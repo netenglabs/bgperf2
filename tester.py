@@ -19,7 +19,7 @@ import os
 from  settings import dckr
 
 def rm_line():
-    print '\x1b[1A\x1b[2K\x1b[1D\x1b[1A'
+    print('\x1b[1A\x1b[2K\x1b[1D\x1b[1A')
 
 
 class ExaBGPTester(Tester, ExaBGP):
@@ -30,7 +30,7 @@ class ExaBGPTester(Tester, ExaBGP):
         super(ExaBGPTester, self).__init__(name, host_dir, conf, image)
 
     def configure_neighbors(self, target_conf):
-        peers = self.conf.get('neighbors', {}).values()
+        peers = list(self.conf.get('neighbors', {}).values())
 
         for p in peers:
             with open('{0}/{1}.conf'.format(self.host_dir, p['router-id']), 'w') as f:
@@ -52,12 +52,15 @@ class ExaBGPTester(Tester, ExaBGP):
     def get_startup_cmd(self):
         startup = ['''#!/bin/bash
 ulimit -n 65536''']
-
-        peers = self.conf.get('neighbors', {}).values()
+     #   startup.append('mkdir /root/run')
+        startup.append('mkfifo /var/run/exabgp.{in,out}')
+        startup.append('chmod 600 /var/run/exabgp.{in,out}')
+        
+        peers = list(self.conf.get('neighbors', {}).values())
         for p in peers:
             startup.append('''env exabgp.log.destination={0}/{1}.log \
 exabgp.daemon.daemonize=true \
 exabgp.daemon.user=root \
-exabgp {0}/{1}.conf'''.format(self.guest_dir, p['router-id']))
+/exabgp/sbin/exabgp {0}/{1}.conf'''.format(self.guest_dir, p['router-id']))
 
         return '\n'.join(startup)

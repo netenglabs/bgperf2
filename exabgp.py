@@ -27,10 +27,9 @@ class ExaBGP(Container):
         cls.dockerfile = '''
 FROM ubuntu:latest
 WORKDIR /root
-RUN apt-get update && apt-get install -qy git python python-setuptools gcc python-dev
-RUN easy_install pip
-RUN git clone https://github.com/Exa-Networks/exabgp && \
-(cd exabgp && git checkout {0} && pip install six && pip install -r requirements.txt && python setup.py install)
+RUN apt-get update && apt-get install -qy git python python-setuptools gcc python-dev iproute2
+RUN apt-get install python3-pip --assume-yes
+RUN git clone https://github.com/Exa-Networks/exabgp 
 RUN ln -s /root/exabgp /exabgp
 '''.format(checkout)
         super(ExaBGP, cls).build_image(force, tag, nocache)
@@ -49,9 +48,8 @@ class ExaBGP_MRTParse(Container):
 FROM ubuntu:latest
 WORKDIR /root
 RUN apt-get update && apt-get install -qy git python python-setuptools gcc python-dev
-RUN easy_install pip
-RUN git clone https://github.com/Exa-Networks/exabgp && \
-(cd exabgp && git checkout {0} && pip install six && pip install -r requirements.txt && python setup.py install)
+RUN apt-get install python3-pip --assume yes
+RUN git clone https://github.com/Exa-Networks/exabgp 
 RUN ln -s /root/exabgp /exabgp
 RUN git clone https://github.com/t2mune/mrtparse.git && \
 (cd mrtparse && python setup.py install)

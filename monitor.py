@@ -48,7 +48,7 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
         filename = '{0}/start.sh'.format(self.host_dir)
         with open(filename, 'w') as f:
             f.write(startup)
-        os.chmod(filename, 0777)
+        os.chmod(filename, 0o777)
         i = dckr.exec_create(container=self.name, cmd='{0}/start.sh'.format(self.guest_dir))
         dckr.exec_start(i['Id'], detach=True, socket=True)
         self.config = conf
@@ -56,8 +56,12 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
 
     def wait_established(self, neighbor):
         while True:
+
             neigh = json.loads(self.local('gobgp neighbor {0} -j'.format(neighbor)))
-            if neigh['state']['session-state'] == 'established':
+
+            if ((neigh['state']['session_state'] == 'established') or
+                (neigh['state']['session_state'] == 6)):
+
                 return
             time.sleep(1)
 

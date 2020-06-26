@@ -38,7 +38,7 @@ def img_exists(name):
 
 
 def rm_line():
-    print '\x1b[1A\x1b[2K\x1b[1D\x1b[1A'
+    print('\x1b[1A\x1b[2K\x1b[1D\x1b[1A')
 
 
 class Container(object):
@@ -51,7 +51,7 @@ class Container(object):
         self.config_name = None
         if not os.path.exists(host_dir):
             os.makedirs(host_dir)
-            os.chmod(host_dir, 0777)
+            os.chmod(host_dir, 0o777)
 
     @classmethod
     def build_image(cls, force, tag, nocache=False):
@@ -73,10 +73,10 @@ class Container(object):
 
         f = io.BytesIO(cls.dockerfile.encode('utf-8'))
         if force or not img_exists(tag):
-            print 'build {0}...'.format(tag)
+            print('build {0}...'.format(tag))
             for line in dckr.build(fileobj=f, rm=True, tag=tag, decode=True, nocache=nocache):
                 if 'stream' in line:
-                    print line['stream'].strip()
+                    print(line['stream'].strip())
 
     def get_ipv4_addresses(self):
         if 'local-address' in self.conf:
@@ -87,7 +87,7 @@ class Container(object):
     def run(self, dckr_net_name='', rm=True):
 
         if rm and ctn_exists(self.name):
-            print 'remove container:', self.name
+            print('remove container:', self.name)
             dckr.remove_container(self.name, force=True)
 
         host_config = dckr.create_host_config(
@@ -110,14 +110,14 @@ class Container(object):
 
             net_id = network['Id']
             if not 'IPAM' in network:
-                print('can\'t verify if container\'s IP addresses '
-                      'are valid for Docker network {}: missing IPAM'.format(dckr_net_name))
+                print(('can\'t verify if container\'s IP addresses '
+                      'are valid for Docker network {}: missing IPAM'.format(dckr_net_name)))
                 break
             ipam = network['IPAM']
 
             if not 'Config' in ipam:
-                print('can\'t verify if container\'s IP addresses '
-                      'are valid for Docker network {}: missing IPAM.Config'.format(dckr_net_name))
+                print(('can\'t verify if container\'s IP addresses '
+                      'are valid for Docker network {}: missing IPAM.Config'.format(dckr_net_name)))
                 break
 
             ip_ok = False
@@ -127,18 +127,18 @@ class Container(object):
                     ip_ok = netaddr.IPAddress(ip) in netaddr.IPNetwork(subnet)
 
                 if not ip_ok:
-                    print('the container\'s IP address {} is not valid for Docker network {} '
+                    print(('the container\'s IP address {} is not valid for Docker network {} '
                           'since it\'s not part of any of its subnets ({})'.format(
-                              ip, dckr_net_name, ', '.join(network_subnets)))
-                    print('Please consider removing the Docket network {net} '
+                              ip, dckr_net_name, ', '.join(network_subnets))))
+                    print(('Please consider removing the Docket network {net} '
                           'to allow bgperf to create it again using the '
                           'expected subnet:\n'
-                          '  docker network rm {net}'.format(net=dckr_net_name))
+                          '  docker network rm {net}'.format(net=dckr_net_name)))
                     sys.exit(1)
             break
 
         if net_id is None:
-            print 'Docker network "{}" not found!'.format(dckr_net_name)
+            print('Docker network "{}" not found!'.format(dckr_net_name))
             return
 
         dckr.connect_container_to_network(self.ctn_id, net_id, ipv4_address=ipv4_addresses[0])
@@ -148,7 +148,8 @@ class Container(object):
 
             # get the interface used by the first IP address already added by Docker
             dev = None
-            res = self.local('ip addr')
+            res = self.local('ip addr').decode("utf-8")
+
             for line in res.split('\n'):
                 if ipv4_addresses[0] in line:
                     dev = line.split(' ')[-1].strip()
@@ -195,11 +196,10 @@ class Container(object):
 
         if not startup_content:
             return
-
         filename = '{0}/start.sh'.format(self.host_dir)
         with open(filename, 'w') as f:
             f.write(startup_content)
-        os.chmod(filename, 0777)
+        os.chmod(filename, 0o777)
 
         return self.local('{0}/start.sh'.format(self.guest_dir),
                           detach=detach,
@@ -241,7 +241,7 @@ class Tester(Container):
 
     def get_ipv4_addresses(self):
         res = []
-        peers = self.conf.get('neighbors', {}).values()
+        peers = list(self.conf.get('neighbors', {}).values())
         for p in peers:
             res.append(p['local-address'])
         return res
@@ -259,22 +259,27 @@ class Tester(Container):
         cnt = 0
         prev_pid = 0
         for lines in output: # This is the ExaBGP output
-            for line in lines.strip().split('\n'):
+            lines = lines.decode("utf-8").strip().split('\n')
+           # breakpoint()
+            for line in lines:
                 fields = line.split('|')
-                # Get PID from ExaBGP output
-                try:
-                    # ExaBGP Version >= 4
-                    # e.g. 00:00:00 | 111 | control | command/comment
-                    pid = int(fields[1])
-                except ValueError:
-                    # ExaBGP Version = 3
-                    # e.g. 00:00:00 | INFO | 111 | control | command
-                    pid = int(fields[2])
-                if pid != prev_pid:
-                    prev_pid = pid
-                    cnt += 1
-                    if cnt > 1:
-                        rm_line()
-                    print 'tester booting.. ({0}/{1})'.format(cnt, len(self.conf.get('neighbors', {}).values()))
+                if len(fields) >2:
+                    # Get PID from ExaBGP output
+                    try:
+                        # ExaBGP Version >= 4
+                        # e.g. 00:00:00 | 111 | control | command/comment
+                        pid = int(fields[1])
+                    except ValueError:
+                        # ExaBGP Version = 3
+                        # e.g. 00:00:00 | INFO | 111 | control | command
+                        pid = int(fields[2])
+                    if pid != prev_pid:
+                        prev_pid = pid
+                        cnt += 1
+                        if cnt > 1:
+                            rm_line()
+                        print('tester booting.. ({0}/{1})'.format(cnt, len(list(self.conf.get('neighbors', {}).values()))))
+                else:
+                    print(lines)
 
         return ctn

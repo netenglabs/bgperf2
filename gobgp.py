@@ -26,13 +26,13 @@ class GoBGP(Container):
     @classmethod
     def build_image(cls, force=False, tag='bgperf/gobgp', checkout='HEAD', nocache=False):
         cls.dockerfile = '''
-FROM golang:1.6
+FROM golang:1.14.4
 WORKDIR /root
-RUN go get -v github.com/osrg/gobgp/gobgpd
-RUN go get -v github.com/osrg/gobgp/gobgp
+RUN go get -v github.com/osrg/gobgp/cmd/gobgpd
+RUN go get -v github.com/osrg/gobgp/cmd/gobgp
 RUN cd $GOPATH/src/github.com/osrg/gobgp && git checkout {0}
-RUN go install github.com/osrg/gobgp/gobgpd
-RUN go install github.com/osrg/gobgp/gobgp
+RUN go install github.com/osrg/gobgp/cmd/gobgpd
+RUN go install github.com/osrg/gobgp/cmd/gobgp
 '''.format(checkout)
         super(GoBGP, cls).build_image(force, tag, nocache)
 
@@ -61,7 +61,7 @@ class GoBGPTarget(GoBGP, Target):
                         'ext-community-sets': [],
                     },
             }
-            for k, v in scenario_global_conf['policy'].iteritems():
+            for k, v in scenario_global_conf['policy'].items():
                 conditions = {
                     'bgp-conditions': {},
                 }
@@ -113,7 +113,7 @@ class GoBGPTarget(GoBGP, Target):
                 c['apply-policy'] = {'config': a}
             return c
 
-        config['neighbors'] = [gen_neighbor_config(n) for n in list(flatten(t.get('neighbors', {}).values() for t in scenario_global_conf['testers'])) + [scenario_global_conf['monitor']]]
+        config['neighbors'] = [gen_neighbor_config(n) for n in list(flatten(list(t.get('neighbors', {}).values()) for t in scenario_global_conf['testers'])) + [scenario_global_conf['monitor']]]
         with open('{0}/{1}'.format(self.host_dir, self.CONFIG_FILE_NAME), 'w') as f:
             f.write(yaml.dump(config, default_flow_style=False))
 

@@ -69,7 +69,7 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
         def stats():
             cps = self.config['monitor']['check-points'] if 'check-points' in self.config['monitor'] else []
             while True:
-                info = json.loads(self.local('gobgp neighbor -j'))[0]
+                info = json.loads(self.local('gobgp monitor -j'))[0]
                 info['who'] = self.name
                 state = info['state']
                 if 'adj-table' in state and 'accepted' in state['adj-table'] and len(cps) > 0 and int(cps[0]) == int(state['adj-table']['accepted']):

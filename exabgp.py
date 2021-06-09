@@ -22,15 +22,30 @@ class ExaBGP(Container):
     def __init__(self, name, host_dir, conf, image='bgperf/exabgp'):
         super(ExaBGP, self).__init__('bgperf_exabgp_' + name, image, host_dir, self.GUEST_DIR, conf)
 
+
+    # This Dockerfile has parts borrowed from exabgps Dockerfile
     @classmethod
     def build_image(cls, force=False, tag='bgperf/exabgp', checkout='HEAD', nocache=False):
         cls.dockerfile = '''
-FROM ubuntu:latest
+FROM python:3-slim-buster
+
+ENV PYTHONPATH "/tmp/exabgp/src"
+
+RUN apt update \
+    && apt -y dist-upgrade \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+
+ADD . /tmp/exabgp
+WORKDIR /tmp/exabgp
+RUN ln -s src/exabgp exabgp
+
+RUN echo Building exabgp 
+RUN pip3 install --upgrade pip setuptools wheel
+RUN pip3 install exabgp
 WORKDIR /root
-RUN apt-get update && apt-get install -qy git python python-setuptools gcc python-dev iproute2
-RUN apt-get install python3-pip --assume-yes
-RUN git clone https://github.com/Exa-Networks/exabgp 
+
 RUN ln -s /root/exabgp /exabgp
+#ENTRYPOINT ["/bin/bash"]
 '''.format(checkout)
         super(ExaBGP, cls).build_image(force, tag, nocache)
 
@@ -45,13 +60,24 @@ class ExaBGP_MRTParse(Container):
     @classmethod
     def build_image(cls, force=False, tag='bgperf/exabgp_mrtparse', checkout='HEAD', nocache=False):
         cls.dockerfile = '''
-FROM ubuntu:latest
+FROM python:3-slim-buster
+
+ENV PYTHONPATH "/tmp/exabgp/src"
+
+RUN apt update \
+    && apt -y dist-upgrade \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+
+ADD . /tmp/exabgp
+WORKDIR /tmp/exabgp
+RUN ln -s src/exabgp exabgp
+
+RUN echo Building exabgp 
+RUN pip3 install --upgrade pip setuptools wheel
+RUN pip3 install exabgp
 WORKDIR /root
-RUN apt-get update && apt-get install -qy git python python-setuptools gcc python-dev
-RUN apt-get install python3-pip --assume yes
-RUN git clone https://github.com/Exa-Networks/exabgp 
+
 RUN ln -s /root/exabgp /exabgp
-RUN git clone https://github.com/t2mune/mrtparse.git && \
-(cd mrtparse && python setup.py install)
+ENTRYPOINT ["/bin/bash"]
 '''.format(checkout)
         super(ExaBGP_MRTParse, cls).build_image(force, tag, nocache)

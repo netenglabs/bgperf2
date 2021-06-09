@@ -26,13 +26,12 @@ class GoBGP(Container):
     @classmethod
     def build_image(cls, force=False, tag='bgperf/gobgp', checkout='HEAD', nocache=False):
         cls.dockerfile = '''
-FROM golang:1.14.4
+FROM golang:1.16.5
 WORKDIR /root
-RUN go get -v github.com/osrg/gobgp/cmd/gobgpd
-RUN go get -v github.com/osrg/gobgp/cmd/gobgp
-RUN cd $GOPATH/src/github.com/osrg/gobgp && git checkout {0}
-RUN go install github.com/osrg/gobgp/cmd/gobgpd
-RUN go install github.com/osrg/gobgp/cmd/gobgp
+RUN git clone git://github.com/osrg/gobgp && cd gobgp && go mod download
+RUN cd gobgp && go install ./cmd/gobgpd
+RUN cd gobgp && go install ./cmd/gobgp
+
 '''.format(checkout)
         super(GoBGP, cls).build_image(force, tag, nocache)
 

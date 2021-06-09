@@ -100,3 +100,6 @@ elapsed time: 18sec
 ```
 
 For a comprehensive list of options, run `sudo ./bgperf.py bench --help`.
+
+
+I've changed this from the way that the original worked and try not to compile every NOS

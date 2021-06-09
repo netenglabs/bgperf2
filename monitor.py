@@ -54,6 +54,10 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
         self.config = conf
         return ctn
 
+    def local(self, cmd, stream=False):
+        i = dckr.exec_create(container=self.name, cmd=cmd)
+        return dckr.exec_start(i['Id'], stream=stream)
+
     def wait_established(self, neighbor):
         while True:
 
@@ -68,11 +72,16 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
     def stats(self, queue):
         def stats():
             cps = self.config['monitor']['check-points'] if 'check-points' in self.config['monitor'] else []
+            print("CHECKING STATS")
             while True:
-                info = json.loads(self.local('gobgp monitor -j').decode('utf-8'))[0]
+
+                info = json.loads(self.local('gobgp neighbor -j').decode('utf-8'))[0]
+
                 info['who'] = self.name
-                state = info['state']
-                if 'adj-table' in state and 'accepted' in state['adj-table'] and len(cps) > 0 and int(cps[0]) == int(state['adj-table']['accepted']):
+                state = info['afi_safis'][0]['state']
+                #breakpoint()
+                if 'accepted'in state and len(cps) > 0 and int(cps[0]) == int(state['accepted']):
+                #if 'accepted' in state and len(cps) > 0 and int(cps[0]) == int(state['adj-table']['accepted']):
                     cps.pop(0)
                     info['checked'] = True
                 else:

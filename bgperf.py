@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright (C) 2015, 2016 Nippon Telegraph and Telephone Corporation.
 #
@@ -274,7 +274,7 @@ def bench(args):
             target_class = QuaggaTarget
         elif args.target == 'frr':
             target_class = FRRoutingTarget
-
+            
         print('run', args.target)
         if args.image:
             target = target_class('{0}/{1}'.format(config_dir, args.target), conf['target'], image=args.image)
@@ -346,18 +346,18 @@ def bench(args):
         if not is_remote and info['who'] == target.name:
             cpu = info['cpu']
             mem = info['mem']
-
+        
         if info['who'] == m.name:
             now = datetime.datetime.now()
             elapsed = now - start
-            recved = info['state']['adj-table']['accepted'] if 'accepted' in info['state']['adj-table'] else 0
+            recved = info['afi_safis'][0]['state']['accepted'] if 'accepted' in info['afi_safis'][0]['state'] else 0
             if elapsed.seconds > 0:
                 rm_line()
             print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, recved: {3}'.format(elapsed.seconds, cpu, mem_human(mem), recved))
             f.write('{0}, {1}, {2}, {3}\n'.format(elapsed.seconds, cpu, mem, recved)) if f else None
             f.flush() if f else None
 
-            if cooling == args.cooling:
+            if cooling == int(args.cooling):
                 f.close() if f else None
                 return
 

@@ -82,7 +82,6 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
                 info['who'] = self.name
                 state = info['afi_safis'][0]['state']
                 if 'accepted'in state and len(cps) > 0 and int(cps[0]) == int(state['accepted']):
-                #if 'accepted' in state and len(cps) > 0 and int(cps[0]) == int(state['adj-table']['accepted']):
                     cps.pop(0)
                     info['checked'] = True
                 else:

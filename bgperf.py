@@ -340,17 +340,26 @@ def bench(args):
     cpu = 0
     mem = 0
     cooling = -1
+    max_cpu = 0
+    max_mem = 0
+    first_received_time = 0
     while True:
         info = q.get()
+
 
         if not is_remote and info['who'] == target.name:
             cpu = info['cpu']
             mem = info['mem']
+            max_cpu = cpu if cpu > max_cpu else max_cpu
+            max_mem = mem if mem > max_mem else max_mem
         
         if info['who'] == m.name:
             now = datetime.datetime.now()
             elapsed = now - start
             recved = info['afi_safis'][0]['state']['accepted'] if 'accepted' in info['afi_safis'][0]['state'] else 0
+            
+            if first_received_time == 0:
+                first_received_time = now - start if recved > 0 else 0
             if elapsed.seconds > 0:
                 rm_line()
             print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, recved: {3}'.format(elapsed.seconds, cpu, mem_human(mem), recved))
@@ -359,6 +368,8 @@ def bench(args):
 
             if cooling == int(args.cooling):
                 f.close() if f else None
+                print('Max cpu: {0:>4.2f}%, max mem: {1}'.format(float(max_cpu), mem_human(max_mem)))
+                print(f'Time since first received route: {elapsed.seconds - first_received_time.seconds}')
                 return
 
             if cooling >= 0:

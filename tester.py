@@ -53,12 +53,9 @@ class ExaBGPTester(Tester, ExaBGP):
         startup = ['''#!/bin/bash
 ulimit -n 65536''']
         peers = list(self.conf.get('neighbors', {}).values())
-        print(f"guest_dir {self.guest_dir}")
         for p in peers:
             startup.append('''env exabgp.log.destination={0}/{1}.log \
 exabgp.daemon.daemonize=true \
 exabgp.daemon.user=root \
 exabgp {0}/{1}.conf'''.format(self.guest_dir, p['router-id']))
-        #print(self.conf)
-        print(startup)
         return '\n'.join(startup)

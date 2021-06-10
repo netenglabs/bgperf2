@@ -27,7 +27,8 @@ class ExaBGP(Container):
     @classmethod
     def build_image(cls, force=False, tag='bgperf/exabgp', checkout='HEAD', nocache=False):
         cls.dockerfile = '''
-FROM python:3-slim-buster
+FROM python:3-buster
+
 
 ENV PYTHONPATH "/tmp/exabgp/src"
 

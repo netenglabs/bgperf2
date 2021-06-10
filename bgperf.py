@@ -141,14 +141,14 @@ def bench(args):
 
     if args.file:
         with open(args.file) as f:
-            conf = yaml.load(Template(f.read()).render())
+            conf = yaml.safe_load(Template(f.read()).render())
     else:
         conf = gen_conf(args)
         if not os.path.exists(config_dir):
             os.makedirs(config_dir)
         with open('{0}/scenario.yaml'.format(config_dir), 'w') as f:
             f.write(conf)
-        conf = yaml.load(Template(conf).render())
+        conf = yaml.safe_load(Template(conf).render())
 
     bridge_found = False
     for network in dckr.networks(names=[dckr_net_name]):

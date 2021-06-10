@@ -260,7 +260,6 @@ class Tester(Container):
         prev_pid = 0
         for lines in output: # This is the ExaBGP output
             lines = lines.decode("utf-8").strip().split('\n')
-           # breakpoint()
             for line in lines:
                 fields = line.split('|')
                 if len(fields) >2:

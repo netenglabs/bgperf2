@@ -59,15 +59,17 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
         return dckr.exec_start(i['Id'], stream=stream)
 
     def wait_established(self, neighbor):
+        n = 0
         while True:
 
             neigh = json.loads(self.local('gobgp neighbor {0} -j'.format(neighbor)).decode('utf-8'))
 
             if ((neigh['state']['session_state'] == 'established') or
                 (neigh['state']['session_state'] == 6)):
-
+                print(f"Waited {n} seconds for neighbor")
                 return
             time.sleep(1)
+            n = n+1
 
     def stats(self, queue):
         def stats():
@@ -79,7 +81,6 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
 
                 info['who'] = self.name
                 state = info['afi_safis'][0]['state']
-                #breakpoint()
                 if 'accepted'in state and len(cps) > 0 and int(cps[0]) == int(state['accepted']):
                 #if 'accepted' in state and len(cps) > 0 and int(cps[0]) == int(state['adj-table']['accepted']):
                     cps.pop(0)

@@ -9,9 +9,24 @@ bgperf is a performance measurement tool for BGP implementation.
 * [Benchmark remote target](https://github.com/osrg/bgperf/blob/master/docs/benchmark_remote_target.md)
 * [MRT injection](https://github.com/osrg/bgperf/blob/master/docs/mrt.md)
 
+## Updates
+I've changed bgperf to work with python 3 and work with new versions of all the NOSes. It no longer compiles EXABGP or FRR, it gets PIP or containers already created. Quagga has been removed since it doesn't seem to be updated anymore.
+
+To get bgperf to work with all the changes in each NOS I've had to change configuration. I 
+don't know if all the features of bgperr still work: I've gotten the simplest version of
+each config to work.
+
+Caveats: 
+
+I don't know if adding more policy will still work. 
+I also don't know if I've configured each NOS for optimal performance.
+I don't know if remote testing works.
+I don't know if MRT works
+
+
 ## Prerequisites
 
-* Python 2.7 or later
+* Python 3.7 or later
 * Docker
 
 ##  <a name="how_to_install">How to install
@@ -94,4 +109,9 @@ elapsed time: 18sec
 For a comprehensive list of options, run `sudo ./bgperf.py bench --help`.
 
 
-I've changed this from the way that the original worked and try not to compile every NOS
+## Debugging
+
+If it doesn't seem to be working, try with 1 peer and 1 route (-n1 -p1) and make sure
+that it connections. If it's just stuck at waiting to connect to the neighbor, then probably the config is wrong and neighbors are not being established between the monitor (gobgp) and the NOS being tested
+
+You'll have to break into gobgp and the test config.

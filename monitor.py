@@ -21,6 +21,9 @@ import json
 from threading import Thread
 import time
 
+def rm_line():
+    print('\x1b[1A\x1b[2K\x1b[1D\x1b[1A')
+
 class Monitor(GoBGP):
 
     CONTAINER_NAME = 'bgperf_monitor'
@@ -61,20 +64,24 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
     def wait_established(self, neighbor):
         n = 0
         while True:
+            if n > 0:
+                 rm_line()
+            print(f"Waiting {n} seconds for neighbor")
+
 
             neigh = json.loads(self.local('gobgp neighbor {0} -j'.format(neighbor)).decode('utf-8'))
 
             if ((neigh['state']['session_state'] == 'established') or
                 (neigh['state']['session_state'] == 6)):
-                print(f"Waited {n} seconds for neighbor")
+
                 return
             time.sleep(1)
+
             n = n+1
 
     def stats(self, queue):
         def stats():
             cps = self.config['monitor']['check-points'] if 'check-points' in self.config['monitor'] else []
-            print("CHECKING STATS")
             while True:
 
                 info = json.loads(self.local('gobgp neighbor -j').decode('utf-8'))[0]

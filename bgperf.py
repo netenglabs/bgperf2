@@ -278,7 +278,6 @@ def bench(args):
 
     time.sleep(1)
 
-    print('waiting bgp connection between {0} and monitor'.format(args.target))
     m.wait_established(conf['target']['local-address'])
 
     if not args.repeat:

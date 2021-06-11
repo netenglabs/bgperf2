@@ -32,7 +32,6 @@ from base import *
 from exabgp import ExaBGP, ExaBGP_MRTParse
 from gobgp import GoBGP, GoBGPTarget
 from bird import BIRD, BIRDTarget
-from quagga import Quagga, QuaggaTarget
 from frr import FRRouting, FRRoutingTarget
 from tester import ExaBGPTester
 from mrt_tester import GoBGPMRTTester, ExaBGPMrtTester
@@ -81,7 +80,7 @@ def doctor(args):
     else:
         print('... not found. run `bgperf prepare`')
 
-    for name in ['gobgp', 'bird', 'quagga', 'frr']:
+    for name in ['gobgp', 'bird', 'frr']:
         print('{0} image'.format(name), end=' ')
         if img_exists('bgperf/{0}'.format(name)):
             print('... ok')
@@ -95,7 +94,6 @@ def prepare(args):
     ExaBGP.build_image(args.force, nocache=args.no_cache)
     ExaBGP_MRTParse.build_image(args.force, nocache=args.no_cache)
     GoBGP.build_image(args.force, nocache=args.no_cache)
-    Quagga.build_image(args.force, checkout='quagga-1.0.20160309', nocache=args.no_cache)
     BIRD.build_image(args.force, nocache=args.no_cache)
     FRRouting.build_image(args.force, checkout='stable/3.0', nocache=args.no_cache)
 
@@ -107,8 +105,6 @@ def update(args):
         ExaBGP_MRTParse.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'all' or args.image == 'gobgp':
         GoBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
-    if args.image == 'all' or args.image == 'quagga':
-        Quagga.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'all' or args.image == 'bird':
         BIRD.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'all' or args.image == 'frr':
@@ -119,7 +115,7 @@ def bench(args):
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
     dckr_net_name = args.docker_network_name or args.bench_name + '-br'
 
-    for target_class in [BIRDTarget, GoBGPTarget, QuaggaTarget, FRRoutingTarget]:
+    for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget]:
         if ctn_exists(target_class.CONTAINER_NAME):
             print('removing target container', target_class.CONTAINER_NAME)
             dckr.remove_container(target_class.CONTAINER_NAME, force=True)
@@ -270,8 +266,6 @@ def bench(args):
             target_class = GoBGPTarget
         elif args.target == 'bird':
             target_class = BIRDTarget
-        elif args.target == 'quagga':
-            target_class = QuaggaTarget
         elif args.target == 'frr':
             target_class = FRRoutingTarget
             
@@ -525,7 +519,7 @@ if __name__ == '__main__':
     parser_prepare.set_defaults(func=prepare)
 
     parser_update = s.add_parser('update', help='rebuild bgp docker images')
-    parser_update.add_argument('image', choices=['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'quagga', 'frr', 'all'])
+    parser_update.add_argument('image', choices=['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'frr', 'all'])
     parser_update.add_argument('-c', '--checkout', default='HEAD')
     parser_update.add_argument('-n', '--no-cache', action='store_true')
     parser_update.set_defaults(func=update)
@@ -555,7 +549,7 @@ if __name__ == '__main__':
                             help='monitor\' router ID; default: same as --monitor-local-address')
 
     parser_bench = s.add_parser('bench', help='run benchmarks')
-    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'quagga', 'frr'], default='gobgp')
+    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr'], default='gobgp')
     parser_bench.add_argument('-i', '--image', help='specify custom docker image')
     parser_bench.add_argument('--docker-network-name', help='Docker network name; this is the name given by \'docker network ls\'')
     parser_bench.add_argument('--bridge-name', help='Linux bridge name of the '

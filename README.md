@@ -44,8 +44,6 @@ docker version ... ok (1.9.1)
 bgperf image ... ok
 gobgp image ... ok
 bird image ... ok
-quagga image ... ok
-```
 
 ## <a name="how_to_use">How to use
 
@@ -63,7 +61,7 @@ elapsed time: 11sec
 ```
 
 To change a target implementation, use `-t` option.
-Currently, `bgperf` supports [BIRD](http://bird.network.cz/) and [Quagga](http://www.nongnu.org/quagga/)
+Currently, `bgperf` supports [BIRD](http://bird.network.cz/) and FRR
 other than GoBGP.
 
 ```bash
@@ -73,12 +71,6 @@ tester booting.. (100/100)
 run bird
 elapsed: 16sec, cpu: 0.00%, mem: 147.55MB
 elapsed time: 11sec
-$ sudo ./bgperf.py bench -t quagga
-run tester
-tester booting.. (100/100)
-run quagga
-elapsed: 33sec, cpu: 0.02%, mem: 477.93MB
-elapsed time: 28sec
 ```
 
 To change a load, use following options.

@@ -44,11 +44,9 @@ class BIRDTarget(BIRD, Target):
 
     def write_config(self, scenario_global_conf):
         config = '''router id {0};
-listen bgp port 179;
 protocol device {{ }}
 protocol direct {{ disabled; }}
-protocol kernel {{ disabled; }}
-table master{1};
+protocol kernel {{ ipv4 {{ import none; export none; }}; }}
 '''.format(self.conf['router-id'], ' sorted' if self.conf['single-table'] else '')
 
         def gen_filter_assignment(n):
@@ -70,21 +68,19 @@ export all;
 '''
 
         def gen_neighbor_config(n):
-            return ('''table table_{0};
+            return ('''ipv4 table table_{0};
 protocol pipe pipe_{0} {{
-    table master;
-    mode transparent;
+    table master4;
     peer table table_{0};
-{1}
-}}'''.format(n['as'], gen_filter_assignment(n)) if not self.conf['single-table'] else '') + '''protocol bgp bgp_{0} {{
+}}
+'''.format(n['as']) if not self.conf['single-table'] else '') + '''protocol bgp bgp_{0} {{
     local as {1};
     neighbor {2} as {0};
     {3};
-    import all;
-    export all;
+    ipv4 {{ import all; export all; }};
     rs client;
 }}
-'''.format(n['as'], self.conf['as'], n['local-address'], 'secondary' if self.conf['single-table'] else 'table table_{0}'.format(n['as']))
+'''.format(n['as'], self.conf['as'], n['local-address'], 'secondary' if self.conf['single-table'] else '')
             return n1 + n2
 
         def gen_prefix_filter(name, match):

@@ -76,7 +76,7 @@ protocol pipe pipe_{0} {{
 '''.format(n['as']) if not self.conf['single-table'] else '') + '''protocol bgp bgp_{0} {{
     local as {1};
     neighbor {2} as {0};
-    {3};
+
     ipv4 {{ import all; export all; }};
     rs client;
 }}

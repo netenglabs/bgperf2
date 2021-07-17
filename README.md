@@ -10,9 +10,11 @@ bgperf is a performance measurement tool for BGP implementation.
 * [MRT injection](https://github.com/osrg/bgperf/blob/master/docs/mrt.md)
 
 ## Updates
-I've changed bgperf to work with python 3 and work with new versions of all the NOSes. It no longer compiles EXABGP or FRR, it gets PIP or containers already created. Quagga has been removed since it doesn't seem to be updated anymore.
+I've changed bgperf to work with python 3 and work with new versions of all the NOSes. It actually works, the original version that this is a from from does not work anymore because of newer version of python and each of the routing stacks.
 
-To get bgperf to work with all the changes in each NOS I've had to change configuration. I 
+ This version no longer compiles EXABGP or FRR, it gets PIP or containers already created. Quagga has been removed since it doesn't seem to be updated anymore.
+
+To get bgperf to work with all the changes in each stack  I've had to change configuration. I 
 don't know if all the features of bgperr still work: I've gotten the simplest version of
 each config to work.
 
@@ -32,7 +34,7 @@ I don't know if MRT works
 ##  <a name="how_to_install">How to install
 
 ```bash
-$ git clone https://github.com/osrg/bgperf
+$ git clone https://github.com:jopietsch/bgperf.git
 $ cd bgperf
 $ pip install -r pip-requirements.txt
 $ ./bgperf.py --help
@@ -108,10 +110,19 @@ elapsed time: 18sec
 
 For a comprehensive list of options, run `sudo ./bgperf.py bench --help`.
 
-
 ## Debugging
 
 If it doesn't seem to be working, try with 1 peer and 1 route (-n1 -p1) and make sure
 that it connections. If it's just stuck at waiting to connect to the neighbor, then probably the config is wrong and neighbors are not being established between the monitor (gobgp) and the NOS being tested
 
 You'll have to break into gobgp and the test config.
+
+
+if you want to see what is happening when the test containers starts, after the test is over (or you've killed it), run 
+```docker exec bgperf_bird_target /root/config/start.sh```
+that's what bgperf is doing. It creates a /root/config/start.sh command and is running it, so if you run it manually you can see if that command produces output to help you debug.
+
+to clean up any existing docker containers
+
+```docker kill `docker ps -q` ```
+```docker rm `docker ps -aq` ```

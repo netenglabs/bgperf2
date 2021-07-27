@@ -281,7 +281,8 @@ def bench(args):
         else:
             target = target_class('{0}/{1}'.format(config_dir, args.target), conf['target'])
         target.run(conf, dckr_net_name)
-
+        target_version = target.exec_version_cmd()
+        print(f"{args.target}: {target_version}")
     time.sleep(1)
 
     m.wait_established(conf['target']['local-address'])
@@ -345,7 +346,6 @@ def bench(args):
     while True:
         info = q.get()
 
-
         if not is_remote and info['who'] == target.name:
             cpu = info['cpu']
             mem = info['mem']
@@ -370,7 +370,7 @@ def bench(args):
                 print('Max cpu: {0:>4.2f}%, max mem: {1}'.format(float(max_cpu), mem_human(max_mem)))
                 print(f'Time since first received route: {elapsed.seconds - first_received_time.seconds}')
                 bench_stop = time.time()
-                print(f"total time: {bench_stop - bench_start}")
+                print(f"total time: {bench_stop - bench_start:.2f}s")
                 return
 
             if cooling >= 0:

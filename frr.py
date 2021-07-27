@@ -120,3 +120,10 @@ no bgp ebgp-requires-policy
         ).format(
             guest_dir=self.guest_dir,
             config_file_name=self.CONFIG_FILE_NAME)
+    
+    def get_version_cmd(self):
+        return ['vtysh', '-c', 'show version', '|', 'head -1']
+
+    def exec_version_cmd(self):
+        ret = super().exec_version_cmd()
+        return ret.split('\n')[0]

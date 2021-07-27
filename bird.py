@@ -169,3 +169,12 @@ return true;
         ).format(
             guest_dir=self.guest_dir,
             config_file_name=self.CONFIG_FILE_NAME)
+
+    def get_version_cmd(self):
+        return "bird --version"
+
+    def exec_version_cmd(self):
+        version = self.get_version_cmd()
+        i = dckr.exec_create(container=self.name, cmd=version, stderr=True)
+        ret =dckr.exec_start(i['Id'], stream=False, detach=False).decode('utf-8')
+        return ret.split(' ')[2].strip('\n')

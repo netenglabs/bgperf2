@@ -10,7 +10,7 @@ bgperf is a performance measurement tool for BGP implementation.
 * [MRT injection](https://github.com/osrg/bgperf/blob/master/docs/mrt.md)
 
 ## Updates
-I've changed bgperf to work with python 3 and work with new versions of all the NOSes. It actually works, the original version that this is a from from does not work anymore because of newer version of python and each of the routing stacks.
+I've changed bgperf to work with python 3 and work with new versions of all the NOSes. It actually works, the original version that this is a fork of does not work anymore because of newer version of python and each of the routing stacks.
 
  This version no longer compiles EXABGP or FRR, it gets PIP or containers already created. Quagga has been removed since it doesn't seem to be updated anymore.
 

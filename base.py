@@ -191,6 +191,14 @@ class Container(object):
     def get_startup_cmd(self):
         raise NotImplementedError()
 
+    def get_version_cmd(self):
+        raise NotImplementedError()
+
+    def exec_version_cmd(self):
+        version = self.get_version_cmd()
+        i = dckr.exec_create(container=self.name, cmd=version, stderr=False)
+        return dckr.exec_start(i['Id'], stream=False, detach=False).decode('utf-8')
+
     def exec_startup_cmd(self, stream=False, detach=False):
         startup_content = self.get_startup_cmd()
 

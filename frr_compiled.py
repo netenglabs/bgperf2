@@ -8,8 +8,8 @@ class FRRoutingCompiled(Container):
     CONTAINER_NAME = None
     GUEST_DIR = '/root/config'
 
-    def __init__(self, host_dir, conf, image='bgperf/frr_c'):
-        super(FRRoutingCompiled, self).__init__(self.CONTAINER_NAME, host_dir, conf, image)
+    def __init__(self, host_dir, conf, image='bgperf/frr'):
+        super(FRRouting, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
 
     @classmethod
     def build_image(cls, force=False, tag='bgperf/frr_c', checkout='stable/8.0', nocache=False):
@@ -100,3 +100,4 @@ RUN cd ~/frr && \
 class FRRoutingCompiledTarget(FRRoutingTarget):
     
     CONTAINER_NAME = 'bgperf_frrouting_compiled_target'
+

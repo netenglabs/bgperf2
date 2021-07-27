@@ -125,3 +125,10 @@ class GoBGPTarget(GoBGP, Target):
             guest_dir=self.guest_dir,
             config_file_name=self.CONFIG_FILE_NAME,
             debug_level='info')
+
+    def get_version_cmd(self):
+        return "gobgpd --version"
+
+    def exec_version_cmd(self):
+        ret = super().exec_version_cmd()
+        return ret.split(' ')[2]

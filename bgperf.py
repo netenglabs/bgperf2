@@ -119,7 +119,7 @@ def update(args):
 def bench(args):
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
     dckr_net_name = args.docker_network_name or args.bench_name + '-br'
-
+    bench_start = time.time()
     for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget]:
         if ctn_exists(target_class.CONTAINER_NAME):
             print('removing target container', target_class.CONTAINER_NAME)
@@ -370,6 +370,8 @@ def bench(args):
                 f.close() if f else None
                 print('Max cpu: {0:>4.2f}%, max mem: {1}'.format(float(max_cpu), mem_human(max_mem)))
                 print(f'Time since first received route: {elapsed.seconds - first_received_time.seconds}')
+                bench_stop = time.time()
+                print(f"total time: {bench_stop - bench_start}")
                 return
 
             if cooling >= 0:
@@ -377,6 +379,7 @@ def bench(args):
 
             if info['checked']:
                 cooling = 0
+
 
 def gen_conf(args):
     neighbor_num = args.neighbor_num

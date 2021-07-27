@@ -113,7 +113,7 @@ For a comprehensive list of options, run `sudo ./bgperf.py bench --help`.
 ## Debugging
 
 If it doesn't seem to be working, try with 1 peer and 1 route (-n1 -p1) and make sure
-that it connections. If it's just stuck at waiting to connect to the neighbor, then probably the config is wrong and neighbors are not being established between the monitor (gobgp) and the NOS being tested
+that it connecting. If it's just stuck at waiting to connect to the neighbor, then probably the config is wrong and neighbors are not being established between the monitor (gobgp) and the NOS being tested
 
 You'll have to break into gobgp and the test config.
 
@@ -126,3 +126,31 @@ to clean up any existing docker containers
 
 ```docker kill `docker ps -q` ```
 ```docker rm `docker ps -aq` ```
+
+
+If you try to change the config, it's a little tricky to debug what's going on since there are so many containers. What bgperf is doing is creating configs and startup scripts in /tmp/bgperf and then copies those to the containers before launching them. It creates three containers: bgperf_exabgp_tester_tester, bgperf_\<target\>_target, and bgperf_monitor. If things aren't working, it's probably because the config for the target is not correct. bgperf puts all the log output in /tmp/bgperf/*.log, but what it doesn't do is capture the output of the startup script.
+
+The startup script is in /tmp/bgperf/\<target\>/start.sh and gets copied to the target as /root/config/start.sh.
+
+In other words, to launch the start.sh and see the output you can run this docker command:
+
+```
+jpietsch@jpietsch-server:~/bgperf$ docker exec bgperf_bird_target /root/config/start.sh
+bird: I found another BIRD running.
+
+```
+In this case, things were already working, so I'll run ps and kill the old bird and start a new one.
+
+```
+jpietsch@jpietsch-server:~/bgperf$ docker exec bgperf_bird_target ps auxww
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root           1  0.0  0.0   3984  2820 ?        Ss   21:21   0:00 bash
+root          14  0.0  0.0   4144  2016 ?        Ss   21:21   0:00 bird -c /root/config/bird.conf
+root          22  0.0  0.0   5904  2784 ?        Rs   21:22   0:00 ps auxww
+jpietsch@jpietsch-server:~/bgperf$ docker exec bgperf_bird_target kill 14
+```
+
+```
+jpietsch@jpietsch-server:~/bgperf$ docker exec bgperf_bird_target /root/config/start.sh
+```
+No output, so it was just fine.

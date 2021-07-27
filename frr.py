@@ -25,7 +25,7 @@ class FRRouting(Container):
     @classmethod
     def build_image(cls, force=False, tag='bgperf/frr', checkout='HEAD', nocache=False):
         cls.dockerfile = '''
-FROM frrouting/frr
+FROM frrouting/frr:v7.5.1
 '''.format(checkout)
         super(FRRouting, cls).build_image(force, tag, nocache)
 

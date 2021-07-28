@@ -283,8 +283,7 @@ def bench(args):
         else:
             target = target_class('{0}/{1}'.format(config_dir, args.target), conf['target'])
         target.run(conf, dckr_net_name)
-        target_version = target.exec_version_cmd()
-        print(f"{args.target}: {target_version}")
+
     
     time.sleep(1)
 
@@ -366,7 +365,7 @@ def bench(args):
                 f.close() if f else None
                 bench_stop = time.time()
                 output_stats['total_time'] = bench_stop - bench_start
-                print_output_stats(args, target_version, output_stats)
+                print_output_stats(args, target, output_stats)
                 return
 
             if cooling >= 0:
@@ -376,8 +375,9 @@ def bench(args):
                 cooling = 0
 
 
-def print_output_stats(args, target_version, stats):
-
+def print_output_stats(args, target, stats):
+    target_version = target.exec_version_cmd()
+    print(f"{args.target}: {target_version}")
     print(f"Max cpu: {stats['max_cpu']:4.2f}, max mem: {mem_human(stats['max_mem'])}")
     print(f"Time since first received route: {stats['elapsed'].seconds - stats['first_received_time'].seconds}")
 

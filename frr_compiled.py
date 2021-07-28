@@ -8,8 +8,8 @@ class FRRoutingCompiled(Container):
     CONTAINER_NAME = None
     GUEST_DIR = '/root/config'
 
-    def __init__(self, host_dir, conf, image='bgperf/frr'):
-        super(FRRouting, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
+    def __init__(self, host_dir, conf, image='bgperf/frr_c'):
+        super(FRRoutingCompiled, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
 
     @classmethod
     def build_image(cls, force=False, tag='bgperf/frr_c', checkout='stable/8.0', nocache=False):
@@ -51,7 +51,7 @@ RUN groupadd -r -g 92 frr && \
 #for libyang 2
 RUN apt-get install -y cmake libpcre2-dev
 
-USER frr:frr
+#USER frr:frr
 
 # build and install libyang2
 RUN cd && pwd && ls -al && \
@@ -88,9 +88,12 @@ RUN cd ~/frr && \
        --enable-vty-group=frrvty \
        --enable-snmp=agentx \
        --enable-scripting \
-       --with-pkg-extra-version=-my-manual-build && \
+       --with-pkg-extra-version=-bgperf && \
     make -j $(nproc) && \
     sudo make install
+
+#RUN sudo mkdir /etc/frr && sudo chown frr:frr /etc/frr && \
+#    sudo mkdir -p /root/config && sudo chown frr:frr /root/config
 
 '''.format(checkout)
         print("FRRoutingCompiled")
@@ -101,3 +104,5 @@ class FRRoutingCompiledTarget(FRRoutingTarget):
     
     CONTAINER_NAME = 'bgperf_frrouting_compiled_target'
 
+    def __init__(self, host_dir, conf, image='bgperf/frr_c'):
+        super(FRRoutingTarget, self).__init__(host_dir, conf, image='bgperf/frr_c')

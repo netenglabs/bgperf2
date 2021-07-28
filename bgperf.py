@@ -372,7 +372,8 @@ def bench(args):
                 target_version = target.exec_version_cmd()
                 print_final_stats(args, target_version, output_stats)
                 o_s = create_output_stats(args, target_version, output_stats)
-                print_output_stats(o_s)
+                print_stats_header()
+                print(','.join(o_s))
                 return o_s
 
             if cooling >= 0:
@@ -389,22 +390,20 @@ def print_final_stats(args, target_version, stats):
     print(f"Time since first received route: {stats['elapsed'].seconds - stats['first_received_time'].seconds}")
 
     print(f"total time: {stats['total_time']:.2f}s")
-
-    
-def print_output_stats(output):
     print()
+
+def print_stats_header():
     print("nos, version, peers, prefixes per peer, neighbor (s), elapsed (s), since first route (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)")
-    print(output)
-    print()    
+
 
 
 def create_output_stats(args, target_version, stats):
     e = stats['elapsed'].seconds
     f = stats['first_received_time'].seconds 
     d = datetime.date.today().strftime("%Y-%m-%d")
-    out = [args.target, target_version, args.neighbor_num, args.prefix_num]
-    out.extend([stats['neighbor_wait_time'], e, f , e-f, format(stats['total_time'], ".2f")])
-    out.extend(['-s' if args.single_table else '', d, stats['cores'], mem_human(stats['memory'])])
+    out = [args.target, target_version, str(args.neighbor_num), str(args.prefix_num)]
+    out.extend([str(stats['neighbor_wait_time']), str(e), str(f) , str(e-f), format(stats['total_time'], ".2f")])
+    out.extend(['-s' if args.single_table else '', d, str(stats['cores']), mem_human(stats['memory'])])
     return out
 
 
@@ -412,8 +411,9 @@ def batch(args):
     with open(args.batch_config, 'r') as f:
         batch_config = yaml.safe_load(f)
 
-    results = []
+
     for test in batch_config['tests']:
+        results = []
         for n in test['neighbors']:
             for p in test['prefixes']:
                 for t in test['targets']:
@@ -421,30 +421,25 @@ def batch(args):
                     a.func = bench
                     a.image = None
                     a.target = t['name']
-                    
-                    a.single_table = t['single_table'] if 'single_table' in t else None
+
                     a.prefix_num = p
                     a.neighbor_num = n
-                    # hardcoding a bunch of args because I don't know how to really re-use argepars
-                    #   programatically
-                    a.docker_network_name = None
-                    a.repeat = None
-                    a.file = None
-                    a.as_path_list_num = 0
-                    a.prefix_list_num = 0
-                    a.community_list_num = 0
-                    a.ext_community_list_num = 0
-                    a.local_address_prefix = '10.10.0.0/16'
-                    a.target_local_address = None
-                    a.monitor_local_address = None
-                    a.target_router_id = None
-                    a.monitor_router_id = None
-                    a.target_config_file = None
-                    a.filter_type = None
-                    a.cooling =  -1
+                    # read any config attribute that was specified in the yaml batch file
+                    a.local_address_prefix = t['local_address_prefix'] if 'local_address_prefix' in t else '10.10.0.0/16'
+                    a.cooling = t['cooling'] if 'local_cooling' in t else -1
+                    for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
+                                    'target_local_address', 'monitor_local_address', 'target_router_id',
+                                    'monitor_router_id', 'target_config_file', 'filter_type',]:
+                        setattr(a, field, t[field]) if field in t else setattr(a, field, None)
+
+                    for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
+                        setattr(a, field, t[field]) if field in t else setattr(a, field, 0)    
                     results.append(bench(a))
 
-    print()
+        print_stats_header()
+        for stat in results:
+            print(','.join(stat))
+
 
 
 

@@ -28,6 +28,7 @@ from requests.exceptions import ConnectionError
 from pyroute2 import IPRoute
 from socket import AF_INET
 from nsenter import Namespace
+from psutil import virtual_memory
 from base import *
 from exabgp import ExaBGP, ExaBGP_MRTParse
 from gobgp import GoBGP, GoBGPTarget
@@ -116,6 +117,7 @@ def update(args):
 
 
 def bench(args):
+    output_stats = {}
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
     dckr_net_name = args.docker_network_name or args.bench_name + '-br'
     bench_start = time.time()
@@ -274,7 +276,7 @@ def bench(args):
             target_class = FRRoutingTarget
         elif args.target == 'frr_c':
             target_class = FRRoutingCompiledTarget
-            
+        
         print('run', args.target)
         if args.image:
             target = target_class('{0}/{1}'.format(config_dir, args.target), conf['target'], image=args.image)
@@ -283,9 +285,11 @@ def bench(args):
         target.run(conf, dckr_net_name)
         target_version = target.exec_version_cmd()
         print(f"{args.target}: {target_version}")
+    
     time.sleep(1)
 
-    m.wait_established(conf['target']['local-address'])
+    output_stats['neighbor_wait_time'] = m.wait_established(conf['target']['local-address'])
+    output_stats['cores'], output_stats['memory'] = get_hardware_info()
 
     if not args.repeat:
         for idx, tester in enumerate(conf['testers']):
@@ -326,39 +330,32 @@ def bench(args):
     if not is_remote:
         target.stats(q)
 
-    def mem_human(v):
-        if v > 1000 * 1000 * 1000:
-            return '{0:.2f}GB'.format(float(v) / (1000 * 1000 * 1000))
-        elif v > 1000 * 1000:
-            return '{0:.2f}MB'.format(float(v) / (1000 * 1000))
-        elif v > 1000:
-            return '{0:.2f}KB'.format(float(v) / 1000)
-        else:
-            return '{0:.2f}B'.format(float(v))
+
 
     f = open(args.output, 'w') if args.output else None
     cpu = 0
     mem = 0
     cooling = -1
-    max_cpu = 0
-    max_mem = 0
-    first_received_time = 0
+    output_stats['max_cpu'] = 0
+    output_stats['max_mem'] = 0
+    output_stats['first_received_time'] = 0
     while True:
         info = q.get()
 
         if not is_remote and info['who'] == target.name:
             cpu = info['cpu']
             mem = info['mem']
-            max_cpu = cpu if cpu > max_cpu else max_cpu
-            max_mem = mem if mem > max_mem else max_mem
+            output_stats['max_cpu'] = cpu if cpu > output_stats['max_cpu'] else output_stats['max_cpu']
+            output_stats['max_mem'] = mem if mem > output_stats['max_mem'] else output_stats['max_mem']
         
         if info['who'] == m.name:
             now = datetime.datetime.now()
             elapsed = now - start
+            output_stats['elapsed'] = elapsed
             recved = info['afi_safis'][0]['state']['accepted'] if 'accepted' in info['afi_safis'][0]['state'] else 0
             
-            if first_received_time == 0:
-                first_received_time = now - start if recved > 0 else 0
+            if output_stats['first_received_time'] == 0:
+                output_stats['first_received_time'] = now - start if recved > 0 else 0
             if elapsed.seconds > 0:
                 rm_line()
             print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, recved: {3}'.format(elapsed.seconds, cpu, mem_human(mem), recved))
@@ -367,10 +364,9 @@ def bench(args):
 
             if cooling == int(args.cooling):
                 f.close() if f else None
-                print('Max cpu: {0:>4.2f}%, max mem: {1}'.format(float(max_cpu), mem_human(max_mem)))
-                print(f'Time since first received route: {elapsed.seconds - first_received_time.seconds}')
                 bench_stop = time.time()
-                print(f"total time: {bench_stop - bench_start:.2f}s")
+                output_stats['total_time'] = bench_stop - bench_start
+                print_output_stats(args, target_version, output_stats)
                 return
 
             if cooling >= 0:
@@ -379,6 +375,41 @@ def bench(args):
             if info['checked']:
                 cooling = 0
 
+
+def print_output_stats(args, target_version, stats):
+
+    print(f"Max cpu: {stats['max_cpu']:4.2f}, max mem: {mem_human(stats['max_mem'])}")
+    print(f"Time since first received route: {stats['elapsed'].seconds - stats['first_received_time'].seconds}")
+
+    print(f"total time: {stats['total_time']:.2f}s")
+    
+    e = stats['elapsed'].seconds
+    f = stats['first_received_time'].seconds 
+    d = datetime.date.today().strftime("%Y-%m-%d")
+
+    print()
+    print("nos, version, peers, prefixes per peer, neighbor (s), elapsed (s), since first route (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)")
+    print(f"{args.target}, {target_version}, {args.neighbor_num}, {args.prefix_num}, ", end='')
+
+    print(f"{stats['neighbor_wait_time']}, {e}, {f}, {e-f:0.2f}, {stats['total_time']:.2f}, ", end='')
+    print(f"{stats['max_cpu']:.2f}, {mem_human(stats['max_mem'])}, ", end='')
+    print(f"{'-s' if args.single_table else ''}, {d}, {stats['cores']},", end='')
+    print(f"{mem_human(stats['memory'])} ")
+
+def mem_human(v):
+    if v > 1024 * 1024 * 1024:
+        return '{0:.2f}GB'.format(float(v) / (1024 * 1024 * 1024))
+    elif v > 1024 * 1024:
+        return '{0:.2f}MB'.format(float(v) / (1024 * 1024))
+    elif v > 1024:
+        return '{0:.2f}KB'.format(float(v) / 1024)
+    else:
+        return '{0:.2f}B'.format(float(v))
+
+def get_hardware_info():
+    cores = os.cpu_count()
+    mem = virtual_memory().total
+    return cores, mem
 
 def gen_conf(args):
     neighbor_num = args.neighbor_num

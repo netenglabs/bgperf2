@@ -74,7 +74,7 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
             if ((neigh['state']['session_state'] == 'established') or
                 (neigh['state']['session_state'] == 6)):
 
-                return
+                return n
             time.sleep(1)
 
             n = n+1

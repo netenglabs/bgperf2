@@ -6,3 +6,4 @@ netaddr
 mako
 six
 packaging
+psutil

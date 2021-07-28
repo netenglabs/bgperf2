@@ -131,4 +131,4 @@ class GoBGPTarget(GoBGP, Target):
 
     def exec_version_cmd(self):
         ret = super().exec_version_cmd()
-        return ret.split(' ')[2]
+        return ret.split(' ')[2].strip('\n')

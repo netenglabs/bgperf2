@@ -80,9 +80,12 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
             n = n+1
 
     def stats(self, queue):
+        self.stop_monitoring = False
         def stats():
             cps = self.config['monitor']['check-points'] if 'check-points' in self.config['monitor'] else []
             while True:
+                if self.stop_monitoring:
+                    return
 
                 info = json.loads(self.local('gobgp neighbor -j').decode('utf-8'))[0]
 
@@ -99,3 +102,4 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
         t = Thread(target=stats)
         t.daemon = True
         t.start()
+

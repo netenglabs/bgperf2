@@ -64,7 +64,6 @@ RUN cd && pwd && ls -al && \
     make -j $(nproc) && \
     sudo make install
 
-#COPY --chown=frr:frr . /home/frr/frr/
 RUN cd && git clone https://github.com/FRRouting/frr.git -b frr-8.0 frr
 
 RUN cd && ls -al && ls -al frr
@@ -100,7 +99,7 @@ RUN cd ~/frr && \
         super(FRRoutingCompiled, cls).build_image(force, tag, nocache)
 
 
-class FRRoutingCompiledTarget(FRRoutingTarget):
+class FRRoutingCompiledTarget(FRRoutingCompiled, FRRoutingTarget):
     
     CONTAINER_NAME = 'bgperf_frrouting_compiled_target'
 

@@ -7,3 +7,4 @@ mako
 six
 packaging
 psutil
+pyyaml

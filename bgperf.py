@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import argparse
 import os
 import sys
 import yaml
@@ -99,6 +100,8 @@ def prepare(args):
     BIRD.build_image(args.force, nocache=args.no_cache)
     FRRouting.build_image(args.force,  nocache=args.no_cache)
     #FRRoutingCompiled.build_image(args.force, nocache=args.no_cache)
+    # don't want to do this automatically. This one is special so have to explicitly
+    # update it
 
 
 def update(args):
@@ -325,7 +328,7 @@ def bench(args):
 
     q = Queue()
 
-    m.stats(q)
+    monitor_thread = m.stats(q)
     if not is_remote:
         target.stats(q)
 
@@ -365,8 +368,12 @@ def bench(args):
                 f.close() if f else None
                 bench_stop = time.time()
                 output_stats['total_time'] = bench_stop - bench_start
-                print_output_stats(args, target, output_stats)
-                return
+                m.stop_monitoring = True
+                target_version = target.exec_version_cmd()
+                print_final_stats(args, target_version, output_stats)
+                o_s = create_output_stats(args, target_version, output_stats)
+                print_output_stats(o_s)
+                return o_s
 
             if cooling >= 0:
                 cooling += 1
@@ -375,26 +382,71 @@ def bench(args):
                 cooling = 0
 
 
-def print_output_stats(args, target, stats):
-    target_version = target.exec_version_cmd()
+def print_final_stats(args, target_version, stats):
+    
     print(f"{args.target}: {target_version}")
     print(f"Max cpu: {stats['max_cpu']:4.2f}, max mem: {mem_human(stats['max_mem'])}")
     print(f"Time since first received route: {stats['elapsed'].seconds - stats['first_received_time'].seconds}")
 
     print(f"total time: {stats['total_time']:.2f}s")
+
     
+def print_output_stats(output):
+    print()
+    print("nos, version, peers, prefixes per peer, neighbor (s), elapsed (s), since first route (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)")
+    print(output)
+    print()    
+
+
+def create_output_stats(args, target_version, stats):
     e = stats['elapsed'].seconds
     f = stats['first_received_time'].seconds 
     d = datetime.date.today().strftime("%Y-%m-%d")
+    out = [args.target, target_version, args.neighbor_num, args.prefix_num]
+    out.extend([stats['neighbor_wait_time'], e, f , e-f, format(stats['total_time'], ".2f")])
+    out.extend(['-s' if args.single_table else '', d, stats['cores'], mem_human(stats['memory'])])
+    return out
+
+
+def batch(args):
+    with open(args.batch_config, 'r') as f:
+        batch_config = yaml.safe_load(f)
+
+    results = []
+    for test in batch_config['tests']:
+        for n in test['neighbors']:
+            for p in test['prefixes']:
+                for t in test['targets']:
+                    a = argparse.Namespace(**vars(args))
+                    a.func = bench
+                    a.image = None
+                    a.target = t['name']
+                    
+                    a.single_table = t['single_table'] if 'single_table' in t else None
+                    a.prefix_num = p
+                    a.neighbor_num = n
+                    # hardcoding a bunch of args because I don't know how to really re-use argepars
+                    #   programatically
+                    a.docker_network_name = None
+                    a.repeat = None
+                    a.file = None
+                    a.as_path_list_num = 0
+                    a.prefix_list_num = 0
+                    a.community_list_num = 0
+                    a.ext_community_list_num = 0
+                    a.local_address_prefix = '10.10.0.0/16'
+                    a.target_local_address = None
+                    a.monitor_local_address = None
+                    a.target_router_id = None
+                    a.monitor_router_id = None
+                    a.target_config_file = None
+                    a.filter_type = None
+                    a.cooling =  -1
+                    results.append(bench(a))
 
     print()
-    print("nos, version, peers, prefixes per peer, neighbor (s), elapsed (s), since first route (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)")
-    print(f"{args.target}, {target_version}, {args.neighbor_num}, {args.prefix_num}, ", end='')
 
-    print(f"{stats['neighbor_wait_time']}, {e}, {f}, {e-f:0.2f}, {stats['total_time']:.2f}, ", end='')
-    print(f"{stats['max_cpu']:.2f}, {mem_human(stats['max_mem'])}, ", end='')
-    print(f"{'-s' if args.single_table else ''}, {d}, {stats['cores']},", end='')
-    print(f"{mem_human(stats['memory'])} ")
+
 
 def mem_human(v):
     if v > 1024 * 1024 * 1024:
@@ -543,8 +595,7 @@ def config(args):
     with open(args.output, 'w') as f:
         f.write(conf)
 
-
-if __name__ == '__main__':
+def create_args_parser(main=True):
     parser = ArgumentParser(description='BGP performance measuring tool')
     parser.add_argument('-b', '--bench-name', default='bgperf')
     parser.add_argument('-d', '--dir', default='/tmp')
@@ -609,8 +660,19 @@ if __name__ == '__main__':
     add_gen_conf_args(parser_config)
     parser_config.set_defaults(func=config)
 
+    parser_batch = s.add_parser('batch', help='run batch benchmarks')
+    parser_batch.add_argument('-c', '--batch_config', type=str, help='batch config file')
+    parser_batch.add_argument('-o', '--output', metavar='BATCH_OUTPUT_FILE')
+    parser_batch.set_defaults(func=batch)
+
+    return parser
+
+if __name__ == '__main__':
+    
+    parser = create_args_parser()
 
     args = parser.parse_args()
+
     try:
         func = args.func
     except AttributeError:

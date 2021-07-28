@@ -1,0 +1,37 @@
+tests:
+  - 
+    name: 10K
+    neighbors: [10, 30, 50, 100, 250, 500]
+    prefixes: [10_000]
+    targets: 
+      -
+        name: bird
+        flags: 
+      -
+        name: bird
+        single_table: True
+      - 
+        name: frr
+      -
+        name: gobgp
+      -
+        name: frr_c
+  - 
+    name: 1M
+    neighbors: [1, 5, 10]
+    prefixes: [1_000_000]
+    targets: 
+      -
+        name: bird
+        flags: 
+      -
+        name: bird
+        flags: -s
+      - 
+        name: frr
+      -
+        name: gobgp
+
+          
+        
+    

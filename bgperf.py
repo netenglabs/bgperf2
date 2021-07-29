@@ -360,7 +360,7 @@ def bench(args):
             recved = info['afi_safis'][0]['state']['accepted'] if 'accepted' in info['afi_safis'][0]['state'] else 0
             
             if output_stats['first_received_time'] == 0:
-                output_stats['first_received_time'] = now - start if recved > 0 else datetime.datetime(1,1,1,0,0)
+                output_stats['first_received_time'] = now - start if recved > 0 else 0
             if elapsed.seconds > 0:
                 rm_line()
             print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, recved: {3}'.format(elapsed.seconds, cpu, mem_human(mem), recved))
@@ -368,6 +368,7 @@ def bench(args):
             f.flush() if f else None
 
             if cooling == int(args.cooling):
+                
                 f.close() if f else None
                 bench_stop = time.time()
                 output_stats['total_time'] = bench_stop - bench_start
@@ -377,6 +378,7 @@ def bench(args):
                 o_s = create_output_stats(args, target_version, output_stats)
                 print_stats_header()
                 print(','.join(map(str, o_s)))
+                print()
                 return o_s
 
             if cooling >= 0:
@@ -409,34 +411,41 @@ def create_output_stats(args, target_version, stats):
     out.extend(['-s' if args.single_table else '', d, str(stats['cores']), mem_human(stats['memory'])])
     return out
 
-def create_graph(stats, test_name='test.png'):
+def create_graph(stats, test_name='total time', stat_index=8, test_file='total_time.png'):
     labels = {}
     data = defaultdict(list)
 
 
     for stat in stats:
         labels[stat[0]] = True
-        data[f"{stat[2]}n_{stat[3]}p"].append(stat[8])
+        data[f"{stat[2]}n_{stat[3]}p"].append(stat[stat_index])
 
     x = np.arange(len(labels))
   
     bars = len(data)
     width = 0.7 / bars
+    plt.figure()
     for i, d in enumerate(data):
         plt.bar(x -0.2+i*width, data[d], width=width, label=d)
 
     plt.ylabel("seconds")
     plt.xlabel('neighbors_prefixes')
-    plt.title("total time")
+    plt.title(test_name)
     plt.xticks(x,labels.keys())
     plt.legend()
 
     plt.show()
-    plt.savefig(test_name)
+    plt.savefig(test_file)
 
 
 
 def batch(args):
+    """ runs several tests together, produces all the stats together and creates graphs
+    requires a yaml file to describe the batch of tests to run
+
+    it iterates through a list of targets, number of neighbors and number of prefixes
+    other variables can be set, but not iterated through
+    """
     with open(args.batch_config, 'r') as f:
         batch_config = yaml.safe_load(f)
 
@@ -454,7 +463,7 @@ def batch(args):
                     a.neighbor_num = n
                     # read any config attribute that was specified in the yaml batch file
                     a.local_address_prefix = t['local_address_prefix'] if 'local_address_prefix' in t else '10.10.0.0/16'
-                    a.cooling = t['cooling'] if 'local_cooling' in t else -1
+                    a.cooling = t['cooling'] if 'local_cooling' in t else 0
                     for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
                                     'target_local_address', 'monitor_local_address', 'target_router_id',
                                     'monitor_router_id', 'target_config_file', 'filter_type',]:
@@ -467,8 +476,9 @@ def batch(args):
         print_stats_header()
         for stat in results:
             print(','.join(map(str, stat)))
-        create_graph(results, f"bgperf_{test['name']}.png")
-
+        create_graph(results, test_name='total time', stat_index=8, test_file=f"bgperf_{test['name']}_total_time.png")
+        create_graph(results, test_name='elapsed', stat_index=5, test_file=f"bgperf_{test['name']}_elapsed.png")
+        create_graph(results, test_name='neighbor', stat_index=4, test_file=f"bgperf_{test['name']}_neighbor.png")
 
 def mem_human(v):
     if v > 1024 * 1024 * 1024:

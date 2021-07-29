@@ -23,6 +23,7 @@ import time
 import shutil
 import netaddr
 import datetime
+from collections import defaultdict
 from argparse import ArgumentParser, REMAINDER
 from itertools import chain, islice
 from requests.exceptions import ConnectionError
@@ -30,6 +31,8 @@ from pyroute2 import IPRoute
 from socket import AF_INET
 from nsenter import Namespace
 from psutil import virtual_memory
+import matplotlib.pyplot as plt
+import numpy as np
 from base import *
 from exabgp import ExaBGP, ExaBGP_MRTParse
 from gobgp import GoBGP, GoBGPTarget
@@ -328,7 +331,7 @@ def bench(args):
 
     q = Queue()
 
-    monitor_thread = m.stats(q)
+    m.stats(q)
     if not is_remote:
         target.stats(q)
 
@@ -357,7 +360,7 @@ def bench(args):
             recved = info['afi_safis'][0]['state']['accepted'] if 'accepted' in info['afi_safis'][0]['state'] else 0
             
             if output_stats['first_received_time'] == 0:
-                output_stats['first_received_time'] = now - start if recved > 0 else 0
+                output_stats['first_received_time'] = now - start if recved > 0 else datetime.datetime(1,1,1,0,0)
             if elapsed.seconds > 0:
                 rm_line()
             print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, recved: {3}'.format(elapsed.seconds, cpu, mem_human(mem), recved))
@@ -373,7 +376,7 @@ def bench(args):
                 print_final_stats(args, target_version, output_stats)
                 o_s = create_output_stats(args, target_version, output_stats)
                 print_stats_header()
-                print(','.join(o_s))
+                print(','.join(map(str, o_s)))
                 return o_s
 
             if cooling >= 0:
@@ -402,15 +405,40 @@ def create_output_stats(args, target_version, stats):
     f = stats['first_received_time'].seconds 
     d = datetime.date.today().strftime("%Y-%m-%d")
     out = [args.target, target_version, str(args.neighbor_num), str(args.prefix_num)]
-    out.extend([str(stats['neighbor_wait_time']), str(e), str(f) , str(e-f), format(stats['total_time'], ".2f")])
+    out.extend([stats['neighbor_wait_time'], e, f , e-f, float(format(stats['total_time'], ".2f"))])
     out.extend(['-s' if args.single_table else '', d, str(stats['cores']), mem_human(stats['memory'])])
     return out
+
+def create_graph(stats, test_name='test.png'):
+    labels = {}
+    data = defaultdict(list)
+
+
+    for stat in stats:
+        labels[stat[0]] = True
+        data[f"{stat[2]}n_{stat[3]}p"].append(stat[8])
+
+    x = np.arange(len(labels))
+  
+    bars = len(data)
+    width = 0.7 / bars
+    for i, d in enumerate(data):
+        plt.bar(x -0.2+i*width, data[d], width=width, label=d)
+
+    plt.ylabel("seconds")
+    plt.xlabel('neighbors_prefixes')
+    plt.title("total time")
+    plt.xticks(x,labels.keys())
+    plt.legend()
+
+    plt.show()
+    plt.savefig(test_name)
+
 
 
 def batch(args):
     with open(args.batch_config, 'r') as f:
         batch_config = yaml.safe_load(f)
-
 
     for test in batch_config['tests']:
         results = []
@@ -435,12 +463,11 @@ def batch(args):
                     for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
                         setattr(a, field, t[field]) if field in t else setattr(a, field, 0)    
                     results.append(bench(a))
-
+        print()
         print_stats_header()
         for stat in results:
-            print(','.join(stat))
-
-
+            print(','.join(map(str, stat)))
+        create_graph(results, f"bgperf_{test['name']}.png")
 
 
 def mem_human(v):

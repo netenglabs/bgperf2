@@ -8,3 +8,5 @@ six
 packaging
 psutil
 pyyaml
+matplotlib
+numpy

@@ -39,6 +39,7 @@ from gobgp import GoBGP, GoBGPTarget
 from bird import BIRD, BIRDTarget
 from frr import FRRouting, FRRoutingTarget
 from frr_compiled import FRRoutingCompiled, FRRoutingCompiledTarget
+from rustybgp import RustyBGP, RustyBGPTarget
 from tester import ExaBGPTester
 from mrt_tester import GoBGPMRTTester, ExaBGPMrtTester
 from monitor import Monitor
@@ -86,7 +87,7 @@ def doctor(args):
     else:
         print('... not found. run `bgperf prepare`')
 
-    for name in ['gobgp', 'bird', 'frr', 'frr_c']:
+    for name in ['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp']:
         print('{0} image'.format(name), end=' ')
         if img_exists('bgperf/{0}'.format(name)):
             print('... ok')
@@ -119,6 +120,8 @@ def update(args):
         BIRD.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'all' or args.image == 'frr':
         FRRouting.build_image(True, checkout=args.checkout, nocache=args.no_cache)
+    if args.image == 'all' or args.image == 'rustybgp':
+        RustyBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'frr_c':
         FRRoutingCompiled.build_image(True, checkout=args.checkout, nocache=args.no_cache)
 
@@ -283,6 +286,8 @@ def bench(args):
             target_class = FRRoutingTarget
         elif args.target == 'frr_c':
             target_class = FRRoutingCompiledTarget
+        elif args.target == 'rustybgp':
+            target_class = RustyBGPTarget
         
         print('run', args.target)
         if args.image:
@@ -647,7 +652,7 @@ def create_args_parser(main=True):
     parser_prepare.set_defaults(func=prepare)
 
     parser_update = s.add_parser('update', help='rebuild bgp docker images')
-    parser_update.add_argument('image', choices=['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'frr', 'frr_c', 'all'])
+    parser_update.add_argument('image', choices=['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'all'])
     parser_update.add_argument('-c', '--checkout', default='HEAD')
     parser_update.add_argument('-n', '--no-cache', action='store_true')
     parser_update.set_defaults(func=update)
@@ -677,7 +682,7 @@ def create_args_parser(main=True):
                             help='monitor\' router ID; default: same as --monitor-local-address')
 
     parser_bench = s.add_parser('bench', help='run benchmarks')
-    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c'], default='gobgp')
+    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp'], default='gobgp')
     parser_bench.add_argument('-i', '--image', help='specify custom docker image')
     parser_bench.add_argument('--docker-network-name', help='Docker network name; this is the name given by \'docker network ls\'')
     parser_bench.add_argument('--bridge-name', help='Linux bridge name of the '

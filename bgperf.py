@@ -131,7 +131,7 @@ def bench(args):
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
     dckr_net_name = args.docker_network_name or args.bench_name + '-br'
     bench_start = time.time()
-    for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget]:
+    for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, RustyBGPTarget]:
         if ctn_exists(target_class.CONTAINER_NAME):
             print('removing target container', target_class.CONTAINER_NAME)
             dckr.remove_container(target_class.CONTAINER_NAME, force=True)

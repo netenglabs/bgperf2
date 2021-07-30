@@ -21,23 +21,7 @@ FROM ekidd/rust-musl-builder
 
 RUN pwd && git clone https://github.com/osrg/rustybgp.git
 RUN sudo chown rust /root
-RUN cd rustybgp && cargo build --release && cp /home/rust/src/rustybgp/target/x86_64-unknown-linux-musl/release/rustybgpd /root
-
-
-
-# FROM golang:1.16.6
-# WORKDIR /root
-# RUN pwd && git clone git://github.com/osrg/gobgp && cd gobgp && go mod download
-# RUN cd gobgp && go install ./cmd/gobgpd
-# RUN cd gobgp && go install ./cmd/gobgp
-
-# FROM ubuntu:18.04
-# RUN apt update && apt upgrade --yes
-
-# WORKDIR /root
-# COPY --from=0 /home/rust/src/rustybgp/target/x86_64-unknown-linux-musl/release/rustybgpd /root
-# COPY --from=1 
-
+RUN cd rustybgp && cargo build --release && cp /home/rust/src/rustybgp/target/*/release/rustybgpd /root
 
 '''.format(checkout)
         super(RustyBGP, cls).build_image(force, tag, nocache)

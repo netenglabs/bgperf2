@@ -102,6 +102,7 @@ def prepare(args):
     GoBGP.build_image(args.force, nocache=args.no_cache)
     BIRD.build_image(args.force, nocache=args.no_cache)
     FRRouting.build_image(args.force,  nocache=args.no_cache)
+    RustyBGP.build_image(args.force, nocache=args.no_cache)
     #FRRoutingCompiled.build_image(args.force, nocache=args.no_cache)
     # don't want to do this automatically. This one is special so have to explicitly
     # update it
@@ -373,6 +374,7 @@ def bench(args):
                 bench_stop = time.time()
                 output_stats['total_time'] = bench_stop - bench_start
                 m.stop_monitoring = True
+                target.stop_monitoring = True
                 target_version = target.exec_version_cmd()
                 print_final_stats(args, target_version, output_stats)
                 o_s = create_output_stats(args, target_version, output_stats)
@@ -398,7 +400,7 @@ def print_final_stats(args, target_version, stats):
     print()
 
 def print_stats_header():
-    print("nos, version, peers, prefixes per peer, neighbor (s), elapsed (s), since first route (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)")
+    print("name, target, version, peers, prefixes per peer, neighbor (s), elapsed (s), since first route (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)")
 
 
 
@@ -406,7 +408,11 @@ def create_output_stats(args, target_version, stats):
     e = stats['elapsed'].seconds
     f = stats['first_received_time'].seconds 
     d = datetime.date.today().strftime("%Y-%m-%d")
-    out = [args.target, target_version, str(args.neighbor_num), str(args.prefix_num)]
+    if 'label' in args and args.label:
+        name = args.label
+    else:
+        name = args.target
+    out = [name, args.target, target_version, str(args.neighbor_num), str(args.prefix_num)]
     out.extend([stats['neighbor_wait_time'], e, f , e-f, float(format(stats['total_time'], ".2f"))])
     out.extend(['-s' if args.single_table else '', d, str(stats['cores']), mem_human(stats['memory'])])
     return out
@@ -415,10 +421,9 @@ def create_graph(stats, test_name='total time', stat_index=8, test_file='total_t
     labels = {}
     data = defaultdict(list)
 
-
     for stat in stats:
         labels[stat[0]] = True
-        data[f"{stat[2]}n_{stat[3]}p"].append(stat[stat_index])
+        data[f"{stat[3]}n_{stat[4]}p"].append(stat[stat_index])
 
     x = np.arange(len(labels))
   
@@ -465,7 +470,7 @@ def batch(args):
                     a.local_address_prefix = t['local_address_prefix'] if 'local_address_prefix' in t else '10.10.0.0/16'
                     a.cooling = t['cooling'] if 'local_cooling' in t else 0
                     for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
-                                    'target_local_address', 'monitor_local_address', 'target_router_id',
+                                    'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
                                     'monitor_router_id', 'target_config_file', 'filter_type',]:
                         setattr(a, field, t[field]) if field in t else setattr(a, field, None)
 
@@ -476,9 +481,10 @@ def batch(args):
         print_stats_header()
         for stat in results:
             print(','.join(map(str, stat)))
-        create_graph(results, test_name='total time', stat_index=8, test_file=f"bgperf_{test['name']}_total_time.png")
-        create_graph(results, test_name='elapsed', stat_index=5, test_file=f"bgperf_{test['name']}_elapsed.png")
-        create_graph(results, test_name='neighbor', stat_index=4, test_file=f"bgperf_{test['name']}_neighbor.png")
+        create_graph(results, test_name='total time', stat_index=9, test_file=f"bgperf_{test['name']}_total_time.png")
+        create_graph(results, test_name='elapsed', stat_index=6, test_file=f"bgperf_{test['name']}_elapsed.png")
+        create_graph(results, test_name='neighbor', stat_index=5, test_file=f"bgperf_{test['name']}_neighbor.png")
+        create_graph(results, test_name='route reception', stat_index=7, test_file=f"bgperf_{test['name']}_neighbor.png")
 
 def mem_human(v):
     if v > 1024 * 1024 * 1024:

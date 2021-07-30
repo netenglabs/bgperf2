@@ -115,6 +115,7 @@ class GoBGPTarget(GoBGP, Target):
         config['neighbors'] = [gen_neighbor_config(n) for n in list(flatten(list(t.get('neighbors', {}).values()) for t in scenario_global_conf['testers'])) + [scenario_global_conf['monitor']]]
         with open('{0}/{1}'.format(self.host_dir, self.CONFIG_FILE_NAME), 'w') as f:
             f.write(yaml.dump(config, default_flow_style=False))
+        return config
 
     def get_startup_cmd(self):
         return '\n'.join(

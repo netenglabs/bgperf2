@@ -10,3 +10,4 @@ psutil
 pyyaml
 matplotlib
 numpy
+toml

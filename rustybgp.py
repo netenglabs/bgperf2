@@ -1,5 +1,5 @@
 
-
+import toml
 from base import *
 from gobgp import GoBGPTarget
 
@@ -44,11 +44,24 @@ RUN cd rustybgp && cargo build --release && cp /home/rust/src/rustybgp/target/x8
 
 
 class RustyBGPTarget(RustyBGP, GoBGPTarget):
+    # RustyBGP has the same config as GoBGP
+    #  except some things are different
     
     CONTAINER_NAME = 'bgperf_rustybgp_target'
 
     def __init__(self, host_dir, conf, image='bgperf/rustybgp'):
         super(GoBGPTarget, self).__init__(host_dir, conf, image=image)
+
+    def write_config(self, scenario_global_conf):
+        # I don't want to figure out how to write config as TOML Instead of YAML, 
+        #  but RustyBGP can only handle TOML, so I'm cheating
+        config = super(RustyBGPTarget, self).write_config(scenario_global_conf)
+        del config['policy-definitions']
+        del config['defined-sets']
+
+        toml_config = toml.dumps(config)
+        with open('{0}/{1}'.format(self.host_dir, self.CONFIG_FILE_NAME), 'w') as f:
+            f.write(toml_config)
 
     def get_startup_cmd(self):
         return '\n'.join(

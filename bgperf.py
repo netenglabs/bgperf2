@@ -40,6 +40,7 @@ from bird import BIRD, BIRDTarget
 from frr import FRRouting, FRRoutingTarget
 from frr_compiled import FRRoutingCompiled, FRRoutingCompiledTarget
 from rustybgp import RustyBGP, RustyBGPTarget
+from openbgp import OpenBGP, OpenBGPTarget
 from tester import ExaBGPTester
 from mrt_tester import GoBGPMRTTester, ExaBGPMrtTester
 from monitor import Monitor
@@ -87,7 +88,7 @@ def doctor(args):
     else:
         print('... not found. run `bgperf prepare`')
 
-    for name in ['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp']:
+    for name in ['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp']:
         print('{0} image'.format(name), end=' ')
         if img_exists('bgperf/{0}'.format(name)):
             print('... ok')
@@ -104,6 +105,7 @@ def prepare(args):
     BIRD.build_image(args.force, nocache=args.no_cache)
     FRRouting.build_image(args.force,  nocache=args.no_cache)
     RustyBGP.build_image(args.force, nocache=args.no_cache)
+    OpenBGP.build_image(args.force, nocache=args.no_cache)
     #FRRoutingCompiled.build_image(args.force, nocache=args.no_cache)
     # don't want to do this automatically. This one is special so have to explicitly
     # update it
@@ -122,6 +124,8 @@ def update(args):
         FRRouting.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'all' or args.image == 'rustybgp':
         RustyBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
+    if args.image == 'all' or args.image == 'openbgp':
+        OpenBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'frr_c':
         FRRoutingCompiled.build_image(True, checkout=args.checkout, nocache=args.no_cache)
 
@@ -131,7 +135,7 @@ def bench(args):
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
     dckr_net_name = args.docker_network_name or args.bench_name + '-br'
     bench_start = time.time()
-    for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, RustyBGPTarget]:
+    for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, RustyBGPTarget, OpenBGPTarget]:
         if ctn_exists(target_class.CONTAINER_NAME):
             print('removing target container', target_class.CONTAINER_NAME)
             dckr.remove_container(target_class.CONTAINER_NAME, force=True)
@@ -288,6 +292,8 @@ def bench(args):
             target_class = FRRoutingCompiledTarget
         elif args.target == 'rustybgp':
             target_class = RustyBGPTarget
+        elif args.target == 'rustybgp':
+            target_class = OpenBGPTarget
         
         print('run', args.target)
         if args.image:
@@ -365,13 +371,15 @@ def bench(args):
             output_stats['elapsed'] = elapsed
             recved = info['afi_safis'][0]['state']['accepted'] if 'accepted' in info['afi_safis'][0]['state'] else 0
             
-            if output_stats['first_received_time'] == 0:
-                output_stats['first_received_time'] = now - start if recved > 0 else 0
+
             if elapsed.seconds > 0:
                 rm_line()
             print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, recved: {3}'.format(elapsed.seconds, cpu, mem_human(mem), recved))
             f.write('{0}, {1}, {2}, {3}\n'.format(elapsed.seconds, cpu, mem, recved)) if f else None
             f.flush() if f else None
+
+            if recved > 0 and output_stats['first_received_time'] == 0:
+                output_stats['first_received_time'] = now - start 
 
             if cooling == int(args.cooling):
                 
@@ -399,13 +407,13 @@ def print_final_stats(args, target_version, stats):
     
     print(f"{args.target}: {target_version}")
     print(f"Max cpu: {stats['max_cpu']:4.2f}, max mem: {mem_human(stats['max_mem'])}")
-    print(f"Time since first received route: {stats['elapsed'].seconds - stats['first_received_time'].seconds}")
+    print(f"Time since first received prefix: {stats['elapsed'].seconds - stats['first_received_time'].seconds}")
 
     print(f"total time: {stats['total_time']:.2f}s")
     print()
 
 def print_stats_header():
-    print("name, target, version, peers, prefixes per peer, neighbor (s), elapsed (s), since first route (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)")
+    print("name, target, version, peers, prefixes per peer, neighbor (s), elapsed (s), prefix received (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)")
 
 
 
@@ -419,6 +427,7 @@ def create_output_stats(args, target_version, stats):
         name = args.target
     out = [name, args.target, target_version, str(args.neighbor_num), str(args.prefix_num)]
     out.extend([stats['neighbor_wait_time'], e, f , e-f, float(format(stats['total_time'], ".2f"))])
+    out.extend([round(stats['max_cpu']), stats['max_mem']/1024/1024/1024])
     out.extend(['-s' if args.single_table else '', d, str(stats['cores']), mem_human(stats['memory'])])
     return out
 
@@ -489,7 +498,9 @@ def batch(args):
         create_graph(results, test_name='total time', stat_index=9, test_file=f"bgperf_{test['name']}_total_time.png")
         create_graph(results, test_name='elapsed', stat_index=6, test_file=f"bgperf_{test['name']}_elapsed.png")
         create_graph(results, test_name='neighbor', stat_index=5, test_file=f"bgperf_{test['name']}_neighbor.png")
-        create_graph(results, test_name='route reception', stat_index=7, test_file=f"bgperf_{test['name']}_neighbor.png")
+        create_graph(results, test_name='route reception', stat_index=8, test_file=f"bgperf_{test['name']}_route_reception.png")
+        create_graph(results, test_name='max cpu', stat_index=10, test_file=f"bgperf_{test['name']}_max_cpu.png")
+        create_graph(results, test_name='max mem', stat_index=11, test_file=f"bgperf_{test['name']}_max_mem.png")
 
 def mem_human(v):
     if v > 1024 * 1024 * 1024:
@@ -652,7 +663,8 @@ def create_args_parser(main=True):
     parser_prepare.set_defaults(func=prepare)
 
     parser_update = s.add_parser('update', help='rebuild bgp docker images')
-    parser_update.add_argument('image', choices=['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'all'])
+    parser_update.add_argument('image', choices=['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'frr', 'frr_c', 
+                                'rustybgp', 'openbgp', 'all'])
     parser_update.add_argument('-c', '--checkout', default='HEAD')
     parser_update.add_argument('-n', '--no-cache', action='store_true')
     parser_update.set_defaults(func=update)
@@ -682,7 +694,7 @@ def create_args_parser(main=True):
                             help='monitor\' router ID; default: same as --monitor-local-address')
 
     parser_bench = s.add_parser('bench', help='run benchmarks')
-    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp'], default='gobgp')
+    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp'], default='gobgp')
     parser_bench.add_argument('-i', '--image', help='specify custom docker image')
     parser_bench.add_argument('--docker-network-name', help='Docker network name; this is the name given by \'docker network ls\'')
     parser_bench.add_argument('--bridge-name', help='Linux bridge name of the '

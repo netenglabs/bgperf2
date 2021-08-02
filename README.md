@@ -59,7 +59,7 @@ docker version ... ok (1.9.1)
 bgperf image ... ok
 gobgp image ... ok
 bird image ... ok
-
+```
 ## <a name="how_to_use">How to use
 
 Use `bench` command to start benchmark test.

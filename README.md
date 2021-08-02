@@ -83,7 +83,7 @@ name, target, version, peers, prefixes per peer, neighbor (s), elapsed (s), pref
 gobgp,gobgp,2.29.0,100,100,5,2,0,2,24.07,554,0.045,,2021-08-02,32,62.82GB
 ```
 
-As you might notice, the interesting statistics are show twice, once in an easy to read format and the second
+As you might notice, the interesting statistics are shown twice, once in an easy to read format and the second
 in a CSV format to easily copy and paste to do analysis later.
 
 To change a target implementation, use `-t` option.
@@ -241,22 +241,22 @@ The startup script is in /tmp/bgperf/\<target\>/start.sh and gets copied to the 
 In other words, to launch the start.sh and see the output you can run this docker command:
 
 ```
-jpietsch@jpietsch-server:~/bgperf$ docker exec bgperf_bird_target /root/config/start.sh
+$ docker exec bgperf_bird_target /root/config/start.sh
 bird: I found another BIRD running.
 
 ```
 In this case, things were already working, so I'll run ps and kill the old bird and start a new one.
 
 ```
-jpietsch@jpietsch-server:~/bgperf$ docker exec bgperf_bird_target ps auxww
+$ docker exec bgperf_bird_target ps auxww
 USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
 root           1  0.0  0.0   3984  2820 ?        Ss   21:21   0:00 bash
 root          14  0.0  0.0   4144  2016 ?        Ss   21:21   0:00 bird -c /root/config/bird.conf
 root          22  0.0  0.0   5904  2784 ?        Rs   21:22   0:00 ps auxww
-jpietsch@jpietsch-server:~/bgperf$ docker exec bgperf_bird_target kill 14
+$ docker exec bgperf_bird_target kill 14
 ```
 
 ```
-jpietsch@jpietsch-server:~/bgperf$ docker exec bgperf_bird_target /root/config/start.sh
+$ docker exec bgperf_bird_target /root/config/start.sh
 ```
 No output, so it was just fine.

@@ -431,7 +431,7 @@ def create_output_stats(args, target_version, stats):
     out.extend(['-s' if args.single_table else '', d, str(stats['cores']), mem_human(stats['memory'])])
     return out
 
-def create_graph(stats, test_name='total time', stat_index=8, test_file='total_time.png'):
+def create_graph(stats, test_name='total time', stat_index=8, test_file='total_time.png', ylabel='seconds'):
     labels = {}
     data = defaultdict(list)
 
@@ -447,16 +447,14 @@ def create_graph(stats, test_name='total time', stat_index=8, test_file='total_t
     for i, d in enumerate(data):
         plt.bar(x -0.2+i*width, data[d], width=width, label=d)
 
-    plt.ylabel("seconds")
-    plt.xlabel('neighbors_prefixes')
+    plt.ylabel(ylabel)
+    #plt.xlabel('neighbors_prefixes')
     plt.title(test_name)
     plt.xticks(x,labels.keys())
     plt.legend()
 
     plt.show()
     plt.savefig(test_file)
-
-
 
 def batch(args):
     """ runs several tests together, produces all the stats together and creates graphs
@@ -500,12 +498,15 @@ def batch(args):
             f.write(stats_header() + '\n')
             for stat in results:
                 f.write(','.join(map(str, stat)) + '\n')
-        create_graph(results, test_name='total time', stat_index=9, test_file=f"bgperf_{test['name']}_total_time.png")
-        create_graph(results, test_name='elapsed', stat_index=6, test_file=f"bgperf_{test['name']}_elapsed.png")
-        create_graph(results, test_name='neighbor', stat_index=5, test_file=f"bgperf_{test['name']}_neighbor.png")
-        create_graph(results, test_name='route reception', stat_index=8, test_file=f"bgperf_{test['name']}_route_reception.png")
-        create_graph(results, test_name='max cpu', stat_index=10, test_file=f"bgperf_{test['name']}_max_cpu.png")
-        create_graph(results, test_name='max mem', stat_index=11, test_file=f"bgperf_{test['name']}_max_mem.png")
+        create_batch_graphs(results, test['name'])
+
+def create_batch_graphs(results, name):
+    create_graph(results, test_name='total time', stat_index=9, test_file=f"bgperf_{name}_total_time.png")
+    create_graph(results, test_name='elapsed', stat_index=6, test_file=f"bgperf_{name}_elapsed.png")
+    create_graph(results, test_name='neighbor', stat_index=5, test_file=f"bgperf_{name}_neighbor.png")
+    create_graph(results, test_name='route reception', stat_index=8, test_file=f"bgperf_{name}_route_reception.png")
+    create_graph(results, test_name='max cpu', stat_index=10, test_file=f"bgperf_{name}_max_cpu.png", ylabel="%")
+    create_graph(results, test_name='max mem', stat_index=11, test_file=f"bgperf_{name}_max_mem.png", ylabel="GB")
 
 def mem_human(v):
     if v > 1024 * 1024 * 1024:

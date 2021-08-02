@@ -427,7 +427,7 @@ def create_output_stats(args, target_version, stats):
         name = args.target
     out = [name, args.target, target_version, str(args.neighbor_num), str(args.prefix_num)]
     out.extend([stats['neighbor_wait_time'], e, f , e-f, float(format(stats['total_time'], ".2f"))])
-    out.extend([round(stats['max_cpu']), stats['max_mem']/1024/1024/1024])
+    out.extend([round(stats['max_cpu']), float(format(stats['max_mem']/1024/1024/1024, ".3f"))])
     out.extend(['-s' if args.single_table else '', d, str(stats['cores']), mem_human(stats['memory'])])
     return out
 

@@ -391,7 +391,7 @@ def bench(args):
                 target_version = target.exec_version_cmd()
                 print_final_stats(args, target_version, output_stats)
                 o_s = create_output_stats(args, target_version, output_stats)
-                print_stats_header()
+                print(stats_header())
                 print(','.join(map(str, o_s)))
                 print()
                 return o_s
@@ -412,8 +412,8 @@ def print_final_stats(args, target_version, stats):
     print(f"total time: {stats['total_time']:.2f}s")
     print()
 
-def print_stats_header():
-    print("name, target, version, peers, prefixes per peer, neighbor (s), elapsed (s), prefix received (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)")
+def stats_header():
+    return("name, target, version, peers, prefixes per peer, neighbor (s), elapsed (s), prefix received (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)")
 
 
 
@@ -492,9 +492,14 @@ def batch(args):
                         setattr(a, field, t[field]) if field in t else setattr(a, field, 0)    
                     results.append(bench(a))
         print()
-        print_stats_header()
+        print(stats_header())
         for stat in results:
             print(','.join(map(str, stat)))
+
+        with open(f"{test['name']}.txt", 'w') as f:
+            f.write(stats_header() + '\n')
+            for stat in results:
+                f.write(','.join(map(str, stat)) + '\n')
         create_graph(results, test_name='total time', stat_index=9, test_file=f"bgperf_{test['name']}_total_time.png")
         create_graph(results, test_name='elapsed', stat_index=6, test_file=f"bgperf_{test['name']}_elapsed.png")
         create_graph(results, test_name='neighbor', stat_index=5, test_file=f"bgperf_{test['name']}_neighbor.png")

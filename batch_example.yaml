@@ -1,21 +1,27 @@
+# not testing gobgp by default because it's peformance is so much different
+#  than the others that it makes it hard to see on graphs how they compare
+#  and it uses more memory, so some tests fail
+
 tests:
   - 
     name: 10K
-    neighbors: [10, 30, 50, 100, 250, 500]
+    neighbors: [10, 30, 50, 100]
     prefixes: [10_000]
     targets: 
       -
         name: bird
-        flags: 
-      -
-        name: bird
+        label: bird -s
         single_table: True
       - 
         name: frr
-      -
-        name: gobgp
+      # -
+      #   name: gobgp
       -
         name: frr_c
+        label: frr 8
+      -
+        name: rustybgp
+
   - 
     name: 1M
     neighbors: [1, 5, 10]
@@ -23,15 +29,74 @@ tests:
     targets: 
       -
         name: bird
-        flags: 
-      -
-        name: bird
-        flags: -s
+        label: bird -s
+        single_table: True
       - 
         name: frr
       -
-        name: gobgp
+        name: frr_c
+        label: frr 8
+      # -
+      #   name: gobgp
+      # runs out of memory on my 64GB device
+      # with gobgp at 10 neighbors
+      -
+        name: rustybgp
 
+  - 
+    name: many_neighbors_10p
+    neighbors: [250, 500, 750, 1000, 1250, 1500, 1750]
+    prefixes: [10]
+    targets: 
+      -
+        name: bird
+        label: bird -s
+        single_table: True
+      - 
+        name: frr
+      -
+        name: frr_c
+        label: frr 8
+      -
+        name: rustybgp
+
+  - 
+    name: many_neighbors_100p
+    # my machine with 64 GB RAM cannot do 1000 clients with 100 routes each
+    #  the exabgp testers take too much memory
+    neighbors: [250, 500, 750]
+    prefixes: [100]
+    targets: 
+      -
+        name: bird
+        label: bird -s
+        single_table: True
+      - 
+        name: frr
+      -
+        name: frr_c
+        label: frr 8
+      # -
+      #   name: gobgp
+      -
+        name: rustybgp
+
+  - # ran out of memory on 64 GB machine
+    name: 1000p
+    neighbors: [50, 100, 250, 500]
+    prefixes: [1000]
+    targets: 
+      -
+        name: bird
+        label: bird -s
+        single_table: True
+      - 
+        name: frr
+      -
+        name: frr_c
+        label: frr 8
+      -
+        name: rustybgp
           
         
     

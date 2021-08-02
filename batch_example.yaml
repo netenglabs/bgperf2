@@ -78,6 +78,24 @@ tests:
       -
         name: rustybgp
   - 
+    name: prefix_growth
+    neighbors: [100, 250]
+    prefixes: [10, 100, 1000, 10000]
+    targets: 
+      -
+        name: bird
+        label: bird -s
+        single_table: True
+      - 
+        name: frr
+      # -
+      #   name: gobgp
+      -
+        name: frr_c
+        label: frr 8
+      -
+        name: rustybgp
+  - 
     name: 1M
     neighbors: [1, 5, 10]
     prefixes: [1_000_000]

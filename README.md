@@ -20,10 +20,8 @@ each config to work.
 
 Caveats: 
 
-I don't know if adding more policy will still work. 
-I also don't know if I've configured each NOS for optimal performance.
-I don't know if remote testing works.
-I don't know if MRT works
+I don't know if adding more policy will still work for all targets.
+I haven't tested MRT or remote targets.
 
 
 ## Prerequisites
@@ -36,7 +34,7 @@ I don't know if MRT works
 ```bash
 $ git clone https://github.com:jopietsch/bgperf.git
 $ cd bgperf
-$ pip install -r pip-requirements.txt
+$ pip3 install -r pip-requirements.txt
 $ ./bgperf.py --help
 usage: bgperf.py [-h] [-b BENCH_NAME] [-d DIR]
                  {doctor,prepare,update,bench,config} ...
@@ -69,25 +67,46 @@ By default, `bgperf` benchmarks [GoBGP](https://github.com/osrg/gobgp).
 `bgperf` boots 100 BGP test peers each advertises 100 routes to `GoBGP`.
 
 ```bash
-$ sudo ./bgperf.py bench
-run tester
-tester booting.. (100/100)
+$ python3 bgperf.py bench
+run monitor
 run gobgp
-elapsed: 16sec, cpu: 0.20%, mem: 580.90MB
-elapsed time: 11sec
+Waiting 5 seconds for neighbor
+run tester tester type normal
+tester booting.. (100/100)
+elapsed: 2sec, cpu: 0.79%, mem: 42.27MB, recved: 10000
+gobgp: 2.29.0
+Max cpu: 554.03, max mem: 45.71MB
+Time since first received prefix: 2
+total time: 24.07s
+
+name, target, version, peers, prefixes per peer, neighbor (s), elapsed (s), prefix received (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)
+gobgp,gobgp,2.29.0,100,100,5,2,0,2,24.07,554,0.045,,2021-08-02,32,62.82GB
 ```
 
+As you might notice, the interesting statistics are show twice, once in an easy to read format and the second
+in a CSV format to easily copy and paste to do analysis later.
+
 To change a target implementation, use `-t` option.
-Currently, `bgperf` supports [BIRD](http://bird.network.cz/) and FRR
-other than GoBGP.
+Currently, `bgperf` supports [BIRD](http://bird.network.cz/) and [FRRouting](https://frrouting.org/)
+(other than GoBGP. There is very intial support for[RustyBGP](https://github.com/osrg/rustybgp), partly
+because RustyBGP doesn't support all policy that BGPerf tries to use for policy testing. If you just want to
+do routes and neighbors then RustyBGP works.
 
 ```bash
-$ sudo ./bgperf.py bench -t bird
-run tester
-tester booting.. (100/100)
+$ python3 bgperf.py bench -t bird
+run monitor
 run bird
-elapsed: 16sec, cpu: 0.00%, mem: 147.55MB
-elapsed time: 11sec
+Waiting 4 seconds for neighbor
+run tester tester type normal
+tester booting.. (100/100)
+elapsed: 1sec, cpu: 1.79%, mem: 110.64MB, recved: 10000
+bird: v2.0.8-59-gf761be6b
+Max cpu: 1.79, max mem: 110.64MB
+Time since first received prefix: 1
+total time: 20.73s
+
+name, target, version, peers, prefixes per peer, neighbor (s), elapsed (s), prefix received (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)
+bird,bird,v2.0.8-59-gf761be6b,100,100,4,1,0,1,20.73,2,0.108,,2021-08-02,32,62.82GB
 ```
 
 To change a load, use following options.
@@ -100,15 +119,102 @@ To change a load, use following options.
 * `-x` : the number of ext-community-list filter (default 0)
 
 ```bash
-$ sudo ./bgperf.py bench -n 200 -p 50
-run tester
-tester booting.. (200/200)
+$ python3 bgperf.py bench
+run monitor
 run gobgp
-elapsed: 23sec, cpu: 0.02%, mem: 1.26GB
-elapsed time: 18sec
+Waiting 5 seconds for neighbor
+run tester tester type normal
+tester booting.. (100/100)
+elapsed: 2sec, cpu: 0.79%, mem: 42.27MB, recved: 10000
+gobgp: 2.29.0
+Max cpu: 554.03, max mem: 45.71MB
+Time since first received prefix: 2
+total time: 24.07s
+
+name, target, version, peers, prefixes per peer, neighbor (s), elapsed (s), prefix received (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)
+gobgp,gobgp,2.29.0,100,100,5,2,0,2,24.07,554,0.045,,2021-08-02,32,62.82GB
 ```
 
-For a comprehensive list of options, run `sudo ./bgperf.py bench --help`.
+For a comprehensive list of options, run `python3 ./bgperf.py bench --help`.
+
+## targets
+
+Targets are the container being tested. There are various ways to make target containers. One is to use a 
+container that is already created. This is the easiest. The second is to compile the NOS.
+
+The problem is that over time how containers about put in dockerhub and how the stacks are compiled changes.
+When I originally forked bgperf it hadn't changed in 4 years, so almost none of the containers could be built
+and all of the software had changed how they interat. I'm not sure how best to make bgperf work over time.
+
+Right now that is demonstrated most readily with FRR. If you use bench -t FRR it will use a prebuilt FRRouting 
+container that is hardcoded to 7.5.1. However, I've also created another target called frr_c, which is a container
+that checks FRRouting out of git with the 8.0 tag and builds the container. This container is not automatically
+built when you do bgperf bench.
+
+## batch
+A new feature called batch lets you run multiple tests, collect all the data, and produces graphs. It's not 
+super robust, if you get any of the expected fields wrong the in the YAML description file it just 
+fails.
+
+There is an included file batch_example.yaml that shows how it works. 
+
+If you use a file that looks like this:
+
+```YAML
+tests:
+  - 
+    name: 10K
+    neighbors: [10, 30, 50, 100]
+    prefixes: [10_000]
+    targets: 
+      -
+        name: bird
+        label: bird -s
+        single_table: True
+      - 
+        name: frr
+      -
+        name: gobgp
+      -
+        name: frr_c
+        label: frr 8
+      -
+        name: rustybgp
+```
+You will get output like this:
+```bash
+name, target, version, peers, prefixes per peer, neighbor (s), elapsed (s), prefix received (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)
+bird -s,bird,v2.0.8-59-gf761be6b,10,10000,3,2,0,2,13.9,30,0.015,-s,2021-08-02,32,62.82GB
+frr,frr,FRRouting 7.5.1_git (910c507f1541).,10,10000,0,3,0,3,11.58,37,0.089,,2021-08-02,32,62.82GB
+gobgp,gobgp,2.29.0,10,10000,6,9,0,9,24.65,1450,0.141,,2021-08-02,32,62.82GB
+frr 8,frr_c,FRRouting 8.0-bgperf (489e9d4e8956).,10,10000,0,3,0,3,11.61,31,0.1,,2021-08-02,32,62.82GB
+rustybgp,rustybgp,exec,10,10000,4,3,0,3,15.94,262,0.032,,2021-08-02,32,62.82GB
+bird -s,bird,v2.0.8-59-gf761be6b,30,10000,4,3,0,3,26.99,100,0.161,-s,2021-08-02,32,62.82GB
+frr,frr,FRRouting 7.5.1_git (ab68d18f80c7).,30,10000,0,3,0,3,22.53,86,0.302,,2021-08-02,32,62.82GB
+gobgp,gobgp,2.29.0,30,10000,5,61,0,61,85.8,1620,0.447,,2021-08-02,32,62.82GB
+frr 8,frr_c,FRRouting 8.0-bgperf (750804dc0e98).,30,10000,0,3,0,3,22.21,78,0.296,,2021-08-02,32,62.82GB
+rustybgp,rustybgp,exec,30,10000,4,4,0,4,28.09,446,0.128,,2021-08-02,32,62.82GB
+bird -s,bird,v2.0.8-59-gf761be6b,50,10000,3,6,0,6,42.35,100,0.396,-s,2021-08-02,32,62.82GB
+frr,frr,FRRouting 7.5.1_git (9e4604a042a6).,50,10000,0,4,0,4,35.48,102,0.513,,2021-08-02,32,62.82GB
+gobgp,gobgp,2.29.0,50,10000,4,160,0,160,194.23,1638,0.875,,2021-08-02,32,62.82GB
+frr 8,frr_c,FRRouting 8.0-bgperf (eb81873b8335).,50,10000,1,6,0,6,36.69,103,0.52,,2021-08-02,32,62.82GB
+rustybgp,rustybgp,exec,50,10000,4,5,0,5,40.74,469,0.307,,2021-08-02,32,62.82GB
+bird -s,bird,v2.0.8-59-gf761be6b,100,10000,3,13,0,13,91.68,100,1.343,-s,2021-08-02,32,62.82GB
+frr,frr,FRRouting 7.5.1_git (8dc6f2f40d8c).,100,10000,1,7,0,7,74.99,101,1.291,,2021-08-02,32,62.82GB
+gobgp,gobgp,2.29.0,100,10000,5,661,0,661,724.83,1664,1.846,,2021-08-02,32,62.82GB
+frr 8,frr_c,FRRouting 8.0-bgperf (74ac3704b034).,100,10000,1,8,1,7,70.46,103,1.116,,2021-08-02,32,62.82GB
+rustybgp,rustybgp,exec,100,10000,6,16,0,16,80.37,597,1.253,,2021-08-02,32,62.82GB
+```
+
+It will create graphs and a CSV file of the output.
+
+And some graphs. These are some of the important ones
+
+![Time to receive all routes](docs/bgperf_10K_route_reception.png)
+
+![CPU Usage ](docs/bgperf_10K_max_cpu.png)
+
+![Memory Usage ](docs/bgperf_10K_max_mem.png)
 
 ## Debugging
 

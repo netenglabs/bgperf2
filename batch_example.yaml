@@ -22,28 +22,8 @@ tests:
       -
         name: rustybgp
 
-  - 
-    name: 1M
-    neighbors: [1, 5, 10]
-    prefixes: [1_000_000]
-    targets: 
-      -
-        name: bird
-        label: bird -s
-        single_table: True
-      - 
-        name: frr
-      -
-        name: frr_c
-        label: frr 8
-      # -
-      #   name: gobgp
-      # runs out of memory on my 64GB device
-      # with gobgp at 10 neighbors
-      -
-        name: rustybgp
-
-  - 
+  - # for more than 1024 neighbors must increase gcthresh3
+    # echo 16384 | sudo tee /proc/sys/net/ipv4/neigh/default/gc_thresh3
     name: many_neighbors_10p
     neighbors: [250, 500, 750, 1000, 1250, 1500, 1750]
     prefixes: [10]
@@ -97,6 +77,26 @@ tests:
         label: frr 8
       -
         name: rustybgp
-          
+  - 
+    name: 1M
+    neighbors: [1, 5, 10]
+    prefixes: [1_000_000]
+    targets: 
+      -
+        name: bird
+        label: bird -s
+        single_table: True
+      - 
+        name: frr
+      -
+        name: frr_c
+        label: frr 8
+      # -
+      #   name: gobgp
+      # runs out of memory on my 64GB device
+      # with gobgp at 10 neighbors
+      -
+        name: rustybgp         
         
-    
+# notes
+# building everything on default ec2 ubuntu image fills up the root partition

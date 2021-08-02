@@ -156,7 +156,8 @@ A new feature called batch lets you run multiple tests, collect all the data, an
 super robust, if you get any of the expected fields wrong the in the YAML description file it just 
 fails.
 
-There is an included file batch_example.yaml that shows how it works. 
+There is an included file batch_example.yaml that shows how it works. You can list the targets that you want
+tested in a batch, as well as iterate through prefix count and neighbor count.
 
 If you use a file that looks like this:
 

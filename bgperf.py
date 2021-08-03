@@ -474,6 +474,7 @@ def batch(args):
                     a = argparse.Namespace(**vars(args))
                     a.func = bench
                     a.image = None
+                    a.output = None
                     a.target = t['name']
 
                     a.prefix_num = p
@@ -494,7 +495,7 @@ def batch(args):
         for stat in results:
             print(','.join(map(str, stat)))
 
-        with open(f"{test['name']}.txt", 'w') as f:
+        with open(f"{test['name']}.csv", 'w') as f:
             f.write(stats_header() + '\n')
             for stat in results:
                 f.write(','.join(map(str, stat)) + '\n')
@@ -723,7 +724,6 @@ def create_args_parser(main=True):
 
     parser_batch = s.add_parser('batch', help='run batch benchmarks')
     parser_batch.add_argument('-c', '--batch_config', type=str, help='batch config file')
-    parser_batch.add_argument('-o', '--output', metavar='BATCH_OUTPUT_FILE')
     parser_batch.set_defaults(func=batch)
 
     return parser

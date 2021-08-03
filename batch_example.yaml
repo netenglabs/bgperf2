@@ -67,27 +67,9 @@ tests:
         name: openbgp
 
   - # ran out of memory on 64 GB machine
-    name: 1000p
-    neighbors: [50, 100, 250, 500]
-    prefixes: [1000]
-    targets: 
-      -
-        name: bird
-        label: bird -s
-        single_table: True
-      - 
-        name: frr
-      -
-        name: frr_c
-        label: frr 8
-      -
-        name: rustybgp
-      -
-        name: openbgp
-  - 
     name: prefix_growth
-    neighbors: [100, 250]
-    prefixes: [10, 100, 1000, 10000]
+    neighbors: [50, 100, 250, 500]
+    prefixes: [10, 100, 1000]
     targets: 
       -
         name: bird
@@ -95,8 +77,6 @@ tests:
         single_table: True
       - 
         name: frr
-      # -
-      #   name: gobgp
       -
         name: frr_c
         label: frr 8
@@ -104,9 +84,9 @@ tests:
         name: rustybgp
       -
         name: openbgp
-  - 
+  -
     name: 1M
-    neighbors: [1, 5, 10]
+    neighbors: [1, 5]
     prefixes: [1_000_000]
     targets: 
       -

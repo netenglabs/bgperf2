@@ -154,10 +154,14 @@ built when you do bgperf bench.
 ## batch
 A new feature called batch lets you run multiple tests, collect all the data, and produces graphs. It's not 
 super robust, if you get any of the expected fields wrong the in the YAML description file it just 
-fails.
+fails. Also, if you run a test that runs out of physical RAM on your machine, linux OOM killer will just kill the process and you'll lose the data from that experiment.
+
+
 
 There is an included file batch_example.yaml that shows how it works. You can list the targets that you want
 tested in a batch, as well as iterate through prefix count and neighbor count.
+
+
 
 If you use a file that looks like this:
 

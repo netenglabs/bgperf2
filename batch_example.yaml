@@ -66,9 +66,9 @@ tests:
       -
         name: openbgp
 
-  - # ran out of memory on 64 GB machine
+  - # openbgp runs out of memory with 500n-100p on 64 GB machine
     name: prefix_growth
-    neighbors: [50, 100, 250, 500]
+    neighbors: [50, 100, 250]
     prefixes: [10, 100, 1000]
     targets: 
       -

@@ -85,14 +85,14 @@ no bgp ebgp-requires-policy
                             f.write(''.join('ip prefix-list {0} deny {1}\n'.format(n, p) for p in match['value']))
                             f.write('ip prefix-list {0} permit any\n'.format(n))
                         elif match['type'] == 'as-path':
-                            f.write(''.join('ip as-path access-list {0} deny _{1}_\n'.format(n, p) for p in match['value']))
-                            f.write('ip as-path access-list {0} permit .*\n'.format(n))
+                            f.write(''.join('bgp as-path access-list {0} deny _{1}_\n'.format(n, p) for p in match['value']))
+                            f.write('bgp as-path access-list {0} permit .*\n'.format(n))
                         elif match['type'] == 'community':
-                            f.write(''.join('ip community-list standard {0} permit {1}\n'.format(n, p) for p in match['value']))
-                            f.write('ip community-list standard {0} permit\n'.format(n))
+                            f.write(''.join('bgp community-list standard {0} permit {1}\n'.format(n, p) for p in match['value']))
+                            f.write('bgp community-list standard {0} permit\n'.format(n))
                         elif match['type'] == 'ext-community':
-                            f.write(''.join('ip extcommunity-list standard {0} permit {1} {2}\n'.format(n, *p.split(':', 1)) for p in match['value']))
-                            f.write('ip extcommunity-list standard {0} permit\n'.format(n))
+                            f.write(''.join('bgp extcommunity-list standard {0} permit {1} {2}\n'.format(n, *p.split(':', 1)) for p in match['value']))
+                            f.write('bgp extcommunity-list standard {0} permit\n'.format(n))
 
                         match_info.append((match['type'], n))
 
@@ -116,7 +116,7 @@ no bgp ebgp-requires-policy
              'mv /etc/frr /etc/frr.old',
              'mkdir /etc/frr',
              'cp {guest_dir}/{config_file_name} /etc/frr/{config_file_name} && chown frr:frr /etc/frr/{config_file_name}',
-             '/usr/lib/frr/bgpd -u frr -f /etc/frr/{config_file_name} -Z']
+             '/usr/lib/frr/bgpd -u frr -f /etc/frr/{config_file_name} -Z > {guest_dir}/bgpd.log 2>&1']
         ).format(
             guest_dir=self.guest_dir,
             config_file_name=self.CONFIG_FILE_NAME)

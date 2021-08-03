@@ -93,7 +93,7 @@ class GoBGPTarget(GoBGP, Target):
 
                 config['policy-definitions'].append({
                     'name': k,
-                    'statements': [{'name': k, 'conditions': conditions, 'actions': {'route-disposition': {'accept-route': True}}}],
+                    'statements': [{'name': k, 'conditions': conditions, 'actions': {'route-disposition': True}}],
                 })
 
 
@@ -104,8 +104,8 @@ class GoBGPTarget(GoBGP, Target):
             if 'filter' in n:
                 a = {}
                 if 'in' in n['filter']:
-                    a['in-policy-list'] = n['filter']['in']
-                    a['default-in-policy'] = 'accept-route'
+                    a['import-policy-list'] = n['filter']['in']
+                    a['default-import-policy'] = 'accept-route'
                 if 'out' in n['filter']:
                     a['export-policy-list'] = n['filter']['out']
                     a['default-export-policy'] = 'accept-route'
@@ -133,3 +133,8 @@ class GoBGPTarget(GoBGP, Target):
     def exec_version_cmd(self):
         ret = super().exec_version_cmd()
         return ret.split(' ')[2].strip('\n')
+
+
+## Caveats
+#   I don't think accepting policy is configured correctly. it 
+#    doesn't seem to be applied to the neighobr

@@ -165,7 +165,7 @@ return true;
         return '\n'.join(
             ['#!/bin/bash',
              'ulimit -n 65536',
-             'bird -c {guest_dir}/{config_file_name}']
+             'bird -c {guest_dir}/{config_file_name} > {guest_dir}/bird.log 2>&1']
         ).format(
             guest_dir=self.guest_dir,
             config_file_name=self.CONFIG_FILE_NAME)

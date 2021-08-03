@@ -525,6 +525,8 @@ def get_hardware_info():
     return cores, mem
 
 def gen_conf(args):
+    ''' This creates the scenario.yml that other things need to read to produce device config
+    '''
     neighbor_num = args.neighbor_num
     prefix = args.prefix_num
     as_path_list = args.as_path_list_num
@@ -606,7 +608,7 @@ def gen_conf(args):
         conf['policy'][name] = {
             'match': [{
                 'type': 'community',
-                'value': list('{0}:{1}'.format(i/(1<<16), i%(1<<16)) for i in range(community_list)),
+                'value': list('{0}:{1}'.format(int(i/(1<<16)), i%(1<<16)) for i in range(community_list)),
             }],
         }
         assignment.append(name)
@@ -616,7 +618,7 @@ def gen_conf(args):
         conf['policy'][name] = {
             'match': [{
                 'type': 'ext-community',
-                'value': list('rt:{0}:{1}'.format(i/(1<<16), i%(1<<16)) for i in range(ext_community_list)),
+                'value': list('rt:{0}:{1}'.format(int(i/(1<<16)), i%(1<<16)) for i in range(ext_community_list)),
             }],
         }
         assignment.append(name)
@@ -647,6 +649,7 @@ def gen_conf(args):
         'type': 'normal',
         'neighbors': neighbors,
     }]
+    yaml.Dumper.ignore_aliases = lambda *args : True
     return gen_mako_macro() + yaml.dump(conf, default_flow_style=False)
 
 

@@ -104,4 +104,9 @@ allow to any
             debug_level='info')
 
     def get_version_cmd(self):
-        return "/usr/local/sbin/bgpd --version"
+        return "/usr/local/sbin/bgpctl -V"
+
+    def exec_version_cmd(self):
+        version = self.get_version_cmd()
+        i= dckr.exec_create(container=self.name, cmd=version, stderr=True)
+        return dckr.exec_start(i['Id'], stream=False, detach=False).decode('utf-8')

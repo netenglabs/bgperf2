@@ -63,4 +63,4 @@ class RustyBGPTarget(RustyBGP, GoBGPTarget):
     def exec_version_cmd(self):
         version = self.get_version_cmd()
         i= dckr.exec_create(container=self.name, cmd=version, stderr=False)
-        return dckr.exec_start(i['Id'], stream=False, detach=False).decode('utf-8')
+        return dckr.exec_start(i['Id'], stream=False, detach=False).decode('utf-8').strip()

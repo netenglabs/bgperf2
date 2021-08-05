@@ -437,7 +437,7 @@ def create_graph(stats, test_name='total time', stat_index=8, test_file='total_t
 
     for stat in stats:
         labels[stat[0]] = True
-        data[f"{stat[3]}n_{stat[4]}p"].append(stat[stat_index])
+        data[f"{stat[3]}n_{stat[4]}p"].append(float(stat[stat_index]))
 
     x = np.arange(len(labels))
   

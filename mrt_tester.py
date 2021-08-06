@@ -186,6 +186,7 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1 &
             cmd.append(str(conf['count']))
         if 'skip' in conf:
             cmd.append(str(conf['skip']))
+        cmd += ['&']
 
         startup += '\n' + ' '.join(cmd)
 

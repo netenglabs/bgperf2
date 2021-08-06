@@ -71,7 +71,7 @@ class ExaBGPMrtTester(Tester, ExaBGP_MRTParse, MRTTester):
             if not mrt_guest_file_path:
                 mrt_guest_file_path = tester_mrt_guest_file_path
 
-            cmd = ['/usr/bin/python', '/root/mrtparse/examples/mrt2exabgp.py']
+            cmd = ['/usr/bin/python3', '/root/mrtparse/examples/mrt2exabgp.py']
             cmd += ['-r {router_id}',
                     '-l {local_as}',
                     '-p {peer_as}',
@@ -123,10 +123,11 @@ class ExaBGPMrtTester(Tester, ExaBGP_MRTParse, MRTTester):
             for p in peers:
                 startup += [' '.join(
                     cmd + [
-                        'exabgp.log.destination={0}/{1}'.format(
+                        'exabgp.log.destination={0}/{1}.log'.format(
                             self.guest_dir, p['router-id']),
-                        '/exabgp/root/exabgp/exabgp {}/{}.conf'.format(
+                        'exabgp {}/{}.conf'.format(
                             self.guest_dir, p['router-id']),
+                        '> {}/exabgp.log 2>&1'.format(self.guest_dir), 
                         '&'
                     ])
                 ]
@@ -176,7 +177,7 @@ class GoBGPMRTTester(Tester, GoBGP, MRTTester):
 ulimit -n 65536
 gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1 &
 '''.format(conf['local-address'], self.guest_dir, self.config_name, 'info')
-
+        startup += 'sleep 15\n' # I don't know why, but it appears sending mrt before neighbor is connected doesn't work
         cmd = ['gobgp', 'mrt']
         if conf.get('only-best', False):
             cmd.append('--only-best')
@@ -188,5 +189,5 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1 &
 
         startup += '\n' + ' '.join(cmd)
 
-        startup += '\n' + 'pkill -SIGHUP gobgpd'
+        #startup += '\n' + 'pkill -SIGHUP gobgpd'
         return startup

@@ -1,0 +1,54 @@
+tests:
+  -
+    name: 100-2500p
+    # my machine with 64 GB RAM cannot do 1000 clients with 100 routes each
+    #  the exabgp testers take too much memory
+    neighbors: [500, 750, 1000, 1250]
+    prefixes: [100, 1000, 2500]
+    targets:
+      -
+        name: bird
+        label: bird -s
+        single_table: True
+      -
+        name: frr
+      -
+        name: frr_c
+        label: frr 8
+      -
+        name: rustybgp
+  - # for more than 1024 neighbors must increase gcthresh3
+    # echo 16384 | sudo tee /proc/sys/net/ipv4/neigh/default/gc_thresh3
+    name: many_neighbors_100p
+    neighbors: [1500, 1750, 2000, 2250, 2500, 3000]
+    prefixes: [100]
+    targets:
+      -
+        name: bird
+        label: bird -s
+        single_table: True
+      -
+        name: frr
+      -
+        name: frr_c
+        label: frr 8
+      -
+        name: rustybgp
+  -
+  - # for more than 1024 neighbors must increase gcthresh3
+    # echo 16384 | sudo tee /proc/sys/net/ipv4/neigh/default/gc_thresh3
+    name: many_many_neighbors_10p
+    neighbors: [3000, 4000, 5000]
+    prefixes: [10]
+    targets:
+      -
+        name: bird
+        label: bird -s
+        single_table: True
+      -
+        name: frr
+      -
+        name: frr_c
+        label: frr 8
+      -
+        name: rustybgp

@@ -490,15 +490,18 @@ def batch(args):
                     for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
                         setattr(a, field, t[field]) if field in t else setattr(a, field, 0)    
                     results.append(bench(a))
+
+                    # update this each time in case something crashes
+                    with open(f"{test['name']}.csv", 'w') as f:
+                        f.write(stats_header() + '\n')
+                        for stat in results:
+                            f.write(','.join(map(str, stat)) + '\n')
         print()
         print(stats_header())
         for stat in results:
             print(','.join(map(str, stat)))
 
-        with open(f"{test['name']}.csv", 'w') as f:
-            f.write(stats_header() + '\n')
-            for stat in results:
-                f.write(','.join(map(str, stat)) + '\n')
+
         create_batch_graphs(results, test['name'])
 
 def create_batch_graphs(results, name):

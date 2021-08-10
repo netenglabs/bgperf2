@@ -353,8 +353,6 @@ def bench(args):
     output_stats['neighbor_wait_time'] = m.wait_established(conf['target']['local-address'])
     output_stats['cores'], output_stats['memory'] = get_hardware_info()
 
-
-
     start = datetime.datetime.now()
 
     q = Queue()
@@ -362,8 +360,6 @@ def bench(args):
     m.stats(q)
     if not is_remote:
         target.stats(q)
-
-
 
     f = open(args.output, 'w') if args.output else None
     cpu = 0
@@ -410,8 +406,8 @@ def bench(args):
                 print(stats_header())
                 print(','.join(map(str, o_s)))
                 print()
-                remove_old_containers()
-                remove_target_containers()
+                # remove_old_containers()
+                # remove_target_containers()
                 return o_s
 
             if cooling >= 0:
@@ -554,6 +550,7 @@ def gen_conf(args):
     prefix_list = args.prefix_list_num
     community_list = args.community_list_num
     ext_community_list = args.ext_community_list_num
+    mrt_injector = args.mrt_injector
 
     local_address_prefix = netaddr.IPNetwork(args.local_address_prefix)
 
@@ -577,6 +574,7 @@ def gen_conf(args):
     else:
         monitor_router_id = monitor_local_address
 
+    
     conf = {}
     conf['local_prefix'] = str(local_address_prefix)
     conf['target'] = {
@@ -595,6 +593,8 @@ def gen_conf(args):
         'local-address': str(monitor_local_address),
         'check-points': [prefix * neighbor_num],
     }
+    if mrt_injector:
+        conf['monitor']['check-points'] = [prefix * 0.99]
 
     offset = 0
 
@@ -664,12 +664,36 @@ def gen_conf(args):
             },
         }
         configured_neighbors_cnt += 1
+    if not mrt_injector:
+        conf['testers'] = [{
+            'name': 'tester',
+            'type': 'normal',
+            'neighbors': neighbors,
+        }]
+    else:
+        conf['testers'] = neighbor_num*[None]
+        
+        mrt_file = 'rib.20210801.0000' # TODO: args.mrt_file
+        for i in range(neighbor_num):
+            router_id = str(local_address_prefix.ip + i+3)
+            conf['testers'][i] = {
+                'name': f'mrt-injector{i}',
+                'type': 'mrt',
+                'mrt_injector': mrt_injector,
+                'mrt-index': i,
+                'neighbors': {
+                    router_id: {
+                        'as': 1000+i+3,
+                        'local-address': router_id,
+                        'router-id': router_id,
+                        'mrt-file': mrt_file,
+                        'only-best': True,
+                        'count': prefix,
 
-    conf['testers'] = [{
-        'name': 'tester',
-        'type': 'normal',
-        'neighbors': neighbors,
-    }]
+
+                    }
+                }
+            }
     yaml.Dumper.ignore_aliases = lambda *args : True
     return gen_mako_macro() + yaml.dump(conf, default_flow_style=False)
 
@@ -709,6 +733,7 @@ def create_args_parser(main=True):
         parser.add_argument('-c', '--community-list-num', default=0, type=int)
         parser.add_argument('-x', '--ext-community-list-num', default=0, type=int)
         parser.add_argument('-s', '--single-table', action='store_true')
+        parser.add_argument('-m', '--mrt_injector', choices=[None, 'gobgp', 'bgpdump2'], default=None)
         parser.add_argument('--target-config-file', type=str,
                             help='target BGP daemon\'s configuration file')
         parser.add_argument('--local-address-prefix', type=str, default='10.10.0.0/16',

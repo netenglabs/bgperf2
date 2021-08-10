@@ -1,4 +1,5 @@
 from base import *
+from mrt_tester import MRTTester
 
 class Bgpdump2(Container):
 
@@ -28,7 +29,7 @@ RUN apt update \
         gcc wget make iputils-ping\
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
-RUN git clone https://github.com/rtbrick/bgpdump2.git \
+RUN git clone https://github.com/jopietsch/bgpdump2.git \
     && cd bgpdump2 \
     && ./configure \
     && make \
@@ -36,13 +37,15 @@ RUN git clone https://github.com/rtbrick/bgpdump2.git \
 
 ## cheating and just hard coding MRT data for now
 RUN wget -q http://archive.routeviews.org/bgpdata/2021.08/RIBS/rib.20210801.0000.bz2 \
-    && bzip2 -d rib.20210801.0000.bz2
+   && bzip2 -d rib.20210801.0000.bz2
 
 ENTRYPOINT ["/bin/bash"]
 '''.format(checkout)
         super(Bgpdump2, cls).build_image(force, tag, nocache)
 
-class Bgpdump2Tester(Tester, Bgpdump2):
+
+
+class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
     CONTAINER_NAME_PREFIX = 'bgperf_bgpdump2_tester_'
 
     def __init__(self, name, host_dir, conf, image='bgperf/bgpdump2'):
@@ -64,24 +67,19 @@ class Bgpdump2Tester(Tester, Bgpdump2):
     def get_mrt_file(sef):
         # harcoded for now
         return 'rib.20210801.0000'
-    
-    def prefixes_to_send(self):
-        # hardcoded
-        return self.conf['prefixes']
-    
 
 
-    # which neighbor am I?
+
     def get_startup_cmd(self):
         #breakpoint()
         # just get the first neighbor, we can only handle one neighbor per container
         neighbor = next(iter(self.conf['neighbors'].values()))
-
+        prefix_count = neighbor['count']
         startup = '''#!/bin/bash
 ulimit -n 65536
 /usr/local/sbin/bgpdump2 --blaster {} -p {} -a {} {} -T {} & > {}/bgpdump2.log 2>&1
         
 '''.format(self.target_ip, self.get_index_useful_neighbor(), 
-            neighbor['as'], self.get_mrt_file(), self.prefixes_to_send(), self.guest_dir)
+            neighbor['as'], self.get_mrt_file(), prefix_count, self.guest_dir)
         return startup
 #> {}/bgpdump2.log 2>&1 

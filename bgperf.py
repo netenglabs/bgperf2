@@ -132,29 +132,35 @@ def update(args):
     if args.image == 'bgpdump2':
         Bgpdump2.build_image(True, checkout=args.checkout, nocache=args.no_cache)
 
+def remove_target_containers():
+    for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, RustyBGPTarget, OpenBGPTarget]:
+        if ctn_exists(target_class.CONTAINER_NAME):
+            print('removing target container', target_class.CONTAINER_NAME)
+            dckr.remove_container(target_class.CONTAINER_NAME, force=True)
+
+def remove_old_containers():
+    if ctn_exists(Monitor.CONTAINER_NAME):
+        print('removing monitor container', Monitor.CONTAINER_NAME)
+        dckr.remove_container(Monitor.CONTAINER_NAME, force=True)
+
+    for ctn_name in get_ctn_names():
+        if ctn_name.startswith(ExaBGPTester.CONTAINER_NAME_PREFIX) or \
+            ctn_name.startswith(ExaBGPMrtTester.CONTAINER_NAME_PREFIX) or \
+            ctn_name.startswith(GoBGPMRTTester.CONTAINER_NAME_PREFIX) or\
+            ctn_name.startswith(Bgpdump2Tester.CONTAINER_NAME_PREFIX):
+            print('removing tester container', ctn_name)
+            dckr.remove_container(ctn_name, force=True)
+
 
 def bench(args):
     output_stats = {}
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
     dckr_net_name = args.docker_network_name or args.bench_name + '-br'
     bench_start = time.time()
-    for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, RustyBGPTarget, OpenBGPTarget]:
-        if ctn_exists(target_class.CONTAINER_NAME):
-            print('removing target container', target_class.CONTAINER_NAME)
-            dckr.remove_container(target_class.CONTAINER_NAME, force=True)
+    remove_target_containers()
 
     if not args.repeat:
-        if ctn_exists(Monitor.CONTAINER_NAME):
-            print('removing monitor container', Monitor.CONTAINER_NAME)
-            dckr.remove_container(Monitor.CONTAINER_NAME, force=True)
-
-        for ctn_name in get_ctn_names():
-            if ctn_name.startswith(ExaBGPTester.CONTAINER_NAME_PREFIX) or \
-                ctn_name.startswith(ExaBGPMrtTester.CONTAINER_NAME_PREFIX) or \
-                ctn_name.startswith(GoBGPMRTTester.CONTAINER_NAME_PREFIX) or\
-                ctn_name.startswith(Bgpdump2Tester.CONTAINER_NAME_PREFIX):
-                print('removing tester container', ctn_name)
-                dckr.remove_container(ctn_name, force=True)
+        remove_old_containers()
 
         if os.path.exists(config_dir):
             shutil.rmtree(config_dir)
@@ -191,6 +197,41 @@ def bench(args):
     print('run monitor')
     m = Monitor(config_dir+'/monitor', conf['monitor'])
     m.run(conf, dckr_net_name)
+
+
+    if not args.repeat:
+        for idx, tester in enumerate(conf['testers']):
+            if 'name' not in tester:
+                name = 'tester{0}'.format(idx)
+            else:
+                name = tester['name']
+            if 'type' not in tester:
+                tester_type = 'normal'
+            else:
+                tester_type = tester['type']
+            if tester_type == 'normal':
+                tester_class = ExaBGPTester
+            elif tester_type == 'mrt':
+                if 'mrt_injector' not in tester:
+                    mrt_injector = 'gobgp'
+                else:
+                    mrt_injector = tester['mrt_injector']
+                if mrt_injector == 'gobgp':
+                    tester_class = GoBGPMRTTester
+                elif mrt_injector == 'exabgp':
+                    tester_class = ExaBGPMrtTester
+                elif mrt_injector == 'bgpdump2':
+                    tester_class = Bgpdump2Tester
+                else:
+                    print('invalid mrt_injector:', mrt_injector)
+                    sys.exit(1)
+
+            else:
+                print('invalid tester type:', tester_type)
+                sys.exit(1)
+            t = tester_class(name, config_dir+'/'+name, tester)
+            print('run tester', name, 'type', tester_type)
+            t.run(conf['target'], dckr_net_name)
 
     is_remote = True if 'remote' in conf['target'] and conf['target']['remote'] else False
 
@@ -312,38 +353,7 @@ def bench(args):
     output_stats['neighbor_wait_time'] = m.wait_established(conf['target']['local-address'])
     output_stats['cores'], output_stats['memory'] = get_hardware_info()
 
-    if not args.repeat:
-        for idx, tester in enumerate(conf['testers']):
-            if 'name' not in tester:
-                name = 'tester{0}'.format(idx)
-            else:
-                name = tester['name']
-            if 'type' not in tester:
-                tester_type = 'normal'
-            else:
-                tester_type = tester['type']
-            if tester_type == 'normal':
-                tester_class = ExaBGPTester
-            elif tester_type == 'mrt':
-                if 'mrt_injector' not in tester:
-                    mrt_injector = 'gobgp'
-                else:
-                    mrt_injector = tester['mrt_injector']
-                if mrt_injector == 'gobgp':
-                    tester_class = GoBGPMRTTester
-                elif mrt_injector == 'exabgp':
-                    tester_class = ExaBGPMrtTester
-                else:
-                    print('invalid mrt_injector:', mrt_injector)
-                    sys.exit(1)
-            elif tester_type == 'bgpdump2':
-                tester_class = Bgpdump2Tester
-            else:
-                print('invalid tester type:', tester_type)
-                sys.exit(1)
-            t = tester_class(name, config_dir+'/'+name, tester)
-            print('run tester', name, 'type', tester_type)
-            t.run(conf['target'], dckr_net_name)
+
 
     start = datetime.datetime.now()
 
@@ -400,6 +410,8 @@ def bench(args):
                 print(stats_header())
                 print(','.join(map(str, o_s)))
                 print()
+                remove_old_containers()
+                remove_target_containers()
                 return o_s
 
             if cooling >= 0:

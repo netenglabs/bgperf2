@@ -43,6 +43,7 @@ from rustybgp import RustyBGP, RustyBGPTarget
 from openbgp import OpenBGP, OpenBGPTarget
 from tester import ExaBGPTester
 from mrt_tester import GoBGPMRTTester, ExaBGPMrtTester
+from bgpdump2 import Bgpdump2, Bgpdump2Tester
 from monitor import Monitor
 from settings import dckr
 from queue import Queue
@@ -128,6 +129,8 @@ def update(args):
         OpenBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'frr_c':
         FRRoutingCompiled.build_image(True, checkout=args.checkout, nocache=args.no_cache)
+    if args.image == 'bgpdump2':
+        Bgpdump2.build_image(True, checkout=args.checkout, nocache=args.no_cache)
 
 
 def bench(args):
@@ -148,7 +151,8 @@ def bench(args):
         for ctn_name in get_ctn_names():
             if ctn_name.startswith(ExaBGPTester.CONTAINER_NAME_PREFIX) or \
                 ctn_name.startswith(ExaBGPMrtTester.CONTAINER_NAME_PREFIX) or \
-                ctn_name.startswith(GoBGPMRTTester.CONTAINER_NAME_PREFIX):
+                ctn_name.startswith(GoBGPMRTTester.CONTAINER_NAME_PREFIX) or\
+                ctn_name.startswith(Bgpdump2Tester.CONTAINER_NAME_PREFIX):
                 print('removing tester container', ctn_name)
                 dckr.remove_container(ctn_name, force=True)
 
@@ -332,6 +336,8 @@ def bench(args):
                 else:
                     print('invalid mrt_injector:', mrt_injector)
                     sys.exit(1)
+            elif tester_type == 'bgpdump2':
+                tester_class = Bgpdump2Tester
             else:
                 print('invalid tester type:', tester_type)
                 sys.exit(1)
@@ -677,7 +683,7 @@ def create_args_parser(main=True):
 
     parser_update = s.add_parser('update', help='rebuild bgp docker images')
     parser_update.add_argument('image', choices=['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'frr', 'frr_c', 
-                                'rustybgp', 'openbgp', 'all'])
+                                'rustybgp', 'openbgp', 'bgpdump2', 'all'])
     parser_update.add_argument('-c', '--checkout', default='HEAD')
     parser_update.add_argument('-n', '--no-cache', action='store_true')
     parser_update.set_defaults(func=update)

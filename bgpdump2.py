@@ -57,10 +57,13 @@ class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
         return None
 
     def get_index_useful_neighbor(self):
+        #known good mrt indexes hardcoded for 20210801.0000
+        good_indexes = [3, 4, 6,7,9,15,17,18, 19, 22, 24, 26, 29]
         # only some of the neighbors in any mrt dump are useful
         # for now we just hardocde
+        
         if 'mrt-index' in self.conf:
-            return self.conf['mrt-index']
+            return good_indexes[self.conf['mrt-index'] % len(good_indexes)]
         else:
             return 3
 

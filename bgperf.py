@@ -199,39 +199,6 @@ def bench(args):
     m.run(conf, dckr_net_name)
 
 
-    if not args.repeat:
-        for idx, tester in enumerate(conf['testers']):
-            if 'name' not in tester:
-                name = 'tester{0}'.format(idx)
-            else:
-                name = tester['name']
-            if 'type' not in tester:
-                tester_type = 'normal'
-            else:
-                tester_type = tester['type']
-            if tester_type == 'normal':
-                tester_class = ExaBGPTester
-            elif tester_type == 'mrt':
-                if 'mrt_injector' not in tester:
-                    mrt_injector = 'gobgp'
-                else:
-                    mrt_injector = tester['mrt_injector']
-                if mrt_injector == 'gobgp':
-                    tester_class = GoBGPMRTTester
-                elif mrt_injector == 'exabgp':
-                    tester_class = ExaBGPMrtTester
-                elif mrt_injector == 'bgpdump2':
-                    tester_class = Bgpdump2Tester
-                else:
-                    print('invalid mrt_injector:', mrt_injector)
-                    sys.exit(1)
-
-            else:
-                print('invalid tester type:', tester_type)
-                sys.exit(1)
-            t = tester_class(name, config_dir+'/'+name, tester)
-            print('run tester', name, 'type', tester_type)
-            t.run(conf['target'], dckr_net_name)
 
     is_remote = True if 'remote' in conf['target'] and conf['target']['remote'] else False
 
@@ -347,6 +314,45 @@ def bench(args):
             target = target_class('{0}/{1}'.format(config_dir, args.target), conf['target'])
         target.run(conf, dckr_net_name)
 
+    ## I'd prefer to start up the testers and then start up the target
+    # however, bgpdump2 isn't smart enough to wait and rety connections so
+    # this is the order
+    if not args.repeat:
+
+        for idx, tester in enumerate(conf['testers']):
+            if 'name' not in tester:
+                name = 'tester{0}'.format(idx)
+            else:
+                name = tester['name']
+            if 'type' not in tester:
+                tester_type = 'normal'
+            else:
+                tester_type = tester['type']
+            if tester_type == 'normal':
+                tester_class = ExaBGPTester
+            elif tester_type == 'mrt':
+                if 'mrt_injector' not in tester:
+                    mrt_injector = 'gobgp'
+                else:
+                    mrt_injector = tester['mrt_injector']
+                if mrt_injector == 'gobgp':
+                    tester_class = GoBGPMRTTester
+                elif mrt_injector == 'exabgp':
+                    tester_class = ExaBGPMrtTester
+                elif mrt_injector == 'bgpdump2':
+                    tester_class = Bgpdump2Tester
+                else:
+                    print('invalid mrt_injector:', mrt_injector)
+                    sys.exit(1)
+
+            else:
+                print('invalid tester type:', tester_type)
+                sys.exit(1)
+
+
+            t = tester_class(name, config_dir+'/'+name, tester)
+            print('run tester', name, 'type', tester_type)
+            t.run(conf['target'], dckr_net_name)
     
     time.sleep(1)
 

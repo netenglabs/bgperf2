@@ -14,6 +14,7 @@
 # limitations under the License.
 
 from base import *
+import json
 
 class FRRouting(Container):
     CONTAINER_NAME = None
@@ -35,7 +36,7 @@ class FRRoutingTarget(FRRouting, Target):
     CONTAINER_NAME = 'bgperf_frrouting_target'
     CONFIG_FILE_NAME = 'bgpd.conf'
 
-    def write_config(self, scenario_global_conf):
+    def write_config(self):
 
         config = """hostname bgpd
 password zebra
@@ -49,7 +50,6 @@ no bgp ebgp-requires-policy
             c = """  neighbor {0} remote-as {1}
   neighbor {0} advertisement-interval 1
   neighbor {0} disable-connected-check
-  neighbor {0} route-server-client
   neighbor {0} timers 30 90
 """.format(local_addr, n['as']) # adjust BGP hold-timers if desired
             if 'filter' in n:
@@ -63,7 +63,7 @@ no bgp ebgp-requires-policy
 
             return c
 
-        neighbors = list(flatten(list(t.get('neighbors', {}).values()) for t in scenario_global_conf['testers'])) + [scenario_global_conf['monitor']]
+        neighbors = list(flatten(list(t.get('neighbors', {}).values()) for t in self.scenario_global_conf['testers'])) + [self.scenario_global_conf['monitor']]
         
         with open('{0}/{1}'.format(self.host_dir, self.CONFIG_FILE_NAME), 'w') as f:
             f.write(config)
@@ -75,9 +75,9 @@ no bgp ebgp-requires-policy
                 f.write(gen_address_family_neighbor(n))
             f.write("  exit-address-family\n")
 
-            if 'policy' in scenario_global_conf:
+            if 'policy' in self.scenario_global_conf:
                 seq = 10
-                for k, v in scenario_global_conf['policy'].items():
+                for k, v in self.scenario_global_conf['policy'].items():
                     match_info = []
                     for i, match in enumerate(v['match']):
                         n = '{0}_match_{1}'.format(k, i)
@@ -127,3 +127,27 @@ no bgp ebgp-requires-policy
     def exec_version_cmd(self):
         ret = super().exec_version_cmd()
         return ret.split('\n')[0]
+    
+
+    def get_neighbor_received_routes(self):
+        ## if we ccall this before the daemon starts we will not get output
+        
+        neighbor_output = self.local("vtysh -c 'sh ip bgp summary json'")
+        tester_count = {}
+        neighbors_checked = {}
+        for tester in self.scenario_global_conf['testers']:
+            for n in tester['neighbors'].keys():
+                tester_count[n] = tester['neighbors'][n]['count']
+                neighbors_checked[n] = False
+        if neighbor_output:
+            neighbor_output = json.loads(neighbor_output.decode('utf-8'))
+
+
+        for n in neighbor_output['ipv4Unicast']['peers'].keys():
+            rcd = neighbor_output['ipv4Unicast']['peers'][n]['pfxRcd'] 
+#
+            #this will include the monitor, we don't want to check that
+            if n in tester_count and rcd >= tester_count[n] *0.99: #gobgp doesn't deliver everything with mrt
+                neighbors_checked[n] = True
+
+        return neighbors_checked

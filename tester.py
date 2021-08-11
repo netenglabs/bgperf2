@@ -18,9 +18,6 @@ from exabgp import ExaBGP
 import os
 from  settings import dckr
 
-def rm_line():
-    print('\x1b[1A\x1b[2K\x1b[1D\x1b[1A')
-
 
 class ExaBGPTester(Tester, ExaBGP):
 

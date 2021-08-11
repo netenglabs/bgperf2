@@ -17,10 +17,6 @@ class Bgpdump2(Container):
 FROM ubuntu:20.04
 WORKDIR /root
 
-# RUN ln -fs /usr/share/zoneinfo/GMT /etc/local/time \
-#     && apt-get install -y tzdata &&
-#     dpkg-reconfigure --frontend noninteractive tzdata
-
 
 RUN apt update \
     && apt -y dist-upgrade \
@@ -29,7 +25,7 @@ RUN apt update \
         gcc wget make iputils-ping\
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
-RUN git clone https://github.com/jopietsch/bgpdump2.git \
+RUN git clone https://github.com/rtbrick/bgpdump2.git \
     && cd bgpdump2 \
     && ./configure \
     && make \
@@ -56,12 +52,16 @@ class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
         self.target_ip = target_conf['local-address']
         return None
 
-    def get_index_useful_neighbor(self):
-        #known good mrt indexes hardcoded for 20210801.0000
-        good_indexes = [3, 4, 6,7,9,15,17,18, 19, 22, 24, 26, 29]
-        # only some of the neighbors in any mrt dump are useful
-        # for now we just hardocde
-        
+    def get_index_useful_neighbor(self, prefix_count):
+        ''' dynamically figure out which of the indexes in the mrt file have enough data'''
+        good_indexes = []
+        counts = self.local(f"/usr/local/sbin/bgpdump2 -c {self.get_mrt_file()}").decode('utf-8').split('\n')[1]
+        counts = counts.split(',') 
+        counts.pop(0) # first item is timestamp, we don't care
+        for i, c in enumerate(counts):
+            if int(c) >= int(prefix_count):
+                good_indexes.append(i)
+
         if 'mrt-index' in self.conf:
             return good_indexes[self.conf['mrt-index'] % len(good_indexes)]
         else:
@@ -82,7 +82,7 @@ class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
 ulimit -n 65536
 /usr/local/sbin/bgpdump2 --blaster {} -p {} -a {} {} -T {} & > {}/bgpdump2.log 2>&1
         
-'''.format(self.target_ip, self.get_index_useful_neighbor(), 
+'''.format(self.target_ip, self.get_index_useful_neighbor(prefix_count), 
             neighbor['as'], self.get_mrt_file(), prefix_count, self.guest_dir)
         return startup
 #> {}/bgpdump2.log 2>&1 

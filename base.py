@@ -16,11 +16,11 @@
 from settings import dckr
 import io
 import os
-import yaml
 from itertools import chain
 from threading import Thread
 import netaddr
 import sys
+import time
 
 flatten = lambda l: chain.from_iterable(l)
 
@@ -49,6 +49,7 @@ class Container(object):
         self.guest_dir = guest_dir
         self.conf = conf
         self.config_name = None
+        self.stop_monitoring = False
         if not os.path.exists(host_dir):
             os.makedirs(host_dir)
             os.chmod(host_dir, 0o777)
@@ -162,11 +163,13 @@ class Container(object):
         return ctn
 
     def stats(self, queue):
-        self.stop_monitoring = False
         def stats():
             if self.stop_monitoring:
                 return
+
             for stat in dckr.stats(self.ctn_id, decode=True):
+                if self.stop_monitoring:
+                    return
                 cpu_percentage = 0.0
                 prev_cpu = stat['precpu_stats']['cpu_usage']['total_usage']
                 if 'system_cpu_usage' in stat['precpu_stats']:
@@ -189,8 +192,23 @@ class Container(object):
         t.daemon = True
         t.start()
 
+    def neighbor_stats(self, queue):
+        def stats():
+            while True:
+                if self.stop_monitoring:
+                    return
+                neighbors_checked = self.get_neighbor_received_routes()
+                queue.put({'who': self.name, 'neighbors_checked': neighbors_checked})
+                time.sleep(1)
+
+        t = Thread(target=stats)
+        t.daemon = True
+        t.start()
+
+        
+
     def local(self, cmd, stream=False, detach=False):
-        i = dckr.exec_create(container=self.name, cmd=cmd)
+        i = dckr.exec_create(container=self.name, cmd=cmd, stderr=False)
         return dckr.exec_start(i['Id'], stream=stream, detach=detach)
 
     def get_startup_cmd(self):
@@ -223,7 +241,7 @@ class Target(Container):
 
     CONFIG_FILE_NAME = None
 
-    def write_config(self, scenario_global_conf):
+    def write_config(self):
         raise NotImplementedError()
 
     def use_existing_config(self):
@@ -235,10 +253,11 @@ class Target(Container):
         return False
 
     def run(self, scenario_global_conf, dckr_net_name=''):
+        self.scenario_global_conf = scenario_global_conf
         ctn = super(Target, self).run(dckr_net_name)
 
         if not self.use_existing_config():
-            self.write_config(scenario_global_conf)
+            self.write_config()
 
         self.exec_startup_cmd(detach=True)
 
@@ -263,10 +282,11 @@ class Tester(Container):
         raise NotImplementedError()
 
     def run(self, target_conf, dckr_net_name):
-        ctn = super(Tester, self).run(dckr_net_name)
+        self.ctn = super(Tester, self).run(dckr_net_name)
 
         self.configure_neighbors(target_conf)
 
+    def launch(self):
         output = self.exec_startup_cmd(stream=True, detach=False)
 
         cnt = 0
@@ -294,4 +314,4 @@ class Tester(Container):
                 else:
                     print(lines)
 
-        return ctn
+        return None

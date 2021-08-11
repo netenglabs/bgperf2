@@ -156,7 +156,7 @@ def bench(args):
     output_stats = {}
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
     dckr_net_name = args.docker_network_name or args.bench_name + '-br'
-    bench_start = time.time()
+
     remove_target_containers()
 
     if not args.repeat:
@@ -164,7 +164,7 @@ def bench(args):
 
         if os.path.exists(config_dir):
             shutil.rmtree(config_dir)
-
+    bench_start = time.time()
     if args.file:
         with open(args.file) as f:
             conf = yaml.safe_load(Template(f.read()).render())
@@ -317,6 +317,7 @@ def bench(args):
     ## I'd prefer to start up the testers and then start up the target
     # however, bgpdump2 isn't smart enough to wait and rety connections so
     # this is the order
+    testers = []
     if not args.repeat:
 
         for idx, tester in enumerate(conf['testers']):
@@ -353,11 +354,14 @@ def bench(args):
             t = tester_class(name, config_dir+'/'+name, tester)
             print('run tester', name, 'type', tester_type)
             t.run(conf['target'], dckr_net_name)
+            testers.append(t)
     
     time.sleep(1)
 
     output_stats['neighbor_wait_time'] = m.wait_established(conf['target']['local-address'])
     output_stats['cores'], output_stats['memory'] = get_hardware_info()
+
+
 
     start = datetime.datetime.now()
 
@@ -366,6 +370,17 @@ def bench(args):
     m.stats(q)
     if not is_remote:
         target.stats(q)
+        target.neighbor_stats(q)
+
+
+    # want to launch all the neighbors at the same(ish) time
+    # launch them after the test starts because as soon as they start they can send info at lest for mrt
+    #  does it need to be in a different place for mrt than exabgp?
+    for i in range(len(testers)):
+        testers[i].launch()
+        if i > 0:
+            rm_line()
+        print(f"launched {i+1} testers")
 
     f = open(args.output, 'w') if args.output else None
     cpu = 0
@@ -374,15 +389,25 @@ def bench(args):
     output_stats['max_cpu'] = 0
     output_stats['max_mem'] = 0
     output_stats['first_received_time'] = 0
+    neighbors_checked = 0
     while True:
         info = q.get()
 
         if not is_remote and info['who'] == target.name:
-            cpu = info['cpu']
-            mem = info['mem']
-            output_stats['max_cpu'] = cpu if cpu > output_stats['max_cpu'] else output_stats['max_cpu']
-            output_stats['max_mem'] = mem if mem > output_stats['max_mem'] else output_stats['max_mem']
-        
+            if 'neighbors_checked' in info:
+                if all(value == True for value in info['neighbors_checked'].values()):
+                    print("finishing because of neighbors checked")     
+                    neighbors_checked = sum(1 if value == True else 0 for value in info['neighbors_checked'].values())
+                    cooling = 0
+                else:
+                    neighbors_checked = sum(1 if value == True else 0 for value in info['neighbors_checked'].values())
+            else:
+                cpu = info['cpu']
+                mem = info['mem']
+                output_stats['max_cpu'] = cpu if cpu > output_stats['max_cpu'] else output_stats['max_cpu']
+                output_stats['max_mem'] = mem if mem > output_stats['max_mem'] else output_stats['max_mem']
+
+
         if info['who'] == m.name:
             now = datetime.datetime.now()
             elapsed = now - start
@@ -391,37 +416,41 @@ def bench(args):
             
 
             if elapsed.seconds > 0:
+                pass
                 rm_line()
-            print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, recved: {3}'.format(elapsed.seconds, cpu, mem_human(mem), recved))
+            print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, recved: {3}, neighbors: {4}'.format(elapsed.seconds, cpu, mem_human(mem), recved, neighbors_checked))
             f.write('{0}, {1}, {2}, {3}\n'.format(elapsed.seconds, cpu, mem, recved)) if f else None
             f.flush() if f else None
 
             if recved > 0 and output_stats['first_received_time'] == 0:
                 output_stats['first_received_time'] = now - start 
 
-            if cooling == int(args.cooling):
-                
+            if cooling == int(args.cooling):                
                 f.close() if f else None
-                bench_stop = time.time()
-                output_stats['total_time'] = bench_stop - bench_start
-                m.stop_monitoring = True
-                target.stop_monitoring = True
-                target_version = target.exec_version_cmd()
-                print_final_stats(args, target_version, output_stats)
-                o_s = create_output_stats(args, target_version, output_stats)
-                print(stats_header())
-                print(','.join(map(str, o_s)))
-                print()
-                # remove_old_containers()
-                # remove_target_containers()
-                return o_s
-
+                return finish_bench(output_stats, bench_start,target, m)   
+                
             if cooling >= 0:
                 cooling += 1
 
-            if info['checked']:
+            if info['checked'] or cooling == 0:
                 cooling = 0
 
+
+def finish_bench(output_stats, bench_start,target, m):
+ 
+    bench_stop = time.time()
+    output_stats['total_time'] = bench_stop - bench_start
+    m.stop_monitoring = True
+    target.stop_monitoring = True
+    target_version = target.exec_version_cmd()
+    print_final_stats(args, target_version, output_stats)
+    o_s = create_output_stats(args, target_version, output_stats)
+    print(stats_header())
+    print(','.join(map(str, o_s)))
+    print()
+    # remove_old_containers()
+    # remove_target_containers()
+    return o_s
 
 def print_final_stats(args, target_version, stats):
     
@@ -599,10 +628,6 @@ def gen_conf(args):
         'local-address': str(monitor_local_address),
         'check-points': [prefix * neighbor_num],
     }
-    if mrt_injector:
-        conf['monitor']['check-points'] = [prefix * 0.99]
-
-    offset = 0
 
     it = netaddr.iter_iprange('90.0.0.0', '100.0.0.0')
 
@@ -665,6 +690,7 @@ def gen_conf(args):
             'router-id': router_id,
             'local-address': router_id,
             'paths': '${{gen_paths({0})}}'.format(prefix),
+            'count': prefix,
             'filter': {
                 args.filter_type: assignment,
             },

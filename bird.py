@@ -42,7 +42,7 @@ class BIRDTarget(BIRD, Target):
     CONTAINER_NAME = 'bgperf_bird_target'
     CONFIG_FILE_NAME = 'bird.conf'
 
-    def write_config(self, scenario_global_conf):
+    def write_config(self):
         config = '''router id {0};
 protocol device {{ }}
 protocol direct {{ disabled; }}
@@ -141,8 +141,8 @@ return true;
         with open('{0}/{1}'.format(self.host_dir, self.CONFIG_FILE_NAME), 'w') as f:
             f.write(config)
 
-            if 'policy' in scenario_global_conf:
-                for k, v in scenario_global_conf['policy'].items():
+            if 'policy' in self.scenario_global_conf:
+                for k, v in self.scenario_global_conf['policy'].items():
                     match_info = []
                     for i, match in enumerate(v['match']):
                         n = '{0}_match_{1}'.format(k, i)
@@ -157,7 +157,7 @@ return true;
                         match_info.append((match['type'], n))
                     f.write(gen_filter(k, match_info))
 
-            for n in sorted(list(flatten(list(t.get('neighbors', {}).values()) for t in scenario_global_conf['testers'])) + [scenario_global_conf['monitor']], key=lambda n: n['as']):
+            for n in sorted(list(flatten(list(t.get('neighbors', {}).values()) for t in self.scenario_global_conf['testers'])) + [self.scenario_global_conf['monitor']], key=lambda n: n['as']):
                 f.write(gen_neighbor_config(n))
             f.flush()
 

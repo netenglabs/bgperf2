@@ -36,10 +36,10 @@ class RustyBGPTarget(RustyBGP, GoBGPTarget):
     def __init__(self, host_dir, conf, image='bgperf/rustybgp'):
         super(GoBGPTarget, self).__init__(host_dir, conf, image=image)
 
-    def write_config(self, scenario_global_conf):
+    def write_config(self):
         # I don't want to figure out how to write config as TOML Instead of YAML, 
         #  but RustyBGP can only handle TOML, so I'm cheating
-        config = super(RustyBGPTarget, self).write_config(scenario_global_conf)
+        config = super(RustyBGPTarget, self).write_config()
         del config['policy-definitions']
         del config['defined-sets']
 

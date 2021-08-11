@@ -236,6 +236,29 @@ class Container(object):
                           detach=detach,
                           stream=stream)
 
+    def get_test_counts(self):
+        '''gets the configured counts that each tester is supposed to send'''
+        tester_count = {}
+        neighbors_checked = {}
+        for tester in self.scenario_global_conf['testers']:
+            for n in tester['neighbors'].keys():
+                tester_count[n] = tester['neighbors'][n]['count']
+                neighbors_checked[n] = False
+        return tester_count, neighbors_checked
+
+    def get_neighbor_received_routes(self):
+        ## if we ccall this before the daemon starts we will not get output
+        
+        tester_count, neighbors_checked = self.get_test_counts()
+        neighbors_received = self.get_neighbors_received()
+
+        for n in neighbors_received.keys():
+
+            #this will include the monitor, we don't want to check that
+            if n in tester_count and neighbors_received[n] >= tester_count[n] *0.99: #gobgp doesn't deliver everything with mrt
+                neighbors_checked[n] = True
+
+        return neighbors_checked
 
 class Target(Container):
 

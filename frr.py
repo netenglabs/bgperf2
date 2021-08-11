@@ -128,26 +128,14 @@ no bgp ebgp-requires-policy
         ret = super().exec_version_cmd()
         return ret.split('\n')[0]
     
+    def get_neighbors_received(self):
+        neighbors_received = {}
+        neighbor_received_output = self.local("vtysh -c 'sh ip bgp summary json'")
+        if neighbor_received_output:
+            neighbor_received_output = json.loads(neighbor_received_output.decode('utf-8'))
 
-    def get_neighbor_received_routes(self):
-        ## if we ccall this before the daemon starts we will not get output
-        
-        neighbor_output = self.local("vtysh -c 'sh ip bgp summary json'")
-        tester_count = {}
-        neighbors_checked = {}
-        for tester in self.scenario_global_conf['testers']:
-            for n in tester['neighbors'].keys():
-                tester_count[n] = tester['neighbors'][n]['count']
-                neighbors_checked[n] = False
-        if neighbor_output:
-            neighbor_output = json.loads(neighbor_output.decode('utf-8'))
+        for n in neighbor_received_output['ipv4Unicast']['peers'].keys():
+            rcd = neighbor_received_output['ipv4Unicast']['peers'][n]['pfxRcd'] 
+            neighbors_received[n] = rcd
+        return neighbors_received
 
-
-        for n in neighbor_output['ipv4Unicast']['peers'].keys():
-            rcd = neighbor_output['ipv4Unicast']['peers'][n]['pfxRcd'] 
-#
-            #this will include the monitor, we don't want to check that
-            if n in tester_count and rcd >= tester_count[n] *0.99: #gobgp doesn't deliver everything with mrt
-                neighbors_checked[n] = True
-
-        return neighbors_checked

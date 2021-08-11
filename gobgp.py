@@ -14,6 +14,8 @@
 # limitations under the License.
 
 from base import *
+import yaml
+import json
 
 class GoBGP(Container):
 
@@ -134,6 +136,17 @@ class GoBGPTarget(GoBGP, Target):
         ret = super().exec_version_cmd()
         return ret.split(' ')[2].strip('\n')
 
+
+    def get_neighbors_received(self):
+        neighbors_received = {}
+        neighbor_received_output = self.local("gobgp neighbor -j")
+        if neighbor_received_output:
+            neighbor_received_output = json.loads(neighbor_received_output.decode('utf-8'))
+
+        for neighbor in neighbor_received_output:
+            if 'accepted' in neighbor['afi_safis'][0]['state']:
+                neighbors_received[neighbor['state']['neighbor_address']] = neighbor['afi_safis'][0]['state']['accepted']
+        return neighbors_received
 
 ## Caveats
 #   I don't think accepting policy is configured correctly. it 

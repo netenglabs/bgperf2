@@ -242,8 +242,6 @@ def bench(args):
     m = Monitor(config_dir+'/monitor', conf['monitor'])
     m.run(conf, dckr_net_name)
 
-
-
     is_remote = True if 'remote' in conf['target'] and conf['target']['remote'] else False
 
     if is_remote:
@@ -763,7 +761,10 @@ def gen_conf(args):
     else:
         conf['testers'] = neighbor_num*[None]
         
-        mrt_file = 'rib.20210801.0000' # TODO: args.mrt_file
+        mrt_file = args.mrt_file 
+        if not mrt_file:
+            print("Need to provide an mrtfile to send")
+            exit(1)
         for i in range(neighbor_num):
             router_id = str(local_address_prefix.ip + i+3)
             conf['testers'][i] = {
@@ -824,6 +825,8 @@ def create_args_parser(main=True):
         parser.add_argument('-x', '--ext-community-list-num', default=0, type=int)
         parser.add_argument('-s', '--single-table', action='store_true')
         parser.add_argument('-m', '--mrt_injector', choices=[None, 'gobgp', 'bgpdump2'], default=None)
+        parser.add_argument('--mrt-file', type=str, 
+                            help='mrt file, requires absolute path')
         parser.add_argument('--target-config-file', type=str,
                             help='target BGP daemon\'s configuration file')
         parser.add_argument('--local-address-prefix', type=str, default='10.10.0.0/16',

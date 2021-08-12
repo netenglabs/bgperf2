@@ -17,7 +17,6 @@ class Bgpdump2(Container):
 FROM ubuntu:20.04
 WORKDIR /root
 
-
 RUN apt update \
     && apt -y dist-upgrade \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata \
@@ -31,15 +30,17 @@ RUN git clone https://github.com/rtbrick/bgpdump2.git \
     && make \
     && mv src/bgpdump2 /usr/local/sbin/
 
-## cheating and just hard coding MRT data for now
-RUN wget -q http://archive.routeviews.org/bgpdata/2021.08/RIBS/rib.20210801.0000.bz2 \
-   && bzip2 -d rib.20210801.0000.bz2
+RUN touch /root/mrt_file
 
 ENTRYPOINT ["/bin/bash"]
 '''.format(checkout)
         super(Bgpdump2, cls).build_image(force, tag, nocache)
 
 
+## cheating and just hard coding MRT data for now
+#RUN wget -q http://archive.routeviews.org/bgpdata/2021.08/RIBS/rib.20210801.0000.bz2 \
+#   && bzip2 -d rib.20210801.0000.bz2
+#
 
 class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
     CONTAINER_NAME_PREFIX = 'bgperf_bgpdump2_tester_'
@@ -55,7 +56,7 @@ class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
     def get_index_useful_neighbor(self, prefix_count):
         ''' dynamically figure out which of the indexes in the mrt file have enough data'''
         good_indexes = []
-        counts = self.local(f"/usr/local/sbin/bgpdump2 -c {self.get_mrt_file()}").decode('utf-8').split('\n')[1]
+        counts = self.local(f"/usr/local/sbin/bgpdump2 -c /root/mrt_file").decode('utf-8').split('\n')[1]
         counts = counts.split(',') 
         counts.pop(0) # first item is timestamp, we don't care
         for i, c in enumerate(counts):
@@ -67,22 +68,18 @@ class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
         else:
             return 3
 
-    def get_mrt_file(sef):
-        # harcoded for now
-        return 'rib.20210801.0000'
-
 
 
     def get_startup_cmd(self):
-        #breakpoint()
+
         # just get the first neighbor, we can only handle one neighbor per container
         neighbor = next(iter(self.conf['neighbors'].values()))
         prefix_count = neighbor['count']
         startup = '''#!/bin/bash
 ulimit -n 65536
-/usr/local/sbin/bgpdump2 --blaster {} -p {} -a {} {} -T {} & > {}/bgpdump2.log 2>&1
+/usr/local/sbin/bgpdump2 --blaster {} -p {} -a {} /root/mrt_file -T {} & > {}/bgpdump2.log 2>&1
         
 '''.format(self.target_ip, self.get_index_useful_neighbor(prefix_count), 
-            neighbor['as'], self.get_mrt_file(), prefix_count, self.guest_dir)
+            neighbor['as'], prefix_count, self.guest_dir)
         return startup
 #> {}/bgpdump2.log 2>&1 

@@ -86,18 +86,22 @@ class Container(object):
             return [local_addr]
         raise NotImplementedError()
 
-    def run(self, dckr_net_name='', rm=True):
-
-        if rm and ctn_exists(self.name):
-            print('remove container:', self.name)
-            dckr.remove_container(self.name, force=True)
-
+    def get_host_config(self):
         host_config = dckr.create_host_config(
             binds=['{0}:{1}'.format(os.path.abspath(self.host_dir), self.guest_dir)],
             privileged=True,
             network_mode='bridge',
             cap_add=['NET_ADMIN']
         )
+        return host_config
+
+    def run(self, dckr_net_name='', rm=True):
+
+        if rm and ctn_exists(self.name):
+            print('remove container:', self.name)
+            dckr.remove_container(self.name, force=True)
+
+        host_config = self.get_host_config()
 
         ctn = dckr.create_container(image=self.image, entrypoint='bash', detach=True, name=self.name,
                                     stdin_open=True, volumes=[self.guest_dir], host_config=host_config)

@@ -19,27 +19,44 @@ from exabgp import ExaBGP_MRTParse
 import os
 import yaml
 from  settings import dckr
-import shutil
+
+from base import *
 
 
-class MRTTester(object):
+class MRTTester(Container):
 
-    def get_mrt_file(self, conf, name):
-        # conf: tester or neighbor configuration
-        if 'mrt-file' in conf:
-            mrt_file_path = os.path.expanduser(conf['mrt-file'])
+    # def get_mrt_file(self, conf, name):
+    #     # conf: tester or neighbor configuration
+    #     if 'mrt-file' in conf:
+    #         mrt_file_path = os.path.expanduser(conf['mrt-file'])
 
-            guest_mrt_file_path = '{guest_dir}/{filename}'.format(
-                guest_dir=self.guest_dir,
-                filename=name + '.mrt'
-            )
-            host_mrt_file_path = '{host_dir}/{filename}'.format(
-                host_dir=self.host_dir,
-                filename=name + '.mrt'
-            )
-            if not os.path.isfile(host_mrt_file_path):
-                shutil.copyfile(mrt_file_path, host_mrt_file_path)
-            return guest_mrt_file_path
+    #         guest_mrt_file_path = '{guest_dir}/{filename}'.format(
+    #             guest_dir=self.guest_dir,
+    #             filename=name + '.mrt'
+    #         )
+    #         host_mrt_file_path = '{host_dir}/{filename}'.format(
+    #             host_dir=self.host_dir,
+    #             filename=name + '.mrt'
+    #         )
+    #         if not os.path.isfile(host_mrt_file_path):
+    #             shutil.copyfile(mrt_file_path, host_mrt_file_path)
+    #         return guest_mrt_file_path
+
+    def get_mrt_file(self, conf):
+        return conf['mrt-file']
+
+    def get_host_config(self):
+        neighbor = next(iter(self.conf['neighbors'].values()))
+        #create an mrt_file on guest_dir so that it can be mounted
+        host_config = dckr.create_host_config(
+            binds=['{0}:{1}'.format(os.path.abspath(self.host_dir), self.guest_dir),
+                    '{0}:/root/mrt_file'.format(self.get_mrt_file(neighbor))],
+            privileged=True,
+            network_mode='bridge',
+            cap_add=['NET_ADMIN']
+        )
+        return host_config
+
 
 class ExaBGPMrtTester(Tester, ExaBGP_MRTParse, MRTTester):
 
@@ -169,7 +186,7 @@ class GoBGPMRTTester(Tester, GoBGP, MRTTester):
     def get_startup_cmd(self):
         conf = list(self.conf.get('neighbors', {}).values())[0]
 
-        mrtfile = self.get_mrt_file(conf, conf['router-id'])
+        mrtfile = '/root/mrt_file'
         if not mrtfile:
             mrtfile = self.get_mrt_file(self.conf, self.name)
 
@@ -177,7 +194,7 @@ class GoBGPMRTTester(Tester, GoBGP, MRTTester):
 ulimit -n 65536
 gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1 &
 '''.format(conf['local-address'], self.guest_dir, self.config_name, 'info')
-        startup += 'sleep 15\n' # I don't know why, but it appears sending mrt before neighbor is connected doesn't work
+        startup += 'sleep 1\n' # seems to need a wait betwee gobgpd starting and the client pushing the  mrt file
         cmd = ['gobgp', 'mrt']
         if conf.get('only-best', False):
             cmd.append('--only-best')

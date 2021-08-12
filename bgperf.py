@@ -31,6 +31,7 @@ from pyroute2 import IPRoute
 from socket import AF_INET
 from nsenter import Namespace
 from psutil import virtual_memory
+from subprocess import check_output
 import matplotlib.pyplot as plt
 import numpy as np
 from base import *
@@ -150,6 +151,47 @@ def remove_old_containers():
             ctn_name.startswith(Bgpdump2Tester.CONTAINER_NAME_PREFIX):
             print('removing tester container', ctn_name)
             dckr.remove_container(ctn_name, force=True)
+
+
+def controller_idle_percent(queue):
+    '''collect stats on the whole machine that is running the tests'''
+    stop_monitoring = False
+    def stats():
+        output = {}
+        output['who'] = 'controller'
+
+        while True:
+            if stop_monitoring == True:
+                return
+            utilization = check_output(['mpstat', '1' ,'1']).decode('utf-8').split('\n')[3].split('   ')
+            output['idle'] = utilization[10]
+            output['time'] = datetime.datetime.now()
+            queue.put(output)
+            # dont' sleep because mpstat is already taking 1 second to run
+
+    t = Thread(target=stats)
+    t.daemon = True
+    t.start()
+
+def controller_memory_free(queue):
+    '''collect stats on the whole machine that is running the tests'''
+    stop_monitoring = False
+    def stats():
+        output = {}
+        output['who'] = 'controller'
+
+        while True:
+            if stop_monitoring == True:
+                return
+            free = check_output(['free', '-h' ]).decode('utf-8').split('\n')[1].split('       ')
+            output['free'] = free[3]
+            output['time'] = datetime.datetime.now()
+            queue.put(output)
+            time.sleep(1)
+
+    t = Thread(target=stats)
+    t.daemon = True
+    t.start()
 
 
 def bench(args):
@@ -369,6 +411,8 @@ def bench(args):
     q = Queue()
 
     m.stats(q)
+    controller_idle_percent(q)
+    controller_memory_free(q)
     if not is_remote:
         target.stats(q)
         target.neighbor_stats(q)
@@ -391,6 +435,8 @@ def bench(args):
     output_stats['max_mem'] = 0
     output_stats['first_received_time'] = 0
     neighbors_checked = 0
+    percent_idle = 0
+    mem_free = 0
     while True:
         info = q.get()
 
@@ -407,10 +453,15 @@ def bench(args):
                 output_stats['max_cpu'] = cpu if cpu > output_stats['max_cpu'] else output_stats['max_cpu']
                 output_stats['max_mem'] = mem if mem > output_stats['max_mem'] else output_stats['max_mem']
 
-
+        if info['who'] == 'controller':
+            if 'free' in info:
+                mem_free = info['free']
+            elif 'idle' in info:
+                percent_idle = info['idle']
+        
         if info['who'] == m.name:
             now = datetime.datetime.now()
-            elapsed = now - start
+            elapsed = info['time'] - start
             output_stats['elapsed'] = elapsed
             recved = info['afi_safis'][0]['state']['accepted'] if 'accepted' in info['afi_safis'][0]['state'] else 0
             
@@ -418,7 +469,7 @@ def bench(args):
             if elapsed.seconds > 0:
                 pass
                 rm_line()
-            print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, recved: {3}, neighbors: {4}'.format(elapsed.seconds, cpu, mem_human(mem), recved, neighbors_checked))
+            print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, mon recved: {3}, neighbors: {4}, %idle {5}, free mem {6}'.format(elapsed.seconds, cpu, mem_human(mem), recved, neighbors_checked, percent_idle, mem_free))
             f.write('{0}, {1}, {2}, {3}\n'.format(elapsed.seconds, cpu, mem, recved)) if f else None
             f.flush() if f else None
 
@@ -442,6 +493,7 @@ def finish_bench(args, output_stats, bench_start,target, m):
     output_stats['total_time'] = bench_stop - bench_start
     m.stop_monitoring = True
     target.stop_monitoring = True
+    stop_monitoring = True
     target_version = target.exec_version_cmd()
     print_final_stats(args, target_version, output_stats)
     o_s = create_output_stats(args, target_version, output_stats)

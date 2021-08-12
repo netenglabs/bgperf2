@@ -21,6 +21,7 @@ from threading import Thread
 import netaddr
 import sys
 import time
+import datetime
 
 flatten = lambda l: chain.from_iterable(l)
 
@@ -186,7 +187,7 @@ class Container(object):
                 if system_delta > 0.0 and cpu_delta > 0.0:
                     cpu_percentage = (cpu_delta / system_delta) * float(cpu_num) * 100.0
                 mem_usage = stat['memory_stats'].get('usage', 0)
-                queue.put({'who': self.name, 'cpu': cpu_percentage, 'mem': mem_usage})
+                queue.put({'who': self.name, 'cpu': cpu_percentage, 'mem': mem_usage, 'time': datetime.datetime.now()})
 
         t = Thread(target=stats)
         t.daemon = True

@@ -20,6 +20,7 @@ import yaml
 import json
 from threading import Thread
 import time
+import datetime
 
 def rm_line():
     print('\x1b[1A\x1b[2K\x1b[1D\x1b[1A')
@@ -97,6 +98,7 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
                     info['checked'] = True
                 else:
                     info['checked'] = False
+                info['time'] = datetime.datetime.now()
                 queue.put(info)
                 time.sleep(1)
 

@@ -33,7 +33,7 @@ WORKDIR /root
 RUN git clone git://github.com/osrg/gobgp && cd gobgp && go mod download
 RUN cd gobgp && go install ./cmd/gobgpd
 RUN cd gobgp && go install ./cmd/gobgp
-
+RUN rm -rf /root/gobgp && cp /go/bin/gobgp /root/gobgp
 '''.format(checkout)
         super(GoBGP, cls).build_image(force, tag, nocache)
 
@@ -102,7 +102,8 @@ class GoBGPTarget(GoBGP, Target):
         def gen_neighbor_config(n):
             c = {'config': {'neighbor-address': n['local-address'], 'peer-as': n['as']},
                  'transport': {'config': {'local-address': self.conf['local-address']}},
-                 'route-server': {'config': {'route-server-client': True}}}
+                 #'route-server': {'config': {'route-server-client': True}}
+                 }
             if 'filter' in n:
                 a = {}
                 if 'in' in n['filter']:

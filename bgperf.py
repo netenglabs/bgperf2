@@ -164,6 +164,7 @@ def bench(args):
 
         if os.path.exists(config_dir):
             shutil.rmtree(config_dir)
+
     bench_start = time.time()
     if args.file:
         with open(args.file) as f:
@@ -395,8 +396,7 @@ def bench(args):
 
         if not is_remote and info['who'] == target.name:
             if 'neighbors_checked' in info:
-                if all(value == True for value in info['neighbors_checked'].values()):
-                    print("finishing because of neighbors checked")     
+                if all(value == True for value in info['neighbors_checked'].values()):    
                     neighbors_checked = sum(1 if value == True else 0 for value in info['neighbors_checked'].values())
                     cooling = 0
                 else:
@@ -427,7 +427,7 @@ def bench(args):
 
             if cooling == int(args.cooling):                
                 f.close() if f else None
-                return finish_bench(output_stats, bench_start,target, m)   
+                return finish_bench(args, output_stats, bench_start,target, m)   
                 
             if cooling >= 0:
                 cooling += 1
@@ -436,7 +436,7 @@ def bench(args):
                 cooling = 0
 
 
-def finish_bench(output_stats, bench_start,target, m):
+def finish_bench(args, output_stats, bench_start,target, m):
  
     bench_stop = time.time()
     output_stats['total_time'] = bench_stop - bench_start
@@ -533,7 +533,7 @@ def batch(args):
                     a.cooling = t['cooling'] if 'local_cooling' in t else 0
                     for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
                                     'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
-                                    'monitor_router_id', 'target_config_file', 'filter_type',]:
+                                    'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector']:
                         setattr(a, field, t[field]) if field in t else setattr(a, field, None)
 
                     for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
@@ -545,6 +545,7 @@ def batch(args):
                         f.write(stats_header() + '\n')
                         for stat in results:
                             f.write(','.join(map(str, stat)) + '\n')
+
         print()
         print(stats_header())
         for stat in results:

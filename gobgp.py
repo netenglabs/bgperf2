@@ -139,12 +139,12 @@ class GoBGPTarget(GoBGP, Target):
 
     def get_neighbors_received(self):
         neighbors_received = {}
-        neighbor_received_output = self.local("gobgp neighbor -j")
+        neighbor_received_output = self.local("/root/gobgp neighbor -j")
         if neighbor_received_output:
             neighbor_received_output = json.loads(neighbor_received_output.decode('utf-8'))
 
         for neighbor in neighbor_received_output:
-            if 'accepted' in neighbor['afi_safis'][0]['state']:
+            if 'afi_safis' in neighbor and 'accepted' in neighbor['afi_safis'][0]['state']:
                 neighbors_received[neighbor['state']['neighbor_address']] = neighbor['afi_safis'][0]['state']['accepted']
         return neighbors_received
 

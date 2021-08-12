@@ -66,7 +66,7 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
         while True:
             if n > 0:
                  rm_line()
-            print(f"Waiting {n} seconds for neighbor")
+            print(f"Waiting {n} seconds for monitor")
 
 
             neigh = json.loads(self.local('gobgp neighbor {0} -j'.format(neighbor)).decode('utf-8'))

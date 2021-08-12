@@ -164,7 +164,7 @@ def controller_idle_percent(queue):
             if stop_monitoring == True:
                 return
             utilization = check_output(['mpstat', '1' ,'1']).decode('utf-8').split('\n')[3].split('   ')
-            output['idle'] = utilization[10]
+            output['idle'] = float(utilization[10])
             output['time'] = datetime.datetime.now()
             queue.put(output)
             # dont' sleep because mpstat is already taking 1 second to run
@@ -183,8 +183,8 @@ def controller_memory_free(queue):
         while True:
             if stop_monitoring == True:
                 return
-            free = check_output(['free', '-h' ]).decode('utf-8').split('\n')[1].split('       ')
-            output['free'] = free[3]
+            free = check_output(['free', '-m']).decode('utf-8').split('\n')[1].split('       ')
+            output['free'] = float(free[3]) * 1024 * 1024
             output['time'] = datetime.datetime.now()
             queue.put(output)
             time.sleep(1)
@@ -193,12 +193,13 @@ def controller_memory_free(queue):
     t.daemon = True
     t.start()
 
+stop_monitoring = False
 
 def bench(args):
     output_stats = {}
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
     dckr_net_name = args.docker_network_name or args.bench_name + '-br'
-
+    
     remove_target_containers()
 
     if not args.repeat:
@@ -401,7 +402,7 @@ def bench(args):
     
     time.sleep(1)
 
-    output_stats['neighbor_wait_time'] = m.wait_established(conf['target']['local-address'])
+    output_stats['monitor_wait_time'] = m.wait_established(conf['target']['local-address'])
     output_stats['cores'], output_stats['memory'] = get_hardware_info()
 
 
@@ -434,6 +435,8 @@ def bench(args):
     output_stats['max_cpu'] = 0
     output_stats['max_mem'] = 0
     output_stats['first_received_time'] = 0
+    output_stats['min_idle'] = 100
+    output_stats['min_free'] = 1_000_000_000_000_000
     neighbors_checked = 0
     percent_idle = 0
     mem_free = 0
@@ -456,11 +459,12 @@ def bench(args):
         if info['who'] == 'controller':
             if 'free' in info:
                 mem_free = info['free']
+                output_stats['min_free'] = mem_free if mem_free < output_stats['min_free'] else output_stats['min_free']
             elif 'idle' in info:
                 percent_idle = info['idle']
-        
+                output_stats['min_idle'] = percent_idle if percent_idle < output_stats['min_idle'] else output_stats['min_idle']
         if info['who'] == m.name:
-            now = datetime.datetime.now()
+
             elapsed = info['time'] - start
             output_stats['elapsed'] = elapsed
             recved = info['afi_safis'][0]['state']['accepted'] if 'accepted' in info['afi_safis'][0]['state'] else 0
@@ -469,12 +473,12 @@ def bench(args):
             if elapsed.seconds > 0:
                 pass
                 rm_line()
-            print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, mon recved: {3}, neighbors: {4}, %idle {5}, free mem {6}'.format(elapsed.seconds, cpu, mem_human(mem), recved, neighbors_checked, percent_idle, mem_free))
+            print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, mon recved: {3}, neighbors: {4}, %idle {5}, free mem {6}'.format(elapsed.seconds, cpu, mem_human(mem), recved, neighbors_checked, percent_idle, mem_human(mem_free)))
             f.write('{0}, {1}, {2}, {3}\n'.format(elapsed.seconds, cpu, mem, recved)) if f else None
             f.flush() if f else None
 
             if recved > 0 and output_stats['first_received_time'] == 0:
-                output_stats['first_received_time'] = now - start 
+                output_stats['first_received_time'] = elapsed
 
             if cooling == int(args.cooling):                
                 f.close() if f else None
@@ -508,14 +512,14 @@ def print_final_stats(args, target_version, stats):
     
     print(f"{args.target}: {target_version}")
     print(f"Max cpu: {stats['max_cpu']:4.2f}, max mem: {mem_human(stats['max_mem'])}")
+    print(f"Min %idle {stats['min_idle']}, Min mem free {mem_human(stats['min_free'])}")
     print(f"Time since first received prefix: {stats['elapsed'].seconds - stats['first_received_time'].seconds}")
 
     print(f"total time: {stats['total_time']:.2f}s")
     print()
 
 def stats_header():
-    return("name, target, version, peers, prefixes per peer, neighbor (s), elapsed (s), prefix received (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)")
-
+    return("name, target, version, peers, prefixes per peer, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date,cores,Mem (GB)")
 
 
 def create_output_stats(args, target_version, stats):
@@ -527,8 +531,9 @@ def create_output_stats(args, target_version, stats):
     else:
         name = args.target
     out = [name, args.target, target_version, str(args.neighbor_num), str(args.prefix_num)]
-    out.extend([stats['neighbor_wait_time'], e, f , e-f, float(format(stats['total_time'], ".2f"))])
+    out.extend([stats['monitor_wait_time'], e, f , e-f, float(format(stats['total_time'], ".2f"))])
     out.extend([round(stats['max_cpu']), float(format(stats['max_mem']/1024/1024/1024, ".3f"))])
+    out.extend ([round(stats['min_idle']), mem_human(stats['min_free'])])
     out.extend(['-s' if args.single_table else '', d, str(stats['cores']), mem_human(stats['memory'])])
     return out
 

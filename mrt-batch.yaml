@@ -1,0 +1,67 @@
+tests:
+  -
+    name: bgpdump
+    neighbors: [5, 10, 20, 50]
+    prefixes: [800_000]
+    targets:
+
+      -
+        name: frr
+        mrt_injector: bgpdump2
+        mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+      -
+        name: frr_c
+        label: frr 8
+        mrt_injector: bgpdump2
+        mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+      -
+        name: bird
+        mrt_injector: bgpdump2
+        mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+      -
+        name: openbgp
+        mrt_injector: bgpdump2
+        mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+
+      -
+        name: rustybgp
+        mrt_injector: bgpdump2
+        mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+      -
+        name: gobgp
+        mrt_injector: bgpdump2
+        mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+
+  -
+    name: gobgp-mrt2
+    neighbors: [5, 10, 20]
+    prefixes: [800_000]
+    targets:
+      -
+        name: frr
+        mrt_injector: gobgp
+        mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+      -
+        name: frr_c
+        label: frr 8
+        mrt_injector: gobgp
+        mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+      -
+        name: bird
+        mrt_injector: gobgp
+        mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+      -
+        name: openbgp
+        mrt_injector: gobgp
+        mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+
+      -
+        name: rustybgp
+        mrt_injector: gobgp
+        mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+      -
+        name: gobgp
+        mrt_injector: gobgp
+        mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+
+

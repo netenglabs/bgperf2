@@ -212,8 +212,8 @@ class Container(object):
 
         
 
-    def local(self, cmd, stream=False, detach=False):
-        i = dckr.exec_create(container=self.name, cmd=cmd, stderr=False)
+    def local(self, cmd, stream=False, detach=False, stderr=False):
+        i = dckr.exec_create(container=self.name, cmd=cmd, stderr=stderr)
         return dckr.exec_start(i['Id'], stream=stream, detach=detach)
 
     def get_startup_cmd(self):

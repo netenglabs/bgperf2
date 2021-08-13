@@ -242,6 +242,70 @@ def bench(args):
     m = Monitor(config_dir+'/monitor', conf['monitor'])
     m.run(conf, dckr_net_name)
 
+
+    ## I'd prefer to start up the testers and then start up the target  
+    # however, bgpdump2 isn't smart enough to wait and rety connections so
+    # this is the order
+    testers = []
+    if not args.repeat:
+        valid_indexes = None
+        asns = None
+        for idx, tester in enumerate(conf['testers']):
+            if 'name' not in tester:
+                name = 'tester{0}'.format(idx)
+            else:
+                name = tester['name']
+            if 'type' not in tester:
+                tester_type = 'normal'
+            else:
+                tester_type = tester['type']
+            if tester_type == 'normal':
+                tester_class = ExaBGPTester
+            elif tester_type == 'mrt':
+                if 'mrt_injector' not in tester:
+                    mrt_injector = 'gobgp'
+                else:
+                    mrt_injector = tester['mrt_injector']
+                if mrt_injector == 'gobgp':
+                    tester_class = GoBGPMRTTester
+                elif mrt_injector == 'exabgp':
+                    tester_class = ExaBGPMrtTester
+                elif mrt_injector == 'bgpdump2':
+                    tester_class = Bgpdump2Tester
+                else:
+                    print('invalid mrt_injector:', mrt_injector)
+                    sys.exit(1)
+
+            else:
+                print('invalid tester type:', tester_type)
+                sys.exit(1)
+
+
+            t = tester_class(name, config_dir+'/'+name, tester)
+            print('run tester', name, 'type', tester_type)
+            t.run(conf['target'], dckr_net_name)
+            testers.append(t)
+            #time.sleep(5)
+
+            # have to do some extra stuff with bgpdump2
+            #  because it's sending real data, we need to figure out
+            #  wich neighbor has data and what the actual ASN is
+            if tester_type == 'mrt' and mrt_injector == 'bgpdump2' and not valid_indexes:
+                print("finding asns and such from mrt file")
+                valid_indexes = t.get_index_valid(args.prefix_num)
+                asns = t.get_index_asns()
+
+                for test in conf['testers']:
+                    test['bgpdump-index'] = valid_indexes[test['mrt-index'] % len(valid_indexes)]
+                    neighbor = next(iter(test['neighbors'].values()))
+                    neighbor['as'] = asns[test['bgpdump-index']]
+
+                # TODO: this needs to all be moved to it's own object and file
+                #  so this stuff isn't copied around
+                str_conf = gen_mako_macro() + yaml.dump(conf, default_flow_style=False)
+                with open('{0}/scenario.yaml'.format(config_dir), 'w') as f:
+                    f.write(str_conf)
+
     is_remote = True if 'remote' in conf['target'] and conf['target']['remote'] else False
 
     if is_remote:
@@ -357,54 +421,12 @@ def bench(args):
             target = target_class('{0}/{1}'.format(config_dir, args.target), conf['target'])
         target.run(conf, dckr_net_name)
 
-    ## I'd prefer to start up the testers and then start up the target
-    # however, bgpdump2 isn't smart enough to wait and rety connections so
-    # this is the order
-    testers = []
-    if not args.repeat:
-
-        for idx, tester in enumerate(conf['testers']):
-            if 'name' not in tester:
-                name = 'tester{0}'.format(idx)
-            else:
-                name = tester['name']
-            if 'type' not in tester:
-                tester_type = 'normal'
-            else:
-                tester_type = tester['type']
-            if tester_type == 'normal':
-                tester_class = ExaBGPTester
-            elif tester_type == 'mrt':
-                if 'mrt_injector' not in tester:
-                    mrt_injector = 'gobgp'
-                else:
-                    mrt_injector = tester['mrt_injector']
-                if mrt_injector == 'gobgp':
-                    tester_class = GoBGPMRTTester
-                elif mrt_injector == 'exabgp':
-                    tester_class = ExaBGPMrtTester
-                elif mrt_injector == 'bgpdump2':
-                    tester_class = Bgpdump2Tester
-                else:
-                    print('invalid mrt_injector:', mrt_injector)
-                    sys.exit(1)
-
-            else:
-                print('invalid tester type:', tester_type)
-                sys.exit(1)
-
-
-            t = tester_class(name, config_dir+'/'+name, tester)
-            print('run tester', name, 'type', tester_type)
-            t.run(conf['target'], dckr_net_name)
-            testers.append(t)
+    
     
     time.sleep(1)
 
     output_stats['monitor_wait_time'] = m.wait_established(conf['target']['local-address'])
     output_stats['cores'], output_stats['memory'] = get_hardware_info()
-
-
 
     start = datetime.datetime.now()
 
@@ -468,10 +490,9 @@ def bench(args):
             output_stats['elapsed'] = elapsed
             recved = info['afi_safis'][0]['state']['accepted'] if 'accepted' in info['afi_safis'][0]['state'] else 0
             
-
             if elapsed.seconds > 0:
-                pass
                 rm_line()
+
             print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, mon recved: {3}, neighbors: {4}, %idle {5}, free mem {6}'.format(elapsed.seconds, cpu, mem_human(mem), recved, neighbors_checked, percent_idle, mem_human(mem_free)))
             f.write('{0}, {1}, {2}, {3}\n'.format(elapsed.seconds, cpu, mem, recved)) if f else None
             f.flush() if f else None

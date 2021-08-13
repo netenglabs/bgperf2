@@ -11,3 +11,4 @@ pyyaml
 matplotlib
 numpy
 toml
+textfsm

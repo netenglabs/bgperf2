@@ -28,6 +28,7 @@ I haven't tested MRT or remote targets.
 
 * Python 3.7 or later
 * Docker
+* Sysstat
 
 ##  <a name="how_to_install">How to install
 

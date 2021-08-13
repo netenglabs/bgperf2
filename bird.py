@@ -42,6 +42,7 @@ class BIRDTarget(BIRD, Target):
 
     CONTAINER_NAME = 'bgperf_bird_target'
     CONFIG_FILE_NAME = 'bird.conf'
+    DYNAMIC_NEIGHBORS = True
 
     def write_config(self):
         config = '''router id {0};
@@ -129,7 +130,6 @@ return true;
 '''
             return c
 
-
         def gen_filter(name, match):
             c = ['function {0}()'.format(name), '{']
             for typ, name in match:
@@ -156,16 +156,33 @@ return true;
                             f.write(gen_ext_community_filter(n, match))
                         match_info.append((match['type'], n))
                     f.write(gen_filter(k, match_info))
+            if self.DYNAMIC_NEIGHBORS:
+                config = self.get_dynamic_neighbor_config()
+                f.write(config)
+                f.flush()
 
-            for n in sorted(list(flatten(list(t.get('neighbors', {}).values()) for t in self.scenario_global_conf['testers'])) + [self.scenario_global_conf['monitor']], key=lambda n: n['as']):
-                f.write(gen_neighbor_config(n))
-            f.flush()
+            else:
+                for n in sorted(list(flatten(list(t.get('neighbors', {}).values()) for t in self.scenario_global_conf['testers'])) + [self.scenario_global_conf['monitor']], key=lambda n: n['as']):
+                    f.write(gen_neighbor_config(n))
+
+            
+    def get_dynamic_neighbor_config(self):
+        config = '''protocol bgp everything {{
+    debug all;
+    local as {};
+    neighbor range 10.0.0.0/8 external;
+    hold time 30;
+    ipv4 {{import all; export all; }};
+}}
+'''.format(self.conf['as'])
+
+        return config
 
     def get_startup_cmd(self):
         return '\n'.join(
             ['#!/bin/bash',
              'ulimit -n 65536',
-             'bird -c {guest_dir}/{config_file_name} > {guest_dir}/bird.log 2>&1']
+             'bird -c {guest_dir}/{config_file_name} -d > {guest_dir}/bird.log 2>&1']
         ).format(
             guest_dir=self.guest_dir,
             config_file_name=self.CONFIG_FILE_NAME)

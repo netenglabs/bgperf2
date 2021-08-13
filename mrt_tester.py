@@ -198,12 +198,12 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1 &
         cmd = ['gobgp', 'mrt']
         if conf.get('only-best', False):
             cmd.append('--only-best')
-        cmd += ['inject', 'global', mrtfile]
+        cmd += ['inject', 'global', f"--nexthop {conf['local-address']}", "--no-ipv6", mrtfile]
         if 'count' in conf:
             cmd.append(str(conf['count']))
         if 'skip' in conf:
             cmd.append(str(conf['skip']))
-        cmd += ['&']
+        cmd += [f"> {self.guest_dir}/mrt.log 2>&1", '&']
 
         startup += '\n' + ' '.join(cmd)
 

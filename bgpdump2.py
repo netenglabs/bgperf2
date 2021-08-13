@@ -103,9 +103,9 @@ class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
         local_as = self.get_local_as(index) or neighbor['as']
         startup = '''#!/bin/bash
 ulimit -n 65536
-/usr/local/sbin/bgpdump2 --blaster {} -p {} -a {} /root/mrt_file -T {}  > {}/bgpdump2.log 2>&1 &
+/usr/local/sbin/bgpdump2 --blaster {} -p {} -a {} /root/mrt_file -T {}  -S {}> {}/bgpdump2.log 2>&1 &
         
 '''.format(self.target_ip, index, 
-            local_as, prefix_count, self.guest_dir)
+            local_as, prefix_count, neighbor['local-address'], self.guest_dir)
         return startup
 #> {}/bgpdump2.log 2>&1 

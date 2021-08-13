@@ -1,5 +1,6 @@
 
 from base import *
+import json
 
 class OpenBGP(Container):
     CONTAINER_NAME = None
@@ -110,3 +111,11 @@ allow to any
         version = self.get_version_cmd()
         i= dckr.exec_create(container=self.name, cmd=version, stderr=True)
         return dckr.exec_start(i['Id'], stream=False, detach=False).decode('utf-8')
+
+    def get_neighbors_received(self):
+        neighbors_received = {}
+        neighbor_received_output = json.loads(self.local("/usr/local/sbin/bgpctl -j show neighbor").decode('utf-8'))
+        for neigh in neighbor_received_output['neighbors']:
+            neighbors_received[neigh['remote_addr']] = neigh['stats']['prefixes']['received']
+    
+        return neighbors_received

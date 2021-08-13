@@ -346,9 +346,10 @@ def bench(args):
             target_class = FRRoutingCompiledTarget
         elif args.target == 'rustybgp':
             target_class = RustyBGPTarget
-        elif args.target == 'rustybgp':
+        elif args.target == 'openbgp':
             target_class = OpenBGPTarget
-        
+        else:
+            print(f"incorrect target {args.target}")
         print('run', args.target)
         if args.image:
             target = target_class('{0}/{1}'.format(config_dir, args.target), conf['target'], image=args.image)

@@ -14,6 +14,7 @@
 # limitations under the License.
 
 from base import *
+import textfsm
 
 class BIRD(Container):
 
@@ -129,7 +130,6 @@ return true;
             return c
 
 
-
         def gen_filter(name, match):
             c = ['function {0}()'.format(name), '{']
             for typ, name in match:
@@ -178,3 +178,19 @@ return true;
         i = dckr.exec_create(container=self.name, cmd=version, stderr=True)
         ret =dckr.exec_start(i['Id'], stream=False, detach=False).decode('utf-8')
         return ret.split(' ')[2].strip('\n')
+
+    def get_neighbors_received(self):
+        neighbors_received = {}
+        neighbor_received_output = self.local("birdc 'show protocols all'").decode('utf-8')
+        
+        with open('bird.tfsm') as template:
+            fsm = textfsm.TextFSM(template)
+            result = fsm.ParseText(neighbor_received_output)
+        
+        for r in result:
+            if r[0] == '' :
+                continue
+            else:
+                neighbors_received[r[0]] = int(r[1]) if r[1] != '' else 0
+
+        return neighbors_received

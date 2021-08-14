@@ -51,6 +51,7 @@ from queue import Queue
 from mako.template import Template
 from packaging import version
 from docker.types import IPAMConfig, IPAMPool
+import re
 
 def gen_mako_macro():
     return '''<%
@@ -65,7 +66,8 @@ def gen_mako_macro():
 '''
 
 def rm_line():
-    print('\x1b[1A\x1b[2K\x1b[1D\x1b[1A')
+    #print('\x1b[1A\x1b[2K\x1b[1D\x1b[1A')
+    pass
 
 
 def gc_thresh3():
@@ -163,8 +165,9 @@ def controller_idle_percent(queue):
         while True:
             if stop_monitoring == True:
                 return
-            utilization = check_output(['mpstat', '1' ,'1']).decode('utf-8').split('\n')[3].split('   ')
-            output['idle'] = float(utilization[10])
+            utilization = check_output(['mpstat', '1' ,'1']).decode('utf-8').split('\n')[3]
+            g = re.match(r'.*all\s+.*\d+\s+(\d+\.\d+)', utilization).groups()
+            output['idle'] = float(g[0])
             output['time'] = datetime.datetime.now()
             queue.put(output)
             # dont' sleep because mpstat is already taking 1 second to run
@@ -183,8 +186,11 @@ def controller_memory_free(queue):
         while True:
             if stop_monitoring == True:
                 return
-            free = check_output(['free', '-m']).decode('utf-8').split('\n')[1].split('       ')
-            output['free'] = float(free[3]) * 1024 * 1024
+            free = check_output(['free', '-m']).decode('utf-8').split('\n')[1]
+            g = re.match(r'.*\d+\s+(\d+)', free).groups()
+            print(free)
+            print(g)
+            output['free'] = float(g[0]) * 1024 * 1024
             output['time'] = datetime.datetime.now()
             queue.put(output)
             time.sleep(1)

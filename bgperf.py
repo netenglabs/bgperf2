@@ -289,7 +289,7 @@ def bench(args):
             print('run tester', name, 'type', tester_type)
             t.run(conf['target'], dckr_net_name)
             testers.append(t)
-            #time.sleep(5)
+
 
             # have to do some extra stuff with bgpdump2
             #  because it's sending real data, we need to figure out
@@ -453,12 +453,12 @@ def bench(args):
             rm_line()
         print(f"launched {i+1} testers")
         if args.prefix_num >= 100_000:
-            time.sleep(5)
+            time.sleep(1)
 
     f = open(args.output, 'w') if args.output else None
     cpu = 0
     mem = 0
-    cooling = -1
+
     output_stats['max_cpu'] = 0
     output_stats['max_mem'] = 0
     output_stats['first_received_time'] = 0
@@ -467,6 +467,9 @@ def bench(args):
     neighbors_checked = 0
     percent_idle = 0
     mem_free = 0
+
+    recved_checkpoint = False
+    neighbors_checkpoint = False
     while True:
         info = q.get()
 
@@ -474,7 +477,7 @@ def bench(args):
             if 'neighbors_checked' in info:
                 if all(value == True for value in info['neighbors_checked'].values()):    
                     neighbors_checked = sum(1 if value == True else 0 for value in info['neighbors_checked'].values())
-                    cooling = 0
+                    neighbors_checkpoint = True
                 else:
                     neighbors_checked = sum(1 if value == True else 0 for value in info['neighbors_checked'].values())
             else:
@@ -506,15 +509,13 @@ def bench(args):
             if recved > 0 and output_stats['first_received_time'] == 0:
                 output_stats['first_received_time'] = elapsed
 
-            if cooling == int(args.cooling):                
+            if recved_checkpoint and neighbors_checkpoint:
+                output_stats['recved']= recved          
                 f.close() if f else None
                 return finish_bench(args, output_stats, bench_start,target, m)   
-                
-            if cooling >= 0:
-                cooling += 1
 
-            if info['checked'] or cooling == 0:
-                cooling = 0
+            if info['checked']:
+                recved_checkpoint = True
 
 
 def finish_bench(args, output_stats, bench_start,target, m):
@@ -530,7 +531,8 @@ def finish_bench(args, output_stats, bench_start,target, m):
     print(stats_header())
     print(','.join(map(str, o_s)))
     print()
-    # remove_old_containers()
+    # it would be better to clean things up, but often I want to to investigate where things ended up
+    # remove_old_containers() 
     # remove_target_containers()
     return o_s
 
@@ -545,7 +547,7 @@ def print_final_stats(args, target_version, stats):
     print()
 
 def stats_header():
-    return("name, target, version, peers, prefixes per peer, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date,cores,Mem (GB)")
+    return("name, target, version, peers, prefixes per peer, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date,cores,Mem (GB)")
 
 
 def create_output_stats(args, target_version, stats):
@@ -557,6 +559,7 @@ def create_output_stats(args, target_version, stats):
     else:
         name = args.target
     out = [name, args.target, target_version, str(args.neighbor_num), str(args.prefix_num)]
+    out.extend([stats['recved']])
     out.extend([stats['monitor_wait_time'], e, f , e-f, float(format(stats['total_time'], ".2f"))])
     out.extend([round(stats['max_cpu']), float(format(stats['max_mem']/1024/1024/1024, ".3f"))])
     out.extend ([round(stats['min_idle']), float(format(stats['min_free']/1024/1024/1024, ".3f"))])
@@ -613,7 +616,6 @@ def batch(args):
                     a.neighbor_num = n
                     # read any config attribute that was specified in the yaml batch file
                     a.local_address_prefix = t['local_address_prefix'] if 'local_address_prefix' in t else '10.10.0.0/16'
-                    a.cooling = t['cooling'] if 'local_cooling' in t else 0
                     for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
                                     'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
                                     'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file']:
@@ -638,12 +640,12 @@ def batch(args):
         create_batch_graphs(results, test['name'])
 
 def create_batch_graphs(results, name):
-    create_graph(results, test_name='total time', stat_index=9, test_file=f"bgperf_{name}_total_time.png")
-    create_graph(results, test_name='elapsed', stat_index=6, test_file=f"bgperf_{name}_elapsed.png")
-    create_graph(results, test_name='neighbor', stat_index=5, test_file=f"bgperf_{name}_neighbor.png")
-    create_graph(results, test_name='route reception', stat_index=8, test_file=f"bgperf_{name}_route_reception.png")
-    create_graph(results, test_name='max cpu', stat_index=10, test_file=f"bgperf_{name}_max_cpu.png", ylabel="%")
-    create_graph(results, test_name='max mem', stat_index=11, test_file=f"bgperf_{name}_max_mem.png", ylabel="GB")
+    create_graph(results, test_name='total time', stat_index=10, test_file=f"bgperf_{name}_total_time.png")
+    create_graph(results, test_name='elapsed', stat_index=7, test_file=f"bgperf_{name}_elapsed.png")
+    create_graph(results, test_name='neighbor', stat_index=6, test_file=f"bgperf_{name}_neighbor.png")
+    create_graph(results, test_name='route reception', stat_index=9, test_file=f"bgperf_{name}_route_reception.png")
+    create_graph(results, test_name='max cpu', stat_index=11, test_file=f"bgperf_{name}_max_cpu.png", ylabel="%")
+    create_graph(results, test_name='max mem', stat_index=12, test_file=f"bgperf_{name}_max_mem.png", ylabel="GB")
 
 def mem_human(v):
     if v > 1024 * 1024 * 1024:
@@ -712,6 +714,9 @@ def gen_conf(args):
         'local-address': str(monitor_local_address),
         'check-points': [prefix * neighbor_num],
     }
+
+    if args.mrt_injector:
+        conf['monitor']['check-points'] = [prefix]
 
     it = netaddr.iter_iprange('90.0.0.0', '100.0.0.0')
 
@@ -882,7 +887,6 @@ def create_args_parser(main=True):
                               'remote targets.')
     parser_bench.add_argument('-r', '--repeat', action='store_true', help='use existing tester/monitor container')
     parser_bench.add_argument('-f', '--file', metavar='CONFIG_FILE')
-    parser_bench.add_argument('-g', '--cooling', default=0, type=int)
     parser_bench.add_argument('-o', '--output', metavar='STAT_FILE')
     add_gen_conf_args(parser_bench)
     parser_bench.set_defaults(func=bench)

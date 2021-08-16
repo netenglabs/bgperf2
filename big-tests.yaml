@@ -1,11 +1,12 @@
 tests:
   -
     name: 1000p
-    # my machine with 64 GB RAM cannot do 1000 clients with 100 routes each
-    #  the exabgp testers take too much memory
-    neighbors: [500, 750, 1000, 1250, 1500, 1750]
+    # with 384 GB RAM, can't do more than 1000n at 1000p
+    neighbors: [1, 500, 750, 1000]
     prefixes: [1000]
     targets:
+      -
+        name: frr
       -
         name: bird
         label: bird -s

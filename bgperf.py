@@ -188,8 +188,6 @@ def controller_memory_free(queue):
                 return
             free = check_output(['free', '-m']).decode('utf-8').split('\n')[1]
             g = re.match(r'.*\d+\s+(\d+)', free).groups()
-            print(free)
-            print(g)
             output['free'] = float(g[0]) * 1024 * 1024
             output['time'] = datetime.datetime.now()
             queue.put(output)
@@ -454,6 +452,8 @@ def bench(args):
         if i > 0:
             rm_line()
         print(f"launched {i+1} testers")
+        if args.prefix_num >= 100_000:
+            time.sleep(5)
 
     f = open(args.output, 'w') if args.output else None
     cpu = 0

@@ -719,7 +719,7 @@ def gen_conf(args):
         conf['monitor']['check-points'] = [prefix]
 
     if args.mrt_injector == 'gobgp': #gobgp doesn't deliver everything with mrt
-        conf['monitor']['check-points'] = conf['monitor']['check-points'] * 0.95
+        conf['monitor']['check-points'][0] = conf['monitor']['check-points'][0] * 0.95
 
     it = netaddr.iter_iprange('90.0.0.0', '100.0.0.0')
 

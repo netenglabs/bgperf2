@@ -783,6 +783,7 @@ def gen_conf(args):
             'local-address': router_id,
             'paths': '${{gen_paths({0})}}'.format(prefix),
             'count': prefix,
+            'check-points': prefix,
             'filter': {
                 args.filter_type: assignment,
             },

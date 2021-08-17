@@ -2,8 +2,9 @@
 sudo apt update
 sudo apt upgrade --yes
 sudo apt install docker.io --yes
-sudo apt install python3-pip
-sudo apt install sysstat
+sudo apt install python3-pip --yes
+sudo apt install sysstat --yes
+sudo apt install emacs-nox --yes
 sudo usermod -aG docker ubuntu
 git clone https://github.com/jopietsch/bgperf.git
 cd bgperf

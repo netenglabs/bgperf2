@@ -168,7 +168,6 @@ return true;
             
     def get_dynamic_neighbor_config(self):
         config = '''protocol bgp everything {{
-    debug all;
     local as {};
     neighbor range 10.0.0.0/8 external;
     hold time 30;

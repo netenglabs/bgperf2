@@ -719,7 +719,7 @@ def gen_conf(args):
         conf['monitor']['check-points'] = [prefix]
 
     if args.mrt_injector == 'gobgp': #gobgp doesn't send everything with mrt
-        conf['monitor']['check-points'][0] = int(conf['monitor']['check-points'][0] * 0.96)
+        conf['monitor']['check-points'][0] = int(conf['monitor']['check-points'][0] * 0.93)
     elif args.target == 'bird': # bird seems to reject severalhandfuls of routes
         conf['monitor']['check-points'][0] = int(conf['monitor']['check-points'][0] * 0.99)
 

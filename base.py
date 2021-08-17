@@ -247,7 +247,7 @@ class Container(object):
         neighbors_checked = {}
         for tester in self.scenario_global_conf['testers']:
             for n in tester['neighbors'].keys():
-                tester_count[n] = tester['neighbors'][n]['count']
+                tester_count[n] = tester['neighbors'][n]['check-points']
                 neighbors_checked[n] = False
         return tester_count, neighbors_checked
 
@@ -260,7 +260,7 @@ class Container(object):
         for n in neighbors_received.keys():
 
             #this will include the monitor, we don't want to check that
-            if n in tester_count and neighbors_received[n] >= tester_count[n] *0.93: #gobgp doesn't deliver everything with mrt
+            if n in tester_count and neighbors_received[n] >= tester_count[n]: 
                 neighbors_checked[n] = True
 
         return neighbors_checked

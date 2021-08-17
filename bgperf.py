@@ -718,8 +718,8 @@ def gen_conf(args):
     if args.mrt_injector:
         conf['monitor']['check-points'] = [prefix]
 
-    if args.mrt_injector == 'gobgp': #gobgp doesn't deliver everything with mrt
-        conf['monitor']['check-points'][0] = conf['monitor']['check-points'][0] * 0.95
+    if args.mrt_injector == 'gobgp': #gobgp doesn't send everything with mrt
+        conf['monitor']['check-points'][0] = int(conf['monitor']['check-points'][0] * 0.93)
 
     it = netaddr.iter_iprange('90.0.0.0', '100.0.0.0')
 
@@ -816,7 +816,7 @@ def gen_conf(args):
                         'mrt-file': mrt_file,
                         'only-best': True,
                         'count': prefix,
-
+                        'check-points': int(conf['monitor']['check-points'][0])
 
                     }
                 }

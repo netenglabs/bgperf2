@@ -720,6 +720,8 @@ def gen_conf(args):
 
     if args.mrt_injector == 'gobgp': #gobgp doesn't send everything with mrt
         conf['monitor']['check-points'][0] = int(conf['monitor']['check-points'][0] * 0.96)
+    elif args.target == 'bird': # bird seems to reject severalhandfuls of routes
+        conf['monitor']['check-points'][0] = int(conf['monitor']['check-points'][0] * 0.99)
 
     it = netaddr.iter_iprange('90.0.0.0', '100.0.0.0')
 

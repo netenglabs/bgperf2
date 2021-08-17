@@ -170,7 +170,7 @@ return true;
         config = '''protocol bgp everything {{
     local as {};
     neighbor range 10.0.0.0/8 external;
-    hold time 30;
+    hold time 90;
     ipv4 {{import all; export all; }};
 }}
 '''.format(self.conf['as'])

@@ -154,16 +154,19 @@ class Container(object):
 
             # get the interface used by the first IP address already added by Docker
             dev = None
+            pxlen = None
             res = self.local('ip addr').decode("utf-8")
 
             for line in res.split('\n'):
                 if ipv4_addresses[0] in line:
                     dev = line.split(' ')[-1].strip()
+                    pxlen = line.split('/')[1].split(' ')[0].strip()
             if not dev:
                 dev = "eth0"
+                pxlen = 8
 
             for ip in ipv4_addresses[1:]:
-                self.local('ip addr add {} dev {}'.format(ip, dev))
+                self.local(f'ip addr add {ip}/{pxlen} dev {dev}')
 
         return ctn
 

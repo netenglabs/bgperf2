@@ -517,7 +517,7 @@ def bench(args):
             f.write('{0}, {1}, {2}, {3}\n'.format(elapsed.seconds, cpu, mem, recved)) if f else None
             f.flush() if f else None
 
-            if recved > 0 and output_stats['first_received_time'] == 0:
+            if recved > 0 and output_stats['first_received_time'] == start - start:
                 output_stats['first_received_time'] = elapsed
 
             if recved_checkpoint and neighbors_checkpoint:
@@ -531,7 +531,7 @@ def bench(args):
         if last_recved_count == 5: # Too many failed in a row
             output_stats['recved']= recved          
             f.close() if f else None
-            output_stats['fail_msg'] = f"FAILED: stuck received count {recved}, neighbors_checked {neighbors_checked}"
+            output_stats['fail_msg'] = f"FAILED: stuck received count {recved} neighbors_checked {neighbors_checked}"
             o_s = finish_bench(args, output_stats, bench_start,target, m, fail=True)  
             print("FAILED")            
             return o_s
@@ -586,7 +586,7 @@ def create_output_stats(args, target_version, stats, fail=False):
     if fail:
         out.extend(['FAILED'])
     else:
-        out.exnted([''])
+        out.extend([''])
     if 'fail_msg' in stats:
         out.extend([stats['fail_msg']])
     return out

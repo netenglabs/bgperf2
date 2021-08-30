@@ -84,17 +84,19 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
         self.stop_monitoring = False
         def stats():
             cps = self.config['monitor']['check-points'] if 'check-points' in self.config['monitor'] else []
-
             while True:
                 if self.stop_monitoring:
                     return
-
-                info = json.loads(self.local('gobgp neighbor -j').decode('utf-8'))[0]
+                try:
+                    info = json.loads(self.local('gobgp neighbor -j').decode('utf-8'))[0]
+                except Exception as e:
+                    print(f"Monitoring reading exception {e}")
+                    continue
 
                 info['who'] = self.name
                 state = info['afi_safis'][0]['state']
                 if 'accepted'in state and len(cps) > 0 and int(cps[0]) <= int(state['accepted']):
-                    cps.pop(0)
+                    #cps.pop(0)
                     info['checked'] = True
                 else:
                     info['checked'] = False

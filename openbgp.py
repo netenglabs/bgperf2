@@ -20,8 +20,6 @@ FROM pierky/openbgpd:7.1p0
 
 
 class OpenBGPTarget(OpenBGP, Target):
-    # OpenBGP has the same config as GoBGP
-    #  except some things are different
     
     CONTAINER_NAME = 'bgperf_openbgp_target'
     CONFIG_FILE_NAME = 'bgpd.conf'

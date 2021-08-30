@@ -218,6 +218,7 @@ def bench(args):
             conf = yaml.safe_load(Template(f.read()).render())
     else:
         conf = gen_conf(args)
+
         if not os.path.exists(config_dir):
             os.makedirs(config_dir)
         with open('{0}/scenario.yaml'.format(config_dir), 'w') as f:
@@ -461,15 +462,19 @@ def bench(args):
 
     output_stats['max_cpu'] = 0
     output_stats['max_mem'] = 0
-    output_stats['first_received_time'] = 0
+    output_stats['first_received_time'] = start - start
     output_stats['min_idle'] = 100
     output_stats['min_free'] = 1_000_000_000_000_000
+
+    output_stats['required'] = conf['monitor']['check-points'][0]
     neighbors_checked = 0
     percent_idle = 0
     mem_free = 0
 
     recved_checkpoint = False
     neighbors_checkpoint = False
+    last_recved = 0
+    last_recved_count = 0
     while True:
         info = q.get()
 
@@ -499,6 +504,12 @@ def bench(args):
             output_stats['elapsed'] = elapsed
             recved = info['afi_safis'][0]['state']['accepted'] if 'accepted' in info['afi_safis'][0]['state'] else 0
             
+            if recved > 0 and recved == last_recved:
+                last_recved_count +=1
+            else:
+                last_recved = recved
+                last_recved_count = 0
+
             if elapsed.seconds > 0:
                 rm_line()
 
@@ -516,9 +527,17 @@ def bench(args):
 
             if info['checked']:
                 recved_checkpoint = True
+        
+        if last_recved_count == 5: # Too many failed in a row
+            output_stats['recved']= recved          
+            f.close() if f else None
+            output_stats['fail_msg'] = f"FAILED: stuck received count {recved}, neighbors_checked {neighbors_checked}"
+            o_s = finish_bench(args, output_stats, bench_start,target, m, fail=True)  
+            print("FAILED")            
+            return o_s
 
 
-def finish_bench(args, output_stats, bench_start,target, m):
+def finish_bench(args, output_stats, bench_start,target, m, fail=False):
  
     bench_stop = time.time()
     output_stats['total_time'] = bench_stop - bench_start
@@ -527,7 +546,7 @@ def finish_bench(args, output_stats, bench_start,target, m):
     stop_monitoring = True
     target_version = target.exec_version_cmd()
     print_final_stats(args, target_version, output_stats)
-    o_s = create_output_stats(args, target_version, output_stats)
+    o_s = create_output_stats(args, target_version, output_stats, fail)
     print(stats_header())
     print(','.join(map(str, o_s)))
     print()
@@ -547,10 +566,10 @@ def print_final_stats(args, target_version, stats):
     print()
 
 def stats_header():
-    return("name, target, version, peers, prefixes per peer, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date,cores,Mem (GB)")
+    return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date,cores,Mem (GB), failed, MSG")
 
 
-def create_output_stats(args, target_version, stats):
+def create_output_stats(args, target_version, stats, fail=False):
     e = stats['elapsed'].seconds
     f = stats['first_received_time'].seconds 
     d = datetime.date.today().strftime("%Y-%m-%d")
@@ -559,11 +578,17 @@ def create_output_stats(args, target_version, stats):
     else:
         name = args.target
     out = [name, args.target, target_version, str(args.neighbor_num), str(args.prefix_num)]
-    out.extend([stats['recved']])
+    out.extend([stats['required'], stats['recved']])
     out.extend([stats['monitor_wait_time'], e, f , e-f, float(format(stats['total_time'], ".2f"))])
     out.extend([round(stats['max_cpu']), float(format(stats['max_mem']/1024/1024/1024, ".3f"))])
     out.extend ([round(stats['min_idle']), float(format(stats['min_free']/1024/1024/1024, ".3f"))])
     out.extend(['-s' if args.single_table else '', d, str(stats['cores']), mem_human(stats['memory'])])
+    if fail:
+        out.extend(['FAILED'])
+    else:
+        out.exnted([''])
+    if 'fail_msg' in stats:
+        out.extend([stats['fail_msg']])
     return out
 
 def create_graph(stats, test_name='total time', stat_index=8, test_file='total_time.png', ylabel='seconds'):
@@ -572,7 +597,12 @@ def create_graph(stats, test_name='total time', stat_index=8, test_file='total_t
 
     for stat in stats:
         labels[stat[0]] = True
-        data[f"{stat[3]}n_{stat[4]}p"].append(float(stat[stat_index]))
+
+        if len(stat) > 21 and stat[20] == 'FAILED':# this means that it failed for some reason
+            data[f"{stat[3]}n_{stat[4]}p"].append(0)
+        else:
+            data[f"{stat[3]}n_{stat[4]}p"].append(float(stat[stat_index]))
+
 
     x = np.arange(len(labels))
   
@@ -640,12 +670,12 @@ def batch(args):
         create_batch_graphs(results, test['name'])
 
 def create_batch_graphs(results, name):
-    create_graph(results, test_name='total time', stat_index=10, test_file=f"bgperf_{name}_total_time.png")
-    create_graph(results, test_name='elapsed', stat_index=7, test_file=f"bgperf_{name}_elapsed.png")
-    create_graph(results, test_name='neighbor', stat_index=6, test_file=f"bgperf_{name}_neighbor.png")
-    create_graph(results, test_name='route reception', stat_index=9, test_file=f"bgperf_{name}_route_reception.png")
-    create_graph(results, test_name='max cpu', stat_index=11, test_file=f"bgperf_{name}_max_cpu.png", ylabel="%")
-    create_graph(results, test_name='max mem', stat_index=12, test_file=f"bgperf_{name}_max_mem.png", ylabel="GB")
+    create_graph(results, test_name='total time', stat_index=11, test_file=f"bgperf_{name}_total_time.png")
+    create_graph(results, test_name='elapsed', stat_index=8, test_file=f"bgperf_{name}_elapsed.png")
+    create_graph(results, test_name='neighbor', stat_index=9, test_file=f"bgperf_{name}_neighbor.png")
+    create_graph(results, test_name='route reception', stat_index=10, test_file=f"bgperf_{name}_route_reception.png")
+    create_graph(results, test_name='max cpu', stat_index=12, test_file=f"bgperf_{name}_max_cpu.png", ylabel="%")
+    create_graph(results, test_name='max mem', stat_index=13, test_file=f"bgperf_{name}_max_mem.png", ylabel="GB")
 
 def mem_human(v):
     if v > 1024 * 1024 * 1024:

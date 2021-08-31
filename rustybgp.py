@@ -20,18 +20,15 @@ FROM rust:1.54-bullseye AS rust_builder
 RUN rustup component add rustfmt
 RUN git clone https://github.com/osrg/rustybgp.git
 RUN cd rustybgp && cargo build --release && cp target/release/rustybgpd /root
-
-
-FROM golang:1.16.6 AS go_builder
-WORKDIR /root
-RUN git clone git://github.com/osrg/gobgp && cd gobgp && go mod download
-RUN cd gobgp && go install ./cmd/gobgp
+RUN wget https://github.com/osrg/gobgp/releases/download/v2.30.0/gobgp_2.30.0_linux_amd64.tar.gz
+RUN tar xzf gobgp_2.30.0_linux_amd64.tar.gz
+RUN cp gobgp /root
 
 
 FROM debian:bullseye
 WORKDIR /root 
 COPY --from=rust_builder /root/rustybgpd ./
-COPY --from=go_builder /go/bin/gobgp ./
+COPY --from=rust_builder /root/gobgp ./
 
 '''.format(checkout)
         super(RustyBGP, cls).build_image(force, tag, nocache)

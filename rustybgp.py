@@ -16,12 +16,10 @@ class RustyBGP(Container):
 
         cls.dockerfile = '''
 
-FROM ekidd/rust-musl-builder AS rust_builder
-
-
-RUN pwd && git clone https://github.com/osrg/rustybgp.git
-RUN sudo chown rust /root
-RUN cd rustybgp && cargo build --release && cp /home/rust/src/rustybgp/target/*/release/rustybgpd /root
+FROM rust:1.54-bullseye AS rust_builder
+RUN rustup component add rustfmt
+RUN git clone https://github.com/osrg/rustybgp.git
+RUN cd rustybgp && cargo build --release && cp target/release/rustybgpd /root
 
 
 FROM golang:1.16.6 AS go_builder
@@ -30,7 +28,7 @@ RUN git clone git://github.com/osrg/gobgp && cd gobgp && go mod download
 RUN cd gobgp && go install ./cmd/gobgp
 
 
-FROM ubuntu:20.04
+FROM debian:bullseye
 WORKDIR /root 
 COPY --from=rust_builder /root/rustybgpd ./
 COPY --from=go_builder /go/bin/gobgp ./

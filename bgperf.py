@@ -42,7 +42,7 @@ from frr import FRRouting, FRRoutingTarget
 from frr_compiled import FRRoutingCompiled, FRRoutingCompiledTarget
 from rustybgp import RustyBGP, RustyBGPTarget
 from openbgp import OpenBGP, OpenBGPTarget
-from tester import ExaBGPTester
+from tester import ExaBGPTester, BIRDTester
 from mrt_tester import GoBGPMRTTester, ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
 from monitor import Monitor
@@ -149,8 +149,9 @@ def remove_old_containers():
     for ctn_name in get_ctn_names():
         if ctn_name.startswith(ExaBGPTester.CONTAINER_NAME_PREFIX) or \
             ctn_name.startswith(ExaBGPMrtTester.CONTAINER_NAME_PREFIX) or \
-            ctn_name.startswith(GoBGPMRTTester.CONTAINER_NAME_PREFIX) or\
-            ctn_name.startswith(Bgpdump2Tester.CONTAINER_NAME_PREFIX):
+            ctn_name.startswith(GoBGPMRTTester.CONTAINER_NAME_PREFIX) or \
+            ctn_name.startswith(Bgpdump2Tester.CONTAINER_NAME_PREFIX) or \
+            ctn_name.startswith(BIRDTester.CONTAINER_NAME_PREFIX):
             print('removing tester container', ctn_name)
             dckr.remove_container(ctn_name, force=True)
 
@@ -266,6 +267,8 @@ def bench(args):
                 tester_type = tester['type']
             if tester_type == 'normal':
                 tester_class = ExaBGPTester
+            elif tester_type == 'bird':
+                tester_class = BIRDTester
             elif tester_type == 'mrt':
                 if 'mrt_injector' not in tester:
                     mrt_injector = 'gobgp'
@@ -824,7 +827,7 @@ def gen_conf(args):
     if not mrt_injector:
         conf['testers'] = [{
             'name': 'tester',
-            'type': 'normal',
+            'type': 'bird',
             'neighbors': neighbors,
         }]
     else:

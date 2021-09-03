@@ -70,6 +70,9 @@ export all;
 '''
 
         def gen_neighbor_config(n):
+            filter = 'all'
+            if 'filter-test' in self.conf:
+                filter = f"filter {self.conf['filter-test']}"
             return ('''ipv4 table table_{0};
 protocol pipe pipe_{0} {{
     table master4;
@@ -79,11 +82,11 @@ protocol pipe pipe_{0} {{
     local as {1};
     neighbor {2} as {0};
 
-    ipv4 {{ import all; export all; }};
+    ipv4 {{ import {}; export all; }};
     rs client;
 }}
-'''.format(n['as'], self.conf['as'], n['local-address'], 'secondary' if self.conf['single-table'] else '')
-            return n1 + n2
+'''.format(n['as'], self.conf['as'], n['local-address'], 'secondary' if self.conf['single-table'] else '', filter)
+
 
         def gen_prefix_filter(name, match):
             return '''function {0}()
@@ -140,6 +143,8 @@ return true;
 
         with open('{0}/{1}'.format(self.host_dir, self.CONFIG_FILE_NAME), 'w') as f:
             f.write(config)
+            if 'filter-test' in self.conf:
+                f.write(self.get_filter_test_config())
 
             if 'policy' in self.scenario_global_conf:
                 for k, v in self.scenario_global_conf['policy'].items():
@@ -167,15 +172,25 @@ return true;
 
             
     def get_dynamic_neighbor_config(self):
+        filter = 'all'
+        if 'filter-test' in self.conf:
+            filter = f"filter {self.conf['filter-test']}"
         config = '''protocol bgp everything {{
     local as {};
     neighbor range 10.0.0.0/8 external;
     hold time 90;
-    ipv4 {{import all; export all; }};
+    ipv4 {{import {}; export all; }};
 }}
-'''.format(self.conf['as'])
+'''.format(self.conf['as'], filter)
 
         return config
+
+
+    def get_filter_test_config(self): 
+        file = open("filters/bird.conf", mode='r')
+        filters = file.read()
+        file.close
+        return filters
 
     def get_startup_cmd(self):
         return '\n'.join(

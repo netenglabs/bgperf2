@@ -110,9 +110,9 @@ def prepare(args):
     FRRouting.build_image(args.force,  nocache=args.no_cache)
     RustyBGP.build_image(args.force, nocache=args.no_cache)
     OpenBGP.build_image(args.force, nocache=args.no_cache)
-    #FRRoutingCompiled.build_image(args.force, nocache=args.no_cache)
-    # don't want to do this automatically. This one is special so have to explicitly
-    # update it
+    FRRoutingCompiled.build_image(args.force, nocache=args.no_cache)
+    Bgpdump2.build_image(args.force, nocache=args.no_cache)
+
 
 
 def update(args):
@@ -478,6 +478,7 @@ def bench(args):
     neighbors_checkpoint = False
     last_recved = 0
     last_recved_count = 0
+    last_neighbors_checked = 0
     while True:
         info = q.get()
 
@@ -511,6 +512,10 @@ def bench(args):
                 last_recved_count +=1
             else:
                 last_recved = recved
+                last_recved_count = 0
+
+            if neighbors_checked > last_neighbors_checked:
+                last_neighbors_checked = last_neighbors_checked
                 last_recved_count = 0
 
             if elapsed.seconds > 0:
@@ -728,6 +733,7 @@ def gen_conf(args):
     else:
         monitor_router_id = monitor_local_address
 
+    filter_test = args.filter_test
     
     conf = {}
     conf['local_prefix'] = str(local_address_prefix)
@@ -740,6 +746,9 @@ def gen_conf(args):
 
     if args.target_config_file:
         conf['target']['config_path'] = args.target_config_file
+    
+    if filter_test:
+        conf['target']['filter-test'] = filter_test
 
     conf['monitor'] = {
         'as': 1001,
@@ -857,6 +866,7 @@ def gen_conf(args):
                     }
                 }
             }
+
     yaml.Dumper.ignore_aliases = lambda *args : True
     return gen_mako_macro() + yaml.dump(conf, default_flow_style=False)
 
@@ -913,6 +923,7 @@ def create_args_parser(main=True):
                                  'local prefix given in --local-address-prefix')
         parser.add_argument('--monitor-router-id', type=str,
                             help='monitor\' router ID; default: same as --monitor-local-address')
+        parser.add_argument('--filter-test', choices=['transit', 'ixp'], default=None)
 
     parser_bench = s.add_parser('bench', help='run benchmarks')
     parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp'], default='gobgp')

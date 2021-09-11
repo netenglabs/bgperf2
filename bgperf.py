@@ -31,7 +31,7 @@ from pyroute2 import IPRoute
 from socket import AF_INET
 from nsenter import Namespace
 from psutil import virtual_memory
-from subprocess import check_output, Popen, PIPE
+from subprocess import check_output
 import matplotlib.pyplot as plt
 import numpy as np
 from base import *
@@ -254,6 +254,7 @@ def bench(args):
     # however, bgpdump2 isn't smart enough to wait and rety connections so
     # this is the order
     testers = []
+    mrt_injector = None
     if not args.repeat:
         valid_indexes = None
         asns = None
@@ -291,7 +292,10 @@ def bench(args):
 
 
             t = tester_class(name, config_dir+'/'+name, tester)
-            print('run tester', name, 'type', tester_type)
+            if not mrt_injector:
+                print('run tester', name, 'type', tester_type)
+            else:
+                print('run tester', name, 'type', tester_type, mrt_injector)
             t.run(conf['target'], dckr_net_name)
             testers.append(t)
 
@@ -455,8 +459,8 @@ def bench(args):
         if i > 0:
             rm_line()
         print(f"launched {i+1} testers")
-        if args.prefix_num >= 100_000:
-            time.sleep(1)
+        # if args.prefix_num >= 100_000:
+        #     time.sleep(1)
 
     f = open(args.output, 'w') if args.output else None
     cpu = 0
@@ -512,6 +516,7 @@ def bench(args):
                 output_stats['recved']= recved          
                 f.close() if f else None
                 output_stats['fail_msg'] = f"FAILED: dropping received count {recved} neighbors_checked {neighbors_checked}"
+                output_stats['tester_errors'] = tester_class.find_errors()      
                 print("FAILED")
                 o_s = finish_bench(args, output_stats, bench_start,target, m, fail=True) 
                 return o_s
@@ -538,7 +543,8 @@ def bench(args):
                 output_stats['first_received_time'] = elapsed
 
             if recved_checkpoint and neighbors_checkpoint:
-                output_stats['recved']= recved          
+                output_stats['recved']= recved       
+                output_stats['tester_errors'] = tester_class.find_errors()   
                 f.close() if f else None
                 return finish_bench(args, output_stats, bench_start,target, m)   
 
@@ -549,6 +555,7 @@ def bench(args):
             output_stats['recved']= recved          
             f.close() if f else None
             output_stats['fail_msg'] = f"FAILED: stuck received count {recved} neighbors_checked {neighbors_checked}"
+            output_stats['tester_errors'] = tester_class.find_errors()
             print("FAILED")
             o_s = finish_bench(args, output_stats, bench_start,target, m, fail=True)  
             return o_s
@@ -564,7 +571,7 @@ def finish_bench(args, output_stats, bench_start,target, m, fail=False):
     del m
 
     target_version = target.exec_version_cmd()
-    output_stats['tester_errors'] = find_bird_errors()        
+  
     print_final_stats(args, target_version, output_stats)
     o_s = create_output_stats(args, target_version, output_stats, fail)
     print(stats_header())
@@ -575,13 +582,7 @@ def finish_bench(args, output_stats, bench_start,target, m, fail=False):
     # remove_target_containers()
     return o_s
 
-def find_bird_errors():
-    grep1 = Popen(('grep RMT /tmp/bgperf/tester/*.log'), shell=True, stdout=PIPE)
-    grep2 = Popen(('grep', '-v', 'NEXT_HOP'), stdin=grep1.stdout, stdout=PIPE)
-    errors = check_output(('wc', '-l'), stdin=grep2.stdout)
-    grep1.wait()
-    grep2.wait()
-    return errors.decode('utf-8').strip()
+
 
 def print_final_stats(args, target_version, stats):
     
@@ -628,7 +629,7 @@ def create_graph(stats, test_name='total time', stat_index=8, test_file='total_t
     for stat in stats:
         labels[stat[0]] = True
 
-        if len(stat) > 21 and stat[20] == 'FAILED':# this means that it failed for some reason
+        if len(stat) > 22 and stat[21] == 'FAILED':# this means that it failed for some reason
             data[f"{stat[3]}n_{stat[4]}p"].append(0)
         else:
             data[f"{stat[3]}n_{stat[4]}p"].append(float(stat[stat_index]))
@@ -735,6 +736,7 @@ def gen_conf(args):
     mrt_injector = args.mrt_injector
     tester_type = args.tester_type
 
+
     local_address_prefix = netaddr.IPNetwork(args.local_address_prefix)
 
     if args.target_local_address:
@@ -781,10 +783,13 @@ def gen_conf(args):
         'check-points': [prefix * neighbor_num],
     }
 
-    if args.mrt_injector:
+    if tester_type == 'gobgp' or tester_type == 'bgpdump2':
+        mrt_injector = tester_type
+
+    if mrt_injector:
         conf['monitor']['check-points'] = [prefix]
 
-    if args.mrt_injector == 'gobgp': #gobgp doesn't send everything with mrt
+    if mrt_injector == 'gobgp': #gobgp doesn't send everything with mrt
         conf['monitor']['check-points'][0] = int(conf['monitor']['check-points'][0] * 0.93)
     elif args.target == 'bird': # bird seems to reject severalhandfuls of routes
         conf['monitor']['check-points'][0] = int(conf['monitor']['check-points'][0] * 0.99)
@@ -952,10 +957,9 @@ def create_args_parser(main=True):
     parser_bench = s.add_parser('bench', help='run benchmarks')
     parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp'], default='gobgp')
     parser_bench.add_argument('-i', '--image', help='specify custom docker image')
-    parser_bench.add_argument('-m', '--mrt_injector', choices=['gobgp', 'bgpdump2'], default=None)
     parser_bench.add_argument('--mrt-file', type=str, 
                               help='mrt file, requires absolute path')
-    parser_bench.add_argument('-g', '--tester-type', choices=['exa', 'bird', 'gobgp', 'bgpdump'], default='exa')
+    parser_bench.add_argument('-g', '--tester-type', choices=['exa', 'bird', 'gobgp', 'bgpdump2'], default='exa')
     parser_bench.add_argument('--docker-network-name', help='Docker network name; this is the name given by \'docker network ls\'')
     parser_bench.add_argument('--bridge-name', help='Linux bridge name of the '
                               'interface corresponding to the Docker network; '

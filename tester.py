@@ -16,8 +16,8 @@
 from base import Tester
 from exabgp import ExaBGP
 from bird import BIRD
-import os
 from  settings import dckr
+from subprocess import check_output, Popen, PIPE
 
 
 class ExaBGPTester(Tester, ExaBGP):
@@ -57,7 +57,8 @@ exabgp.daemon.daemonize=true \
 exabgp.daemon.user=root \
 exabgp {0}/{1}.conf'''.format(self.guest_dir, p['router-id']))
         return '\n'.join(startup)
-
+    def find_errors():
+        return 0
 
 class BIRDTester(Tester, BIRD):
 
@@ -106,3 +107,10 @@ ulimit -n 65536
             startup.append('''bird -c {0}/{1}.conf -s {0}/{1}.ctl >>{0}/{1}.log 2>&1\n'''.format(self.guest_dir, p['router-id']))
         return '\n'.join(startup)
 
+    def find_errors():
+        grep1 = Popen(('grep RMT /tmp/bgperf/tester/*.log'), shell=True, stdout=PIPE)
+        grep2 = Popen(('grep', '-v', 'NEXT_HOP'), stdin=grep1.stdout, stdout=PIPE)
+        errors = check_output(('wc', '-l'), stdin=grep2.stdout)
+        grep1.wait()
+        grep2.wait()
+        return errors.decode('utf-8').strip()

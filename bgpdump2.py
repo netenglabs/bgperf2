@@ -1,4 +1,5 @@
 import re
+from subprocess import check_output, Popen, PIPE
 from base import *
 from mrt_tester import MRTTester
 
@@ -109,3 +110,9 @@ ulimit -n 65536
             local_as, prefix_count, neighbor['local-address'], self.guest_dir)
         return startup
 #> {}/bgpdump2.log 2>&1 
+
+    def find_errors():
+        grep1 = Popen(('grep -i error /tmp/bgperf/mrt-injector*/*.log'), shell=True, stdout=PIPE)
+        errors = check_output(('wc', '-l'), stdin=grep1.stdout)
+        grep1.wait()
+        return errors.decode('utf-8').strip()

@@ -31,7 +31,7 @@ from pyroute2 import IPRoute
 from socket import AF_INET
 from nsenter import Namespace
 from psutil import virtual_memory
-from subprocess import check_output
+from subprocess import check_output, Popen, PIPE
 import matplotlib.pyplot as plt
 import numpy as np
 from base import *
@@ -246,6 +246,7 @@ def bench(args):
 
     print('run monitor')
     m = Monitor(config_dir+'/monitor', conf['monitor'])
+    m.monitor_for = args.target
     m.run(conf, dckr_net_name)
 
 
@@ -261,11 +262,11 @@ def bench(args):
                 name = 'tester{0}'.format(idx)
             else:
                 name = tester['name']
-            if 'type' not in tester:
-                tester_type = 'normal'
+            if not 'type' in tester:
+                tester_type = 'bird'
             else:
                 tester_type = tester['type']
-            if tester_type == 'normal':
+            if tester_type == 'exa':
                 tester_class = ExaBGPTester
             elif tester_type == 'bird':
                 tester_class = BIRDTester
@@ -429,8 +430,6 @@ def bench(args):
             target = target_class('{0}/{1}'.format(config_dir, args.target), conf['target'])
         target.run(conf, dckr_net_name)
 
-    
-    
     time.sleep(1)
 
     output_stats['monitor_wait_time'] = m.wait_established(conf['target']['local-address'])
@@ -479,6 +478,7 @@ def bench(args):
     last_recved = 0
     last_recved_count = 0
     last_neighbors_checked = 0
+    recved = 0
     while True:
         info = q.get()
 
@@ -508,20 +508,29 @@ def bench(args):
             output_stats['elapsed'] = elapsed
             recved = info['afi_safis'][0]['state']['accepted'] if 'accepted' in info['afi_safis'][0]['state'] else 0
             
-            if recved > 0 and recved == last_recved:
+            if last_recved > recved:
+                output_stats['recved']= recved          
+                f.close() if f else None
+                output_stats['fail_msg'] = f"FAILED: dropping received count {recved} neighbors_checked {neighbors_checked}"
+                print("FAILED")
+                o_s = finish_bench(args, output_stats, bench_start,target, m, fail=True) 
+                return o_s
+
+            elif (recved > 0 or last_neighbors_checked > 0) and recved == last_recved:
                 last_recved_count +=1
             else:
                 last_recved = recved
                 last_recved_count = 0
 
-            if neighbors_checked > last_neighbors_checked:
-                last_neighbors_checked = last_neighbors_checked
+            if neighbors_checked != last_neighbors_checked:
+                last_neighbors_checked = neighbors_checked
                 last_recved_count = 0
 
             if elapsed.seconds > 0:
                 rm_line()
 
-            print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, mon recved: {3}, neighbors: {4}, %idle {5}, free mem {6}'.format(elapsed.seconds, cpu, mem_human(mem), recved, neighbors_checked, percent_idle, mem_human(mem_free)))
+            print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, mon recved: {3}, neighbors: {4}, %idle {5}, free mem {6}'.format(elapsed.seconds, 
+                    cpu, mem_human(mem), recved, neighbors_checked, percent_idle, mem_human(mem_free)))
             f.write('{0}, {1}, {2}, {3}\n'.format(elapsed.seconds, cpu, mem, recved)) if f else None
             f.flush() if f else None
 
@@ -536,12 +545,12 @@ def bench(args):
             if info['checked']:
                 recved_checkpoint = True
         
-        if last_recved_count == 5: # Too many failed in a row
+        if last_recved_count == 30: # Too many of the same counts in a row, not progressing
             output_stats['recved']= recved          
             f.close() if f else None
             output_stats['fail_msg'] = f"FAILED: stuck received count {recved} neighbors_checked {neighbors_checked}"
+            print("FAILED")
             o_s = finish_bench(args, output_stats, bench_start,target, m, fail=True)  
-            print("FAILED")            
             return o_s
 
 
@@ -552,7 +561,10 @@ def finish_bench(args, output_stats, bench_start,target, m, fail=False):
     m.stop_monitoring = True
     target.stop_monitoring = True
     stop_monitoring = True
+    del m
+
     target_version = target.exec_version_cmd()
+    output_stats['tester_errors'] = find_bird_errors()        
     print_final_stats(args, target_version, output_stats)
     o_s = create_output_stats(args, target_version, output_stats, fail)
     print(stats_header())
@@ -563,6 +575,14 @@ def finish_bench(args, output_stats, bench_start,target, m, fail=False):
     # remove_target_containers()
     return o_s
 
+def find_bird_errors():
+    grep1 = Popen(('grep RMT /tmp/bgperf/tester/*.log'), shell=True, stdout=PIPE)
+    grep2 = Popen(('grep', '-v', 'NEXT_HOP'), stdin=grep1.stdout, stdout=PIPE)
+    errors = check_output(('wc', '-l'), stdin=grep2.stdout)
+    grep1.wait()
+    grep2.wait()
+    return errors.decode('utf-8').strip()
+
 def print_final_stats(args, target_version, stats):
     
     print(f"{args.target}: {target_version}")
@@ -571,10 +591,11 @@ def print_final_stats(args, target_version, stats):
     print(f"Time since first received prefix: {stats['elapsed'].seconds - stats['first_received_time'].seconds}")
 
     print(f"total time: {stats['total_time']:.2f}s")
+    print(f"tester errors: {stats['tester_errors']}")
     print()
 
 def stats_header():
-    return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date,cores,Mem (GB), failed, MSG")
+    return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date,cores,Mem (GB), tester errors, failed, MSG")
 
 
 def create_output_stats(args, target_version, stats, fail=False):
@@ -591,6 +612,7 @@ def create_output_stats(args, target_version, stats, fail=False):
     out.extend([round(stats['max_cpu']), float(format(stats['max_mem']/1024/1024/1024, ".3f"))])
     out.extend ([round(stats['min_idle']), float(format(stats['min_free']/1024/1024/1024, ".3f"))])
     out.extend(['-s' if args.single_table else '', d, str(stats['cores']), mem_human(stats['memory'])])
+    out.extend([stats['tester_errors']])
     if fail:
         out.extend(['FAILED'])
     else:
@@ -656,7 +678,8 @@ def batch(args):
                     a.local_address_prefix = t['local_address_prefix'] if 'local_address_prefix' in t else '10.10.0.0/16'
                     for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
                                     'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
-                                    'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file']:
+                                    'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
+                                    'tester_type']:
                         setattr(a, field, t[field]) if field in t else setattr(a, field, None)
 
                     for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
@@ -710,6 +733,7 @@ def gen_conf(args):
     community_list = args.community_list_num
     ext_community_list = args.ext_community_list_num
     mrt_injector = args.mrt_injector
+    tester_type = args.tester_type
 
     local_address_prefix = netaddr.IPNetwork(args.local_address_prefix)
 
@@ -733,7 +757,7 @@ def gen_conf(args):
     else:
         monitor_router_id = monitor_local_address
 
-    filter_test = args.filter_test
+    filter_test = args.filter_test if 'filter_test' in args else None
     
     conf = {}
     conf['local_prefix'] = str(local_address_prefix)
@@ -833,10 +857,12 @@ def gen_conf(args):
             },
         }
         configured_neighbors_cnt += 1
-    if not mrt_injector:
+
+    print(f"Tester Type: {tester_type}")
+    if tester_type == 'exa' or tester_type == 'bird':
         conf['testers'] = [{
             'name': 'tester',
-            'type': 'bird',
+            'type': tester_type,
             'neighbors': neighbors,
         }]
     else:
@@ -906,9 +932,7 @@ def create_args_parser(main=True):
         parser.add_argument('-c', '--community-list-num', default=0, type=int)
         parser.add_argument('-x', '--ext-community-list-num', default=0, type=int)
         parser.add_argument('-s', '--single-table', action='store_true')
-        parser.add_argument('-m', '--mrt_injector', choices=[None, 'gobgp', 'bgpdump2'], default=None)
-        parser.add_argument('--mrt-file', type=str, 
-                            help='mrt file, requires absolute path')
+
         parser.add_argument('--target-config-file', type=str,
                             help='target BGP daemon\'s configuration file')
         parser.add_argument('--local-address-prefix', type=str, default='10.10.0.0/16',
@@ -928,6 +952,10 @@ def create_args_parser(main=True):
     parser_bench = s.add_parser('bench', help='run benchmarks')
     parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp'], default='gobgp')
     parser_bench.add_argument('-i', '--image', help='specify custom docker image')
+    parser_bench.add_argument('-m', '--mrt_injector', choices=['gobgp', 'bgpdump2'], default=None)
+    parser_bench.add_argument('--mrt-file', type=str, 
+                              help='mrt file, requires absolute path')
+    parser_bench.add_argument('-g', '--tester-type', choices=['exa', 'bird', 'gobgp', 'bgpdump'], default='exa')
     parser_bench.add_argument('--docker-network-name', help='Docker network name; this is the name given by \'docker network ls\'')
     parser_bench.add_argument('--bridge-name', help='Linux bridge name of the '
                               'interface corresponding to the Docker network; '

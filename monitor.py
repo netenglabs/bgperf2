@@ -90,7 +90,7 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
                 try:
                     info = json.loads(self.local('gobgp neighbor -j').decode('utf-8'))[0]
                 except Exception as e:
-                    print(f"Monitoring reading exception {e}")
+                    print(f"Monitoring reading exception {self.monitor_for}: {e} ")
                     continue
 
                 info['who'] = self.name

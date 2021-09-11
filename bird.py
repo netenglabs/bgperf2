@@ -49,6 +49,9 @@ class BIRDTarget(BIRD, Target):
 protocol device {{ }}
 protocol direct {{ disabled; }}
 protocol kernel {{ ipv4 {{ import none; export none; }}; }}
+
+log stderr all;
+debug protocols all;
 '''.format(self.conf['router-id'], ' sorted' if self.conf['single-table'] else '')
 
         def gen_filter_assignment(n):
@@ -178,7 +181,8 @@ return true;
         config = '''protocol bgp everything {{
     local as {};
     neighbor range 10.0.0.0/8 external;
-    hold time 90;
+    hold time 10;
+    connect delay time 1;
     ipv4 {{import {}; export all; }};
 }}
 '''.format(self.conf['as'], filter)
@@ -208,7 +212,10 @@ return true;
         version = self.get_version_cmd()
         i = dckr.exec_create(container=self.name, cmd=version, stderr=True)
         ret =dckr.exec_start(i['Id'], stream=False, detach=False).decode('utf-8')
-        return ret.split(' ')[2].strip('\n')
+        if len(ret) > 2:
+            return ret.split(' ')[2].strip('\n')
+        else:
+            return ret.strip('\n')
 
     def get_neighbors_received(self):
         neighbors_received = {}

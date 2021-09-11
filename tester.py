@@ -74,15 +74,17 @@ class BIRDTester(Tester, BIRD):
                 local_address = p['local-address']
                 config = '''log "{5}/{2}.log" all;
 #debug protocols all;
+debug protocols {{states}};
 router id {2};
 protocol device {{}}
 protocol bgp {{
-source address {3};
-connect delay time 1;
-interface "eth0";
-strict bind;
-ipv4 {{ import none; export all; }};
-local {3} as {4};
+    #hold time 5;
+    source address {3};
+    connect delay time 1;
+    interface "eth0";
+    strict bind;
+    ipv4 {{ import none; export all; }};
+    local {3} as {4};
 neighbor {0} as {1};
 }}
 protocol static {{ ipv4;

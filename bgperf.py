@@ -733,7 +733,6 @@ def gen_conf(args):
     prefix_list = args.prefix_list_num
     community_list = args.community_list_num
     ext_community_list = args.ext_community_list_num
-    mrt_injector = args.mrt_injector
     tester_type = args.tester_type
 
 
@@ -783,8 +782,10 @@ def gen_conf(args):
         'check-points': [prefix * neighbor_num],
     }
 
+    mrt_injector = None
     if tester_type == 'gobgp' or tester_type == 'bgpdump2':
         mrt_injector = tester_type
+        
 
     if mrt_injector:
         conf['monitor']['check-points'] = [prefix]

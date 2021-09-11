@@ -51,7 +51,7 @@ protocol direct {{ disabled; }}
 protocol kernel {{ ipv4 {{ import none; export none; }}; }}
 
 log stderr all;
-debug protocols all;
+#debug protocols all; # this seems to add a lot of extra load especially in internet/mrt tests
 '''.format(self.conf['router-id'], ' sorted' if self.conf['single-table'] else '')
 
         def gen_filter_assignment(n):

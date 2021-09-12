@@ -57,8 +57,7 @@ exabgp.daemon.daemonize=true \
 exabgp.daemon.user=root \
 exabgp {0}/{1}.conf'''.format(self.guest_dir, p['router-id']))
         return '\n'.join(startup)
-    def find_errors():
-        return 0
+
 
 class BIRDTester(Tester, BIRD):
 

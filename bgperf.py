@@ -483,6 +483,7 @@ def bench(args):
     last_recved_count = 0
     last_neighbors_checked = 0
     recved = 0
+    less_last_received = 0
     while True:
         info = q.get()
 
@@ -513,13 +514,15 @@ def bench(args):
             recved = info['afi_safis'][0]['state']['accepted'] if 'accepted' in info['afi_safis'][0]['state'] else 0
             
             if last_recved > recved:
-                output_stats['recved']= recved          
-                f.close() if f else None
-                output_stats['fail_msg'] = f"FAILED: dropping received count {recved} neighbors_checked {neighbors_checked}"
-                output_stats['tester_errors'] = tester_class.find_errors()      
-                print("FAILED")
-                o_s = finish_bench(args, output_stats, bench_start,target, m, fail=True) 
-                return o_s
+                less_last_received += 1
+                if less_last_received >= 5: # 2 times that things dropped
+                    output_stats['recved'] = recved
+                    f.close() if f else None
+                    output_stats['fail_msg'] = f"FAILED: dropping received count {recved} neighbors_checked {neighbors_checked}"
+                    output_stats['tester_errors'] = tester_class.find_errors()      
+                    print("FAILED")
+                    o_s = finish_bench(args, output_stats, bench_start,target, m, fail=True) 
+                    return o_s
 
             elif (recved > 0 or last_neighbors_checked > 0) and recved == last_recved:
                 last_recved_count +=1

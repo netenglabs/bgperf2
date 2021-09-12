@@ -346,3 +346,6 @@ class Tester(Container):
                     print(lines)
 
         return None
+
+    def find_errors():
+        return 0

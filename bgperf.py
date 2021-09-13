@@ -711,6 +711,9 @@ def create_batch_graphs(results, name):
     create_graph(results, test_name='route reception', stat_index=10, test_file=f"bgperf_{name}_route_reception.png")
     create_graph(results, test_name='max cpu', stat_index=12, test_file=f"bgperf_{name}_max_cpu.png", ylabel="%")
     create_graph(results, test_name='max mem', stat_index=13, test_file=f"bgperf_{name}_max_mem.png", ylabel="GB")
+    create_graph(results, test_name='min idle', stat_index=14, test_file=f"bgperf_{name}_min_idle.png", ylabel="%")
+    create_graph(results, test_name='min free mem', stat_index=15, test_file=f"bgperf_{name}_min_free.png", ylabel="GB")
+    create_graph(results, test_name='tester errors', stat_index=20, test_file=f"bgperf_{name}_tester_error.png", ylabel="errors")
 
 def mem_human(v):
     if v > 1024 * 1024 * 1024:

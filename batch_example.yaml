@@ -3,89 +3,54 @@
 #  and it uses more memory, so some tests fail
 
 tests:
-  - 
-    name: 10K
-    neighbors: [10, 30, 50, 100]
-    prefixes: [10_000]
+  -
+    name: lots_bird
+    neighbors: [500, 1000, 1500]
+    prefixes: [100, 1000]
     targets: 
       -
         name: bird
         label: bird -s
         single_table: True
-      - 
+        tester_type: bird
+      -
         name: frr
-      # -
-      #   name: gobgp
+        tester_type: bird
       -
         name: frr_c
         label: frr 8
-      -
-        name: rustybgp
-      -
-        name: openbgp
-
-  - # for more than 1024 neighbors must increase gcthresh3
-    # echo 16384 | sudo tee /proc/sys/net/ipv4/neigh/default/gc_thresh3
-    name: many_neighbors_10p
-    neighbors: [250, 500, 750, 1000, 1250, 1500, 1750]
-    prefixes: [10]
-    targets: 
-      -
-        name: bird
-        label: bird -s
-        single_table: True
-      - 
-        name: frr
-      -
-        name: frr_c
-        label: frr 8
-      -
-        name: rustybgp
+        tester_type: bird
       -
         name: openbgp
-  - 
-    name: many_neighbors_100p
-    # my machine with 64 GB RAM cannot do 1000 clients with 100 routes each
-    #  the exabgp testers take too much memory
-    neighbors: [250, 500, 750]
+        tester_type: bird
+      -
+        name: rustybgp
+        tester_type: bird
+  -
+    name: lots_exa
+    neighbors: [500, 1000]
     prefixes: [100]
     targets: 
       -
         name: bird
         label: bird -s
         single_table: True
-      - 
+        tester_type: exa
+      -
         name: frr
+        tester_type: exa
       -
         name: frr_c
         label: frr 8
-      # -
-      #   name: gobgp
-      -
-        name: rustybgp
+        tester_type: exa
       -
         name: openbgp
-
-  - # openbgp runs out of memory with 500n-100p on 64 GB machine
-    name: prefix_growth
-    neighbors: [50, 100, 250]
-    prefixes: [10, 100, 1000]
-    targets: 
-      -
-        name: bird
-        label: bird -s
-        single_table: True
-      - 
-        name: frr
-      -
-        name: frr_c
-        label: frr 8
+        tester_type: exa
       -
         name: rustybgp
-      -
-        name: openbgp
+        tester_type: exa
   -
-    name: 1M
+    name: 1M_bird
     neighbors: [1, 5]
     prefixes: [1_000_000]
     targets: 
@@ -93,19 +58,43 @@ tests:
         name: bird
         label: bird -s
         single_table: True
-      - 
+        tester_type: exa
+      -
         name: frr
+        tester_type: exa
       -
         name: frr_c
         label: frr 8
-      # -
-      #   name: gobgp
-      # runs out of memory on my 64GB device
-      # with gobgp at 10 neighbors
+        tester_type: exa
       -
-        name: rustybgp     
+        name: openbgp
+        tester_type: exa
       -
-        name: openbgp    
-        
+        name: rustybgp
+        tester_type: exa
+  -
+    name: 1M_exa
+    neighbors: [1, 5]
+    prefixes: [1_000_000]
+    targets:
+      -
+        name: bird
+        label: bird -s
+        single_table: True
+        tester_type: exa
+      -
+        name: frr
+        tester_type: exa
+      -
+        name: frr_c
+        label: frr 8
+        tester_type: exa
+      -
+        name: openbgp
+        tester_type: exa
+      -
+        name: rustybgp
+        tester_type: exa 
+
 # notes
 # building everything on default ec2 ubuntu image fills up the root partition

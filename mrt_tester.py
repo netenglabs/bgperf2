@@ -209,3 +209,9 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1 &
 
         #startup += '\n' + 'pkill -SIGHUP gobgpd'
         return startup
+
+    def find_errors():
+        grep1 = Popen(('grep -i error /tmp/bgperf/mrt-injector*/*.log'), shell=True, stdout=PIPE)
+        errors = check_output(('wc', '-l'), stdin=grep1.stdout)
+        grep1.wait()
+        return errors.decode('utf-8').strip()

@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from json.decoder import JSONDecodeError
 from gobgp import GoBGP
 import os
 from  settings import dckr
@@ -69,8 +70,12 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
                  rm_line()
             print(f"Waiting {n} seconds for monitor")
 
+            neighbor_data = self.local('gobgp neighbor {0} -j'.format(neighbor)).decode('utf-8')
 
-            neigh = json.loads(self.local('gobgp neighbor {0} -j'.format(neighbor)).decode('utf-8'))
+            try:
+                neigh = json.loads(neighbor_data)
+            except JSONDecodeError:
+                neigh['state']['session_state'] = 'failed'
 
             if ((neigh['state']['session_state'] == 'established') or
                 (neigh['state']['session_state'] == 6)):

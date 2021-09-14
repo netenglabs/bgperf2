@@ -11,7 +11,7 @@ sudo usermod -aG docker ubuntu
 
 cd bgperf
 pip3 install -r pip-requirements.txt
-wget -q http://archive.routeviews.org/bgpdata/2021.08/RIBS/rib.20210801.0000.bz2 && bzip2 rib.20210801.0000.bz2
+wget -q http://archive.routeviews.org/bgpdata/2021.08/RIBS/rib.20210801.0000.bz2 && bzip2 -d rib.20210801.0000.bz2
 sudo /sbin/shutdown now -r
 # the user group permissions need to be applied, so easiest to log out
 #python3 bgperf.py prepare && python3 bgperf.py update frr_c && python3 bgperf.py update bgpdump2

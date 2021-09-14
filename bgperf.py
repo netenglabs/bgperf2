@@ -514,8 +514,11 @@ def bench(args):
             recved = info['afi_safis'][0]['state']['accepted'] if 'accepted' in info['afi_safis'][0]['state'] else 0
             
             if last_recved > recved:
-                less_last_received += 1
-                if less_last_received >= 5: # 2 times that things dropped
+                if neighbors_checked > last_neighbors_checked:
+                    less_last_received += 1
+                else:
+                    last_recved = 0
+                if less_last_received >= 10: # 10 times that things dropped
                     output_stats['recved'] = recved
                     f.close() if f else None
                     output_stats['fail_msg'] = f"FAILED: dropping received count {recved} neighbors_checked {neighbors_checked}"

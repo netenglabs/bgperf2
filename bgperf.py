@@ -517,7 +517,7 @@ def bench(args):
                 if neighbors_checked > last_neighbors_checked:
                     less_last_received += 1
                 else:
-                    last_recved = 0
+                    less_last_received = 0
                 if less_last_received >= 10: # 10 times that things dropped
                     output_stats['recved'] = recved
                     f.close() if f else None

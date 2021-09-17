@@ -184,6 +184,7 @@ return true;
     #hold time 10;
     connect delay time 1;
     ipv4 {{import {}; export all; }};
+    #rs client;
 }}
 '''.format(self.conf['as'], filter)
 

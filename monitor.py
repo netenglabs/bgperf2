@@ -75,7 +75,8 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
             try:
                 neigh = json.loads(neighbor_data)
             except JSONDecodeError:
-                neigh['state']['session_state'] = 'failed'
+                neigh = {'state': {'session_state': 'failed'}}
+
 
             if ((neigh['state']['session_state'] == 'established') or
                 (neigh['state']['session_state'] == 6)):

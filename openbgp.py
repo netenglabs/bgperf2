@@ -96,7 +96,7 @@ allow to any
         return '\n'.join(
             ['#!/bin/bash',
              'ulimit -n 65536',
-             '/usr/local/sbin/bgpd -f {guest_dir}/{config_file_name} > {guest_dir}/openbgp.log 2>&1']
+             '/usr/local/sbin/bgpd -f {guest_dir}/{config_file_name} -d > {guest_dir}/openbgp.log 2>&1']
         ).format(
             guest_dir=self.guest_dir,
             config_file_name=self.CONFIG_FILE_NAME,

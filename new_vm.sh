@@ -9,10 +9,11 @@ sudo apt install sysstat --yes
 sudo apt install emacs-nox --yes
 sudo usermod -aG docker ubuntu
 
-cd bgperf
 pip3 install -r pip-requirements.txt
 wget -q http://archive.routeviews.org/bgpdata/2021.08/RIBS/rib.20210801.0000.bz2 && bzip2 -d rib.20210801.0000.bz2
 sudo /sbin/shutdown now -r
 # the user group permissions need to be applied, so easiest to log out
-#python3 bgperf.py prepare && python3 bgperf.py update frr_c && python3 bgperf.py update bgpdump2
-# python3 bgperf.py update bgperf &; python3 bgperf.py update gobgp &; python3 bgperf.py update bird &; python3 bgperf.py update frr &; python3 bgperf.py update frr_c &; python3 bgperf.py update rustybgp &; python3 bgperf.py update openbgp &; python3 bgperf.py update bgpdump &;
+
+# python3 bgperf.py update exabgp & python3 bgperf.py update gobgp & python3 bgperf.py update bird & python3 bgperf.py update frr & python3 bgperf.py update frr_c & python3 bgperf.py update rustybgp & python3 bgperf.py update openbgp & python3 bgperf.py update bgpdump2 & 
+# python3 bgperf.py prepare
+# -- just in case ython3 bgperf.py prepare && python3 bgperf.py update frr_c && python3 bgperf.py update bgpdump2

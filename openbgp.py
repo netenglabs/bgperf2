@@ -39,6 +39,7 @@ fib-update no
         def gen_neighbor_config(n):
             return ('''neighbor {0} {{
     remote-as {1}
+    enforce neighbor-as no
 }}
 '''.format(n['router-id'], n['as']) )
     

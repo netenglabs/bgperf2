@@ -626,6 +626,8 @@ def create_output_stats(args, target_version, stats, fail=False):
         out.extend([''])
     if 'fail_msg' in stats:
         out.extend([stats['fail_msg']])
+    else:
+        out.extend([''])
     return out
 
 def create_graph(stats, test_name='total time', stat_index=8, test_file='total_time.png', ylabel='seconds'):

@@ -518,7 +518,8 @@ def bench(args):
                     less_last_received += 1
                 else:
                     less_last_received = 0
-                if less_last_received >= 10: # 10 times that things dropped, usually to catch when target was killed
+                if less_last_received >= 10 and (last_recved - recved) / last_recved > .01: 
+                   # breakpoint()
                     output_stats['recved'] = recved
                     f.close() if f else None
                     output_stats['fail_msg'] = f"FAILED: dropping received count {recved} neighbors_checked {neighbors_checked}"

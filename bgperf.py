@@ -563,7 +563,7 @@ def bench(args):
                 recved_checkpoint = True
 
         
-            if elapsed.seconds % 10 == 0 and elapsed.seconds > 1:
+            if elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
                 bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
                 create_bench_graphs(bench_stats, prefix=bench_prefix)       
 
@@ -599,7 +599,6 @@ def finish_bench(args, output_stats, bench_stats, bench_start,target, m, fail=Fa
     # remove_target_containers()
     bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
     create_bench_graphs(bench_stats, prefix=bench_prefix)
-    print(bench_stats)
     return o_s
 
 
@@ -647,14 +646,19 @@ def create_output_stats(args, target_version, stats, fail=False):
 
 def create_ts_graph(bench_stats, stat_index=1, filename='ts.png', ylabel='%cpu', diviser=1):
     plt.figure()
-    #don't want to see 0 element of data
-    bench_stats.pop(0)
+    #bench_stats.pop(0)
     data = np.array(bench_stats)
     plt.plot(data[:,0], data[:,stat_index]/diviser)
+    
+    #don't want to see 0 element of data, not and accurate measure of what's happening
+    plt.xlim([1, len(data)])
     plt.ylabel(ylabel)
     plt.xlabel('elapsed seconds')
     plt.show()
     plt.savefig(filename)
+    plt.close()
+    plt.cla()
+    plt.clf()
 
 
 def create_bench_graphs(bench_stats, prefix='ts_data'):

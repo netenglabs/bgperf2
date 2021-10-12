@@ -651,7 +651,7 @@ def create_ts_graph(bench_stats, stat_index=1, filename='ts.png', ylabel='%cpu',
     plt.plot(data[:,0], data[:,stat_index]/diviser)
     
     #don't want to see 0 element of data, not and accurate measure of what's happening
-    plt.xlim([1, len(data)])
+    #plt.xlim([1, len(data)])
     plt.ylabel(ylabel)
     plt.xlabel('elapsed seconds')
     plt.show()

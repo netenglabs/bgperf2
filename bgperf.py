@@ -473,6 +473,7 @@ def bench(args):
     output_stats['min_free'] = 1_000_000_000_000_000
 
     output_stats['required'] = conf['monitor']['check-points'][0]
+    bench_stats = []
     neighbors_checked = 0
     percent_idle = 0
     mem_free = 0
@@ -525,7 +526,7 @@ def bench(args):
                     output_stats['fail_msg'] = f"FAILED: dropping received count {recved} neighbors_checked {neighbors_checked}"
                     output_stats['tester_errors'] = tester_class.find_errors()      
                     print("FAILED")
-                    o_s = finish_bench(args, output_stats, bench_start,target, m, fail=True) 
+                    o_s = finish_bench(args, output_stats, bench_stats, bench_start,target, m, fail=True) 
                     return o_s
 
             elif (recved > 0 or last_neighbors_checked > 0) and recved == last_recved:
@@ -543,6 +544,7 @@ def bench(args):
 
             print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, mon recved: {3}, neighbors: {4}, %idle {5}, free mem {6}'.format(elapsed.seconds, 
                     cpu, mem_human(mem), recved, neighbors_checked, percent_idle, mem_human(mem_free)))
+            bench_stats.append([elapsed.seconds, float(f"{cpu:>4.2f}"), mem, recved, neighbors_checked, percent_idle, mem_free])
             f.write('{0}, {1}, {2}, {3}\n'.format(elapsed.seconds, cpu, mem, recved)) if f else None
             f.flush() if f else None
 
@@ -553,12 +555,19 @@ def bench(args):
                 output_stats['recved']= recved       
                 output_stats['tester_errors'] = tester_class.find_errors()   
                 f.close() if f else None
-                return finish_bench(args, output_stats, bench_start,target, m)   
+                o_s = finish_bench(args, output_stats,bench_stats, bench_start,target, m)  
+                return o_s
+
 
             if info['checked']:
                 recved_checkpoint = True
+
         
-        if last_recved_count == 30: # Too many of the same counts in a row, not progressing
+            if elapsed.seconds % 10 == 0 and elapsed.seconds > 1:
+                bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
+                create_bench_graphs(bench_stats, prefix=bench_prefix)       
+
+        if last_recved_count == 120: # Too many of the same counts in a row, not progressing
             output_stats['recved']= recved          
             f.close() if f else None
             output_stats['fail_msg'] = f"FAILED: stuck received count {recved} neighbors_checked {neighbors_checked}"
@@ -568,7 +577,8 @@ def bench(args):
             return o_s
 
 
-def finish_bench(args, output_stats, bench_start,target, m, fail=False):
+
+def finish_bench(args, output_stats, bench_stats, bench_start,target, m, fail=False):
  
     bench_stop = time.time()
     output_stats['total_time'] = bench_stop - bench_start
@@ -587,6 +597,9 @@ def finish_bench(args, output_stats, bench_start,target, m, fail=False):
     # it would be better to clean things up, but often I want to to investigate where things ended up
     # remove_old_containers() 
     # remove_target_containers()
+    bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
+    create_bench_graphs(bench_stats, prefix=bench_prefix)
+    print(bench_stats)
     return o_s
 
 
@@ -630,6 +643,27 @@ def create_output_stats(args, target_version, stats, fail=False):
     else:
         out.extend([''])
     return out
+
+
+def create_ts_graph(bench_stats, stat_index=1, filename='ts.png', ylabel='%cpu', diviser=1):
+    plt.figure()
+    #don't want to see 0 element of data
+    bench_stats.pop(0)
+    data = np.array(bench_stats)
+    plt.plot(data[:,0], data[:,stat_index]/diviser)
+    plt.ylabel(ylabel)
+    plt.xlabel('elapsed seconds')
+    plt.show()
+    plt.savefig(filename)
+
+
+def create_bench_graphs(bench_stats, prefix='ts_data'):
+    create_ts_graph(bench_stats, filename=f"{prefix}_cpu.png")
+    create_ts_graph(bench_stats, stat_index=2, filename=f"{prefix}_mem_used", ylabel="GB", diviser=1024*1024*1024)
+    create_ts_graph(bench_stats, stat_index=3, filename=f"{prefix}_mon_received", ylabel='prefixes')
+    create_ts_graph(bench_stats, stat_index=4, filename=f"{prefix}_neighbors", ylabel='neighbors')
+    create_ts_graph(bench_stats, stat_index=5, filename=f"{prefix}_machine_idle", ylabel="%")
+    create_ts_graph(bench_stats, stat_index=6, filename=f"{prefix}_free_mem", ylabel="GB", diviser=1024*1024*1024)
 
 def create_graph(stats, test_name='total time', stat_index=8, test_file='total_time.png', ylabel='seconds'):
     labels = {}

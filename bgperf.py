@@ -573,7 +573,7 @@ def bench(args):
             output_stats['fail_msg'] = f"FAILED: stuck received count {recved} neighbors_checked {neighbors_checked}"
             output_stats['tester_errors'] = tester_class.find_errors()
             print("FAILED")
-            o_s = finish_bench(args, output_stats, bench_start, bench_stats, target, m, fail=True)  
+            o_s = finish_bench(args, output_stats,bench_stats, bench_start,target, m, fail=True)  
             return o_s
 
 

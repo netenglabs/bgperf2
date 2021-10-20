@@ -567,7 +567,7 @@ def bench(args):
                 bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
                 create_bench_graphs(bench_stats, prefix=bench_prefix)       
 
-        if last_recved_count == 120: # Too many of the same counts in a row, not progressing
+        if last_recved_count == 600: # Too many of the same counts in a row, not progressing
             output_stats['recved']= recved          
             f.close() if f else None
             output_stats['fail_msg'] = f"FAILED: stuck received count {recved} neighbors_checked {neighbors_checked}"
@@ -673,14 +673,19 @@ def create_graph(stats, test_name='total time', stat_index=8, test_file='total_t
     labels = {}
     data = defaultdict(list)
 
-    for stat in stats:
-        labels[stat[0]] = True
+    try:
+        for stat in stats:
+            labels[stat[0]] = True
 
-        if len(stat) > 22 and stat[21] == 'FAILED':# this means that it failed for some reason
-            data[f"{stat[3]}n_{stat[4]}p"].append(0)
-        else:
-            data[f"{stat[3]}n_{stat[4]}p"].append(float(stat[stat_index]))
-
+            if len(stat) > 22 and stat[21] == 'FAILED':# this means that it failed for some reason
+                data[f"{stat[3]}n_{stat[4]}p"].append(0)
+            else:
+                data[f"{stat[3]}n_{stat[4]}p"].append(float(stat[stat_index]))
+    except IndexError as e:
+        print(e)
+        print(f"stat line failed: {stat}")
+        print(f"stat_index {stat_index}")
+        exit(-1)
 
     x = np.arange(len(labels))
   

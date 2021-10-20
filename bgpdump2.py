@@ -23,11 +23,12 @@ RUN apt update \
     && apt -y dist-upgrade \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata \
     && apt-get install -y git libarchive-dev libbz2-dev liblz-dev zlib1g-dev autoconf \
-        gcc wget make iputils-ping\
+        gcc wget make iputils-ping automake-1.15 \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
 RUN git clone https://github.com/rtbrick/bgpdump2.git \
     && cd bgpdump2 \
+    && git checkout timer-refactoring \
     && ./configure \
     && make \
     && mv src/bgpdump2 /usr/local/sbin/

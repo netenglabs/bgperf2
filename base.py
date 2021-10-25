@@ -349,3 +349,6 @@ class Tester(Container):
 
     def find_errors():
         return 0
+
+    def find_timeouts():
+        return 0

@@ -524,7 +524,8 @@ def bench(args):
                     output_stats['recved'] = recved
                     f.close() if f else None
                     output_stats['fail_msg'] = f"FAILED: dropping received count {recved} neighbors_checked {neighbors_checked}"
-                    output_stats['tester_errors'] = tester_class.find_errors()      
+                    output_stats['tester_errors'] = tester_class.find_errors() 
+                    output_stats['tester_timeouts'] = tester_class.find_timeouts()      
                     print("FAILED")
                     o_s = finish_bench(args, output_stats, bench_stats, bench_start,target, m, fail=True) 
                     return o_s
@@ -553,7 +554,8 @@ def bench(args):
 
             if recved_checkpoint and neighbors_checkpoint:
                 output_stats['recved']= recved       
-                output_stats['tester_errors'] = tester_class.find_errors()   
+                output_stats['tester_errors'] = tester_class.find_errors() 
+                output_stats['tester_timeouts'] = tester_class.find_timeouts() 
                 f.close() if f else None
                 o_s = finish_bench(args, output_stats,bench_stats, bench_start,target, m)  
                 return o_s
@@ -572,6 +574,7 @@ def bench(args):
             f.close() if f else None
             output_stats['fail_msg'] = f"FAILED: stuck received count {recved} neighbors_checked {neighbors_checked}"
             output_stats['tester_errors'] = tester_class.find_errors()
+            output_stats['tester_timeouts'] = tester_class.find_timeouts() 
             print("FAILED")
             o_s = finish_bench(args, output_stats,bench_stats, bench_start,target, m, fail=True)  
             return o_s
@@ -612,6 +615,7 @@ def print_final_stats(args, target_version, stats):
 
     print(f"total time: {stats['total_time']:.2f}s")
     print(f"tester errors: {stats['tester_errors']}")
+    print(f"tester timeouts: {stats['tester_timeouts']}")
     print()
 
 def stats_header():
@@ -632,7 +636,7 @@ def create_output_stats(args, target_version, stats, fail=False):
     out.extend([round(stats['max_cpu']), float(format(stats['max_mem']/1024/1024/1024, ".3f"))])
     out.extend ([round(stats['min_idle']), float(format(stats['min_free']/1024/1024/1024, ".3f"))])
     out.extend(['-s' if args.single_table else '', d, str(stats['cores']), mem_human(stats['memory'])])
-    out.extend([stats['tester_errors']])
+    out.extend([stats['tester_errors'],stats['tester_timeouts']])
     if fail:
         out.extend(['FAILED'])
     else:
@@ -677,7 +681,7 @@ def create_graph(stats, test_name='total time', stat_index=8, test_file='total_t
         for stat in stats:
             labels[stat[0]] = True
 
-            if len(stat) > 22 and stat[21] == 'FAILED':# this means that it failed for some reason
+            if len(stat) > 23 and stat[22] == 'FAILED':# this means that it failed for some reason
                 data[f"{stat[3]}n_{stat[4]}p"].append(0)
             else:
                 data[f"{stat[3]}n_{stat[4]}p"].append(float(stat[stat_index]))

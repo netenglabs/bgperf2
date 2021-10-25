@@ -28,7 +28,6 @@ RUN apt update \
 
 RUN git clone https://github.com/rtbrick/bgpdump2.git \
     && cd bgpdump2 \
-    && git checkout timer-refactoring \
     && ./configure \
     && make \
     && mv src/bgpdump2 /usr/local/sbin/
@@ -117,3 +116,9 @@ ulimit -n 65536
         errors = check_output(('wc', '-l'), stdin=grep1.stdout)
         grep1.wait()
         return errors.decode('utf-8').strip()
+
+    def find_timeouts():
+        grep1 = Popen(('grep -i timeout /tmp/bgperf/mrt-injector*/*.log'), shell=True, stdout=PIPE)
+        timeouts = check_output(('wc', '-l'), stdin=grep1.stdout)
+        grep1.wait()
+        return timeouts.decode('utf-8').strip()

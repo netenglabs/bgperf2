@@ -30,7 +30,8 @@ RUN apt update && \
       sudo gdb curl iputils-ping time \
       libgrpc++-dev libgrpc-dev protobuf-compiler-grpc \
       lua5.3 liblua5.3-dev \
-      mininet iproute2 iperf && \
+      mininet iproute2 iperf \
+      linux-tools-common linux-tools-generic linux-tools-5.11.0-38-generic && \
       curl https://bootstrap.pypa.io/pip/2.7/get-pip.py --output /tmp/get-pip.py && \
       python2 /tmp/get-pip.py && \
       rm -f  /tmp/get-pip.py && \
@@ -54,7 +55,7 @@ RUN apt-get install -y cmake libpcre2-dev
 #USER frr:frr
 
 # build and install libyang2
-RUN cd && pwd && ls -al && \
+RUN cd  && \
     git clone https://github.com/CESNET/libyang.git && \
     cd libyang && \
     git checkout v2.0.0 && \

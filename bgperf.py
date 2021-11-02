@@ -42,6 +42,7 @@ from frr import FRRouting, FRRoutingTarget
 from frr_compiled import FRRoutingCompiled, FRRoutingCompiledTarget
 from rustybgp import RustyBGP, RustyBGPTarget
 from openbgp import OpenBGP, OpenBGPTarget
+from flock import Flock, FlockTarget
 from tester import ExaBGPTester, BIRDTester
 from mrt_tester import GoBGPMRTTester, ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
@@ -92,7 +93,7 @@ def doctor(args):
     else:
         print('... not found. run `bgperf prepare`')
 
-    for name in ['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp']:
+    for name in ['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp', 'flock']:
         print('{0} image'.format(name), end=' ')
         if img_exists('bgperf/{0}'.format(name)):
             print('... ok')
@@ -130,13 +131,15 @@ def update(args):
         RustyBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'all' or args.image == 'openbgp':
         OpenBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
+    if args.image == 'all' or args.image == 'flock':
+        Flock.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'frr_c':
         FRRoutingCompiled.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'bgpdump2':
         Bgpdump2.build_image(True, checkout=args.checkout, nocache=args.no_cache)
 
 def remove_target_containers():
-    for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, RustyBGPTarget, OpenBGPTarget]:
+    for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, RustyBGPTarget, OpenBGPTarget, FlockTarget]:
         if ctn_exists(target_class.CONTAINER_NAME):
             print('removing target container', target_class.CONTAINER_NAME)
             dckr.remove_container(target_class.CONTAINER_NAME, force=True)
@@ -425,6 +428,8 @@ def bench(args):
             target_class = RustyBGPTarget
         elif args.target == 'openbgp':
             target_class = OpenBGPTarget
+        elif args.target == 'flock':
+            target_class = FlockTarget
         else:
             print(f"incorrect target {args.target}")
         print('run', args.target)
@@ -983,7 +988,7 @@ def create_args_parser(main=True):
 
     parser_update = s.add_parser('update', help='rebuild bgp docker images')
     parser_update.add_argument('image', choices=['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'frr', 'frr_c', 
-                                'rustybgp', 'openbgp', 'bgpdump2', 'all'])
+                                'rustybgp', 'openbgp', 'flock', 'bgpdump2', 'all'])
     parser_update.add_argument('-c', '--checkout', default='HEAD')
     parser_update.add_argument('-n', '--no-cache', action='store_true')
     parser_update.set_defaults(func=update)
@@ -1015,7 +1020,7 @@ def create_args_parser(main=True):
         parser.add_argument('--filter-test', choices=['transit', 'ixp'], default=None)
 
     parser_bench = s.add_parser('bench', help='run benchmarks')
-    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp'], default='gobgp')
+    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp', 'flock'], default='gobgp')
     parser_bench.add_argument('-i', '--image', help='specify custom docker image')
     parser_bench.add_argument('--mrt-file', type=str, 
                               help='mrt file, requires absolute path')

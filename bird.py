@@ -218,8 +218,8 @@ return true;
         else:
             return ret.strip('\n')
 
-    def get_neighbors_received(self):
-        neighbors_received = {}
+    def get_neighbors_accepted(self):
+        neighbors_accepted = {}
         neighbor_received_output = self.local("birdc 'show protocols all'").decode('utf-8')
         
         with open('bird.tfsm') as template:
@@ -230,6 +230,6 @@ return true;
             if r[0] == '' :
                 continue
             else:
-                neighbors_received[r[0]] = int(r[1]) if r[1] != '' else 0
+                neighbors_accepted[r[0]] = int(r[1]) if r[1] != '' else 0
 
-        return neighbors_received
+        return neighbors_accepted

@@ -258,12 +258,12 @@ class Container(object):
         ## if we ccall this before the daemon starts we will not get output
         
         tester_count, neighbors_checked = self.get_test_counts()
-        neighbors_received = self.get_neighbors_received()
+        neighbors_accepted = self.get_neighbors_accepted()
 
-        for n in neighbors_received.keys():
+        for n in neighbors_accepted.keys():
 
             #this will include the monitor, we don't want to check that
-            if n in tester_count and neighbors_received[n] >= tester_count[n]: 
+            if n in tester_count and neighbors_accepted[n] >= tester_count[n]: 
                 neighbors_checked[n] = True
 
         return neighbors_checked

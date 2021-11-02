@@ -143,16 +143,16 @@ class GoBGPTarget(GoBGP, Target):
         return ret.split(' ')[2].strip('\n')
 
 
-    def get_neighbors_received(self):
-        neighbors_received = {}
+    def get_neighbors_accepted(self):
+        neighbors_accepted = {}
         neighbor_received_output = self.local("/root/gobgp neighbor -j")
         if neighbor_received_output:
             neighbor_received_output = json.loads(neighbor_received_output.decode('utf-8'))
 
         for neighbor in neighbor_received_output:
             if 'afi_safis' in neighbor and 'accepted' in neighbor['afi_safis'][0]['state']:
-                neighbors_received[neighbor['state']['neighbor_address']] = neighbor['afi_safis'][0]['state']['accepted']
-        return neighbors_received
+                neighbors_accepted[neighbor['state']['neighbor_address']] = neighbor['afi_safis'][0]['state']['accepted']
+        return neighbors_accepted
 
 ## Caveats
 #   I don't think accepting policy is configured correctly. it 

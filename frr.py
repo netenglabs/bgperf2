@@ -116,7 +116,11 @@ no bgp ebgp-requires-policy
              'mv /etc/frr /etc/frr.old',
              'mkdir /etc/frr',
              'cp {guest_dir}/{config_file_name} /etc/frr/{config_file_name} && chown frr:frr /etc/frr/{config_file_name}',
-             '/usr/lib/frr/bgpd -u frr -f /etc/frr/{config_file_name} -Z > {guest_dir}/bgpd.log 2>&1']
+             '/usr/lib/frr/bgpd -u frr -f /etc/frr/{config_file_name} -Z > {guest_dir}/bgpd.log 2>&1 &',
+             #'cd /root/config',   
+             #'perf record -F 99 -p 17 -g -- sleep 1300 > perf.out',
+             #'perf script > /root/config/out.perf',
+             ]
         ).format(
             guest_dir=self.guest_dir,
             config_file_name=self.CONFIG_FILE_NAME)
@@ -128,14 +132,14 @@ no bgp ebgp-requires-policy
         ret = super().exec_version_cmd()
         return ret.split('\n')[0]
     
-    def get_neighbors_received(self):
-        neighbors_received = {}
+    def get_neighbors_accepted(self):
+        neighbors_accepted = {}
         neighbor_received_output = self.local("vtysh -c 'sh ip bgp summary json'")
         if neighbor_received_output:
             neighbor_received_output = json.loads(neighbor_received_output.decode('utf-8'))
 
         for n in neighbor_received_output['ipv4Unicast']['peers'].keys():
             rcd = neighbor_received_output['ipv4Unicast']['peers'][n]['pfxRcd'] 
-            neighbors_received[n] = rcd
-        return neighbors_received
+            neighbors_accepted[n] = rcd
+        return neighbors_accepted
 

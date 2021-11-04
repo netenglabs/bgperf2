@@ -149,13 +149,15 @@ def remove_old_containers():
         print('removing monitor container', Monitor.CONTAINER_NAME)
         dckr.remove_container(Monitor.CONTAINER_NAME, force=True)
 
-    for ctn_name in get_ctn_names():
+    for i, ctn_name in enumerate (get_ctn_names()):
         if ctn_name.startswith(ExaBGPTester.CONTAINER_NAME_PREFIX) or \
             ctn_name.startswith(ExaBGPMrtTester.CONTAINER_NAME_PREFIX) or \
             ctn_name.startswith(GoBGPMRTTester.CONTAINER_NAME_PREFIX) or \
             ctn_name.startswith(Bgpdump2Tester.CONTAINER_NAME_PREFIX) or \
             ctn_name.startswith(BIRDTester.CONTAINER_NAME_PREFIX):
-            print('removing tester container', ctn_name)
+            print(f"removing tester container i {ctn_name}")
+            if i > 0:
+                rm_line()
             dckr.remove_container(ctn_name, force=True)
 
 
@@ -299,6 +301,8 @@ def bench(args):
                 print('run tester', name, 'type', tester_type)
             else:
                 print('run tester', name, 'type', tester_type, mrt_injector)
+            if idx > 0:
+                rm_line()
             t.run(conf['target'], dckr_net_name)
             testers.append(t)
 
@@ -480,6 +484,7 @@ def bench(args):
     output_stats['required'] = conf['monitor']['check-points'][0]
     bench_stats = []
     neighbors_checked = 0
+    neighbors_received_full = 0
     percent_idle = 0
     mem_free = 0
 
@@ -495,11 +500,18 @@ def bench(args):
 
         if not is_remote and info['who'] == target.name:
             if 'neighbors_checked' in info:
-                if all(value == True for value in info['neighbors_checked'].values()):    
+                if len(info['neighbors_checked']) > 0 and all(value == True for value in info['neighbors_checked'].values()):    
                     neighbors_checked = sum(1 if value == True else 0 for value in info['neighbors_checked'].values())
                     neighbors_checkpoint = True
                 else:
                     neighbors_checked = sum(1 if value == True else 0 for value in info['neighbors_checked'].values())
+            elif 'neighbors_received_full' in info:
+                
+                if len(info['neighbors_received_full']) > 1 and all(value == True for value in info['neighbors_received_full'].values()):    
+                    neighbors_received_full = sum(1 if value == True else 0 for value in info['neighbors_received_full'].values())
+                    neighbors_checkpoint = True
+                else:
+                    neighbors_received_full = sum(1 if value == True else 0 for value in info['neighbors_received_full'].values())
             else:
                 cpu = info['cpu']
                 mem = info['mem']
@@ -548,8 +560,8 @@ def bench(args):
             if elapsed.seconds > 0:
                 rm_line()
 
-            print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, mon recved: {3}, neighbors: {4}, %idle {5}, free mem {6}'.format(elapsed.seconds, 
-                    cpu, mem_human(mem), recved, neighbors_checked, percent_idle, mem_human(mem_free)))
+            print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, mon recved: {3}, neighbors_received: {4}, neighbors_accepted: {5}, %idle {6}, free mem {7}'.format(elapsed.seconds, 
+                    cpu, mem_human(mem), recved, neighbors_received_full, neighbors_checked, percent_idle, mem_human(mem_free)))
             bench_stats.append([elapsed.seconds, float(f"{cpu:>4.2f}"), mem, recved, neighbors_checked, percent_idle, mem_free])
             f.write('{0}, {1}, {2}, {3}\n'.format(elapsed.seconds, cpu, mem, recved)) if f else None
             f.flush() if f else None
@@ -557,7 +569,7 @@ def bench(args):
             if recved > 0 and output_stats['first_received_time'] == start - start:
                 output_stats['first_received_time'] = elapsed
 
-            if recved_checkpoint and neighbors_checkpoint:
+            if neighbors_checkpoint and (recved_checkpoint or last_recved_count ==5):
                 output_stats['recved']= recved       
                 output_stats['tester_errors'] = tester_class.find_errors() 
                 output_stats['tester_timeouts'] = tester_class.find_timeouts() 
@@ -741,7 +753,7 @@ def batch(args):
                     for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
                                     'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
                                     'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
-                                    'tester_type']:
+                                    'tester_type', 'filter_test']:
                         setattr(a, field, t[field]) if field in t else setattr(a, field, None)
 
                     for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
@@ -837,7 +849,8 @@ def gen_conf(args):
         conf['target']['config_path'] = args.target_config_file
     
     if filter_test:
-        conf['target']['filter-test'] = filter_test
+        conf['target']['filter_test'] = filter_test
+        print(f"FILTERING: {filter_test}")
 
     conf['monitor'] = {
         'as': 1001,
@@ -856,7 +869,7 @@ def gen_conf(args):
 
     if mrt_injector == 'gobgp': #gobgp doesn't send everything with mrt
         conf['monitor']['check-points'][0] = int(conf['monitor']['check-points'][0] * 0.93)
-    elif args.target == 'bird': # bird seems to reject severalhandfuls of routes
+    else: #args.target == 'bird': # bird seems to reject severalhandfuls of routes
         conf['monitor']['check-points'][0] = int(conf['monitor']['check-points'][0] * 0.99)
 
     it = netaddr.iter_iprange('90.0.0.0', '100.0.0.0')
@@ -1017,7 +1030,7 @@ def create_args_parser(main=True):
                                  'local prefix given in --local-address-prefix')
         parser.add_argument('--monitor-router-id', type=str,
                             help='monitor\' router ID; default: same as --monitor-local-address')
-        parser.add_argument('--filter-test', choices=['transit', 'ixp'], default=None)
+        parser.add_argument('--filter_test', choices=['transit', 'ixp'], default=None)
 
     parser_bench = s.add_parser('bench', help='run benchmarks')
     parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp', 'flock'], default='gobgp')

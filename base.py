@@ -205,15 +205,14 @@ class Container(object):
             while True:
                 if self.stop_monitoring:
                     return
-                neighbors_checked = self.get_neighbor_received_routes()
+                neighbors_received_full, neighbors_checked = self.get_neighbor_received_routes()
                 queue.put({'who': self.name, 'neighbors_checked': neighbors_checked})
+                queue.put({'who': self.name, 'neighbors_received_full': neighbors_received_full})
                 time.sleep(1)
 
         t = Thread(target=stats)
         t.daemon = True
         t.start()
-
-        
 
     def local(self, cmd, stream=False, detach=False, stderr=False):
         i = dckr.exec_create(container=self.name, cmd=cmd, stderr=stderr)
@@ -258,15 +257,22 @@ class Container(object):
         ## if we ccall this before the daemon starts we will not get output
         
         tester_count, neighbors_checked = self.get_test_counts()
-        neighbors_accepted = self.get_neighbors_accepted()
-
+        neighbors_received_full = neighbors_checked.copy()
+        neighbors_received, neighbors_accepted = self.get_neighbors_state()
         for n in neighbors_accepted.keys():
 
             #this will include the monitor, we don't want to check that
             if n in tester_count and neighbors_accepted[n] >= tester_count[n]: 
                 neighbors_checked[n] = True
 
-        return neighbors_checked
+        
+        for n in neighbors_received.keys():
+
+            #this will include the monitor, we don't want to check that
+            if n in tester_count and neighbors_received[n] >= tester_count[n]: 
+                neighbors_received_full[n] = True
+
+        return neighbors_received_full, neighbors_checked 
 
 class Target(Container):
 

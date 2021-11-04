@@ -60,13 +60,16 @@ no bgp ebgp-requires-policy
         def gen_address_family_neighbor(n):
             local_addr = n['local-address']
             c = "    neighbor {0} activate\n".format(local_addr)
-
+            c +="    neighbor {0} soft-reconfiguration inbound\n".format(local_addr)
+            if 'filter_test' in self.conf:
+                c +="    neighbor {0} route-map {1} in\n".format(local_addr, self.conf['filter_test'])
             return c
 
         neighbors = list(flatten(list(t.get('neighbors', {}).values()) for t in self.scenario_global_conf['testers'])) + [self.scenario_global_conf['monitor']]
         
         with open('{0}/{1}'.format(self.host_dir, self.CONFIG_FILE_NAME), 'w') as f:
             f.write(config)
+
             for n in neighbors:
                 f.write(gen_neighbor_config(n))
 
@@ -109,6 +112,17 @@ no bgp ebgp-requires-policy
 
                     seq += 10
 
+            if 'filter_test' in self.conf:
+                f.write(self.get_filter_test_config())
+
+            f.write("log stdout debug\n")
+
+    def get_filter_test_config(self): 
+        file = open("filters/frr.conf", mode='r')
+        filters = file.read()
+        file.close
+        return filters
+
     def get_startup_cmd(self):
         return '\n'.join(
             ['#!/bin/bash',
@@ -132,8 +146,9 @@ no bgp ebgp-requires-policy
         ret = super().exec_version_cmd()
         return ret.split('\n')[0]
     
-    def get_neighbors_accepted(self):
+    def get_neighbors_state(self):
         neighbors_accepted = {}
+        neighbors_received = {}
         neighbor_received_output = self.local("vtysh -c 'sh ip bgp summary json'")
         if neighbor_received_output:
             neighbor_received_output = json.loads(neighbor_received_output.decode('utf-8'))
@@ -141,5 +156,5 @@ no bgp ebgp-requires-policy
         for n in neighbor_received_output['ipv4Unicast']['peers'].keys():
             rcd = neighbor_received_output['ipv4Unicast']['peers'][n]['pfxRcd'] 
             neighbors_accepted[n] = rcd
-        return neighbors_accepted
+        return neighbors_received, neighbors_accepted
 

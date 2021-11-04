@@ -74,8 +74,8 @@ export all;
 
         def gen_neighbor_config(n):
             filter = 'all'
-            if 'filter-test' in self.conf:
-                filter = f"filter {self.conf['filter-test']}"
+            if 'filter_test' in self.conf:
+                filter = f"filter {self.conf['filter_test']}"
             return ('''ipv4 table table_{0};
 protocol pipe pipe_{0} {{
     table master4;
@@ -146,7 +146,7 @@ return true;
 
         with open('{0}/{1}'.format(self.host_dir, self.CONFIG_FILE_NAME), 'w') as f:
             f.write(config)
-            if 'filter-test' in self.conf:
+            if 'filter_test' in self.conf:
                 f.write(self.get_filter_test_config())
 
             if 'policy' in self.scenario_global_conf:
@@ -176,8 +176,8 @@ return true;
             
     def get_dynamic_neighbor_config(self):
         filter = 'all'
-        if 'filter-test' in self.conf:
-            filter = f"filter {self.conf['filter-test']}"
+        if 'filter_test' in self.conf:
+            filter = f"filter {self.conf['filter_test']}"
         config = '''protocol bgp everything {{
     local as {};
     neighbor range 10.0.0.0/8 external;
@@ -218,18 +218,21 @@ return true;
         else:
             return ret.strip('\n')
 
-    def get_neighbors_accepted(self):
+    def get_neighbors_state(self):
         neighbors_accepted = {}
+        neighbors_received = {}
         neighbor_received_output = self.local("birdc 'show protocols all'").decode('utf-8')
         
         with open('bird.tfsm') as template:
             fsm = textfsm.TextFSM(template)
             result = fsm.ParseText(neighbor_received_output)
-        
+
         for r in result:
             if r[0] == '' :
                 continue
             else:
-                neighbors_accepted[r[0]] = int(r[1]) if r[1] != '' else 0
-
-        return neighbors_accepted
+                neighbors_accepted[r[0]] = int(r[2]) if r[2] != '' else 0
+                neighbors_received[r[0]] = int(r[1]) if r[1] != '' else 0
+        # print(f"received: {neighbors_received}")
+        # print(f"accepted: {neighbors_accepted}")
+        return neighbors_received, neighbors_accepted

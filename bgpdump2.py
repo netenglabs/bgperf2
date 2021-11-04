@@ -28,6 +28,7 @@ RUN apt update \
 
 RUN git clone https://github.com/rtbrick/bgpdump2.git \
     && cd bgpdump2 \
+    && git checkout timer-refactoring \
     && ./configure \
     && make \
     && mv src/bgpdump2 /usr/local/sbin/
@@ -39,10 +40,6 @@ ENTRYPOINT ["/bin/bash"]
         super(Bgpdump2, cls).build_image(force, tag, nocache)
 
 
-## cheating and just hard coding MRT data for now
-#RUN wget -q http://archive.routeviews.org/bgpdata/2021.08/RIBS/rib.20210801.0000.bz2 \
-#   && bzip2 -d rib.20210801.0000.bz2
-#
 
 class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
     CONTAINER_NAME_PREFIX = 'bgperf_bgpdump2_tester_'

@@ -111,10 +111,10 @@ allow to any
         i= dckr.exec_create(container=self.name, cmd=version, stderr=True)
         return dckr.exec_start(i['Id'], stream=False, detach=False).decode('utf-8').strip('\n')
 
-    def get_neighbors_accepted(self):
+    def get_neighbors_state(self):
         neighbors_accepted = {}
         neighbor_received_output = json.loads(self.local("/usr/local/sbin/bgpctl -j show neighbor").decode('utf-8'))
         for neigh in neighbor_received_output['neighbors']:
             neighbors_accepted[neigh['remote_addr']] = neigh['stats']['prefixes']['received']
     
-        return neighbors_accepted
+        return neighbors_received, neighbors_accepted

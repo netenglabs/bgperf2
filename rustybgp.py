@@ -53,6 +53,16 @@ class RustyBGPTarget(RustyBGP, GoBGPTarget):
         toml_config = toml.dumps(config)
         with open('{0}/{1}'.format(self.host_dir, self.CONFIG_FILE_NAME), 'w') as f:
             f.write(toml_config)
+            if 'filter-test' in self.conf:
+                f.write(self.get_filter_test_config())
+
+    def get_filter_test_config(self):
+        file = open("filters/rustybgpd.conf", mode='r')
+        filters = file.read()
+        filters += "\n[global.apply-policy.config]\n"
+        filters += f"import-policy-list = [\"{self.conf['filter-test']}\"]"
+        file.close
+        return filters
 
     def get_startup_cmd(self):
         return '\n'.join(

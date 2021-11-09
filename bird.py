@@ -233,6 +233,5 @@ return true;
             else:
                 neighbors_accepted[r[0]] = int(r[2]) if r[2] != '' else 0
                 neighbors_received[r[0]] = int(r[1]) if r[1] != '' else 0
-        # print(f"received: {neighbors_received}")
-        # print(f"accepted: {neighbors_accepted}")
+
         return neighbors_received, neighbors_accepted

@@ -269,7 +269,7 @@ class Container(object):
         for n in neighbors_received.keys():
 
             #this will include the monitor, we don't want to check that
-            if n in tester_count and neighbors_received[n] >= tester_count[n]: 
+            if (n in tester_count and neighbors_received[n] >= tester_count[n]) or neighbors_received[n] == True: 
                 neighbors_received_full[n] = True
 
         return neighbors_received_full, neighbors_checked 

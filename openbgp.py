@@ -113,8 +113,21 @@ allow to any
 
     def get_neighbors_state(self):
         neighbors_accepted = {}
+        neighbors_received_full = {}
         neighbor_received_output = json.loads(self.local("/usr/local/sbin/bgpctl -j show neighbor").decode('utf-8'))
         for neigh in neighbor_received_output['neighbors']:
             neighbors_accepted[neigh['remote_addr']] = neigh['stats']['prefixes']['received']
+            neighbors_received_full[neigh['remote_addr']] = False if neigh['stats']['update']['received']['eor'] == 0 else True
     
-        return neighbors_received, neighbors_accepted
+
+        return neighbors_received_full, neighbors_accepted
+
+    # def get_neighbor_received_routes(self):
+    #     # Openbgpd doesn't have a counter to look at to see if all the prefixes have been sent
+    #     # instead but it does have a counter for how often it gets EOR, so we dno't have to compare against anything
+    #     neighbors_received_full, neighbors_checked = super(OpenBGPTarget, self).get_neighbor_received_routes()
+
+    #     assert(len(neighbors_received_full) == len(neighbors_checked))
+
+
+    #     return neighbors_received_full, neighbors_checked

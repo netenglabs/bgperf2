@@ -696,7 +696,7 @@ def create_graph(stats, test_name='total time', stat_index=8, test_file='total_t
             
             if stat[24]:
                  key =f"{key}_{stat[24]}"
-            print(key)
+
             if len(stat) > 23 and stat[22] == 'FAILED':# this means that it failed for some reason
                 data[key].append(0)
             else:

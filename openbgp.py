@@ -121,13 +121,3 @@ allow to any
     
 
         return neighbors_received_full, neighbors_accepted
-
-    # def get_neighbor_received_routes(self):
-    #     # Openbgpd doesn't have a counter to look at to see if all the prefixes have been sent
-    #     # instead but it does have a counter for how often it gets EOR, so we dno't have to compare against anything
-    #     neighbors_received_full, neighbors_checked = super(OpenBGPTarget, self).get_neighbor_received_routes()
-
-    #     assert(len(neighbors_received_full) == len(neighbors_checked))
-
-
-    #     return neighbors_received_full, neighbors_checked

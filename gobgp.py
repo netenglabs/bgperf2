@@ -153,6 +153,7 @@ class GoBGPTarget(GoBGP, Target):
         for neighbor in neighbor_received_output:
             if 'afi_safis' in neighbor and 'accepted' in neighbor['afi_safis'][0]['state']:
                 neighbors_accepted[neighbor['state']['neighbor_address']] = neighbor['afi_safis'][0]['state']['accepted']
+                neighbors_received[neighbor['state']['neighbor_address']] = neighbor['afi_safis'][0]['state']['received']
         return neighbors_received, neighbors_accepted
 
 ## Caveats

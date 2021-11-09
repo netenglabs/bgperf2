@@ -88,9 +88,15 @@ fib-update no
 
             for n in sorted(list(flatten(list(t.get('neighbors', {}).values()) for t in self.scenario_global_conf['testers'])) + [self.scenario_global_conf['monitor']], key=lambda n: n['as']):
                 f.write(gen_neighbor_config(n))
-            f.write('''allow from any
-allow to any
-''')
+            f.write('allow to any\n')
+            
+            if 'filter_test' in self.conf:
+                f.write(self.get_filter_test_config())
+                if self.conf['filter_test'] == 'ixp':
+                    f.write('deny quick from any transit-as {174,701,1299,2914,3257,3320,3356,3491,4134,5511,6453,6461,6762,6830,7018}\n')
+            else:
+                f.write('allow from any\n')
+
             f.flush()
 
     def get_startup_cmd(self):
@@ -121,3 +127,10 @@ allow to any
     
 
         return neighbors_received_full, neighbors_accepted
+
+
+    def get_filter_test_config(self): 
+        file = open("filters/openbgp.conf", mode='r')
+        filters = file.read()
+        file.close
+        return filters

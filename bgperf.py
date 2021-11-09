@@ -155,7 +155,7 @@ def remove_old_containers():
             ctn_name.startswith(GoBGPMRTTester.CONTAINER_NAME_PREFIX) or \
             ctn_name.startswith(Bgpdump2Tester.CONTAINER_NAME_PREFIX) or \
             ctn_name.startswith(BIRDTester.CONTAINER_NAME_PREFIX):
-            print(f"removing tester container i {ctn_name}")
+            print(f"removing tester container {i} {ctn_name}")
             if i > 0:
                 rm_line()
             dckr.remove_container(ctn_name, force=True)
@@ -569,7 +569,7 @@ def bench(args):
             if recved > 0 and output_stats['first_received_time'] == start - start:
                 output_stats['first_received_time'] = elapsed
 
-            if neighbors_checkpoint and (recved_checkpoint or last_recved_count ==5):
+            if neighbors_checkpoint and (recved_checkpoint or last_recved_count >=5):
                 output_stats['recved']= recved       
                 output_stats['tester_errors'] = tester_class.find_errors() 
                 output_stats['tester_timeouts'] = tester_class.find_timeouts() 
@@ -636,7 +636,7 @@ def print_final_stats(args, target_version, stats):
     print()
 
 def stats_header():
-    return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date,cores,Mem (GB), tester errors, failed, MSG")
+    return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date,cores,Mem (GB), tester errors, failed, MSG, filters")
 
 
 def create_output_stats(args, target_version, stats, fail=False):
@@ -654,14 +654,9 @@ def create_output_stats(args, target_version, stats, fail=False):
     out.extend ([round(stats['min_idle']), float(format(stats['min_free']/1024/1024/1024, ".3f"))])
     out.extend(['-s' if args.single_table else '', d, str(stats['cores']), mem_human(stats['memory'])])
     out.extend([stats['tester_errors'],stats['tester_timeouts']])
-    if fail:
-        out.extend(['FAILED'])
-    else:
-        out.extend([''])
-    if 'fail_msg' in stats:
-        out.extend([stats['fail_msg']])
-    else:
-        out.extend([''])
+    out.extend(['FAILED']) if fail else out.extend([''])
+    out.extend([stats['fail_msg']]) if 'fail_msg' in stats else out.extend([''])
+    out.extend([args.filter_test]) if 'filter_test' in args  and args.filter_test else out.extend([''])
     return out
 
 
@@ -697,11 +692,15 @@ def create_graph(stats, test_name='total time', stat_index=8, test_file='total_t
     try:
         for stat in stats:
             labels[stat[0]] = True
-
+            key = f"{stat[3]}n_{stat[4]}p"
+            
+            if stat[24]:
+                 key =f"{key}_{stat[24]}"
+            print(key)
             if len(stat) > 23 and stat[22] == 'FAILED':# this means that it failed for some reason
-                data[f"{stat[3]}n_{stat[4]}p"].append(0)
+                data[key].append(0)
             else:
-                data[f"{stat[3]}n_{stat[4]}p"].append(float(stat[stat_index]))
+                data[key].append(float(stat[stat_index]))
     except IndexError as e:
         print(e)
         print(f"stat line failed: {stat}")
@@ -739,32 +738,33 @@ def batch(args):
         results = []
         for n in test['neighbors']:
             for p in test['prefixes']:
-                for t in test['targets']:
-                    a = argparse.Namespace(**vars(args))
-                    a.func = bench
-                    a.image = None
-                    a.output = None
-                    a.target = t['name']
+                for filter in test['filter_test']:
+                    for t in test['targets']:
+                        a = argparse.Namespace(**vars(args))
+                        a.func = bench
+                        a.image = None
+                        a.output = None
+                        a.target = t['name']
+                        a.prefix_num = p
+                        a.neighbor_num = n
+                        a.filter_test = filter if filter != 'None' else None
+                        # read any config attribute that was specified in the yaml batch file
+                        a.local_address_prefix = t['local_address_prefix'] if 'local_address_prefix' in t else '10.10.0.0/16'
+                        for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
+                                        'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
+                                        'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
+                                        'tester_type']:
+                            setattr(a, field, t[field]) if field in t else setattr(a, field, None)
 
-                    a.prefix_num = p
-                    a.neighbor_num = n
-                    # read any config attribute that was specified in the yaml batch file
-                    a.local_address_prefix = t['local_address_prefix'] if 'local_address_prefix' in t else '10.10.0.0/16'
-                    for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
-                                    'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
-                                    'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
-                                    'tester_type', 'filter_test']:
-                        setattr(a, field, t[field]) if field in t else setattr(a, field, None)
+                        for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
+                            setattr(a, field, t[field]) if field in t else setattr(a, field, 0)    
+                        results.append(bench(a))
 
-                    for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
-                        setattr(a, field, t[field]) if field in t else setattr(a, field, 0)    
-                    results.append(bench(a))
-
-                    # update this each time in case something crashes
-                    with open(f"{test['name']}.csv", 'w') as f:
-                        f.write(stats_header() + '\n')
-                        for stat in results:
-                            f.write(','.join(map(str, stat)) + '\n')
+                        # update this each time in case something crashes
+                        with open(f"{test['name']}.csv", 'w') as f:
+                            f.write(stats_header() + '\n')
+                            for stat in results:
+                                f.write(','.join(map(str, stat)) + '\n')
 
         print()
         print(stats_header())
@@ -784,6 +784,7 @@ def create_batch_graphs(results, name):
     create_graph(results, test_name='min idle', stat_index=14, test_file=f"bgperf_{name}_min_idle.png", ylabel="%")
     create_graph(results, test_name='min free mem', stat_index=15, test_file=f"bgperf_{name}_min_free.png", ylabel="GB")
     create_graph(results, test_name='tester errors', stat_index=20, test_file=f"bgperf_{name}_tester_error.png", ylabel="errors")
+    create_graph(results, test_name='prefixes at monitor', stat_index=6, test_file=f"bgperf_{name}_monitor_prefixes.png")
 
 def mem_human(v):
     if v > 1024 * 1024 * 1024:

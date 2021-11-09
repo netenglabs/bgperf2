@@ -15,6 +15,7 @@
 
 from base import *
 import json
+import re
 
 class FRRouting(Container):
     CONTAINER_NAME = None
@@ -115,7 +116,8 @@ no bgp ebgp-requires-policy
             if 'filter_test' in self.conf:
                 f.write(self.get_filter_test_config())
 
-            f.write("log stdout debug\n")
+            # we need log level to debug so that we can find End-of-RIB
+            f.write("log stdout debug\n") 
 
     def get_filter_test_config(self): 
         file = open("filters/frr.conf", mode='r')
@@ -157,4 +159,31 @@ no bgp ebgp-requires-policy
             rcd = neighbor_received_output['ipv4Unicast']['peers'][n]['pfxRcd'] 
             neighbors_accepted[n] = rcd
         return neighbors_received, neighbors_accepted
+
+    def _get_EOR_from_log(self, neighbors):
+        # we are looking at the log files for End-Of-RIB
+        # 2021/11/05 16:34:38 BGP: bgp_update_receive: rcvd End-of-RIB for IPv4 Unicast from 10.10.0.3 in vrf default
+
+        with open(f"{self.host_dir}/bgpd.log") as f:
+            log = f.readlines()
+        EOR = re.compile(f".*rcvd End-of-RIB for IPv4 Unicast from (\d+\.\d+\.\d+\.\d+)")
+        if len(log) > 1:
+            for line in log:
+                m_eor = EOR.match(line)
+                if m_eor:
+                    neighbors[m_eor.groups()[0]] = True
+
+        return neighbors
+
+    def get_neighbor_received_routes(self):
+        # FRR doesn't have a counter to look at to see if all the prefixes have been sent
+        # instead we have to look at the log file and see if End-of-RIB has been sent for the neighbor
+        neighbors_received_full, neighbors_checked = super(FRRoutingTarget, self).get_neighbor_received_routes()
+
+        assert(all(value == False for value in neighbors_received_full.values()))
+        neighbors_received_full = self._get_EOR_from_log(neighbors_received_full)
+
+        assert(len(neighbors_received_full) == len(neighbors_checked))
+
+        return neighbors_received_full, neighbors_checked
 

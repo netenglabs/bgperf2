@@ -28,7 +28,6 @@ RUN apt update \
 
 RUN git clone https://github.com/rtbrick/bgpdump2.git \
     && cd bgpdump2 \
-    && git checkout timer-refactoring \
     && ./configure \
     && make \
     && mv src/bgpdump2 /usr/local/sbin/
@@ -64,6 +63,7 @@ class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
         if len(good_indexes) < 1:
             print(f"No mrt data has {prefix_count} of prefixes to send")
             exit(1)
+        print(f"{len(good_indexes)} peers with more than {prefix_count} prefixes in this MRT data")
         return good_indexes
 
     def get_index_useful_neighbor(self, prefix_count):

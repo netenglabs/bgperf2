@@ -1,8 +1,9 @@
 Value neighbor (\d+\.\d+\.\d+\.\d+)
+Value received (\d+)
 Value accepted (\d+)
 
 Start
   ^\s+BGP state:.*$$ -> Record
   ^.*Pipe -> Record 
   ^\s+Neighbor address:\s+${neighbor}
-  ^\s+Import updates:\s+\S+\s+\S+\s+\S+\s+\S+\s+${accepted}
+  ^\s+Import updates:\s+${received}\s+\S+\s+\S+\s+\S+\s+${accepted}

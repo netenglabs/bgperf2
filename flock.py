@@ -18,7 +18,7 @@ FROM debian:latest
 RUN apt update \
     && apt -y dist-upgrade \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata \
-    && apt-get install -y curl systemd iputils-ping sudo psutils procps\
+    && apt-get install -y curl systemd iputils-ping sudo psutils procps iproute2\
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
 RUN curl 'https://www.flocknetworks.com/?smd_process_download=1&download_id=429' --output flockd_21.0.0_amd64.deb && \
@@ -37,14 +37,17 @@ class FlockTarget(Flock, Target):
         super(FlockTarget, self).__init__(host_dir, conf, image=image)
 
     def write_config(self):
-
         config = {}
         config["system"] = {"api": {"rest": {"bind_ip_addr": "127.0.0.1"}}}
-        config["rib"] = {}
+        config["system"]["api"]["netlink_recv"] = True
+
         config["bgp"] = {}
         config["bgp"]["local"] = {}
         config["bgp"]["local"]["id"] = self.conf['router-id']
         config["bgp"]["local"]["asn"] = self.conf['as']
+        # config["static"] = {"static_routes":[{ "ip_net": "10.10.0.0/16"} ]} # from scenario this is lcal_prefix but don't have access to that here
+        # config["static"]["static_routes"][0]["next_hops"] = [{"intf_name": "eth0"}] #not sure where 10.10.0.1 comes from
+        # config["static"]["static_routes"].append({"ip_net": "10.10.0.3/32", "next_hops": [{ "intf_name": "eth0"}]})
 
 
 
@@ -90,7 +93,7 @@ class FlockTarget(Flock, Target):
             ['#!/bin/bash',
              'ulimit -n 65536',
              'cp {guest_dir}/{config_file_name} /etc/flockd/flockd.json',
-             'RUST_LOG=info FLOCK_LOG=info /usr/sbin/flockd > {guest_dir}/flock.log 2>&1']
+             'RUST_LOG="info,bgp=debug" FLOCK_LOG="info,bgp=debug" /usr/sbin/flockd > {guest_dir}/flock.log 2>&1']
         ).format(
             guest_dir=self.guest_dir,
             config_file_name=self.CONFIG_FILE_NAME,
@@ -111,16 +114,19 @@ class FlockTarget(Flock, Target):
         return neighbor_received_output['neighbor_summary']['recv_converged']
     
     def get_neighbor_received_routes(self):
-        ## if we ccall this before the daemon starts we will not get output
+        ## if we call this before the daemon starts we will not get output
         
         tester_count, neighbors_checked = self.get_test_counts()
-        neighbors_accepted = self.get_neighbors_state()
+        neighbors_accepted = self.get_neighbors_state() - 1 # have to discount the monitor
 
         i = 0
-        for n in neighbors_accepted.keys():
+        for n in neighbors_checked.keys():
+            if i >= neighbors_accepted:
+                break
             neighbors_checked[n] = True
             i += 1
-            if i >= neighbors_accepted:
-                return neighbors_checked
+
+
+        return neighbors_checked, neighbors_checked
 
 

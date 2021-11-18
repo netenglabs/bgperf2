@@ -569,12 +569,22 @@ def bench(args):
             if recved > 0 and output_stats['first_received_time'] == start - start:
                 output_stats['first_received_time'] = elapsed
 
-            if neighbors_checkpoint and (recved_checkpoint or last_recved_count >=5):
+
+            time_for_assurance = 5
+            if neighbors_checkpoint and (recved_checkpoint or last_recved_count >=time_for_assurance):
                 output_stats['recved']= recved       
                 output_stats['tester_errors'] = tester_class.find_errors() 
                 output_stats['tester_timeouts'] = tester_class.find_timeouts() 
+                
                 f.close() if f else None
-                o_s = finish_bench(args, output_stats,bench_stats, bench_start,target, m)  
+    
+                # need to subract the last 5 seconds, it was done by this time, we were just making sure
+                # TODO: recaulate all min/max stats after removing these stats
+                #  should move to always calculating based on bench_stats rather than while counting
+
+                output_stats['elapsed'] = datetime.timedelta(seconds = int(output_stats['elapsed'].seconds) - time_for_assurance)
+
+                o_s = finish_bench(args, output_stats, bench_stats, bench_start,target, m)  
                 return o_s
 
 

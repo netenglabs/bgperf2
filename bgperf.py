@@ -547,7 +547,7 @@ def bench(args):
                     o_s = finish_bench(args, output_stats, bench_stats, bench_start,target, m, fail=True) 
                     return o_s
 
-            elif (recved > 0 or last_neighbors_checked > 0) and recved == last_recved:
+            elif (last_neighbors_checked > 0 or neighbors_received_full > 0) and recved == last_recved:
                 last_recved_count +=1
             else:
                 last_recved = recved
@@ -582,8 +582,8 @@ def bench(args):
                 # TODO: recaulate all min/max stats after removing these stats
                 #  should move to always calculating based on bench_stats rather than while counting
 
-                output_stats['elapsed'] = datetime.timedelta(seconds = int(output_stats['elapsed'].seconds) - time_for_assurance)
-
+                output_stats['elapsed'] = datetime.timedelta(seconds = int(output_stats['elapsed'].seconds) - time_for_assurance + 1)
+                bench_stats = bench_stats[0:len(bench_stats)-time_for_assurance]
                 o_s = finish_bench(args, output_stats, bench_stats, bench_start,target, m)  
                 return o_s
 

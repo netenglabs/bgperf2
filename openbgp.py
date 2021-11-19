@@ -93,6 +93,7 @@ fib-update no
             if 'filter_test' in self.conf:
                 f.write(self.get_filter_test_config())
                 if self.conf['filter_test'] == 'ixp':
+                    f.write("deny quick from any inet prefixlen > 24\n")
                     f.write('deny quick from any transit-as {174,701,1299,2914,3257,3320,3356,3491,4134,5511,6453,6461,6762,6830,7018}\n')
             else:
                 f.write('allow from any\n')

@@ -537,7 +537,7 @@ def bench(args):
                 else:
                     less_last_received = 0
                 if less_last_received >= 10 and (last_recved - recved) / last_recved > .01: 
-                   # breakpoint()
+
                     output_stats['recved'] = recved
                     f.close() if f else None
                     output_stats['fail_msg'] = f"FAILED: dropping received count {recved} neighbors_checked {neighbors_checked}"
@@ -596,7 +596,10 @@ def bench(args):
                 bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
                 create_bench_graphs(bench_stats, prefix=bench_prefix)       
 
-        if last_recved_count >= 600: # Too many of the same counts in a row, not progressing
+            if elapsed.seconds > 60 and recved_checkpoint == 0 and last_recved_count == 0:
+                last_recved_count = 1_000_000 # make it artifically high so things fail quickly
+
+        if last_recved_count >= 600 : # Too many of the same counts in a row, not progressing
             output_stats['recved']= recved          
             f.close() if f else None
             output_stats['fail_msg'] = f"FAILED: stuck received count {recved} neighbors_checked {neighbors_checked}"

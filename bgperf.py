@@ -43,6 +43,7 @@ from frr_compiled import FRRoutingCompiled, FRRoutingCompiledTarget
 from rustybgp import RustyBGP, RustyBGPTarget
 from openbgp import OpenBGP, OpenBGPTarget
 from flock import Flock, FlockTarget
+from srlinux import SRLinux, SRLinuxTarget
 from tester import ExaBGPTester, BIRDTester
 from mrt_tester import GoBGPMRTTester, ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
@@ -93,7 +94,7 @@ def doctor(args):
     else:
         print('... not found. run `bgperf prepare`')
 
-    for name in ['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp', 'flock']:
+    for name in ['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp', 'flock', 'srlinux']:
         print('{0} image'.format(name), end=' ')
         if img_exists('bgperf/{0}'.format(name)):
             print('... ok')
@@ -113,6 +114,7 @@ def prepare(args):
     OpenBGP.build_image(args.force, nocache=args.no_cache)
     FRRoutingCompiled.build_image(args.force, nocache=args.no_cache)
     Bgpdump2.build_image(args.force, nocache=args.no_cache)
+    #don't do anything for srlinux because it's just a download out of bad
 
 
 
@@ -139,7 +141,7 @@ def update(args):
         Bgpdump2.build_image(True, checkout=args.checkout, nocache=args.no_cache)
 
 def remove_target_containers():
-    for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, RustyBGPTarget, OpenBGPTarget, FlockTarget]:
+    for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, RustyBGPTarget, OpenBGPTarget, FlockTarget, SRLinuxTarget]:
         if ctn_exists(target_class.CONTAINER_NAME):
             print('removing target container', target_class.CONTAINER_NAME)
             dckr.remove_container(target_class.CONTAINER_NAME, force=True)
@@ -216,7 +218,7 @@ def bench(args):
         remove_old_containers()
 
         if os.path.exists(config_dir):
-            shutil.rmtree(config_dir)
+            shutil.rmtree(config_dir, ignore_errors=True)
 
     bench_start = time.time()
     if args.file:
@@ -434,6 +436,8 @@ def bench(args):
             target_class = OpenBGPTarget
         elif args.target == 'flock':
             target_class = FlockTarget
+        elif args.target == 'srlinux':
+            target_class = SRLinuxTarget
         else:
             print(f"incorrect target {args.target}")
         print('run', args.target)
@@ -582,8 +586,9 @@ def bench(args):
                 # TODO: recaulate all min/max stats after removing these stats
                 #  should move to always calculating based on bench_stats rather than while counting
 
-                output_stats['elapsed'] = datetime.timedelta(seconds = int(output_stats['elapsed'].seconds) - time_for_assurance + 1)
-                bench_stats = bench_stats[0:len(bench_stats)-time_for_assurance]
+                if last_recved_count >= time_for_assurance:
+                    output_stats['elapsed'] = datetime.timedelta(seconds = int(output_stats['elapsed'].seconds) - time_for_assurance + 1)
+                    bench_stats = bench_stats[0:len(bench_stats)-time_for_assurance]
                 o_s = finish_bench(args, output_stats, bench_stats, bench_start,target, m)  
                 return o_s
 
@@ -596,8 +601,9 @@ def bench(args):
                 bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
                 create_bench_graphs(bench_stats, prefix=bench_prefix)       
 
-            if elapsed.seconds > 60 and recved_checkpoint == 0 and last_recved_count == 0:
+            if elapsed.seconds > 60 and recved_checkpoint == 0 and last_recved_count == 0 and recved == 0:
                 last_recved_count = 1_000_000 # make it artifically high so things fail quickly
+
 
         if last_recved_count >= 600 : # Too many of the same counts in a row, not progressing
             output_stats['recved']= recved          
@@ -1015,7 +1021,7 @@ def create_args_parser(main=True):
 
     parser_update = s.add_parser('update', help='rebuild bgp docker images')
     parser_update.add_argument('image', choices=['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'frr', 'frr_c', 
-                                'rustybgp', 'openbgp', 'flock', 'bgpdump2', 'all'])
+                                'rustybgp', 'openbgp', 'flock',  'bgpdump2', 'all'])
     parser_update.add_argument('-c', '--checkout', default='HEAD')
     parser_update.add_argument('-n', '--no-cache', action='store_true')
     parser_update.set_defaults(func=update)
@@ -1047,7 +1053,7 @@ def create_args_parser(main=True):
         parser.add_argument('--filter_test', choices=['transit', 'ixp'], default=None)
 
     parser_bench = s.add_parser('bench', help='run benchmarks')
-    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp', 'flock'], default='gobgp')
+    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp', 'flock', 'srlinux'], default='gobgp')
     parser_bench.add_argument('-i', '--image', help='specify custom docker image')
     parser_bench.add_argument('--mrt-file', type=str, 
                               help='mrt file, requires absolute path')

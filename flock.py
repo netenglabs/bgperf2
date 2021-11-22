@@ -1,4 +1,3 @@
-
 from base import *
 import json
 
@@ -21,8 +20,8 @@ RUN apt update \
     && apt-get install -y curl systemd iputils-ping sudo psutils procps iproute2\
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
-RUN curl 'https://www.flocknetworks.com/?smd_process_download=1&download_id=429' --output flockd_21.0.0_amd64.deb && \
-    dpkg -i ./flockd_21.0.0_amd64.deb
+RUN curl 'https://www.flocknetworks.com/?smd_process_download=1&download_id=429' --output flockd_21.1.0_amd64.deb && \
+    dpkg -i ./flockd_21.1.0_amd64.deb
 
 '''.format(checkout)
         super(Flock, cls).build_image(force, tag, nocache)
@@ -45,6 +44,7 @@ class FlockTarget(Flock, Target):
         config["bgp"]["local"] = {}
         config["bgp"]["local"]["id"] = self.conf['router-id']
         config["bgp"]["local"]["asn"] = self.conf['as']
+        #config["bgp"]["local"]["router_server"] = True # -- not yet
         # config["static"] = {"static_routes":[{ "ip_net": "10.10.0.0/16"} ]} # from scenario this is lcal_prefix but don't have access to that here
         # config["static"]["static_routes"][0]["next_hops"] = [{"intf_name": "eth0"}] #not sure where 10.10.0.1 comes from
         # config["static"]["static_routes"].append({"ip_net": "10.10.0.3/32", "next_hops": [{ "intf_name": "eth0"}]})
@@ -110,8 +110,7 @@ class FlockTarget(Flock, Target):
     def get_neighbors_state(self):
         neighbors_accepted = {}
         neighbor_received_output = json.loads(self.local("/usr/bin/flockc bgp --host 127.0.0.1 -J").decode('utf-8'))
-
-        return neighbor_received_output['neighbor_summary']['recv_converged']
+        return neighbor_received_output['neighbor_summary']['default']['recv_converged']
     
     def get_neighbor_received_routes(self):
         ## if we call this before the daemon starts we will not get output

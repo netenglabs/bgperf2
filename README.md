@@ -9,7 +9,7 @@ bgperf is a performance measurement tool for BGP implementation.
 * [Benchmark remote target](https://github.com/osrg/bgperf/blob/master/docs/benchmark_remote_target.md)
 * [MRT injection](https://github.com/osrg/bgperf/blob/master/docs/mrt.md)
 
-## Updates
+## Updates from original bgperf
 I've changed bgperf to work with python 3 and work with new versions of all the NOSes. It actually works, the original version that this is a fork of does not work anymore because of newer version of python and each of the routing stacks.
 
  This version no longer compiles EXABGP or FRR, it gets PIP or containers already created. Quagga has been removed since it doesn't seem to be updated anymore.
@@ -163,7 +163,6 @@ There is an included file batch_example.yaml that shows how it works. You can li
 tested in a batch, as well as iterate through prefix count and neighbor count.
 
 
-
 If you use a file that looks like this:
 
 ```YAML
@@ -224,6 +223,9 @@ And some graphs. These are some of the important ones
 
 ## Debugging
 
+
+
+
 If it doesn't seem to be working, try with 1 peer and 1 route (-n1 -p1) and make sure
 that it connecting. If it's just stuck at waiting to connect to the neighbor, then probably the config is wrong and neighbors are not being established between the monitor (gobgp) and the NOS being tested
 
@@ -240,7 +242,7 @@ to clean up any existing docker containers
 ```docker rm `docker ps -aq` ```
 
 
-If you try to change the config, it's a little tricky to debug what's going on since there are so many containers. What bgperf is doing is creating configs and startup scripts in /tmp/bgperf and then copies those to the containers before launching them. It creates three containers: bgperf_exabgp_tester_tester, bgperf_\<target\>_target, and bgperf_monitor. If things aren't working, it's probably because the config for the target is not correct. bgperf puts all the log output in /tmp/bgperf/*.log, but what it doesn't do is capture the output of the startup script.
+If you try to change the config, it's a little tricky to debug what's going on since there are so many containers. What bgperf is doing is creating configs and startup scripts in /tmp/bgperf and then it copies those to the containers before launching them. It creates three containers: bgperf_exabgp_tester_tester, bgperf_\<target\>_target, and bgperf_monitor. If things aren't working, it's probably because the config for the target is not correct. bgperf puts all the log output in /tmp/bgperf/*.log, but what it doesn't do is capture the output of the startup script.
 
 The startup script is in /tmp/bgperf/\<target\>/start.sh and gets copied to the target as /root/config/start.sh.
 

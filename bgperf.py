@@ -574,7 +574,7 @@ def bench(args):
                 output_stats['first_received_time'] = elapsed
 
 
-            time_for_assurance = 5
+            time_for_assurance = 10
             if neighbors_checkpoint and (recved_checkpoint or last_recved_count >=time_for_assurance):
                 output_stats['recved']= recved       
                 output_stats['tester_errors'] = tester_class.find_errors() 
@@ -601,7 +601,7 @@ def bench(args):
                 bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
                 create_bench_graphs(bench_stats, prefix=bench_prefix)       
 
-            if elapsed.seconds > 60 and recved_checkpoint == 0 and last_recved_count == 0 and recved == 0:
+            if elapsed.seconds > 15 and recved_checkpoint == 0 and last_recved_count == 0 and recved == 0:
                 last_recved_count = 1_000_000 # make it artifically high so things fail quickly
 
 

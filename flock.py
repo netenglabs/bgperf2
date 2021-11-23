@@ -44,7 +44,7 @@ class FlockTarget(Flock, Target):
         config["bgp"]["local"] = {}
         config["bgp"]["local"]["id"] = self.conf['router-id']
         config["bgp"]["local"]["asn"] = self.conf['as']
-        #config["bgp"]["local"]["router_server"] = True # -- not yet
+        config["bgp"]["local"]["router_server"] = True # -- not yet
         # config["static"] = {"static_routes":[{ "ip_net": "10.10.0.0/16"} ]} # from scenario this is lcal_prefix but don't have access to that here
         # config["static"]["static_routes"][0]["next_hops"] = [{"intf_name": "eth0"}] #not sure where 10.10.0.1 comes from
         # config["static"]["static_routes"].append({"ip_net": "10.10.0.3/32", "next_hops": [{ "intf_name": "eth0"}]})
@@ -117,7 +117,6 @@ class FlockTarget(Flock, Target):
         
         tester_count, neighbors_checked = self.get_test_counts()
         neighbors_accepted = self.get_neighbors_state() - 1 # have to discount the monitor
-
         i = 0
         for n in neighbors_checked.keys():
             if i >= neighbors_accepted:

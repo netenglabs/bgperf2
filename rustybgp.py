@@ -16,7 +16,7 @@ class RustyBGP(Container):
 
         cls.dockerfile = '''
 
-FROM rust:1.54-bullseye AS rust_builder
+FROM rust:1.56-bullseye AS rust_builder
 RUN rustup component add rustfmt
 RUN git clone https://github.com/osrg/rustybgp.git
 RUN cd rustybgp && cargo build --release && cp target/release/rustybgpd /root

@@ -65,13 +65,14 @@ class EosTarget(Eos, Target):
 
 
     def get_version_cmd(self):
-        return ['Cli', '-c', 'show version']
+        return "Cli -c 'show version|json'"
 
     def exec_version_cmd(self):
         version = self.get_version_cmd()
         i= dckr.exec_create(container=self.name, cmd=version, stderr=True)
         results = json.loads(dckr.exec_start(i['Id'], stream=False, detach=False).decode('utf-8'))
-        return results['version']
+
+        return results['version'].strip('(engineering build)')
 
 
 

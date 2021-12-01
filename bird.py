@@ -25,16 +25,16 @@ class BIRD(Container):
         super(BIRD, self).__init__(name if name is not None else self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
 
     @classmethod
-    def build_image(cls, force=False, tag='bgperf/bird', checkout='HEAD', nocache=False):
+    def build_image(cls, force=False, tag='bgperf/bird', checkout='HEAD', branch='master', nocache=False):
         cls.dockerfile = '''
 FROM ubuntu:latest
 WORKDIR /root
 RUN apt-get update && apt-get install -qy git autoconf libtool gawk make \
 flex bison libncurses-dev libreadline6-dev iproute2
 RUN apt-get install -qy flex
-RUN git clone https://gitlab.labs.nic.cz/labs/bird.git bird
+RUN git config --global http.sslverify false && git clone https://gitlab.nic.cz/labs/bird.git -b {0} bird
 RUN cd bird && git checkout {0} && autoreconf -i && ./configure && make && make install
-'''.format(checkout)
+'''.format(branch)
         super(BIRD, cls).build_image(force, tag, nocache)
 
 

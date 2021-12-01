@@ -60,23 +60,6 @@ class FlockTarget(Flock, Target):
             return config
     
         
-        def gen_prefix_configs(n):
-            pass
-
-        def gen_filter(name, match):
-            pass
-            
-        def gen_prefix_filter(n, match):
-            pass
-
-        def gen_aspath_filter(n, match):
-            pass
-
-        def gen_community_filter(n, match):
-            pass      
-
-        def gen_ext_community_filter(n, match):
-            pass   
 
         config["bgp"]["as"] = []
 

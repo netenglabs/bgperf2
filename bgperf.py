@@ -44,6 +44,7 @@ from rustybgp import RustyBGP, RustyBGPTarget
 from openbgp import OpenBGP, OpenBGPTarget
 from flock import Flock, FlockTarget
 from srlinux import SRLinux, SRLinuxTarget
+from junos import Junos, JunosTarget
 from tester import ExaBGPTester, BIRDTester
 from mrt_tester import GoBGPMRTTester, ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
@@ -114,7 +115,7 @@ def prepare(args):
     OpenBGP.build_image(args.force, nocache=args.no_cache)
     FRRoutingCompiled.build_image(args.force, nocache=args.no_cache)
     Bgpdump2.build_image(args.force, nocache=args.no_cache)
-    #don't do anything for srlinux because it's just a download out of bad
+    #don't do anything for srlinux or junos because it's just a download out of band
 
 
 
@@ -141,7 +142,7 @@ def update(args):
         Bgpdump2.build_image(True, checkout=args.checkout, nocache=args.no_cache)
 
 def remove_target_containers():
-    for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, RustyBGPTarget, OpenBGPTarget, FlockTarget, SRLinuxTarget]:
+    for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, RustyBGPTarget, OpenBGPTarget, FlockTarget, JunosTarget, SRLinuxTarget]:
         if ctn_exists(target_class.CONTAINER_NAME):
             print('removing target container', target_class.CONTAINER_NAME)
             dckr.remove_container(target_class.CONTAINER_NAME, force=True)
@@ -438,6 +439,8 @@ def bench(args):
             target_class = FlockTarget
         elif args.target == 'srlinux':
             target_class = SRLinuxTarget
+        elif args.target == 'junos':
+            target_class = JunosTarget
         else:
             print(f"incorrect target {args.target}")
         print('run', args.target)
@@ -576,6 +579,7 @@ def bench(args):
 
             time_for_assurance = 10
             if neighbors_checkpoint and (recved_checkpoint or last_recved_count >=time_for_assurance):
+                print(f"neighbors checkpoint: {neighbors_checkpoint}, recvd_check {recved_checkpoint}, last_recved_count {last_recved_count}")
                 output_stats['recved']= recved       
                 output_stats['tester_errors'] = tester_class.find_errors() 
                 output_stats['tester_timeouts'] = tester_class.find_timeouts() 
@@ -587,6 +591,7 @@ def bench(args):
                 #  should move to always calculating based on bench_stats rather than while counting
 
                 if last_recved_count >= time_for_assurance:
+                    print(f"last recevied: {last_recved_count}")
                     output_stats['elapsed'] = datetime.timedelta(seconds = int(output_stats['elapsed'].seconds) - time_for_assurance + 1)
                     bench_stats = bench_stats[0:len(bench_stats)-time_for_assurance]
                 o_s = finish_bench(args, output_stats, bench_stats, bench_start,target, m)  
@@ -1053,7 +1058,7 @@ def create_args_parser(main=True):
         parser.add_argument('--filter_test', choices=['transit', 'ixp'], default=None)
 
     parser_bench = s.add_parser('bench', help='run benchmarks')
-    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp', 'flock', 'srlinux'], default='gobgp')
+    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp', 'flock', 'srlinux', 'junos'], default='bird')
     parser_bench.add_argument('-i', '--image', help='specify custom docker image')
     parser_bench.add_argument('--mrt-file', type=str, 
                               help='mrt file, requires absolute path')

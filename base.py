@@ -22,6 +22,8 @@ import netaddr
 import sys
 import time
 import datetime
+from jinja2 import Environment, FileSystemLoader, PackageLoader, StrictUndefined, make_logging_undefined
+
 
 flatten = lambda l: chain.from_iterable(l)
 
@@ -51,6 +53,7 @@ class Container(object):
         self.conf = conf
         self.config_name = None
         self.stop_monitoring = False
+        self.volumes = [self.guest_dir]
         if not os.path.exists(host_dir):
             os.makedirs(host_dir)
             os.chmod(host_dir, 0o777)
@@ -102,9 +105,9 @@ class Container(object):
             dckr.remove_container(self.name, force=True)
 
         host_config = self.get_host_config()
-
-        ctn = dckr.create_container(image=self.image, entrypoint='bash', detach=True, name=self.name,
-                                    stdin_open=True, volumes=[self.guest_dir], host_config=host_config)
+        
+        ctn = dckr.create_container(image=self.image, detach=True, name=self.name,
+                                    stdin_open=True, volumes=self.volumes, host_config=host_config)
         self.ctn_id = ctn['Id']
 
         ipv4_addresses = self.get_ipv4_addresses()
@@ -299,7 +302,12 @@ class Target(Container):
         self.exec_startup_cmd(detach=True)
 
         return ctn
-
+    
+    def get_template(self, data, template_file="junos.j2",):
+        env = Environment(loader=FileSystemLoader(searchpath="./nos_templates"))
+        template = env.get_template(template_file)
+        output = template.render(data=data)
+        return output
 
 class Tester(Container):
 

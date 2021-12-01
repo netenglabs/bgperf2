@@ -1,0 +1,18 @@
+ip routing
+
+!interface Loopback0
+!  ip address {{ data['router-id'] }}/16
+
+interface Management0
+  ip address {{ data['router-id'] }}/16
+
+router bgp {{ data.asn }}
+  router-id {{ data['router-id'] }}
+  bgp advertise-inactive
+  bgp log-neighbor-changes
+  neighbor ebgp-peers peer group
+{% for n in data.neighbors %}
+    neighbor {{ n['router-id'] }} peer group ebgp-peers
+    neighbor {{ n['router-id']}} remote-as {{n.as}}
+{% endfor %}
+!

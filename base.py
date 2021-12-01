@@ -53,6 +53,8 @@ class Container(object):
         self.conf = conf
         self.config_name = None
         self.stop_monitoring = False
+        self.command = None
+        self.environment = None
         self.volumes = [self.guest_dir]
         if not os.path.exists(host_dir):
             os.makedirs(host_dir)
@@ -105,8 +107,9 @@ class Container(object):
             dckr.remove_container(self.name, force=True)
 
         host_config = self.get_host_config()
-        
-        ctn = dckr.create_container(image=self.image, detach=True, name=self.name,
+
+        ctn = dckr.create_container(image=self.image, command=self.command, environment=self.environment,
+                                    detach=True, name=self.name,
                                     stdin_open=True, volumes=self.volumes, host_config=host_config)
         self.ctn_id = ctn['Id']
 
@@ -294,10 +297,12 @@ class Target(Container):
 
     def run(self, scenario_global_conf, dckr_net_name=''):
         self.scenario_global_conf = scenario_global_conf
-        ctn = super(Target, self).run(dckr_net_name)
-
+        # create config before container is created
         if not self.use_existing_config():
             self.write_config()
+
+        ctn = super(Target, self).run(dckr_net_name)
+
 
         self.exec_startup_cmd(detach=True)
 

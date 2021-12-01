@@ -37,10 +37,7 @@ class JunosTarget(Junos, Target):
         super(JunosTarget, self).__init__(host_dir, conf, image=image)
 
 
-        
-
     def write_config(self):
-        #bgp = self.conf['neighbors']
         bgp = {}
         bgp['neighbors'] = []
         bgp['asn'] = self.conf['as']

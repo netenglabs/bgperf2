@@ -45,6 +45,7 @@ from openbgp import OpenBGP, OpenBGPTarget
 from flock import Flock, FlockTarget
 from srlinux import SRLinux, SRLinuxTarget
 from junos import Junos, JunosTarget
+from eos import Eos, EosTarget
 from tester import ExaBGPTester, BIRDTester
 from mrt_tester import GoBGPMRTTester, ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
@@ -115,7 +116,7 @@ def prepare(args):
     OpenBGP.build_image(args.force, nocache=args.no_cache)
     FRRoutingCompiled.build_image(args.force, nocache=args.no_cache)
     Bgpdump2.build_image(args.force, nocache=args.no_cache)
-    #don't do anything for srlinux or junos because it's just a download out of band
+    #don't do anything for srlinux, junos, eos because it's just a download out of band
 
 
 
@@ -136,13 +137,16 @@ def update(args):
         OpenBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'all' or args.image == 'flock':
         Flock.build_image(True, checkout=args.checkout, nocache=args.no_cache)
-    if args.image == 'frr_c':
+    if args.image == 'all' or args.image == 'frr_c':
         FRRoutingCompiled.build_image(True, checkout=args.checkout, nocache=args.no_cache)
+    if args.image == 'eos':
+        Eos.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'bgpdump2':
         Bgpdump2.build_image(True, checkout=args.checkout, nocache=args.no_cache)
 
 def remove_target_containers():
-    for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, RustyBGPTarget, OpenBGPTarget, FlockTarget, JunosTarget, SRLinuxTarget]:
+    for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, 
+        RustyBGPTarget, OpenBGPTarget, FlockTarget, JunosTarget, SRLinuxTarget, EosTarget]:
         if ctn_exists(target_class.CONTAINER_NAME):
             print('removing target container', target_class.CONTAINER_NAME)
             dckr.remove_container(target_class.CONTAINER_NAME, force=True)
@@ -441,6 +445,8 @@ def bench(args):
             target_class = SRLinuxTarget
         elif args.target == 'junos':
             target_class = JunosTarget
+        elif args.target == 'eos':
+            target_class = EosTarget
         else:
             print(f"incorrect target {args.target}")
         print('run', args.target)
@@ -1058,7 +1064,8 @@ def create_args_parser(main=True):
         parser.add_argument('--filter_test', choices=['transit', 'ixp'], default=None)
 
     parser_bench = s.add_parser('bench', help='run benchmarks')
-    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp', 'flock', 'srlinux', 'junos'], default='bird')
+    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 
+                              'openbgp', 'flock', 'srlinux', 'junos', 'eos'], default='bird')
     parser_bench.add_argument('-i', '--image', help='specify custom docker image')
     parser_bench.add_argument('--mrt-file', type=str, 
                               help='mrt file, requires absolute path')

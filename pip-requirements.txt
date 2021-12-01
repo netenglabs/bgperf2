@@ -1,9 +1,11 @@
 docker
+jinja2
 pyyaml
 pyroute2
 nsenter
 netaddr
 mako
+gzip
 six
 packaging
 psutil

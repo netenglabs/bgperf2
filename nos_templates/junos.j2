@@ -1,0 +1,35 @@
+system {
+    processes {
+        routing {
+            bgp {
+                rib-sharding {
+                    number-of-shards 31;
+                }
+                update-threading {
+                    number-of-threads 31;
+                }
+            }
+        }
+    }
+}
+routing-options {
+    router-id {{ data['router-id'] }};
+    autonomous-system {{ data.asn }};
+}
+protocols {
+    bgp {
+        group ebgp-peers {
+            type external;
+            advertise-inactive;
+        {%- for n in data.neighbors -%}
+            neighbor {{ n['router-id'] }} {
+                peer-as {{ n.as }};
+            }
+        {% endfor %}
+        }
+    }
+}
+
+
+
+

@@ -460,6 +460,9 @@ def bench(args):
 
     output_stats['monitor_wait_time'] = m.wait_established(conf['target']['local-address'])
     output_stats['cores'], output_stats['memory'] = get_hardware_info()
+    if target_class == EosTarget:
+        print("Waiting extra 10 seconds for EOS ")
+        time.sleep(10)
 
     start = datetime.datetime.now()
 
@@ -583,7 +586,7 @@ def bench(args):
                 output_stats['first_received_time'] = elapsed
 
 
-            time_for_assurance = 10
+            time_for_assurance = 20
             if neighbors_checkpoint and (recved_checkpoint or last_recved_count >=time_for_assurance):
                 print(f"neighbors checkpoint: {neighbors_checkpoint}, recvd_check {recved_checkpoint}, last_recved_count {last_recved_count}")
                 output_stats['recved']= recved       

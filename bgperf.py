@@ -786,7 +786,7 @@ def batch(args):
                         for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
                                         'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
                                         'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
-                                        'tester_type']:
+                                        'tester_type', 'license_file']:
                             setattr(a, field, t[field]) if field in t else setattr(a, field, None)
 
                         for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:

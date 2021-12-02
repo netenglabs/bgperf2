@@ -5,7 +5,6 @@ pyroute2
 nsenter
 netaddr
 mako
-gzip
 six
 packaging
 psutil
@@ -14,3 +13,4 @@ matplotlib
 numpy
 toml
 textfsm
+

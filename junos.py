@@ -37,7 +37,7 @@ class JunosTarget(Junos, Target):
 
     def __init__(self, host_dir, conf, image='crpd'):
         super(JunosTarget, self).__init__(host_dir, conf, image=image)
-        if not self.conf['license_file']: 
+        if not 'license_file' in self.conf or not self.conf['license_file']: 
             print(f"Junos requires a license file")
             exit(1)
         if not os.path.exists(self.conf['license_file']):
@@ -49,7 +49,9 @@ class JunosTarget(Junos, Target):
         bgp['neighbors'] = []
         bgp['asn'] = self.conf['as']
         bgp['router-id'] = self.conf['router-id']
-        bgp['cores'] = os.cpu_count() // 2 # junper suggests areound half avaible cores
+        # junper suggests areound half avaible cores
+        bgp['cores'] = os.cpu_count() // 2 if os.cpu_count() < 63 else 31
+
         bgp['license'] = self.get_license_key(self.conf['license_file'])
 
         for n in sorted(list(flatten(list(t.get('neighbors', {}).values()) for t in self.scenario_global_conf['testers'])) + 
@@ -62,6 +64,11 @@ class JunosTarget(Junos, Target):
             f.write(config.encode('utf8'))
             f.flush()
 
+    def get_filter_test_config(self): 
+        file = open("filters/junos.conf", mode='r')
+        filters = file.read()
+        file.close
+        return filters
 
     def get_license_key(self, license_file):
         with open(license_file) as f:

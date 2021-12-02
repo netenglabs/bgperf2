@@ -2,6 +2,8 @@ from jinja2.loaders import FileSystemLoader
 from base import *
 import json
 import gzip
+import os
+from shutil import copyfile
 
 
 class Junos(Container):
@@ -35,13 +37,20 @@ class JunosTarget(Junos, Target):
 
     def __init__(self, host_dir, conf, image='crpd'):
         super(JunosTarget, self).__init__(host_dir, conf, image=image)
-
+        if not self.conf['license_file']: 
+            print(f"Junos requires a license file")
+            exit(1)
+        if not os.path.exists(self.conf['license_file']):
+            print(f"license file {self.conf['license_file']} doesen't exist")
+            exit(1)
 
     def write_config(self):
         bgp = {}
         bgp['neighbors'] = []
         bgp['asn'] = self.conf['as']
         bgp['router-id'] = self.conf['router-id']
+        bgp['cores'] = os.cpu_count() // 2 # junper suggests areound half avaible cores
+        bgp['license'] = self.get_license_key(self.conf['license_file'])
 
         for n in sorted(list(flatten(list(t.get('neighbors', {}).values()) for t in self.scenario_global_conf['testers'])) + 
             [self.scenario_global_conf['monitor']], key=lambda n: n['as']):
@@ -54,6 +63,10 @@ class JunosTarget(Junos, Target):
             f.flush()
 
 
+    def get_license_key(self, license_file):
+        with open(license_file) as f:
+            data = f.readlines()[0].strip('\n')
+        return data
 
     def exec_startup_cmd(self, stream=False, detach=False):
         return None

@@ -1,12 +1,20 @@
 system {
+    root-authentication {
+        encrypted-password bgperf; ## SECRET-DATA
+    }
+    license {
+        keys {
+            key "{{ data.license }}";
+        }
+    }
     processes {
         routing {
             bgp {
                 rib-sharding {
-                    number-of-shards 31;
+                    number-of-shards {{ data.cores }};
                 }
                 update-threading {
-                    number-of-threads 31;
+                    number-of-threads {{ data.cores }};
                 }
             }
         }

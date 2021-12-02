@@ -21,7 +21,21 @@ each config to work.
 Caveats: 
 
 I don't know if adding more policy will still work for all targets.
-I haven't tested MRT or remote targets.
+I haven't tested remote targets.
+
+## What it does
+bgperf creates containers of bgp software to be performance tested. It then can run either one off tests "bench" or
+a group of tests "batch". It will create graphs to help you understand what the bgp software is doing as well as to
+compare across batches. 
+
+bgperf has two main ways of producing prefixes for BGP performance testing. The first way uses either BIRD or EXABGP
+to create prefixes and send them. These are pretty lightweight, so it's easy to generate hundreds (or even thousands)
+of neighbors with a small amount (hundreds or thousands) or prefixes. BIRD is generally faster, so it is the default
+but EXABGP is around for some extra testing.
+
+The second way to generate traffic is by playing back MRT files using [bgpdump2](https://github.com/rtbrick/bgpdump2). 
+This is much faster, and is good for playing back internet size tables.  [RouteViews](http://archive.routeviews.org/)
+is a good place to get MRT files to play back.
 
 
 ## Prerequisites
@@ -143,7 +157,7 @@ For a comprehensive list of options, run `python3 ./bgperf.py bench --help`.
 Targets are the container being tested. There are various ways to make target containers. One is to use a 
 container that is already created. This is the easiest. The second is to compile the NOS.
 
-The problem is that over time how containers about put in dockerhub and how the stacks are compiled changes.
+The problem is that over time how containers are put in dockerhub and how the stacks are compiled changes.
 When I originally forked bgperf it hadn't changed in 4 years, so almost none of the containers could be built
 and all of the software had changed how they interat. I'm not sure how best to make bgperf work over time.
 
@@ -153,15 +167,12 @@ that checks FRRouting out of git with the 8.0 tag and builds the container. This
 built when you do bgperf bench.
 
 ## batch
-A new feature called batch lets you run multiple tests, collect all the data, and produces graphs. It's not 
-super robust, if you get any of the expected fields wrong the in the YAML description file it just 
-fails. Also, if you run a test that runs out of physical RAM on your machine, linux OOM killer will just kill the process and you'll lose the data from that experiment.
-
+A new feature called batch lets you run multiple tests, collect all the data, and produces graphs. 
+If you run a test that runs out of physical RAM on your machine, linux OOM killer will just kill the process and you'll lose the data from that experiment.
 
 
 There is an included file batch_example.yaml that shows how it works. You can list the targets that you want
 tested in a batch, as well as iterate through prefix count and neighbor count.
-
 
 If you use a file that looks like this:
 
@@ -171,6 +182,7 @@ tests:
     name: 10K
     neighbors: [10, 30, 50, 100]
     prefixes: [10_000]
+    filter_test: [None]
     targets: 
       -
         name: bird
@@ -221,9 +233,18 @@ And some graphs. These are some of the important ones
 
 ![Memory Usage ](docs/bgperf_10K_max_mem.png)
 
+
+## Testing commercial BGP Stacks
+
+bgperf was originally created to test open source bgp, so for most containers it compiles the software
+and creates a container. For commerical NOSes this doesn't make sense. For those you will need to download
+the container images.
+
+
+
 ## Debugging
 
-
+If you try to change the config, it's a little tricky to debug what's going on since there are so many containers. What bgperf is doing is creating configs and startup scripts in /tmp/bgperf and then it copies those to the containers before launching them. It creates three containers: bgperf_exabgp_tester_tester, bgperf_\<target\>_target, and bgperf_monitor. If things aren't working, it's probably because the config for the target is not correct. bgperf puts all the log output in /tmp/bgperf/*.log, but what it doesn't do is capture the output of the startup script.
 
 
 If it doesn't seem to be working, try with 1 peer and 1 route (-n1 -p1) and make sure
@@ -238,11 +259,8 @@ that's what bgperf is doing. It creates a /root/config/start.sh command and is r
 
 to clean up any existing docker containers
 
-```docker kill `docker ps -q` ```
-```docker rm `docker ps -aq` ```
+```docker kill `docker ps -q`; docker rm `docker ps -aq` ```
 
-
-If you try to change the config, it's a little tricky to debug what's going on since there are so many containers. What bgperf is doing is creating configs and startup scripts in /tmp/bgperf and then it copies those to the containers before launching them. It creates three containers: bgperf_exabgp_tester_tester, bgperf_\<target\>_target, and bgperf_monitor. If things aren't working, it's probably because the config for the target is not correct. bgperf puts all the log output in /tmp/bgperf/*.log, but what it doesn't do is capture the output of the startup script.
 
 The startup script is in /tmp/bgperf/\<target\>/start.sh and gets copied to the target as /root/config/start.sh.
 

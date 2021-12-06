@@ -154,10 +154,10 @@ For a comprehensive list of options, run `python3 ./bgperf.py bench --help`.
 
 ## targets
 
-Targets are the container being tested. There are various ways to make target containers. One is to use a 
-container that is already created. This is the easiest. The second is to compile the NOS.
-
-The problem is that over time how containers are put in dockerhub and how the stacks are compiled changes.
+Targets are the container being tested. bgperf was initially created to create containers of BGP software and 
+and make them testable. However, a challenge is the best way to be able to do this over time. For instance, 
+the instructions for how to build these software stacks has changed over time. So is the best way to keep up 
+to compile the software ourselves or to try to download containers from the open source project themsevles. 
 When I originally forked bgperf it hadn't changed in 4 years, so almost none of the containers could be built
 and all of the software had changed how they interat. I'm not sure how best to make bgperf work over time.
 
@@ -166,10 +166,103 @@ container that is hardcoded to 7.5.1. However, I've also created another target 
 that checks FRRouting out of git with the 8.0 tag and builds the container. This container is not automatically
 built when you do bgperf bench.
 
-## batch
-A new feature called batch lets you run multiple tests, collect all the data, and produces graphs. 
-If you run a test that runs out of physical RAM on your machine, linux OOM killer will just kill the process and you'll lose the data from that experiment.
+### Testing commercial BGP Stacks
 
+bgperf was originally created to test open source bgp software, so for most containers it compiles the software
+and creates a container. For commerical NOSes this doesn't make sense. For those you will need to download
+the container images manually and then use bgperf.
+
+For most of these images, bgperf mounts a local directory (usually in /tmp/bgperf) to the container. These
+commerical stacks then write back data as root, and set the privleges so that a regular user cannot delete these
+files and directories.
+
+bgperf tries to delete /tmp/bgperf every time it runs, but it can't with data from these stacks, so you
+might need to remove them yourself. The other option is to run bgperf as root <shrugs>, that's not a good idea.
+
+```
+sudo rm -rf /tmp/bpgperf
+```
+
+I have setup multi-threaded support by default in both of these. If you want to do uni-threaded performance
+testing you will have to edit config files, which is documented below.
+
+#### EOS
+
+
+[cEOS overview](https://www.arista.com/en/products/software-controlled-container-networking)
+
+
+To download, after getting an account: https://www.arista.com/en/support/software-download. Make sure you get the cEOS64
+image. I didn't the first time, and the results are frustringly slow. After downloading:
+
+``` bash
+$ docker import ../NOS/cEOS64-lab-4.27.0F.tar.xz ceos:latest
+```
+
+Be sure to use this command for importing: if you don't tag the image as ceos:latest then bgperf
+won't be able to find the image.
+
+N.B. EOS takes longer to startup than other BGP software I've tested with bgperf, so don't be alarmed.
+However, if it's taken more than 60 seconds to establish a neighbor, something is wrong and start 
+looking at logs.
+
+EOS has less clear directions on how to setup multithreading and the consequences. I can't find an authoritative doc to point to.
+
+However, if you want to remove multi-threading support, remove this line from nos_templates/eos.j2
+
+```bash
+service routing protocols model multi-agent
+```
+
+
+
+#### Juniper
+
+[Junos cRPD deployment guide](https://www.juniper.net/documentation/us/en/software/crpd/crpd-deployment/index.html)
+
+
+Download the image to your local machine and then run:
+
+``` bash
+$ docker load -i ../NOS/junos-routing-crpd-docker-21.3R1-S1.1.tgz
+$ docker tag crpd:21.3R1-S1.1 crpd:latest
+```
+
+Be sure you tag the image or bgperf cannot find the image and everything will fail.
+
+bgperf mounts the log directory as /tmp/bgperf/junos/logs, however there are a lot there and most of it
+is not relevant. To see if your config worked correctly on startup:
+
+``` bash
+$ docker logs bgperf_junos_target
+ ```
+
+[Deploying BGP RIB Sharding and Update Threading](https://www.juniper.net/documentation/en_US/day-one-books/DO_BGPSharding.pdf) -- while informative it's weird to me that it's 2021 and getting mult-threaded performance requires a 40 page document. How am I not supposed to think that networking is two decades behind everybody else in software? (This isn't just a Juniper problem by any means)
+
+For multithreading, as mentioned above bgperf sets this up by default in nos_tempaltes/junos.j2
+
+``` bash
+processes {
+        routing {
+            bgp {
+                rib-sharding {
+                    number-of-shards {{ data.cores }};
+                }
+                update-threading {
+                    number-of-threads {{ data.cores }};
+                }
+            }
+        }       
+    }
+```
+
+data.cores is set in junos.py and by default it's lahf number of availble cores on the test machine, 
+with a max of 31, since that is the Junos max. If you want to try setting the threads to something different
+you can hard code those values. If you want to see without multi-threading, delete that whole section.
+
+## batch
+A  feature called batch lets you run multiple tests, collect all the data, and produces graphs. 
+If you run a test that runs out of physical RAM on your machine, linux OOM killer will just kill the process and you'll lose the data from that experiment.
 
 There is an included file batch_example.yaml that shows how it works. You can list the targets that you want
 tested in a batch, as well as iterate through prefix count and neighbor count.
@@ -198,7 +291,9 @@ tests:
       -
         name: rustybgp
 ```
+
 You will get output like this:
+
 ```bash
 name, target, version, peers, prefixes per peer, neighbor (s), elapsed (s), prefix received (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)
 bird -s,bird,v2.0.8-59-gf761be6b,10,10000,3,2,0,2,13.9,30,0.015,-s,2021-08-02,32,62.82GB
@@ -233,40 +328,28 @@ And some graphs. These are some of the important ones
 
 ![Memory Usage ](docs/bgperf_10K_max_mem.png)
 
-
-## Testing commercial BGP Stacks
-
-bgperf was originally created to test open source bgp, so for most containers it compiles the software
-and creates a container. For commerical NOSes this doesn't make sense. For those you will need to download
-the container images.
-
-
-
 ## Debugging
 
 If you try to change the config, it's a little tricky to debug what's going on since there are so many containers. What bgperf is doing is creating configs and startup scripts in /tmp/bgperf and then it copies those to the containers before launching them. It creates three containers: bgperf_exabgp_tester_tester, bgperf_\<target\>_target, and bgperf_monitor. If things aren't working, it's probably because the config for the target is not correct. bgperf puts all the log output in /tmp/bgperf/*.log, but what it doesn't do is capture the output of the startup script.
-
 
 If it doesn't seem to be working, try with 1 peer and 1 route (-n1 -p1) and make sure
 that it connecting. If it's just stuck at waiting to connect to the neighbor, then probably the config is wrong and neighbors are not being established between the monitor (gobgp) and the NOS being tested
 
 You'll have to break into gobgp and the test config.
 
-
 if you want to see what is happening when the test containers starts, after the test is over (or you've killed it), run 
-```docker exec bgperf_bird_target /root/config/start.sh```
+```$ docker exec bgperf_bird_target /root/config/start.sh```
 that's what bgperf is doing. It creates a /root/config/start.sh command and is running it, so if you run it manually you can see if that command produces output to help you debug.
 
 to clean up any existing docker containers
 
-```docker kill `docker ps -q`; docker rm `docker ps -aq` ```
-
+```$ docker kill `docker ps -q`; docker rm `docker ps -aq` ```
 
 The startup script is in /tmp/bgperf/\<target\>/start.sh and gets copied to the target as /root/config/start.sh.
 
 In other words, to launch the start.sh and see the output you can run this docker command:
 
-```
+```bash
 $ docker exec bgperf_bird_target /root/config/start.sh
 bird: I found another BIRD running.
 

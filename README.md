@@ -176,8 +176,8 @@ For most of these images, bgperf mounts a local directory (usually in /tmp/bgper
 commerical stacks then write back data as root, and set the privleges so that a regular user cannot delete these
 files and directories.
 
-bgperf tries to delete /tmp/bgperf every time it runs, but it can't with data from these stacks, so you
-might need to remove them yourself. The other option is to run bgperf as root <shrugs>, that's not a good idea.
+bgperf tries to delete /tmp/bgperf before it runs, but it can't with data from these stacks, so you
+might need to remove them yourself. The other option is to run bgperf as root \<shrugs\>, that's not a good idea.
 
 ```
 sudo rm -rf /tmp/bpgperf
@@ -186,11 +186,11 @@ sudo rm -rf /tmp/bpgperf
 I have setup multi-threaded support by default in both of these. If you want to do uni-threaded performance
 testing you will have to edit config files, which is documented below.
 
+**Warning** The license for these stacks prohibits publishing results. Don't publish results.
+
 #### EOS
 
-
 [cEOS overview](https://www.arista.com/en/products/software-controlled-container-networking)
-
 
 To download, after getting an account: https://www.arista.com/en/support/software-download. Make sure you get the cEOS64
 image. I didn't the first time, and the results are frustringly slow. After downloading:
@@ -214,7 +214,8 @@ However, if you want to remove multi-threading support, remove this line from no
 service routing protocols model multi-agent
 ```
 
-
+There is no way to adjust the number of threads being used. For cEOS it appears to be hardcoded
+no matter the hardware that you have.
 
 #### Juniper
 
@@ -256,7 +257,7 @@ processes {
     }
 ```
 
-data.cores is set in junos.py and by default it's lahf number of availble cores on the test machine, 
+data.cores is set in junos.py and by default it's half the number of availble cores on the test machine, 
 with a max of 31, since that is the Junos max. If you want to try setting the threads to something different
 you can hard code those values. If you want to see without multi-threading, delete that whole section.
 

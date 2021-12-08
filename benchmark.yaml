@@ -1,0 +1,44 @@
+# a set of standard tests
+#  to compare outputs a I make changes to bgperf
+tests:
+  -
+     name: baseline-benchmark
+     neighbors: [10]
+     prefixes: [800_000]
+     filter_test: [None, ixp, transit]
+     targets:
+       -
+         name: junos
+         label: junos rs-16
+         tester_type: bgpdump2
+         mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+         license_file: /home/jpietsch/bgperf/NOS/2021Nov_JNX_LICFEAT_CRPD_STANDARD-TRIAL.txt
+       -
+         name: eos
+         label: eos arBGP
+         tester_type: bgpdump2
+         mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+         
+       -
+         name: frr_c
+         label: frr 8
+         tester_type: bgpdump2
+         mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+       -
+         name: bird
+         tester_type: bgpdump2
+         mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+       -
+         name: rustybgp
+         tester_type: bgpdump2
+         mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+
+      # TODO: openbgp doesn't work, complains about rpki
+      #  I have no idea how I broke it
+      #  -
+      #    name: openbgp
+      #    tester_type: bgpdump2
+      #    mrt_file: /home/jpietsch/bgperf/rib.20210801.0000
+         
+         
+         

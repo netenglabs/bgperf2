@@ -17,7 +17,7 @@ system {
                     number-of-threads {{ data.cores }};
                 }
             }
-        }
+        }       
     }
 }
 routing-options {
@@ -32,6 +32,9 @@ protocols {
         {%- for n in data.neighbors -%}
             neighbor {{ n['router-id'] }} {
                 peer-as {{ n.as }};
+        {% if data.filter is defined %}
+                import {{data.filter}} ;
+        {% endif %}
             }
         {% endfor %}
         }

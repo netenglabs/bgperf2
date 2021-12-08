@@ -477,7 +477,7 @@ def bench(args):
 
 
     # want to launch all the neighbors at the same(ish) time
-    # launch them after the test starts because as soon as they start they can send info at lest for mrt
+    # launch them after the test starts because as soon as they start they can send info at least for mrt
     #  does it need to be in a different place for mrt than exabgp?
     for i in range(len(testers)):
         testers[i].launch()
@@ -523,7 +523,7 @@ def bench(args):
                     neighbors_checked = sum(1 if value == True else 0 for value in info['neighbors_checked'].values())
             elif 'neighbors_received_full' in info:
                 
-                if len(info['neighbors_received_full']) > 1 and all(value == True for value in info['neighbors_received_full'].values()):    
+                if len(info['neighbors_received_full']) >= 1 and all(value == True for value in info['neighbors_received_full'].values()):    
                     neighbors_received_full = sum(1 if value == True else 0 for value in info['neighbors_received_full'].values())
                     neighbors_checkpoint = True
                 else:
@@ -582,20 +582,39 @@ def bench(args):
             f.write('{0}, {1}, {2}, {3}\n'.format(elapsed.seconds, cpu, mem, recved)) if f else None
             f.flush() if f else None
 
+            if info['checked']:
+                recved_checkpoint = True
+
             if recved > 0 and output_stats['first_received_time'] == start - start:
                 output_stats['first_received_time'] = elapsed
 
 
+            # we are trying to discover if the tests have finished
+            #  in the ieal world, we'd know how many prefixes were sent and we'd just check for that
+            #  that's how things work when generating with bird or exa, but not with MRT playback or when testing filtering
+            #  with MRT Playback, not all prefixes overlap, so we aren't sure how many there will be.
+            #  for example, each instance might send 800K prefixes, but the total amount of unique prefixes
+            #  might be 867342. We don't want to just stop at 800K, we want to wait a while until things have stablized
+            #  similarly with filtering, we don't know the amount that should be received 
+            #  so we have to wait longer to make sure we've received a stable amount of prefixes
+            #  for all cases we make sure that the target has recevied (but not accepted) as many prefixes as specified
+            #  but in the end we want to wait until the monitor has received a stable number of prefixes
+            
             time_for_assurance = 20
-            if neighbors_checkpoint and (recved_checkpoint or last_recved_count >=time_for_assurance):
-                print(f"neighbors checkpoint: {neighbors_checkpoint}, recvd_check {recved_checkpoint}, last_recved_count {last_recved_count}")
+
+            # make sure it's stable but not wait as long as if we hadn't received 
+            #  at least as many prefixes as specified
+            if recved_checkpoint:
+                time_for_assurance = 5 
+
+            if neighbors_checkpoint and last_recved_count >=time_for_assurance:
                 output_stats['recved']= recved       
                 output_stats['tester_errors'] = tester_class.find_errors() 
                 output_stats['tester_timeouts'] = tester_class.find_timeouts() 
                 
                 f.close() if f else None
     
-                # need to subract the last 5 seconds, it was done by this time, we were just making sure
+                # subract the last time_for_assurance seconds, it was done by this time, we were just making sure
                 # TODO: recaulate all min/max stats after removing these stats
                 #  should move to always calculating based on bench_stats rather than while counting
 
@@ -605,11 +624,6 @@ def bench(args):
                     bench_stats = bench_stats[0:len(bench_stats)-time_for_assurance]
                 o_s = finish_bench(args, output_stats, bench_stats, bench_start,target, m)  
                 return o_s
-
-
-            if info['checked']:
-                recved_checkpoint = True
-
         
             if elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
                 bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
@@ -618,8 +632,10 @@ def bench(args):
             if elapsed.seconds > 15 and recved_checkpoint == 0 and last_recved_count == 0 and recved == 0:
                 last_recved_count = 1_000_000 # make it artifically high so things fail quickly
 
-
-        if last_recved_count >= 600 : # Too many of the same counts in a row, not progressing
+        # Too many of the same counts in a row, not progressing
+        #  using 600 because in high load some stacks take this longer, or longer
+        #  to process and we want to have good assurance it's really stuck
+        if last_recved_count >= 600 : 
             output_stats['recved']= recved          
             f.close() if f else None
             output_stats['fail_msg'] = f"FAILED: stuck received count {recved} neighbors_checked {neighbors_checked}"
@@ -628,7 +644,6 @@ def bench(args):
             print("FAILED")
             o_s = finish_bench(args, output_stats,bench_stats, bench_start,target, m, fail=True)  
             return o_s
-
 
 
 def finish_bench(args, output_stats, bench_stats, bench_start,target, m, fail=False):
@@ -664,6 +679,7 @@ def print_final_stats(args, target_version, stats):
     print(f"Time since first received prefix: {stats['elapsed'].seconds - stats['first_received_time'].seconds}")
 
     print(f"total time: {stats['total_time']:.2f}s")
+    print(f"elasped time: {stats['elapsed'].seconds}s")
     print(f"tester errors: {stats['tester_errors']}")
     print(f"tester timeouts: {stats['tester_timeouts']}")
     print()
@@ -699,7 +715,7 @@ def create_ts_graph(bench_stats, stat_index=1, filename='ts.png', ylabel='%cpu',
     data = np.array(bench_stats)
     plt.plot(data[:,0], data[:,stat_index]/diviser)
     
-    #don't want to see 0 element of data, not and accurate measure of what's happening
+    #don't want to see 0 element of data, not an accurate measure of what's happening
     #plt.xlim([1, len(data)])
     plt.ylabel(ylabel)
     plt.xlabel('elapsed seconds')

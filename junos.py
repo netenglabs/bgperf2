@@ -51,6 +51,8 @@ class JunosTarget(Junos, Target):
         bgp['router-id'] = self.conf['router-id']
         # junper suggests areound half avaible cores
         bgp['cores'] = os.cpu_count() // 2 if os.cpu_count() < 63 else 31
+        if 'filter_test' in self.conf:
+            bgp['filter'] = self.conf['filter_test']
 
         bgp['license'] = self.get_license_key(self.conf['license_file'])
 
@@ -62,6 +64,7 @@ class JunosTarget(Junos, Target):
         # junos expects the config file to be compressed
         with gzip.open('{0}/{1}'.format(self.host_dir, self.CONFIG_FILE_NAME), 'w') as f:
             f.write(config.encode('utf8'))
+            f.write(self.get_filter_test_config().encode('utf8'))
             f.flush()
 
     def get_filter_test_config(self): 

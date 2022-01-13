@@ -1,7 +1,7 @@
-bgperf
+bgperf2
 ========
 
-bgperf is a performance measurement tool for BGP implementation.
+bgperf2 is a performance measurement tool for BGP implementation. This was forked from https://github.com/osrg/bgperf and has been changed significantly. 
 
 * [How to install](#how_to_install)
 * [How to use](#how_to_use)

@@ -1,6 +1,6 @@
 # MRT injection
 
-This feature requires the basic knowledge about how `bgperf` works.
+This feature requires the basic knowledge about how `bgperf2` works.
 Please refer to [this guide](https://github.com/osrg/bgperf/blob/master/docs/how_bgperf_works.md).
 
 `bgperf` supports injecting routes to the target implementation via MRT file.
@@ -12,7 +12,7 @@ To use the feature, you need to create your own `scenario.yaml`.
 Below is an example configuration to enable MRT injection feature.
 
 ```shell
-$ cat /tmp/bgperf/scenario.yaml
+$ cat /tmp/bgperf2/scenario.yaml
 <%
     import netaddr
     from itertools import islice

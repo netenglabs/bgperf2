@@ -109,13 +109,13 @@ ulimit -n 65536
 #> {}/bgpdump2.log 2>&1 
 
     def find_errors():
-        grep1 = Popen(('grep -i error /tmp/bgperf/mrt-injector*/*.log'), shell=True, stdout=PIPE)
+        grep1 = Popen(('grep -i error /tmp/bgperf2/mrt-injector*/*.log'), shell=True, stdout=PIPE)
         errors = check_output(('wc', '-l'), stdin=grep1.stdout)
         grep1.wait()
         return errors.decode('utf-8').strip()
 
     def find_timeouts():
-        grep1 = Popen(('grep -i timeout /tmp/bgperf/mrt-injector*/*.log'), shell=True, stdout=PIPE)
+        grep1 = Popen(('grep -i timeout /tmp/bgperf2/mrt-injector*/*.log'), shell=True, stdout=PIPE)
         timeouts = check_output(('wc', '-l'), stdin=grep1.stdout)
         grep1.wait()
         return timeouts.decode('utf-8').strip()

@@ -9,8 +9,8 @@ By default, `bgperf` stores all configuration files and log files under `/tmp/bg
 Here is what you can see after issuing `bgperf.py bench -n 10`.
 
 ```shell
-$ tree /tmp/bgperf
-/tmp/bgperf
+$ tree /tmp/bgperf2
+/tmp/bgperf2
 ├── gobgp
 │   ├── gobgpd.conf
 │   ├── gobgpd.log
@@ -47,10 +47,10 @@ $ tree /tmp/bgperf
 ```
 
 `scenario.yaml` controls all the configuration of benchmark. You can pass your own scenario by using `-f` option.
-By default, `bgperf` creates it automatically and places it under `/tmp/bgperf` like above. Let's see what's inside `scenario.yaml`.
+By default, `bgperf` creates it automatically and places it under `/tmp/bgperf2` like above. Let's see what's inside `scenario.yaml`.
 
 ```shell
-$ cat /tmp/bgperf/scenario.yaml
+$ cat /tmp/bgperf2/scenario.yaml
 <%
     import netaddr
     from itertools import islice

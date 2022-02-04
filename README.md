@@ -5,9 +5,9 @@ bgperf2 is a performance measurement tool for BGP implementation. This was forke
 
 * [How to install](#how_to_install)
 * [How to use](#how_to_use)
-* [How bgperf2 works](https://github.com/osrg/bgperf/blob/master/docs/how_bgperf_works.md)
-* [Benchmark remote target](https://github.com/osrg/bgperf/blob/master/docs/benchmark_remote_target.md)
-* [MRT injection](https://github.com/osrg/bgperf/blob/master/docs/mrt.md)
+* [How bgperf2 works](https://github.com/netenglabs/bgperf2/blob/master/docs/how_bgperf_works.md)
+* [Benchmark remote target](https://github.com/netenglabs/bgperf2/blob/master/docs/benchmark_remote_target.md)
+* [MRT injection](https://github.com/netenglabs/bgperf2/blob/master/docs/mrt.md)
 
 ## Updates from original bgperf
 I've changed bgperf to work with python 3 and work with new versions of all the NOSes. It actually works, the original version that this is a fork of does not work anymore because of newer version of python and each of the routing stacks.
@@ -180,7 +180,7 @@ bgperf2 tries to delete /tmp/bgperf2 before it runs, but it can't with data from
 might need to remove them yourself. The other option is to run bgperf2 as root \<shrugs\>, that's not a good idea.
 
 ```
-sudo rm -rf /tmp/bpgperf
+sudo rm -rf /tmp/bpgperf2
 ```
 
 I have setup multi-threaded support by default in both of these. If you want to do uni-threaded performance
@@ -231,7 +231,7 @@ $ docker tag crpd:21.3R1-S1.1 crpd:latest
 
 Be sure you tag the image or bgperf2 cannot find the image and everything will fail.
 
-bgperf2 mounts the log directory as /tmp/bgperf/junos/logs, however there are a lot there and most of it
+bgperf2 mounts the log directory as /tmp/bgperf2/junos/logs, however there are a lot there and most of it
 is not relevant. To see if your config worked correctly on startup:
 
 ``` bash
@@ -331,7 +331,7 @@ And some graphs. These are some of the important ones
 
 ## Debugging
 
-If you try to change the config, it's a little tricky to debug what's going on since there are so many containers. What bgperf is doing is creating configs and startup scripts in /tmp/bgperf and then it copies those to the containers before launching them. It creates three containers: bgperf_exabgp_tester_tester, bgperf_\<target\>_target, and bgperf2_monitor. If things aren't working, it's probably because the config for the target is not correct. bgperf2 puts all the log output in /tmp/bgperf/*.log, but what it doesn't do is capture the output of the startup script.
+If you try to change the config, it's a little tricky to debug what's going on since there are so many containers. What bgperf is doing is creating configs and startup scripts in 2 and then it copies those to the containers before launching them. It creates three containers: bgperf_exabgp_tester_tester, bgperf_\<target\>_target, and bgperf2_monitor. If things aren't working, it's probably because the config for the target is not correct. bgperf2 puts all the log output in /tmp/bgperf2/*.log, but what it doesn't do is capture the output of the startup script.
 
 If it doesn't seem to be working, try with 1 peer and 1 route (-n1 -p1) and make sure
 that it connecting. If it's just stuck at waiting to connect to the neighbor, then probably the config is wrong and neighbors are not being established between the monitor (gobgp) and the NOS being tested

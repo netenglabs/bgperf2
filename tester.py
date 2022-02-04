@@ -107,7 +107,7 @@ ulimit -n 65536
         return '\n'.join(startup)
 
     def find_errors():
-        grep1 = Popen(('grep RMT /tmp/bgperf/tester/*.log'), shell=True, stdout=PIPE)
+        grep1 = Popen(('grep RMT /tmp/bgperf2/tester/*.log'), shell=True, stdout=PIPE)
         grep2 = Popen(('grep', '-v', 'NEXT_HOP'), stdin=grep1.stdout, stdout=PIPE)
         errors = check_output(('wc', '-l'), stdin=grep2.stdout)
         grep1.wait()

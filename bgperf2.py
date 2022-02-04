@@ -1040,7 +1040,7 @@ def config(args):
 
 def create_args_parser(main=True):
     parser = ArgumentParser(description='BGP performance measuring tool')
-    parser.add_argument('-b', '--bench-name', default='bgperf')
+    parser.add_argument('-b', '--bench-name', default='bgperf2')
     parser.add_argument('-d', '--dir', default='/tmp')
     s = parser.add_subparsers()
     parser_doctor = s.add_parser('doctor', help='check env')

@@ -5,7 +5,7 @@ bgperf2 is a performance measurement tool for BGP implementation. This was forke
 
 * [How to install](#how_to_install)
 * [How to use](#how_to_use)
-* [How bgperf works](https://github.com/osrg/bgperf/blob/master/docs/how_bgperf_works.md)
+* [How bgperf2 works](https://github.com/osrg/bgperf/blob/master/docs/how_bgperf_works.md)
 * [Benchmark remote target](https://github.com/osrg/bgperf/blob/master/docs/benchmark_remote_target.md)
 * [MRT injection](https://github.com/osrg/bgperf/blob/master/docs/mrt.md)
 
@@ -14,7 +14,7 @@ I've changed bgperf to work with python 3 and work with new versions of all the 
 
  This version no longer compiles EXABGP or FRR, it gets PIP or containers already created. Quagga has been removed since it doesn't seem to be updated anymore.
 
-To get bgperf to work with all the changes in each stack  I've had to change configuration. I 
+To get bgperf2 to work with all the changes in each stack  I've had to change configuration. I 
 don't know if all the features of bgperr still work: I've gotten the simplest version of
 each config to work.
 
@@ -24,11 +24,11 @@ I don't know if adding more policy will still work for all targets.
 I haven't tested remote targets.
 
 ## What it does
-bgperf creates containers of bgp software to be performance tested. It then can run either one off tests "bench" or
+bgperf2 creates containers of bgp software to be performance tested. It then can run either one off tests "bench" or
 a group of tests "batch". It will create graphs to help you understand what the bgp software is doing as well as to
 compare across batches. 
 
-bgperf has two main ways of producing prefixes for BGP performance testing. The first way uses either BIRD or EXABGP
+bgperf2 has two main ways of producing prefixes for BGP performance testing. The first way uses either BIRD or EXABGP
 to create prefixes and send them. These are pretty lightweight, so it's easy to generate hundreds (or even thousands)
 of neighbors with a small amount (hundreds or thousands) or prefixes. BIRD is generally faster, so it is the default
 but EXABGP is around for some extra testing.
@@ -48,10 +48,10 @@ is a good place to get MRT files to play back.
 
 ```bash
 $ git clone https://github.com:jopietsch/bgperf.git
-$ cd bgperf
+$ cd bgperf2
 $ pip3 install -r pip-requirements.txt
-$ ./bgperf.py --help
-usage: bgperf.py [-h] [-b BENCH_NAME] [-d DIR]
+$ ./bgperf2.py --help
+usage: bgperf2.py [-h] [-b BENCH_NAME] [-d DIR]
                  {doctor,prepare,update,bench,config} ...
 
 BGP performance measuring tool
@@ -68,21 +68,21 @@ optional arguments:
   -h, --help            show this help message and exit
   -b BENCH_NAME, --bench-name BENCH_NAME
   -d DIR, --dir DIR
-$ ./bgperf.py prepare
-$ ./bgperf.py doctor
+$ ./bgperf2.py prepare
+$ ./bgperf2.py doctor
 docker version ... ok (1.9.1)
-bgperf image ... ok
+bgperf2 image ... ok
 gobgp image ... ok
 bird image ... ok
 ```
 ## <a name="how_to_use">How to use
 
 Use `bench` command to start benchmark test.
-By default, `bgperf` benchmarks [GoBGP](https://github.com/osrg/gobgp).
-`bgperf` boots 100 BGP test peers each advertises 100 routes to `GoBGP`.
+By default, `bgperf2` benchmarks [GoBGP](https://github.com/osrg/gobgp).
+`bgperf2` boots 100 BGP test peers each advertises 100 routes to `GoBGP`.
 
 ```bash
-$ python3 bgperf.py bench
+$ python3 bgperf2.py bench
 run monitor
 run gobgp
 Waiting 5 seconds for neighbor
@@ -102,13 +102,13 @@ As you might notice, the interesting statistics are shown twice, once in an easy
 in a CSV format to easily copy and paste to do analysis later.
 
 To change a target implementation, use `-t` option.
-Currently, `bgperf` supports [BIRD](http://bird.network.cz/) and [FRRouting](https://frrouting.org/)
+Currently, `bgperf2` supports [BIRD](http://bird.network.cz/) and [FRRouting](https://frrouting.org/)
 (other than GoBGP. There is very intial support for[RustyBGP](https://github.com/osrg/rustybgp), partly
-because RustyBGP doesn't support all policy that BGPerf tries to use for policy testing. If you just want to
+because RustyBGP doesn't support all policy that Bgperf2 tries to use for policy testing. If you just want to
 do routes and neighbors then RustyBGP works.
 
 ```bash
-$ python3 bgperf.py bench -t bird
+$ python3 bgperf2.py bench -t bird
 run monitor
 run bird
 Waiting 4 seconds for neighbor
@@ -134,7 +134,7 @@ To change a load, use following options.
 * `-x` : the number of ext-community-list filter (default 0)
 
 ```bash
-$ python3 bgperf.py bench
+$ python3 bgperf2.py bench
 run monitor
 run gobgp
 Waiting 5 seconds for neighbor
@@ -150,34 +150,34 @@ name, target, version, peers, prefixes per peer, neighbor (s), elapsed (s), pref
 gobgp,gobgp,2.29.0,100,100,5,2,0,2,24.07,554,0.045,,2021-08-02,32,62.82GB
 ```
 
-For a comprehensive list of options, run `python3 ./bgperf.py bench --help`.
+For a comprehensive list of options, run `python3 ./bgperf2.py bench --help`.
 
 ## targets
 
-Targets are the container being tested. bgperf was initially created to create containers of BGP software and 
+Targets are the container being tested. bgperf2 was initially created to create containers of BGP software and 
 and make them testable. However, a challenge is the best way to be able to do this over time. For instance, 
 the instructions for how to build these software stacks has changed over time. So is the best way to keep up 
 to compile the software ourselves or to try to download containers from the open source project themsevles. 
-When I originally forked bgperf it hadn't changed in 4 years, so almost none of the containers could be built
-and all of the software had changed how they interat. I'm not sure how best to make bgperf work over time.
+When I originally forked bgperf2 it hadn't changed in 4 years, so almost none of the containers could be built
+and all of the software had changed how they interat. I'm not sure how best to make bgperf2 work over time.
 
 Right now that is demonstrated most readily with FRR. If you use bench -t FRR it will use a prebuilt FRRouting 
 container that is hardcoded to 7.5.1. However, I've also created another target called frr_c, which is a container
 that checks FRRouting out of git with the 8.0 tag and builds the container. This container is not automatically
-built when you do bgperf bench.
+built when you do bgperf2 bench.
 
 ### Testing commercial BGP Stacks
 
-bgperf was originally created to test open source bgp software, so for most containers it compiles the software
+bgperf2 was originally created to test open source bgp software, so for most containers it compiles the software
 and creates a container. For commerical NOSes this doesn't make sense. For those you will need to download
-the container images manually and then use bgperf.
+the container images manually and then use bgperf2.
 
-For most of these images, bgperf mounts a local directory (usually in /tmp/bgperf) to the container. These
+For most of these images, bgperf2 mounts a local directory (usually in /tmp/bgperf2) to the container. These
 commerical stacks then write back data as root, and set the privleges so that a regular user cannot delete these
 files and directories.
 
-bgperf tries to delete /tmp/bgperf before it runs, but it can't with data from these stacks, so you
-might need to remove them yourself. The other option is to run bgperf as root \<shrugs\>, that's not a good idea.
+bgperf2 tries to delete /tmp/bgperf2 before it runs, but it can't with data from these stacks, so you
+might need to remove them yourself. The other option is to run bgperf2 as root \<shrugs\>, that's not a good idea.
 
 ```
 sudo rm -rf /tmp/bpgperf
@@ -199,10 +199,10 @@ image. I didn't the first time, and the results are frustringly slow. After down
 $ docker import ../NOS/cEOS64-lab-4.27.0F.tar.xz ceos:latest
 ```
 
-Be sure to use this command for importing: if you don't tag the image as ceos:latest then bgperf
+Be sure to use this command for importing: if you don't tag the image as ceos:latest then bgperf2
 won't be able to find the image.
 
-N.B. EOS takes longer to startup than other BGP software I've tested with bgperf, so don't be alarmed.
+N.B. EOS takes longer to startup than other BGP software I've tested with bgperf2, so don't be alarmed.
 However, if it's taken more than 60 seconds to establish a neighbor, something is wrong and start 
 looking at logs.
 
@@ -229,9 +229,9 @@ $ docker load -i ../NOS/junos-routing-crpd-docker-21.3R1-S1.1.tgz
 $ docker tag crpd:21.3R1-S1.1 crpd:latest
 ```
 
-Be sure you tag the image or bgperf cannot find the image and everything will fail.
+Be sure you tag the image or bgperf2 cannot find the image and everything will fail.
 
-bgperf mounts the log directory as /tmp/bgperf/junos/logs, however there are a lot there and most of it
+bgperf2 mounts the log directory as /tmp/bgperf/junos/logs, however there are a lot there and most of it
 is not relevant. To see if your config worked correctly on startup:
 
 ``` bash
@@ -240,7 +240,7 @@ $ docker logs bgperf_junos_target
 
 [Deploying BGP RIB Sharding and Update Threading](https://www.juniper.net/documentation/en_US/day-one-books/DO_BGPSharding.pdf) -- while informative it's weird to me that it's 2021 and getting mult-threaded performance requires a 40 page document. How am I not supposed to think that networking is two decades behind everybody else in software? (This isn't just a Juniper problem by any means)
 
-For multithreading, as mentioned above bgperf sets this up by default in nos_tempaltes/junos.j2
+For multithreading, as mentioned above bgperf2 sets this up by default in nos_tempaltes/junos.j2
 
 ``` bash
 processes {
@@ -331,7 +331,7 @@ And some graphs. These are some of the important ones
 
 ## Debugging
 
-If you try to change the config, it's a little tricky to debug what's going on since there are so many containers. What bgperf is doing is creating configs and startup scripts in /tmp/bgperf and then it copies those to the containers before launching them. It creates three containers: bgperf_exabgp_tester_tester, bgperf_\<target\>_target, and bgperf_monitor. If things aren't working, it's probably because the config for the target is not correct. bgperf puts all the log output in /tmp/bgperf/*.log, but what it doesn't do is capture the output of the startup script.
+If you try to change the config, it's a little tricky to debug what's going on since there are so many containers. What bgperf is doing is creating configs and startup scripts in /tmp/bgperf and then it copies those to the containers before launching them. It creates three containers: bgperf_exabgp_tester_tester, bgperf_\<target\>_target, and bgperf2_monitor. If things aren't working, it's probably because the config for the target is not correct. bgperf2 puts all the log output in /tmp/bgperf/*.log, but what it doesn't do is capture the output of the startup script.
 
 If it doesn't seem to be working, try with 1 peer and 1 route (-n1 -p1) and make sure
 that it connecting. If it's just stuck at waiting to connect to the neighbor, then probably the config is wrong and neighbors are not being established between the monitor (gobgp) and the NOS being tested
@@ -340,7 +340,7 @@ You'll have to break into gobgp and the test config.
 
 if you want to see what is happening when the test containers starts, after the test is over (or you've killed it), run 
 ```$ docker exec bgperf_bird_target /root/config/start.sh```
-that's what bgperf is doing. It creates a /root/config/start.sh command and is running it, so if you run it manually you can see if that command produces output to help you debug.
+that's what bgperf2 is doing. It creates a /root/config/start.sh command and is running it, so if you run it manually you can see if that command produces output to help you debug.
 
 to clean up any existing docker containers
 

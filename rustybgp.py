@@ -16,10 +16,11 @@ class RustyBGP(Container):
 
         cls.dockerfile = '''
 
-FROM rust:1.56-bullseye AS rust_builder
+FROM rust:1-bullseye AS rust_builder
 RUN rustup component add rustfmt
 RUN git clone https://github.com/osrg/rustybgp.git 
-RUN cd rustybgp && cargo build --release && cp target/release/rustybgpd /root
+# I don't know why, but a newer version of futures is required
+RUN cd rustybgp && sed -i "s/0.3.16/0.3.31/g" daemon/Cargo.toml && cargo build --release && cp target/release/rustybgpd /root
 RUN wget https://github.com/osrg/gobgp/releases/download/v2.30.0/gobgp_2.30.0_linux_amd64.tar.gz
 RUN tar xzf gobgp_2.30.0_linux_amd64.tar.gz
 RUN cp gobgp /root

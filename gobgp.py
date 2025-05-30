@@ -28,9 +28,9 @@ class GoBGP(Container):
     @classmethod
     def build_image(cls, force=False, tag='bgperf/gobgp', checkout='HEAD', nocache=False):
         cls.dockerfile = '''
-FROM golang:1.16.6
+FROM golang:latest
 WORKDIR /root
-RUN git clone git://github.com/osrg/gobgp && cd gobgp && go mod download
+RUN git clone https://github.com/osrg/gobgp.git && cd gobgp && go mod download
 RUN cd gobgp && go install ./cmd/gobgpd
 RUN cd gobgp && go install ./cmd/gobgp
 RUN rm -rf /root/gobgp && cp /go/bin/gobgp /root/gobgp

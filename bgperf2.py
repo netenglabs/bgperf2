@@ -111,7 +111,7 @@ def prepare(args):
     ExaBGP_MRTParse.build_image(args.force, nocache=args.no_cache)
     GoBGP.build_image(args.force, nocache=args.no_cache)
     BIRD.build_image(args.force, nocache=args.no_cache)
-    FRRouting.build_image(args.force,  nocache=args.no_cache)
+    #FRRouting.build_image(args.force,  nocache=args.no_cache)
     RustyBGP.build_image(args.force, nocache=args.no_cache)
     OpenBGP.build_image(args.force, nocache=args.no_cache)
     FRRoutingCompiled.build_image(args.force, nocache=args.no_cache)

@@ -13,32 +13,88 @@ class FRRoutingCompiled(Container):
 
     @classmethod
     def build_image(cls, force=False, tag='bgperf/frr_c', checkout='stable/8.0', nocache=False):
-        # copied from https://github.com/FRRouting/frr/blob/master/docker/ubuntu20-ci/Dockerfile
+        # copied from https://github.com/FRRouting/frr/blob/master/docker/ubuntu-ci/Dockerfile
         cls.dockerfile = '''
-FROM ubuntu:20.04
-WORKDIR /root
+ARG UBUNTU_VERSION=22.04
+FROM ubuntu:$UBUNTU_VERSION AS builder
+
 ARG DEBIAN_FRONTEND=noninteractive
 ENV APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=DontWarn
-# Update Ubuntu Software repository
-RUN apt update && \
+
+# Update and install build requirements.
+RUN apt update && apt upgrade -y && \
+   apt-get install -y \
+            autoconf \
+            automake \
+            bison \
+            build-essential \
+            flex \
+            git \
+            install-info \
+            libc-ares-dev \
+            libcap-dev \
+            libelf-dev \
+            libjson-c-dev \
+            libpam0g-dev \
+            libreadline-dev \
+            libsnmp-dev \
+            libsqlite3-dev \
+            lsb-release \
+            libtool \
+            lcov \
+            make \
+            perl \
+            pkg-config \
+            python3-dev \
+            python3-sphinx \
+            screen \
+            texinfo \
+            tmux \
+    && \
     apt-get install -y \
-      git autoconf automake libtool make libreadline-dev texinfo \
-      pkg-config libpam0g-dev libjson-c-dev bison flex python3-pytest \
-      libc-ares-dev python3-dev python-ipaddress python3-sphinx \
-      install-info build-essential libsnmp-dev perl \
-      libcap-dev python2 libelf-dev \
-      sudo gdb curl iputils-ping time \
-      libgrpc++-dev libgrpc-dev protobuf-compiler-grpc \
-      lua5.3 liblua5.3-dev \
-      mininet iproute2 iperf \
-      linux-tools-common linux-tools-generic linux-tools-5.11.0-38-generic && \
-      curl https://bootstrap.pypa.io/pip/2.7/get-pip.py --output /tmp/get-pip.py && \
-      python2 /tmp/get-pip.py && \
-      rm -f  /tmp/get-pip.py && \
-      pip2 install ipaddr && \
-      pip2 install "pytest<5" && \
-      pip2 install "scapy>=2.4.2" && \
-      pip2 install exabgp==3.4.17
+        libprotobuf-c-dev \
+        protobuf-c-compiler \
+    && \
+    apt-get install -y \
+        cmake \
+        libpcre2-dev \
+    && \
+    apt-get install -y \
+        libgrpc-dev \
+        libgrpc++-dev \
+        protobuf-compiler-grpc \
+    && \
+    apt-get install -y \
+        curl \
+        gdb \
+        kmod \
+        iproute2 \
+        iputils-ping \
+        liblua5.3-dev \
+        libssl-dev \
+        lua5.3 \
+        net-tools \
+        python3 \
+        python3-pip \
+        snmp \
+        snmp-mibs-downloader \
+        snmpd \
+        sudo \
+        time \
+        tshark \
+        valgrind \
+        yodl \
+      && \
+    download-mibs && \
+    wget https://raw.githubusercontent.com/FRRouting/frr-mibs/main/iana/IANA-IPPM-METRICS-REGISTRY-MIB -O /usr/share/snmp/mibs/iana/IANA-IPPM-METRICS-REGISTRY-MIB && \
+    wget https://raw.githubusercontent.com/FRRouting/frr-mibs/main/ietf/SNMPv2-PDU -O /usr/share/snmp/mibs/ietf/SNMPv2-PDU && \
+    wget https://raw.githubusercontent.com/FRRouting/frr-mibs/main/ietf/IPATM-IPMC-MIB -O /usr/share/snmp/mibs/ietf/IPATM-IPMC-MIB && \
+    python3 -m pip install wheel && \
+    python3 -m pip install 'protobuf<4' grpcio grpcio-tools && \
+    python3 -m pip install 'pytest>=6.2.4' 'pytest-xdist>=2.3.0' && \
+    python3 -m pip install 'scapy>=2.4.5' && \
+    python3 -m pip install xmltodict && \
+    python3 -m pip install git+https://github.com/Exa-Networks/exabgp@0659057837cd6c6351579e9f0fa47e9fb7de7311
 
 RUN groupadd -r -g 92 frr && \
       groupadd -r -g 85 frrvty && \
@@ -49,48 +105,46 @@ RUN groupadd -r -g 92 frr && \
       echo 'frr ALL = NOPASSWD: ALL' | tee /etc/sudoers.d/frr && \
       mkdir -p /home/frr && chown frr.frr /home/frr
 
-#for libyang 2
-RUN apt-get install -y cmake libpcre2-dev
+# Install FRR built packages
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -s -o /etc/apt/keyrings/frrouting.gpg https://deb.frrouting.org/frr/keys.gpg && \
+    echo deb '[signed-by=/etc/apt/keyrings/frrouting.gpg]' https://deb.frrouting.org/frr \
+        $(lsb_release -s -c) "frr-stable" > /etc/apt/sources.list.d/frr.list && \
+    apt-get update && apt-get install -y librtr-dev libyang2-dev libyang2-tools
+
+RUN git clone https://github.com/FRRouting/frr.git
 
 #USER frr:frr
 
-# build and install libyang2
-RUN cd  && \
-    git clone https://github.com/CESNET/libyang.git && \
-    cd libyang && \
-    git checkout v2.0.0 && \
-    mkdir build; cd build && \
-    cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr \
-          -DCMAKE_BUILD_TYPE:String="Release" .. && \
-    make -j $(nproc) && \
-    sudo make install
+#COPY --chown=frr:frr . /home/frr/frr/
 
-RUN cd && git clone https://github.com/FRRouting/frr.git -b frr-8.0 frr
-
-RUN cd && ls -al && ls -al frr
-
-RUN ls ~/frr/
-
-RUN cd ~/frr && \
+RUN cd frr && \
     ./bootstrap.sh && \
     ./configure \
        --prefix=/usr \
-       --localstatedir=/var/run/frr \
+       --sysconfdir=/etc \
+       --localstatedir=/var \
        --sbindir=/usr/lib/frr \
-       --sysconfdir=/etc/frr \
-       --enable-vtysh \
-       --enable-grpc \
-       --enable-pimd \
+       --enable-gcov \
+       --enable-dev-build \
+       --enable-mgmtd-test-be-client \
+       --enable-rpki \
        --enable-sharpd \
        --enable-multipath=64 \
        --enable-user=frr \
        --enable-group=frr \
+       --enable-config-rollbacks \
+       --enable-grpc \
        --enable-vty-group=frrvty \
        --enable-snmp=agentx \
        --enable-scripting \
-       --with-pkg-extra-version=-bgperf && \
+       --with-pkg-extra-version=-my-manual-build && \
     make -j $(nproc) && \
     sudo make install
+
+RUN cd frr && make check || true
+RUN cp /frr/docker/ubuntu-ci/docker-start /usr/sbin/docker-start && rm -rf /frr
+CMD ["/usr/sbin/docker-start"]
 
 #RUN sudo mkdir /etc/frr && sudo chown frr:frr /etc/frr && \
 #    sudo mkdir -p /root/config && sudo chown frr:frr /root/config

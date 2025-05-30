@@ -1,18 +1,2 @@
-*.py[co]
-*~
-*.egg-info/
-*.swp
-build/
-dist/
-
-GTAGS
-GRTAGS
-GPATH
-GSYMS
-*.log
-.venv/
-.tox/
-.coverage
-covhtml/
-coverage.xml
-nosetests.xml
+# Created by venv; see https://docs.python.org/3/library/venv.html
+*

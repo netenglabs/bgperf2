@@ -13,7 +13,7 @@ class OpenBGP(Container):
     def build_image(cls, force=False, tag='bgperf/openbgp', checkout='', nocache=False):
 
         cls.dockerfile = '''
-FROM pierky/openbgpd:7.1p0
+FROM openbgpd/openbgpd
 
 '''.format(checkout)
         super(OpenBGP, cls).build_image(force, tag, nocache)

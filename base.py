@@ -37,7 +37,7 @@ def ctn_exists(name):
 
 
 def img_exists(name):
-    return name in [ctn['RepoTags'][0].split(':')[0] for ctn in dckr.images() if ctn['RepoTags'] != None]
+    return name in [ctn['RepoTags'][0].split(':')[0] for ctn in dckr.images() if ctn['RepoTags'] != None and len(ctn['RepoTags']) > 0]
 
 
 def rm_line():
@@ -81,9 +81,12 @@ class Container(object):
         f = io.BytesIO(cls.dockerfile.encode('utf-8'))
         if force or not img_exists(tag):
             print('build {0}...'.format(tag))
-            for line in dckr.build(fileobj=f, rm=True, tag=tag, decode=True, nocache=nocache):
+            for line in dckr.build(fileobj=f, rm=False, tag=tag, decode=True, nocache=nocache):
                 if 'stream' in line:
                     print(line['stream'].strip())
+
+                if 'errorDetail' in line:
+                    print(line['errorDetail'])
 
     def get_ipv4_addresses(self):
         if 'local-address' in self.conf:

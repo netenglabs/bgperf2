@@ -77,7 +77,7 @@ class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
 
     def get_index_asns(self):
         index_asns = {}
-        asn = re.compile(f".*peer_table\[(\d+)\].*asn:(\d+).*")
+        asn = re.compile(r".*peer_table\[(\d+)\].*asn:(\d+).*")
         r_table = self.local(f"/usr/local/sbin/bgpdump2 -P /root/mrt_file").decode('utf-8').splitlines()
         for line in r_table:
             m_asn = asn.match(line)

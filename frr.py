@@ -166,7 +166,7 @@ no bgp ebgp-requires-policy
 
         with open(f"{self.host_dir}/bgpd.log") as f:
             log = f.readlines()
-        EOR = re.compile(f".*rcvd End-of-RIB for IPv4 Unicast from (\d+\.\d+\.\d+\.\d+)")
+        EOR = re.compile(r".*rcvd End-of-RIB for IPv4 Unicast from (\d+\.\d+\.\d+\.\d+)")
         if len(log) > 1:
             for line in log:
                 m_eor = EOR.match(line)

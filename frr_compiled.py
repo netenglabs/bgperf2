@@ -14,16 +14,18 @@ class FRRoutingCompiled(Container):
     @classmethod
     def build_image(cls, force=False, tag='bgperf/frr_c', checkout='stable/8.0', nocache=False):
         # copied from https://github.com/FRRouting/frr/blob/master/docker/ubuntu-ci/Dockerfile
+        #  but you have to remove any lines that include # comments
         cls.dockerfile = '''
 ARG UBUNTU_VERSION=22.04
-FROM ubuntu:$UBUNTU_VERSION AS builder
+FROM ubuntu:$UBUNTU_VERSION
 
 ARG DEBIAN_FRONTEND=noninteractive
 ENV APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE=DontWarn
 
 # Update and install build requirements.
+
 RUN apt update && apt upgrade -y && \
-   apt-get install -y \
+    apt-get install -y \
             autoconf \
             automake \
             bison \
@@ -50,6 +52,7 @@ RUN apt update && apt upgrade -y && \
             screen \
             texinfo \
             tmux \
+            iptables \
     && \
     apt-get install -y \
         libprotobuf-c-dev \
@@ -79,6 +82,7 @@ RUN apt update && apt upgrade -y && \
         snmp \
         snmp-mibs-downloader \
         snmpd \
+        ssmping \
         sudo \
         time \
         tshark \
@@ -86,20 +90,23 @@ RUN apt update && apt upgrade -y && \
         yodl \
       && \
     download-mibs && \
-    wget https://raw.githubusercontent.com/FRRouting/frr-mibs/main/iana/IANA-IPPM-METRICS-REGISTRY-MIB -O /usr/share/snmp/mibs/iana/IANA-IPPM-METRICS-REGISTRY-MIB && \
-    wget https://raw.githubusercontent.com/FRRouting/frr-mibs/main/ietf/SNMPv2-PDU -O /usr/share/snmp/mibs/ietf/SNMPv2-PDU && \
-    wget https://raw.githubusercontent.com/FRRouting/frr-mibs/main/ietf/IPATM-IPMC-MIB -O /usr/share/snmp/mibs/ietf/IPATM-IPMC-MIB && \
+    wget --tries=5 --waitretry=10 --retry-connrefused https://raw.githubusercontent.com/FRRouting/frr-mibs/main/iana/IANA-IPPM-METRICS-REGISTRY-MIB -O /usr/share/snmp/mibs/iana/IANA-IPPM-METRICS-REGISTRY-MIB && \
+    wget --tries=5 --waitretry=10 --retry-connrefused https://raw.githubusercontent.com/FRRouting/frr-mibs/main/ietf/SNMPv2-PDU -O /usr/share/snmp/mibs/ietf/SNMPv2-PDU && \
+    wget --tries=5 --waitretry=10 --retry-connrefused https://raw.githubusercontent.com/FRRouting/frr-mibs/main/ietf/IPATM-IPMC-MIB -O /usr/share/snmp/mibs/ietf/IPATM-IPMC-MIB && \
+    rm -f /usr/lib/python3.*/EXTERNALLY-MANAGED && \
     python3 -m pip install wheel && \
-    python3 -m pip install 'protobuf<4' grpcio grpcio-tools && \
+    bash -c "PV=($(pkg-config --modversion protobuf | tr '.' ' ')); if (( PV[0] == 3 && PV[1] < 19 )); then python3 -m pip install 'protobuf<4' grpcio grpcio-tools; else python3 -m pip install 'protobuf>=4' grpcio grpcio-tools; fi" && \
     python3 -m pip install 'pytest>=6.2.4' 'pytest-xdist>=2.3.0' && \
     python3 -m pip install 'scapy>=2.4.5' && \
     python3 -m pip install xmltodict && \
     python3 -m pip install git+https://github.com/Exa-Networks/exabgp@0659057837cd6c6351579e9f0fa47e9fb7de7311
 
+
+ARG UID=1010
 RUN groupadd -r -g 92 frr && \
       groupadd -r -g 85 frrvty && \
       adduser --system --ingroup frr --home /home/frr \
-              --gecos "FRR suite" --shell /bin/bash frr && \
+              --gecos "FRR suite" -u $UID --shell /bin/bash frr && \
       usermod -a -G frrvty frr && \
       useradd -d /var/run/exabgp/ -s /bin/false exabgp && \
       echo 'frr ALL = NOPASSWD: ALL' | tee /etc/sudoers.d/frr && \
@@ -112,13 +119,15 @@ RUN mkdir -p /etc/apt/keyrings && \
         $(lsb_release -s -c) "frr-stable" > /etc/apt/sources.list.d/frr.list && \
     apt-get update && apt-get install -y librtr-dev libyang2-dev libyang2-tools
 
-RUN git clone https://github.com/FRRouting/frr.git
 
-#USER frr:frr
+#USER frr:frr    
+RUN git clone https://github.com/FRRouting/frr.git 
 
-#COPY --chown=frr:frr . /home/frr/frr/
 
-RUN cd frr && \
+
+#COPY --chown=frr:frr ./ /home/frr/frr/
+
+RUN cd /frr && \
     ./bootstrap.sh && \
     ./configure \
        --prefix=/usr \
@@ -126,27 +135,37 @@ RUN cd frr && \
        --localstatedir=/var \
        --sbindir=/usr/lib/frr \
        --enable-gcov \
-       --enable-dev-build \
-       --enable-mgmtd-test-be-client \
        --enable-rpki \
-       --enable-sharpd \
-       --enable-multipath=64 \
+       --enable-multipath=256 \
        --enable-user=frr \
        --enable-group=frr \
-       --enable-config-rollbacks \
-       --enable-grpc \
        --enable-vty-group=frrvty \
        --enable-snmp=agentx \
        --enable-scripting \
+       --enable-configfile-mask=0640 \
+       --enable-logfile-mask=0640 \
        --with-pkg-extra-version=-my-manual-build && \
     make -j $(nproc) && \
     sudo make install
 
-RUN cd frr && make check || true
+RUN cd /frr && make check || true
+
 RUN cp /frr/docker/ubuntu-ci/docker-start /usr/sbin/docker-start && rm -rf /frr
+
 CMD ["/usr/sbin/docker-start"]
 
-#RUN sudo mkdir /etc/frr && sudo chown frr:frr /etc/frr && \
+RUN sudo install -m 755 -o frr -g frr -d /var/log/frr && \
+    sudo install -m 755 -o frr -g frr -d /var/opt/frr && \
+    sudo install -m 775 -o frr -g frrvty -d /etc/frr && \
+    sudo install -m 640 -o frr -g frr /dev/null /etc/frr/zebra.conf &&  \
+    sudo install -m 640 -o frr -g frr /dev/null /etc/frr/bgpd.conf && \
+    sudo install -m 640 -o frr -g frrvty /dev/null /etc/frr/vtysh.conf && \
+    sudo install -m 755 -o frr -g frr -d /var/lib/frr && \
+    sudo install -m 755 -o frr -g frr -d /var/etc/frr && \
+    sudo install -m 755 -o frr -g frr -d /var/run/frr
+
+#RUN sudo mkdir /etc/frr /var/lib/frr /var/run/frr /frr
+#    sudo chown frr:frr /etc/frr /var/lib/frr /var/run/frr
 #    sudo mkdir -p /root/config && sudo chown frr:frr /root/config
 
 '''.format(checkout)

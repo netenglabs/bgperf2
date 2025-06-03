@@ -121,13 +121,13 @@ RUN mkdir -p /etc/apt/keyrings && \
 
 
 #USER frr:frr    
-RUN git clone https://github.com/FRRouting/frr.git 
+RUN cd ~/ && git clone https://github.com/FRRouting/frr.git 
 
 
 
 #COPY --chown=frr:frr ./ /home/frr/frr/
 
-RUN cd /frr && \
+RUN cd ~/frr && \
     ./bootstrap.sh && \
     ./configure \
        --prefix=/usr \
@@ -148,9 +148,9 @@ RUN cd /frr && \
     make -j $(nproc) && \
     sudo make install
 
-RUN cd /frr && make check || true
+RUN cd ~/frr && make check || true
 
-RUN cp /frr/docker/ubuntu-ci/docker-start /usr/sbin/docker-start && rm -rf /frr
+RUN sudo cp ~/frr/docker/ubuntu-ci/docker-start /usr/sbin/docker-start && rm -rf ~/frr
 
 CMD ["/usr/sbin/docker-start"]
 
@@ -163,6 +163,7 @@ RUN sudo install -m 755 -o frr -g frr -d /var/log/frr && \
     sudo install -m 755 -o frr -g frr -d /var/lib/frr && \
     sudo install -m 755 -o frr -g frr -d /var/etc/frr && \
     sudo install -m 755 -o frr -g frr -d /var/run/frr
+
 
 #RUN sudo mkdir /etc/frr /var/lib/frr /var/run/frr /frr
 #    sudo chown frr:frr /etc/frr /var/lib/frr /var/run/frr

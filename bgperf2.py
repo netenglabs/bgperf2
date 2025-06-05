@@ -1085,7 +1085,7 @@ def create_args_parser(main=True):
         parser.add_argument('--filter_test', choices=['transit', 'ixp'], default=None)
 
     parser_bench = s.add_parser('bench', help='run benchmarks')
-    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 
+    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird',  'frr_c', 'rustybgp', 
                               'openbgp', 'flock', 'srlinux', 'junos', 'eos'], default='bird')
     parser_bench.add_argument('-i', '--image', help='specify custom docker image')
     parser_bench.add_argument('--mrt-file', type=str, 

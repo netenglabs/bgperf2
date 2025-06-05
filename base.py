@@ -187,6 +187,7 @@ class Container(object):
             for stat in dckr.stats(self.ctn_id, decode=True):
                 if self.stop_monitoring:
                     return
+
                 cpu_percentage = 0.0
                 prev_cpu = stat['precpu_stats']['cpu_usage']['total_usage']
                 if 'system_cpu_usage' in stat['precpu_stats']:
@@ -195,9 +196,8 @@ class Container(object):
                     prev_system = 0
                 cpu = stat['cpu_stats']['cpu_usage']['total_usage']
                 system = stat['cpu_stats']['system_cpu_usage'] if 'system_cpu_usage' in stat['cpu_stats'] else 0
-                if not 'percpu_usage' in stat['cpu_stats']['cpu_usage']:
-                    continue
-                cpu_num = len(stat['cpu_stats']['cpu_usage']['percpu_usage'])
+
+                cpu_num = stat['cpu_stats']['online_cpus']
                 cpu_delta = float(cpu) - float(prev_cpu)
                 system_delta = float(system) - float(prev_system)
                 if system_delta > 0.0 and cpu_delta > 0.0:

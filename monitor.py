@@ -63,9 +63,13 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
         i = dckr.exec_create(container=self.name, cmd=cmd)
         return dckr.exec_start(i['Id'], stream=stream)
 
-    def wait_established(self, neighbor):
+    def wait_established(self, neighbor, timeout=600):
         n = 0
         while True:
+            if n > timeout:
+                raise RuntimeError(
+                    'monitor: session with {0} not established after {1} seconds; '
+                    'target is not accepting the monitor peering'.format(neighbor, timeout))
             if n > 0:
                  rm_line()
             print(f"Waiting {n} seconds for monitor")

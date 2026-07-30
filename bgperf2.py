@@ -41,6 +41,7 @@ from bird import BIRD, BIRDTarget
 from frr import FRRouting, FRRoutingTarget
 from frr_compiled import FRRoutingCompiled, FRRoutingCompiledTarget
 from rustybgp import RustyBGP, RustyBGPTarget
+from rustbgpd import RustBGPd, RustBGPdTarget
 from openbgp import OpenBGP, OpenBGPTarget
 from flock import Flock, FlockTarget
 from srlinux import SRLinux, SRLinuxTarget
@@ -96,7 +97,7 @@ def doctor(args):
     else:
         print('... not found. run `bgperf prepare`')
 
-    for name in ['gobgp', 'bird', 'frr_c', 'rustybgp', 'openbgp', 'flock', 'srlinux']:
+    for name in ['gobgp', 'bird', 'frr_c', 'rustybgp', 'rustbgpd', 'openbgp', 'flock', 'srlinux']:
         print('{0} image'.format(name), end=' ')
         if img_exists('bgperf/{0}'.format(name)):
             print('... ok')
@@ -113,6 +114,7 @@ def prepare(args):
     BIRD.build_image(args.force, nocache=args.no_cache)
     #FRRouting.build_image(args.force,  nocache=args.no_cache)
     RustyBGP.build_image(args.force, nocache=args.no_cache)
+    RustBGPd.build_image(args.force, nocache=args.no_cache)
     OpenBGP.build_image(args.force, nocache=args.no_cache)
     FRRoutingCompiled.build_image(args.force, nocache=args.no_cache)
     Bgpdump2.build_image(args.force, nocache=args.no_cache)
@@ -133,6 +135,8 @@ def update(args):
         FRRouting.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'all' or args.image == 'rustybgp':
         RustyBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
+    if args.image == 'all' or args.image == 'rustbgpd':
+        RustBGPd.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'all' or args.image == 'openbgp':
         OpenBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'all' or args.image == 'flock':
@@ -146,7 +150,7 @@ def update(args):
 
 def remove_target_containers():
     for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, 
-        RustyBGPTarget, OpenBGPTarget, FlockTarget, JunosTarget, SRLinuxTarget, EosTarget]:
+        RustyBGPTarget, RustBGPdTarget, OpenBGPTarget, FlockTarget, JunosTarget, SRLinuxTarget, EosTarget]:
         if ctn_exists(target_class.CONTAINER_NAME):
             print('removing target container', target_class.CONTAINER_NAME)
             dckr.remove_container(target_class.CONTAINER_NAME, force=True)
@@ -437,6 +441,8 @@ def bench(args):
             target_class = FRRoutingCompiledTarget
         elif args.target == 'rustybgp':
             target_class = RustyBGPTarget
+        elif args.target == 'rustbgpd':
+            target_class = RustBGPdTarget
         elif args.target == 'openbgp':
             target_class = OpenBGPTarget
         elif args.target == 'flock':
@@ -1066,7 +1072,7 @@ def create_args_parser(main=True):
 
     parser_update = s.add_parser('update', help='rebuild bgp docker images')
     parser_update.add_argument('image', choices=['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'frr', 'frr_c', 
-                                'rustybgp', 'openbgp', 'flock',  'bgpdump2', 'all'])
+                                'rustybgp', 'rustbgpd', 'openbgp', 'flock',  'bgpdump2', 'all'])
     parser_update.add_argument('-c', '--checkout', default='HEAD')
     parser_update.add_argument('-n', '--no-cache', action='store_true')
     parser_update.set_defaults(func=update)
@@ -1098,8 +1104,8 @@ def create_args_parser(main=True):
         parser.add_argument('--filter_test', choices=['transit', 'ixp'], default=None)
 
     parser_bench = s.add_parser('bench', help='run benchmarks')
-    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird',  'frr_c', 'rustybgp', 
-                              'openbgp', 'flock', 'srlinux', 'junos', 'eos'], default='bird')
+    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird',  'frr_c', 'rustybgp',
+                              'rustbgpd', 'openbgp', 'flock', 'srlinux', 'junos', 'eos'], default='bird')
     parser_bench.add_argument('-i', '--image', help='specify custom docker image')
     parser_bench.add_argument('--mrt-file', type=str, 
                               help='mrt file, requires absolute path')

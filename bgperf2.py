@@ -41,6 +41,7 @@ from bird import BIRD, BIRDTarget
 from frr import FRRouting, FRRoutingTarget
 from frr_compiled import FRRoutingCompiled, FRRoutingCompiledTarget
 from rustybgp import RustyBGP, RustyBGPTarget
+from rustbgpd import RustBGPd, RustBGPdTarget
 from openbgp import OpenBGP, OpenBGPTarget
 from flock import Flock, FlockTarget
 from srlinux import SRLinux, SRLinuxTarget
@@ -96,7 +97,7 @@ def doctor(args):
     else:
         print('... not found. run `bgperf prepare`')
 
-    for name in ['gobgp', 'bird', 'frr_c', 'rustybgp', 'openbgp', 'flock', 'srlinux']:
+    for name in ['gobgp', 'bird', 'frr_c', 'rustybgp', 'rustbgpd', 'openbgp', 'flock', 'srlinux']:
         print('{0} image'.format(name), end=' ')
         if img_exists('bgperf/{0}'.format(name)):
             print('... ok')
@@ -113,6 +114,7 @@ def prepare(args):
     BIRD.build_image(args.force, nocache=args.no_cache)
     #FRRouting.build_image(args.force,  nocache=args.no_cache)
     RustyBGP.build_image(args.force, nocache=args.no_cache)
+    RustBGPd.build_image(args.force, nocache=args.no_cache)
     OpenBGP.build_image(args.force, nocache=args.no_cache)
     FRRoutingCompiled.build_image(args.force, nocache=args.no_cache)
     Bgpdump2.build_image(args.force, nocache=args.no_cache)
@@ -133,6 +135,8 @@ def update(args):
         FRRouting.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'all' or args.image == 'rustybgp':
         RustyBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
+    if args.image == 'all' or args.image == 'rustbgpd':
+        RustBGPd.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'all' or args.image == 'openbgp':
         OpenBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'all' or args.image == 'flock':
@@ -146,7 +150,7 @@ def update(args):
 
 def remove_target_containers():
     for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, 
-        RustyBGPTarget, OpenBGPTarget, FlockTarget, JunosTarget, SRLinuxTarget, EosTarget]:
+        RustyBGPTarget, RustBGPdTarget, OpenBGPTarget, FlockTarget, JunosTarget, SRLinuxTarget, EosTarget]:
         if ctn_exists(target_class.CONTAINER_NAME):
             print('removing target container', target_class.CONTAINER_NAME)
             dckr.remove_container(target_class.CONTAINER_NAME, force=True)
@@ -437,6 +441,8 @@ def bench(args):
             target_class = FRRoutingCompiledTarget
         elif args.target == 'rustybgp':
             target_class = RustyBGPTarget
+        elif args.target == 'rustbgpd':
+            target_class = RustBGPdTarget
         elif args.target == 'openbgp':
             target_class = OpenBGPTarget
         elif args.target == 'flock':
@@ -563,7 +569,7 @@ def bench(args):
                     o_s = finish_bench(args, output_stats, bench_stats, bench_start,target, m, fail=True) 
                     return o_s
 
-            elif (last_neighbors_checked > 0 or neighbors_received_full > 0) and recved == last_recved:
+            elif (last_neighbors_checked > 0 or neighbors_received_full > 0 or neighbors_checkpoint) and recved == last_recved:
                 last_recved_count +=1
             else:
                 last_recved = recved
@@ -571,7 +577,13 @@ def bench(args):
 
             if neighbors_checked != last_neighbors_checked:
                 last_neighbors_checked = neighbors_checked
-                last_recved_count = 0
+                # Only reset the stabilization counter if the monitor hasn't
+                # already confirmed convergence.  At high scale the neighbor
+                # query can return after a long block, changing
+                # neighbors_checked and resetting the counter indefinitely,
+                # which hangs the run.
+                if not neighbors_checkpoint:
+                    last_recved_count = 0
 
             if elapsed.seconds > 0:
                 rm_line()
@@ -588,6 +600,13 @@ def bench(args):
             if recved > 0 and output_stats['first_received_time'] == start - start:
                 output_stats['first_received_time'] = elapsed
 
+            # The monitor-observed route count is the ground truth for
+            # convergence.  The per-neighbor query (via CLI/gRPC) can be
+            # blocked or slow while the target is under heavy load.  If the
+            # monitor has received enough prefixes, treat the neighbors
+            # checkpoint as met.
+            if recved >= output_stats['required'] and not neighbors_checkpoint:
+                neighbors_checkpoint = True
 
             # we are trying to discover if the tests have finished
             #  in the ieal world, we'd know how many prefixes were sent and we'd just check for that
@@ -629,7 +648,7 @@ def bench(args):
                 bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
                 create_bench_graphs(bench_stats, prefix=bench_prefix)       
 
-            if elapsed.seconds > 15 and recved_checkpoint == 0 and last_recved_count == 0 and recved == 0:
+            if elapsed.seconds > 120 and recved_checkpoint == 0 and last_recved_count == 0 and recved == 0:
                 last_recved_count = 1_000_000 # make it artifically high so things fail quickly
 
         # Too many of the same counts in a row, not progressing
@@ -1053,7 +1072,7 @@ def create_args_parser(main=True):
 
     parser_update = s.add_parser('update', help='rebuild bgp docker images')
     parser_update.add_argument('image', choices=['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'frr', 'frr_c', 
-                                'rustybgp', 'openbgp', 'flock',  'bgpdump2', 'all'])
+                                'rustybgp', 'rustbgpd', 'openbgp', 'flock',  'bgpdump2', 'all'])
     parser_update.add_argument('-c', '--checkout', default='HEAD')
     parser_update.add_argument('-n', '--no-cache', action='store_true')
     parser_update.set_defaults(func=update)
@@ -1085,8 +1104,8 @@ def create_args_parser(main=True):
         parser.add_argument('--filter_test', choices=['transit', 'ixp'], default=None)
 
     parser_bench = s.add_parser('bench', help='run benchmarks')
-    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird',  'frr_c', 'rustybgp', 
-                              'openbgp', 'flock', 'srlinux', 'junos', 'eos'], default='bird')
+    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird',  'frr_c', 'rustybgp',
+                              'rustbgpd', 'openbgp', 'flock', 'srlinux', 'junos', 'eos'], default='bird')
     parser_bench.add_argument('-i', '--image', help='specify custom docker image')
     parser_bench.add_argument('--mrt-file', type=str, 
                               help='mrt file, requires absolute path')

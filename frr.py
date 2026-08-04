@@ -148,7 +148,7 @@ no bgp ebgp-requires-policy
         ret = super().exec_version_cmd()
         return ret.split('\n')[0]
     
-    def get_neighbors_state(self):
+    def get_neighbors_state(self, dckr_override=None):
         neighbors_accepted = {}
         neighbors_received = {}
         neighbor_received_output = self.local("vtysh -c 'sh ip bgp summary json'")
@@ -175,10 +175,10 @@ no bgp ebgp-requires-policy
 
         return neighbors
 
-    def get_neighbor_received_routes(self):
+    def get_neighbor_received_routes(self, dckr_override=None):
         # FRR doesn't have a counter to look at to see if all the prefixes have been sent
         # instead we have to look at the log file and see if End-of-RIB has been sent for the neighbor
-        neighbors_received_full, neighbors_checked = super(FRRoutingTarget, self).get_neighbor_received_routes()
+        neighbors_received_full, neighbors_checked = super(FRRoutingTarget, self).get_neighbor_received_routes(dckr_override=dckr_override)
 
         assert(all(value == False for value in neighbors_received_full.values()))
         neighbors_received_full = self._get_EOR_from_log(neighbors_received_full)

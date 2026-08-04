@@ -210,11 +210,17 @@ class Container(object):
         t.start()
 
     def neighbor_stats(self, queue):
+        # Use a dedicated Docker client so long-running exec calls
+        # (e.g. 60s+ gRPC queries under load) don't block the shared
+        # connection pool used by the monitor and stats threads.
+        from settings import Client
+        neighbor_dckr = Client(version='auto')
+
         def stats():
             while True:
                 if self.stop_monitoring:
                     return
-                neighbors_received_full, neighbors_checked = self.get_neighbor_received_routes()
+                neighbors_received_full, neighbors_checked = self.get_neighbor_received_routes(dckr_override=neighbor_dckr)
                 queue.put({'who': self.name, 'neighbors_checked': neighbors_checked})
                 queue.put({'who': self.name, 'neighbors_received_full': neighbors_received_full})
                 time.sleep(1)
@@ -223,9 +229,10 @@ class Container(object):
         t.daemon = True
         t.start()
 
-    def local(self, cmd, stream=False, detach=False, stderr=False):
-        i = dckr.exec_create(container=self.name, cmd=cmd, stderr=stderr)
-        return dckr.exec_start(i['Id'], stream=stream, detach=detach)
+    def local(self, cmd, stream=False, detach=False, stderr=False, dckr_override=None):
+        d = dckr_override or dckr
+        i = d.exec_create(container=self.name, cmd=cmd, stderr=stderr)
+        return d.exec_start(i['Id'], stream=stream, detach=detach)
 
     def get_startup_cmd(self):
         raise NotImplementedError()
@@ -262,26 +269,30 @@ class Container(object):
                 neighbors_checked[n] = False
         return tester_count, neighbors_checked
 
-    def get_neighbor_received_routes(self):
-        ## if we ccall this before the daemon starts we will not get output
-        
+    def get_neighbor_received_routes(self, dckr_override=None):
+        ## if we call this before the daemon starts we will not get output
+
         tester_count, neighbors_checked = self.get_test_counts()
         neighbors_received_full = neighbors_checked.copy()
-        neighbors_received, neighbors_accepted = self.get_neighbors_state()
-        for n in neighbors_accepted.keys():
+        neighbors_received, neighbors_accepted = self.get_neighbors_state(dckr_override=dckr_override)
 
+        # get_neighbors_state returns (None, None) on query failure.
+        # Propagate that as-is so callers can distinguish "query failed"
+        # from "zero neighbors."
+        if neighbors_received is None or neighbors_accepted is None:
+            return neighbors_received_full, neighbors_checked
+
+        for n in neighbors_accepted.keys():
             #this will include the monitor, we don't want to check that
-            if n in tester_count and neighbors_accepted[n] >= tester_count[n]: 
+            if n in tester_count and neighbors_accepted[n] >= tester_count[n]:
                 neighbors_checked[n] = True
 
-        
         for n in neighbors_received.keys():
-
             #this will include the monitor, we don't want to check that
-            if (n in tester_count and neighbors_received[n] >= tester_count[n]) or neighbors_received[n] == True: 
+            if (n in tester_count and neighbors_received[n] >= tester_count[n]) or neighbors_received[n] == True:
                 neighbors_received_full[n] = True
 
-        return neighbors_received_full, neighbors_checked 
+        return neighbors_received_full, neighbors_checked
 
 class Target(Container):
 

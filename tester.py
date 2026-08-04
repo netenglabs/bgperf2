@@ -81,11 +81,10 @@ protocol bgp {{
     #hold time 5;
     source address {3};
     connect delay time 1;
-    interface "eth0";
     strict bind;
     ipv4 {{ import none; export all; }};
     local {3} as {4};
-neighbor {0} as {1};
+    neighbor {0} as {1};
 }}
 protocol static {{ ipv4;
 '''.format(target_conf['local-address'], target_conf['as'],

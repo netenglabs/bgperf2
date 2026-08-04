@@ -218,7 +218,7 @@ return true;
         else:
             return ret.strip('\n')
 
-    def get_neighbors_state(self):
+    def get_neighbors_state(self, dckr_override=None):
         neighbors_accepted = {}
         neighbors_received = {}
         neighbor_received_output = self.local("birdc 'show protocols all'").decode('utf-8')

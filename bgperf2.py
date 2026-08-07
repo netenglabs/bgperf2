@@ -115,6 +115,9 @@ def prepare(args):
     RustyBGP.build_image(args.force, nocache=args.no_cache)
     OpenBGP.build_image(args.force, nocache=args.no_cache)
     FRRoutingCompiled.build_image(args.force, nocache=args.no_cache)
+    FRRoutingCompiled.build_image(args.force, checkout='stable/8.0', tag='bgperf/frr_c/stable_8', nocache=args.no_cache)
+    FRRoutingCompiled.build_image(args.force, checkout='stable/9.0', tag='bgperf/frr_c/stable_9', nocache=args.no_cache)
+
     Bgpdump2.build_image(args.force, nocache=args.no_cache)
     #don't do anything for srlinux, junos, eos because it's just a download out of band
 
@@ -447,6 +450,8 @@ def bench(args):
             target_class = JunosTarget
         elif args.target == 'eos':
             target_class = EosTarget
+        elif 'frr_c' in args.target:
+            target_class = FRRoutingCompiledTarget
         else:
             print(f"incorrect target {args.target}")
         print('run', args.target)
@@ -454,6 +459,7 @@ def bench(args):
             target = target_class('{0}/{1}'.format(config_dir, args.target), conf['target'], image=args.image)
         else:
             target = target_class('{0}/{1}'.format(config_dir, args.target), conf['target'])
+        
         target.run(conf, dckr_net_name)
 
     time.sleep(1)
@@ -665,7 +671,10 @@ def finish_bench(args, output_stats, bench_stats, bench_start,target, m, fail=Fa
     # it would be better to clean things up, but often I want to to investigate where things ended up
     # remove_old_containers() 
     # remove_target_containers()
-    bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
+    pre = args.target
+    if 'label' in args and args.label:
+        pre = args.label
+    bench_prefix = f"{pre}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
     create_bench_graphs(bench_stats, prefix=bench_prefix)
     return o_s
 
@@ -791,7 +800,10 @@ def batch(args):
                     for t in test['targets']:
                         a = argparse.Namespace(**vars(args))
                         a.func = bench
-                        a.image = None
+                        if 'image' in t:
+                            a.image = t['image']
+                        else:
+                            a.image = None
                         a.output = None
                         a.target = t['name']
                         a.prefix_num = p

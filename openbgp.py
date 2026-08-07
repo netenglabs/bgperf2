@@ -102,9 +102,9 @@ fib-update no
 
     def get_startup_cmd(self):
         return '\n'.join(
-            ['#!/bin/bash',
+            ['#!/bin/sh',
              'ulimit -n 65536',
-             '/usr/local/sbin/bgpd -f {guest_dir}/{config_file_name} -d > {guest_dir}/openbgp.log 2>&1']
+             '/usr//sbin/bgpd -f {guest_dir}/{config_file_name} -d > {guest_dir}/openbgp.log 2>&1']
         ).format(
             guest_dir=self.guest_dir,
             config_file_name=self.CONFIG_FILE_NAME,

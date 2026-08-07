@@ -12,7 +12,7 @@ class FRRoutingCompiled(Container):
         super(FRRoutingCompiled, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
 
     @classmethod
-    def build_image(cls, force=False, tag='bgperf/frr_c', checkout='stable/8.0', nocache=False):
+    def build_image(cls, force=False, tag='bgperf/frr_c', checkout='HEAD', nocache=False):
         # copied from https://github.com/FRRouting/frr/blob/master/docker/ubuntu-ci/Dockerfile
         #  but you have to remove any lines that include # comments
         cls.dockerfile = '''
@@ -122,6 +122,7 @@ RUN mkdir -p /etc/apt/keyrings && \
 
 #USER frr:frr    
 RUN cd ~/ && git clone https://github.com/FRRouting/frr.git 
+RUN cd ~/frr && git checkout {0}
 
 
 
@@ -132,7 +133,7 @@ RUN cd ~/frr && \
     ./configure \
        --prefix=/usr \
        --sysconfdir=/etc \
-       --localstatedir=/var \
+       --localstatedir=/var/run/frr \
        --sbindir=/usr/lib/frr \
        --enable-gcov \
        --enable-rpki \
@@ -150,9 +151,9 @@ RUN cd ~/frr && \
 
 RUN cd ~/frr && make check || true
 
-RUN sudo cp ~/frr/docker/ubuntu-ci/docker-start /usr/sbin/docker-start && rm -rf ~/frr
+#RUN sudo cp ~/frr/docker/ubuntu-ci/docker-start /usr/sbin/docker-start
 
-CMD ["/usr/sbin/docker-start"]
+#CMD ["/usr/sbin/docker-start"]
 
 RUN sudo install -m 755 -o frr -g frr -d /var/log/frr && \
     sudo install -m 755 -o frr -g frr -d /var/opt/frr && \
@@ -162,7 +163,8 @@ RUN sudo install -m 755 -o frr -g frr -d /var/log/frr && \
     sudo install -m 640 -o frr -g frrvty /dev/null /etc/frr/vtysh.conf && \
     sudo install -m 755 -o frr -g frr -d /var/lib/frr && \
     sudo install -m 755 -o frr -g frr -d /var/etc/frr && \
-    sudo install -m 755 -o frr -g frr -d /var/run/frr
+    sudo install -m 755 -o frr -g frr -d /var/run/frr && \
+    touch /var/bgpd.pid && chown frr.frr /var/bgpd.pid
 
 
 #RUN sudo mkdir /etc/frr /var/lib/frr /var/run/frr /frr
@@ -179,4 +181,4 @@ class FRRoutingCompiledTarget(FRRoutingCompiled, FRRoutingTarget):
     CONTAINER_NAME = 'bgperf_frrouting_compiled_target'
 
     def __init__(self, host_dir, conf, image='bgperf/frr_c'):
-        super(FRRoutingTarget, self).__init__(host_dir, conf, image='bgperf/frr_c')
+        super(FRRoutingTarget, self).__init__(host_dir, conf, image=image)

@@ -59,6 +59,7 @@ class Container(object):
         if not os.path.exists(host_dir):
             os.makedirs(host_dir)
             os.chmod(host_dir, 0o777)
+        print(f"image: {image}")
 
     @classmethod
     def build_image(cls, force, tag, nocache=False):

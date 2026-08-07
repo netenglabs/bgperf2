@@ -1,3 +1,18 @@
-python3 bgperf.py update exabgp & python3 bgperf.py update gobgp & python3 bgperf.py update bird & \
-  python3 bgperf.py update frr & python3 bgperf.py update frr_c & python3 bgperf.py update rustybgp & \
-  python3 bgperf.py update bgpdump2 & python3 bgperf.py update openbgp &
+#!/bin/bash
+# Build every daemon image in parallel.
+#
+# `bgperf2.py prepare` does the same thing serially; this is the faster path
+# when you are rebuilding everything from scratch.
+
+set -u
+cd "$(dirname "$0")" || exit 1
+
+PYTHON=venv/bin/python
+[ -x "$PYTHON" ] || PYTHON=python3
+
+for image in exabgp exabgp_mrtparse gobgp bird frr_c rustybgp openbgp bgpdump2; do
+    "$PYTHON" bgperf2.py update "$image" &
+done
+
+wait
+echo "all builds finished; run '$PYTHON bgperf2.py doctor' to check"

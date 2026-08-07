@@ -24,6 +24,7 @@ import shutil
 import netaddr
 import datetime
 from collections import defaultdict
+from pathlib import Path
 from argparse import ArgumentParser, REMAINDER
 from itertools import chain, islice
 from requests.exceptions import ConnectionError
@@ -96,7 +97,7 @@ def doctor(args):
     else:
         print('... not found. run `bgperf prepare`')
 
-    for name in ['gobgp', 'bird', 'frr_c', 'rustybgp', 'openbgp', 'flock', 'srlinux']:
+    for name in ['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp', 'flock', 'srlinux']:
         print('{0} image'.format(name), end=' ')
         if img_exists('bgperf/{0}'.format(name)):
             print('... ok')
@@ -111,7 +112,8 @@ def prepare(args):
     ExaBGP_MRTParse.build_image(args.force, nocache=args.no_cache)
     GoBGP.build_image(args.force, nocache=args.no_cache)
     BIRD.build_image(args.force, nocache=args.no_cache)
-    #FRRouting.build_image(args.force,  nocache=args.no_cache)
+    # thin wrapper over the upstream frrouting/frr image; benchmarks/big-tests.yaml uses it
+    FRRouting.build_image(args.force, nocache=args.no_cache)
     RustyBGP.build_image(args.force, nocache=args.no_cache)
     OpenBGP.build_image(args.force, nocache=args.no_cache)
     FRRoutingCompiled.build_image(args.force, nocache=args.no_cache)
@@ -633,7 +635,7 @@ def bench(args):
         
             if elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
                 bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
-                create_bench_graphs(bench_stats, prefix=bench_prefix)       
+                create_bench_graphs(bench_stats, prefix=bench_prefix, results_dir=args.results_dir)
 
             if elapsed.seconds > 15 and recved_checkpoint == 0 and last_recved_count == 0 and recved == 0:
                 last_recved_count = 1_000_000 # make it artifically high so things fail quickly
@@ -675,7 +677,7 @@ def finish_bench(args, output_stats, bench_stats, bench_start,target, m, fail=Fa
     if 'label' in args and args.label:
         pre = args.label
     bench_prefix = f"{pre}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
-    create_bench_graphs(bench_stats, prefix=bench_prefix)
+    create_bench_graphs(bench_stats, prefix=bench_prefix, results_dir=args.results_dir)
     return o_s
 
 
@@ -718,7 +720,22 @@ def create_output_stats(args, target_version, stats, fail=False):
     return out
 
 
-def create_ts_graph(bench_stats, stat_index=1, filename='ts.png', ylabel='%cpu', diviser=1):
+DEFAULT_RESULTS_DIR = 'results'
+
+
+def results_path(results_dir, filename):
+    '''Resolve an output filename into results_dir, creating the directory if needed.
+
+    Graphs and CSVs used to be written to the working directory, which meant they
+    piled up in the repo root. Everything generated now goes under results_dir.
+    '''
+    directory = Path(results_dir or DEFAULT_RESULTS_DIR)
+    directory.mkdir(parents=True, exist_ok=True)
+    return str(directory / filename)
+
+
+def create_ts_graph(bench_stats, stat_index=1, filename='ts.png', ylabel='%cpu', diviser=1,
+                    results_dir=DEFAULT_RESULTS_DIR):
     plt.figure()
     #bench_stats.pop(0)
     data = np.array(bench_stats)
@@ -729,21 +746,26 @@ def create_ts_graph(bench_stats, stat_index=1, filename='ts.png', ylabel='%cpu',
     plt.ylabel(ylabel)
     plt.xlabel('elapsed seconds')
     plt.show()
-    plt.savefig(filename)
+    plt.savefig(results_path(results_dir, filename))
     plt.close()
     plt.cla()
     plt.clf()
 
 
-def create_bench_graphs(bench_stats, prefix='ts_data'):
-    create_ts_graph(bench_stats, filename=f"{prefix}_cpu.png")
-    create_ts_graph(bench_stats, stat_index=2, filename=f"{prefix}_mem_used", ylabel="GB", diviser=1024*1024*1024)
-    create_ts_graph(bench_stats, stat_index=3, filename=f"{prefix}_mon_received", ylabel='prefixes')
-    create_ts_graph(bench_stats, stat_index=4, filename=f"{prefix}_neighbors", ylabel='neighbors')
-    create_ts_graph(bench_stats, stat_index=5, filename=f"{prefix}_machine_idle", ylabel="%")
-    create_ts_graph(bench_stats, stat_index=6, filename=f"{prefix}_free_mem", ylabel="GB", diviser=1024*1024*1024)
+def create_bench_graphs(bench_stats, prefix='ts_data', results_dir=DEFAULT_RESULTS_DIR):
+    for stat_index, suffix, ylabel, diviser in [
+        (1, 'cpu', '%cpu', 1),
+        (2, 'mem_used', 'GB', 1024*1024*1024),
+        (3, 'mon_received', 'prefixes', 1),
+        (4, 'neighbors', 'neighbors', 1),
+        (5, 'machine_idle', '%', 1),
+        (6, 'free_mem', 'GB', 1024*1024*1024),
+    ]:
+        create_ts_graph(bench_stats, stat_index=stat_index, filename=f"{prefix}_{suffix}.png",
+                        ylabel=ylabel, diviser=diviser, results_dir=results_dir)
 
-def create_graph(stats, test_name='total time', stat_index=8, test_file='total_time.png', ylabel='seconds'):
+def create_graph(stats, test_name='total time', stat_index=8, test_file='total_time.png', ylabel='seconds',
+                 results_dir=DEFAULT_RESULTS_DIR):
     labels = {}
     data = defaultdict(list)
 
@@ -780,7 +802,7 @@ def create_graph(stats, test_name='total time', stat_index=8, test_file='total_t
     plt.legend()
 
     plt.show()
-    plt.savefig(test_file)
+    plt.savefig(results_path(results_dir, test_file))
 
 def batch(args):
     """ runs several tests together, produces all the stats together and creates graphs
@@ -822,7 +844,7 @@ def batch(args):
                         results.append(bench(a))
 
                         # update this each time in case something crashes
-                        with open(f"{test['name']}.csv", 'w') as f:
+                        with open(results_path(args.results_dir, f"{test['name']}.csv"), 'w') as f:
                             f.write(stats_header() + '\n')
                             for stat in results:
                                 f.write(','.join(map(str, stat)) + '\n')
@@ -833,19 +855,26 @@ def batch(args):
             print(','.join(map(str, stat)))
 
 
-        create_batch_graphs(results, test['name'])
+        create_batch_graphs(results, test['name'], results_dir=args.results_dir)
 
-def create_batch_graphs(results, name):
-    create_graph(results, test_name='total time', stat_index=11, test_file=f"bgperf_{name}_total_time.png")
-    create_graph(results, test_name='elapsed', stat_index=8, test_file=f"bgperf_{name}_elapsed.png")
-    create_graph(results, test_name='neighbor', stat_index=9, test_file=f"bgperf_{name}_neighbor.png")
-    create_graph(results, test_name='route reception', stat_index=10, test_file=f"bgperf_{name}_route_reception.png")
-    create_graph(results, test_name='max cpu', stat_index=12, test_file=f"bgperf_{name}_max_cpu.png", ylabel="%")
-    create_graph(results, test_name='max mem', stat_index=13, test_file=f"bgperf_{name}_max_mem.png", ylabel="GB")
-    create_graph(results, test_name='min idle', stat_index=14, test_file=f"bgperf_{name}_min_idle.png", ylabel="%")
-    create_graph(results, test_name='min free mem', stat_index=15, test_file=f"bgperf_{name}_min_free.png", ylabel="GB")
-    create_graph(results, test_name='tester errors', stat_index=20, test_file=f"bgperf_{name}_tester_error.png", ylabel="errors")
-    create_graph(results, test_name='prefixes at monitor', stat_index=6, test_file=f"bgperf_{name}_monitor_prefixes.png")
+def create_batch_graphs(results, name, results_dir=DEFAULT_RESULTS_DIR):
+    # stat_index values are positions in the row built by create_output_stats();
+    # changing that row's layout silently mislabels every graph below.
+    for test_name, stat_index, suffix, ylabel in [
+        ('total time', 11, 'total_time', 'seconds'),
+        ('elapsed', 8, 'elapsed', 'seconds'),
+        ('neighbor', 9, 'neighbor', 'seconds'),
+        ('route reception', 10, 'route_reception', 'seconds'),
+        ('max cpu', 12, 'max_cpu', '%'),
+        ('max mem', 13, 'max_mem', 'GB'),
+        ('min idle', 14, 'min_idle', '%'),
+        ('min free mem', 15, 'min_free', 'GB'),
+        ('tester errors', 20, 'tester_error', 'errors'),
+        ('prefixes at monitor', 6, 'monitor_prefixes', 'seconds'),
+    ]:
+        create_graph(results, test_name=test_name, stat_index=stat_index,
+                     test_file=f"bgperf_{name}_{suffix}.png", ylabel=ylabel,
+                     results_dir=results_dir)
 
 def mem_human(v):
     if v > 1024 * 1024 * 1024:
@@ -1097,7 +1126,7 @@ def create_args_parser(main=True):
         parser.add_argument('--filter_test', choices=['transit', 'ixp'], default=None)
 
     parser_bench = s.add_parser('bench', help='run benchmarks')
-    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird',  'frr_c', 'rustybgp', 
+    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp',
                               'openbgp', 'flock', 'srlinux', 'junos', 'eos'], default='bird')
     parser_bench.add_argument('-i', '--image', help='specify custom docker image')
     parser_bench.add_argument('--mrt-file', type=str, 
@@ -1114,6 +1143,9 @@ def create_args_parser(main=True):
     parser_bench.add_argument('-r', '--repeat', action='store_true', help='use existing tester/monitor container')
     parser_bench.add_argument('-f', '--file', metavar='CONFIG_FILE')
     parser_bench.add_argument('-o', '--output', metavar='STAT_FILE')
+    parser_bench.add_argument('--results-dir', default=DEFAULT_RESULTS_DIR,
+                              help='directory for generated graphs and CSVs; '
+                                   'default: {}'.format(DEFAULT_RESULTS_DIR))
     add_gen_conf_args(parser_bench)
     parser_bench.set_defaults(func=bench)
 
@@ -1124,6 +1156,9 @@ def create_args_parser(main=True):
 
     parser_batch = s.add_parser('batch', help='run batch benchmarks')
     parser_batch.add_argument('-c', '--batch_config', type=str, help='batch config file')
+    parser_batch.add_argument('--results-dir', default=DEFAULT_RESULTS_DIR,
+                              help='directory for generated graphs and CSVs; '
+                                   'default: {}'.format(DEFAULT_RESULTS_DIR))
     parser_batch.set_defaults(func=batch)
 
     return parser

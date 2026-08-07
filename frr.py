@@ -120,10 +120,8 @@ no bgp ebgp-requires-policy
             f.write("log stdout debug\n") 
 
     def get_filter_test_config(self): 
-        file = open("filters/frr.conf", mode='r')
-        filters = file.read()
-        file.close
-        return filters
+        with open(REPO_ROOT / 'filters' / 'frr.conf') as file:
+            return file.read()
 
     def get_startup_cmd(self):
         return '\n'.join(

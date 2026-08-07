@@ -58,11 +58,10 @@ class RustyBGPTarget(RustyBGP, GoBGPTarget):
                 f.write(self.get_filter_test_config())
 
     def get_filter_test_config(self):
-        file = open("filters/rustybgpd.conf", mode='r')
-        filters = file.read()
+        with open(REPO_ROOT / 'filters' / 'rustybgpd.conf') as file:
+            filters = file.read()
         filters += "\n[global.apply-policy.config]\n"
         filters += f"import-policy-list = [\"{self.conf['filter_test']}\"]"
-        file.close
         return filters
 
     def get_startup_cmd(self):

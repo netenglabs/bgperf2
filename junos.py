@@ -68,10 +68,8 @@ class JunosTarget(Junos, Target):
             f.flush()
 
     def get_filter_test_config(self): 
-        file = open("filters/junos.conf", mode='r')
-        filters = file.read()
-        file.close
-        return filters
+        with open(REPO_ROOT / 'filters' / 'junos.conf') as file:
+            return file.read()
 
     def get_license_key(self, license_file):
         with open(license_file) as f:
@@ -94,7 +92,7 @@ class JunosTarget(Junos, Target):
     def get_neighbors_state(self):
         neighbors_accepted = {}
         neighbors_received = {}
-        neighbor_received_output = json.loads(self.local("cli show bgp neighbor \| no-more \| display json").decode('utf-8'))
+        neighbor_received_output = json.loads(self.local(r"cli show bgp neighbor \| no-more \| display json").decode('utf-8'))
 
         for neighbor in neighbor_received_output['bgp-information'][0]['bgp-peer']:
 

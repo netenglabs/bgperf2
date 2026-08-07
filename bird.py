@@ -192,10 +192,8 @@ return true;
 
 
     def get_filter_test_config(self): 
-        file = open("filters/bird.conf", mode='r')
-        filters = file.read()
-        file.close
-        return filters
+        with open(REPO_ROOT / 'filters' / 'bird.conf') as file:
+            return file.read()
 
     def get_startup_cmd(self):
         return '\n'.join(
@@ -223,7 +221,7 @@ return true;
         neighbors_received = {}
         neighbor_received_output = self.local("birdc 'show protocols all'").decode('utf-8')
         
-        with open('bird.tfsm') as template:
+        with open(REPO_ROOT / 'bird.tfsm') as template:
             fsm = textfsm.TextFSM(template)
             result = fsm.ParseText(neighbor_received_output)
 

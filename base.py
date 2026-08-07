@@ -17,6 +17,7 @@ from settings import dckr
 import io
 import os
 from itertools import chain
+from pathlib import Path
 from threading import Thread
 import netaddr
 import sys
@@ -24,6 +25,11 @@ import time
 import datetime
 from jinja2 import Environment, FileSystemLoader, PackageLoader, StrictUndefined, make_logging_undefined
 
+
+# Resource files (filters/, nos_templates/, bird.tfsm) live next to the source,
+# so anchor them to the source directory rather than the working directory.
+# Without this, bgperf2 can only be run from the repo root.
+REPO_ROOT = Path(__file__).resolve().parent
 
 flatten = lambda l: chain.from_iterable(l)
 
@@ -313,7 +319,7 @@ class Target(Container):
         return ctn
     
     def get_template(self, data, template_file="junos.j2",):
-        env = Environment(loader=FileSystemLoader(searchpath="./nos_templates"))
+        env = Environment(loader=FileSystemLoader(searchpath=str(REPO_ROOT / 'nos_templates')))
         template = env.get_template(template_file)
         output = template.render(data=data)
         return output

@@ -131,7 +131,5 @@ fib-update no
 
 
     def get_filter_test_config(self): 
-        file = open("filters/openbgp.conf", mode='r')
-        filters = file.read()
-        file.close
-        return filters
+        with open(REPO_ROOT / 'filters' / 'openbgp.conf') as file:
+            return file.read()

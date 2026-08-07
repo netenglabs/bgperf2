@@ -41,30 +41,32 @@ is a good place to get MRT files to play back.
 ## Prerequisites
 
 * Python 3.7 or later
-* Docker
-* Sysstat
+* Docker (your user must be in the `docker` group)
+* Sysstat (`bench` shells out to `mpstat`)
 
 ##  <a name="how_to_install">How to install
 
 ```bash
-$ git clone https://github.com:jopietsch/bgperf.git
+$ git clone https://github.com/netenglabs/bgperf2.git
 $ cd bgperf2
-$ pip3 install -r pip-requirements.txt
-$ ./bgperf2.py --help
+$ python3 -m venv venv
+$ venv/bin/pip install -r pip-requirements.txt
+$ venv/bin/python bgperf2.py --help
 usage: bgperf2.py [-h] [-b BENCH_NAME] [-d DIR]
-                 {doctor,prepare,update,bench,config} ...
+                 {doctor,prepare,update,bench,config,batch} ...
 
 BGP performance measuring tool
 
 positional arguments:
-  {doctor,prepare,update,bench,config}
+  {doctor,prepare,update,bench,config,batch}
     doctor              check env
     prepare             prepare env
-    update              pull bgp docker images
+    update              rebuild bgp docker images
     bench               run benchmarks
     config              generate config
+    batch               run batch benchmarks
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
   -b BENCH_NAME, --bench-name BENCH_NAME
   -d DIR, --dir DIR
@@ -75,6 +77,18 @@ bgperf2 image ... ok
 gobgp image ... ok
 bird image ... ok
 ```
+
+Activating the venv (`source venv/bin/activate`) lets you drop the `venv/bin/`
+prefix and run `./bgperf2.py` directly; the rest of this document does that.
+
+On a fresh VM, `new_vm.sh` installs the system packages, creates the venv, and
+downloads a RouteViews MRT file into `mrt/` for the MRT-based benchmarks.
+
+### Where output goes
+
+Generated graphs and CSVs are written to `results/`, overridable with
+`--results-dir`. That directory is gitignored, so runs no longer leave files
+scattered in the repo root.
 ## <a name="how_to_use">How to use
 
 Use `bench` command to start benchmark test.
@@ -265,8 +279,17 @@ you can hard code those values. If you want to see without multi-threading, dele
 A  feature called batch lets you run multiple tests, collect all the data, and produces graphs. 
 If you run a test that runs out of physical RAM on your machine, linux OOM killer will just kill the process and you'll lose the data from that experiment.
 
-There is an included file batch_example.yaml that shows how it works. You can list the targets that you want
-tested in a batch, as well as iterate through prefix count and neighbor count.
+The `benchmarks/` directory holds example batch configs that show how it works — start with
+`benchmarks/benchmark.yaml`. You can list the targets that you want tested in a batch, as well as
+iterate through prefix count and neighbor count. Run one with:
+
+```bash
+$ ./bgperf2.py batch -c benchmarks/benchmark.yaml
+```
+
+Configs that play back MRT data expect the file at `mrt/rib.20210801.0000`, which `new_vm.sh`
+downloads. Paths in a batch config may be relative or use `~`; they are resolved before being
+handed to Docker. Keep personal, unshared configs in `benchmarks/local/` — that path is gitignored.
 
 If you use a file that looks like this:
 

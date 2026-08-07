@@ -5,12 +5,9 @@ pyroute2
 nsenter
 netaddr
 mako
-six
 packaging
 psutil
-pyyaml
 matplotlib
 numpy
 toml
 textfsm
-

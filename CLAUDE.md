@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+
+## rules
+
+commit-message:
+  max-length: 72
+  format: conventional
+  no-body: true
+
 ## What this is
 
 bgperf2 benchmarks BGP daemons by running them in Docker containers, blasting routes at them from

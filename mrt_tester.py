@@ -43,15 +43,31 @@ class MRTTester(Container):
     #             shutil.copyfile(mrt_file_path, host_mrt_file_path)
     #         return guest_mrt_file_path
 
-    def get_mrt_file(self, conf):
-        return conf['mrt-file']
+    def get_mrt_file(self, conf, name=None):
+        '''Absolute host path of the MRT file, or None if this conf has none.
+
+        The path is used as a Docker bind-mount source, which must be absolute.
+        Resolving here lets benchmark configs use relative or ~-prefixed paths
+        instead of hardcoding someone's home directory.
+        '''
+        mrt_file = conf.get('mrt-file')
+        if not mrt_file:
+            return None
+        return str(Path(mrt_file).expanduser().resolve())
 
     def get_host_config(self):
         neighbor = next(iter(self.conf['neighbors'].values()))
+        mrt_file = self.get_mrt_file(neighbor)
+        if not mrt_file:
+            print('no mrt-file configured for tester {0}'.format(self.name))
+            sys.exit(1)
+        if not os.path.isfile(mrt_file):
+            print('mrt-file not found: {0}'.format(mrt_file))
+            sys.exit(1)
         #create an mrt_file on guest_dir so that it can be mounted
         host_config = dckr.create_host_config(
             binds=['{0}:{1}'.format(os.path.abspath(self.host_dir), self.guest_dir),
-                    '{0}:/root/mrt_file'.format(self.get_mrt_file(neighbor))],
+                    '{0}:/root/mrt_file'.format(mrt_file)],
             privileged=True,
             network_mode='bridge',
             cap_add=['NET_ADMIN']

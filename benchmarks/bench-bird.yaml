@@ -1,0 +1,36 @@
+# a set of standard tests
+#  to compare outputs a I make changes to bgperf
+tests:
+  -
+     name: baseline-benchmark
+     neighbors: [10, 50, 100]
+     prefixes: [20_000, 50_000, 100_000]
+     filter_test: [None]
+     targets:
+       -
+         name: frr_c
+         label: frr 8
+         image:  bgperf/frr_c/stable_8
+         tester_type: bird
+       -
+         name: frr_c
+         label: frr 9
+         image:  bgperf/frr_c/stable_9
+         tester_type: bird
+       -
+         name: frr_c
+         label: frr 10
+         tester_type: bird        
+       -
+         name: bird
+         label: bird -s
+         tester_type: bird
+         single_table: True   
+       -
+         name: bird
+         label: bird
+         tester_type: bird
+         single_table: False
+       -
+         name: rustybgp
+         tester_type: bird

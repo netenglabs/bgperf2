@@ -1,0 +1,33 @@
+# a set of standard tests
+#  to compare outputs a I make changes to bgperf
+tests:
+  -
+     name: baseline-benchmark
+     neighbors: [10]
+     prefixes: [800_000]
+     filter_test: [None]
+     targets:
+         
+       -
+         name: frr_c
+         label: frr
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20210801.0000
+       -
+         name: bird
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20210801.0000
+       -
+         name: rustybgp
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20210801.0000
+
+      # TODO: openbgp doesn't work, complains about rpki
+      #  I have no idea how I broke it
+      #  -
+      #    name: openbgp
+      #    tester_type: bgpdump2
+      #    mrt_file: mrt/rib.20210801.0000
+         
+         
+         

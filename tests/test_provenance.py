@@ -157,9 +157,20 @@ class TestVersionParsers:
         cls = getattr(__import__(mod), name)
         assert self._parse(monkeypatch, cls, good) == expected
 
+    # Every daemon that parses a banner, not a sample of them: the raise path
+    # is code that only ever runs when something is already wrong, so a typo in
+    # it survives indefinitely. Leaving bird out of this list is what let a
+    # NameError sit in its raise, turning the diagnostic into
+    # "UNKNOWN (name 'version' is not defined)" -- version_string()'s bare
+    # `except Exception` catches it, so nothing crashes and nothing says what
+    # the daemon actually printed.
     @pytest.mark.parametrize('cls_name,bad', [
         # what vtysh really prints before bgpd is answering
         ('frr.FRRoutingTarget', 'Exiting: failed to connect to any daemons.'),
+        ('bird.BIRDTarget', "exec: 'bird': executable file not found in $PATH"),
+        ('bird.BIRDTarget', ''),
+        ('gobgp.GoBGPTarget', 'exec failed'),
+        ('rustybgp.RustyBGPTarget', 'exec failed'),
         ('openbgp.OpenBGP', "exec: '/usr/local/sbin/bgpctl': no such file"),
         ('openbgp.OpenBGP', ''),
     ])
@@ -168,6 +179,39 @@ class TestVersionParsers:
         cls = getattr(__import__(mod), name)
         with pytest.raises(base.VersionUnavailable):
             self._parse(monkeypatch, cls, bad)
+
+    # The fragment is a distinctive TAIL of each message on purpose. Matching
+    # the first token ('exec', 'Exiting') would pass just as happily for a
+    # parser that truncated the daemon's output to its first word, which is
+    # the opposite of what this is asserting.
+    @pytest.mark.parametrize('cls_name,bad,fragment', [
+        ('frr.FRRoutingTarget', 'Exiting: failed to connect to any daemons.',
+         'any daemons'),
+        ('bird.BIRDTarget', "exec: 'bird': executable file not found in $PATH",
+         'not found in $PATH'),
+        ('gobgp.GoBGPTarget', 'gobgpd: command not found', 'command not found'),
+        ('rustybgp.RustyBGPTarget', 'no such file or directory',
+         'such file or directory'),
+        ('openbgp.OpenBGP', "exec: '/usr/local/sbin/bgpctl': no such file",
+         '/usr/local/sbin/bgpctl'),
+    ])
+    def test_the_rejected_output_survives_into_the_message(self, monkeypatch,
+                                                           cls_name, bad,
+                                                           fragment):
+        '''The point of raising is to say what the daemon really printed, so
+        assert that text reaches the recorded string rather than only that
+        something was raised -- a broken raise still raises.
+        '''
+        mod, name = cls_name.split('.')
+        cls = getattr(__import__(mod), name)
+        obj = cls.__new__(cls)
+        obj.name = 'test'
+        monkeypatch.setattr(base.Container, 'exec_version_cmd',
+                            lambda self, **kw: bad)
+
+        recorded = obj.version_string()
+        assert recorded.startswith(base.VERSION_UNKNOWN)
+        assert fragment in recorded
 
     @pytest.mark.parametrize('cls_name,output,expected', [
         # The mixin targets are the ones that can pick up a sibling daemon's

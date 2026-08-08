@@ -42,7 +42,8 @@ class BIRD(Container):
         m = re.search(r'BIRD version (\S+)', ret)
         if not m:
             raise VersionUnavailable(
-                'unexpected output from `{0}`: {1!r}'.format(version, ret))
+                'unexpected output from `{0}`: {1!r}'.format(
+                    self.get_version_cmd(), ret))
         return m.group(1)
 
     @classmethod

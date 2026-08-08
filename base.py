@@ -92,6 +92,15 @@ class VersionNotSupported(Exception):
     '''A version was asked for from a daemon that only has the one build.'''
 
 
+class ImageBuildFailed(Exception):
+    '''Docker reported an error while building an image.'''
+    def __init__(self, tag, message):
+        self.tag = tag
+        self.message = message
+        super(ImageBuildFailed, self).__init__(
+            'building {0} failed: {1}'.format(tag, message))
+
+
 class ImageNotBuilt(Exception):
     '''A run asked for a version whose image does not exist locally.
 
@@ -336,6 +345,7 @@ class Container(object):
         f = io.BytesIO(dockerfile.encode('utf-8'))
         if force or not img_exists(tag):
             print('build {0}...'.format(tag))
+            error = None
             for line in dckr.build(fileobj=f, rm=False, tag=tag, decode=True, nocache=nocache,
                                    buildargs=buildargs or {}):
                 if 'stream' in line:
@@ -343,6 +353,13 @@ class Container(object):
 
                 if 'errorDetail' in line:
                     print(line['errorDetail'])
+                    error = line['errorDetail']
+            # Docker reports build failures in the stream rather than by raising,
+            # so without this a compile error just scrolls past: `prepare` exits
+            # 0, the image is missing or stale, and the mystery surfaces later as
+            # a bench that will not come up.
+            if error is not None:
+                raise ImageBuildFailed(tag, error.get('message') or error)
 
     def get_ipv4_addresses(self):
         if 'local-address' in self.conf:

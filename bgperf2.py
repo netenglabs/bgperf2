@@ -267,8 +267,24 @@ def prepare(args):
         print('  {0:<28} from {1}'.format(tag, cls.resolve_ref(v)))
     print()
 
+    # A plan can be eight daemons and several hours. bird/gobgp/rustybgp all
+    # track moving default branches, so one transient upstream breakage used to
+    # be enough to lose every image after it -- keep going and report at the
+    # end, but still exit non-zero so the failure cannot pass for success.
+    failures = []
     for cls, v, tag in plan:
-        cls.build_version(v, force=args.force, nocache=args.no_cache)
+        try:
+            cls.build_version(v, force=args.force, nocache=args.no_cache)
+        except ImageBuildFailed as e:
+            print('FAILED: {0}'.format(e))
+            failures.append((tag, e))
+
+    if failures:
+        print()
+        print('{0} of {1} image(s) failed to build:'.format(len(failures), len(plan)))
+        for tag, e in failures:
+            print('  {0:<28} {1}'.format(tag, e.message))
+        sys.exit(1)
 
     #don't do anything for srlinux, junos, eos because it's just a download out of band
 
@@ -1387,7 +1403,7 @@ if __name__ == '__main__':
 
     try:
         args.func(args)
-    except (ImageNotBuilt, VersionNotSupported) as e:
-        # A missing or unselectable image is a setup mistake, not a crash --
-        # the message already carries the command that fixes it.
+    except (ImageNotBuilt, VersionNotSupported, ImageBuildFailed) as e:
+        # A missing, unselectable or unbuildable image is a setup mistake, not a
+        # crash -- the message already carries the command that fixes it.
         sys.exit(str(e))

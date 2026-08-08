@@ -76,8 +76,20 @@ def test_frr_parses_prefix_counts():
 
 def test_frr_handles_no_output():
     '''local() returns falsy before bgpd is up; that must not raise.'''
-    target = build(FRRoutingTarget, b'')
-    with pytest.raises((TypeError, UnboundLocalError, KeyError)):
-        # Documents current behavior: an empty reply is not handled and blows up
-        # inside the parser. Worth fixing; pinned here so a fix is deliberate.
-        target.get_neighbors_state()
+    received, accepted = build(FRRoutingTarget, b'').get_neighbors_state()
+    assert received == {}
+    assert accepted == {}
+
+
+def test_frr_handles_non_json_output():
+    '''vtysh emits plain text errors while bgpd is still starting.'''
+    target = build(FRRoutingTarget, b'% BGP instance not found\n')
+    received, accepted = target.get_neighbors_state()
+    assert received == {}
+    assert accepted == {}
+
+
+def test_frr_handles_summary_without_ipv4_unicast():
+    target = build(FRRoutingTarget, json.dumps({}).encode('utf-8'))
+    received, accepted = target.get_neighbors_state()
+    assert accepted == {}

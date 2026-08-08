@@ -150,12 +150,19 @@ no bgp ebgp-requires-policy
         neighbors_accepted = {}
         neighbors_received = {}
         neighbor_received_output = self.local("vtysh -c 'sh ip bgp summary json'")
-        if neighbor_received_output:
-            neighbor_received_output = json.loads(neighbor_received_output.decode('utf-8'))
+        if not neighbor_received_output:
+            # bgpd is not answering yet; polling starts before it is up
+            return neighbors_received, neighbors_accepted
 
-        for n in neighbor_received_output['ipv4Unicast']['peers'].keys():
-            rcd = neighbor_received_output['ipv4Unicast']['peers'][n]['pfxRcd'] 
-            neighbors_accepted[n] = rcd
+        try:
+            summary = json.loads(neighbor_received_output.decode('utf-8'))
+        except json.JSONDecodeError:
+            # vtysh emits plain-text errors when bgpd is still starting
+            return neighbors_received, neighbors_accepted
+
+        peers = summary.get('ipv4Unicast', {}).get('peers', {})
+        for n in peers:
+            neighbors_accepted[n] = peers[n]['pfxRcd']
         return neighbors_received, neighbors_accepted
 
     def _get_EOR_from_log(self, neighbors):

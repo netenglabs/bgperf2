@@ -10,6 +10,17 @@ commit-message:
   format: conventional
   no-body: false
 
+code-review:
+  before-commit: required
+
+**Run `/code-review` on the staged/working diff before every `git commit`**, and act on what it
+finds before committing — fix it, or say plainly why you are committing anyway. Skip only for
+commits that change no code at all (docs-only, or moving files without editing them).
+
+This is not ceremony. There is no CI on this repo and the test suite deliberately cannot touch
+Docker, so it covers the pure layers only — a real `bench` is the sole end-to-end check and nobody
+runs one per commit. Review is the only thing standing between a bad edit and master.
+
 ## What this is
 
 bgperf2 benchmarks BGP daemons by running them in Docker containers, blasting routes at them from

@@ -4,5 +4,19 @@
       "Bash(venv/bin/python -m pytest *)",
       "Bash(venv/bin/python bgperf2.py doctor)"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "c=$(jq -r \".tool_input.command // \\\"\\\"\"); if printf \"%s\" \"$c\" | grep -qE \"(^|[;&|] *)git +(-[^ ]+ +)*commit\\b\"; then jq -nc \"{hookSpecificOutput:{hookEventName:\\\"PreToolUse\\\",additionalContext:\\\"CLAUDE.md requires /code-review on the diff before committing. If no review has run for this change, run it and act on the findings first. If it already ran, or this commit changes no code, proceed.\\\"}}\"; fi",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
   }
 }

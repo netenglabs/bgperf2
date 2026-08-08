@@ -66,7 +66,8 @@ venv/bin/python -m pytest tests/test_convergence.py -q
 ```
 
 The test suite deliberately needs **no Docker daemon and no privileges** — it covers the pure layers
-(stats row/header contract, convergence rules, CLI-output parsers, module imports). Importing
+(stats row/header contract, convergence rules, host-contention detection, CLI-output parsers,
+module imports). Importing
 `bgperf2` works without a reachable daemon, which is what makes that possible; keep it that way.
 There is no coverage of the container orchestration itself, so a real `bench` is still the only
 end-to-end check. Use `-n1 -p1` for the fastest one.
@@ -181,6 +182,87 @@ FRR is a special case worth knowing about: it has no received-prefix counter, so
 `FRRoutingTarget.get_neighbor_received_routes()` overrides the base method and greps `bgpd.log` for
 `End-of-RIB` messages instead.
 
+**That log read must stay incremental.** `write_config()` sets `log stdout debug` purely so
+End-of-RIB is visible, which means `bgpd.log` grows with the route count — a 10-peer 1.05M-prefix
+MRT run puts it past **1 GB**. `_get_EOR_from_log()` used to `readlines()` the whole file and
+rematch every line once per second, costing 4+ seconds of CPU against a 1-second poll interval: the
+loop fell permanently behind, stopped printing progress, and the run never finished even though the
+target had converged minutes earlier. Measured on a real 1.04 GB log, same neighbors found either
+way: **4.14s per poll before, 0.0000s after the first.** It now tracks a byte offset and reads only
+what was appended, and:
+
+- it stops at the last complete line, so a half-written one is not consumed and lost;
+- the restart reset keys on **inode**, not size — a replaced log that had already grown past the
+  saved offset would otherwise be resumed from the wrong place, and since FRR reaches its
+  checkpoint only via End-of-RIB, missing those lines means the run never converges;
+- the per-poll read is capped, and matching happens on bytes with the decode deferred to lines that
+  hit, because this process's own RSS feeds the recorded `min_free` column.
+
+### Host contention — `contention.py`
+
+A benchmark sharing its machine reports numbers that look fine and are not comparable with
+anything. The margins here are small enough that this decides results: FRR 8.5, 9.1 and 10.0
+finished a 95s MRT run within **0.11s** of each other, so a competing job of a few cores invents a
+version ranking out of nothing.
+
+`contention.py` attributes busy CPU to processes outside `BGPERF_PROCESSES`. It is kept free of
+Docker and privileges so the test suite covers it, like `convergence.py`. Two consumers:
+
+- `warn_if_machine_is_busy()` names the offenders before the run starts. It is called **after**
+  `remove_target_containers()`, not at the top of `bench()`: `batch()` reuses the process for every
+  cell, so checking earlier sees the previous cell's own target daemon and blames it.
+- `controller_foreign_cpu()` samples every 5s into the same queue as the other controller threads;
+  `bench()` keeps the max and writes it as the **`max foreign cpu %`** column. The interval is a
+  parameter so the tests can pass a short one — the first sample only arrives one interval in,
+  because the measurement is a delta.
+
+`min idle%` cannot replace this: bgperf's *own* daemons move it, so it cannot separate "the target
+worked hard" from "something else was running."
+
+**Measure CPU as a delta between two `/proc` samples, never `ps -eo pcpu`.** This was got wrong
+first time round and the mistake is easy to repeat, because `ps` looks exactly like what you want.
+It reports cputime divided by process *lifetime*, so it fails in both directions: a job that
+finished an hour ago still reads high and condemns a clean run, and — the case the whole module
+exists for — a long-lived process that starts burning four cores for a 95s run barely moves its
+average. On a real box: alive 16821s, 1475s of CPU, reads 8.7%; four cores for 95s takes it to
+about 11%, well under the one-core threshold. A lifetime average also barely moves within a run, so
+sampling repeatedly and keeping the max adds nothing over sampling once.
+
+Every daemon a target can run must be in `BGPERF_PROCESSES`, including the commercial NOSes
+(`rpd`, `Bgp`, `sr_bgp_mgr`, …) and `flockd`. A missing name means that target's own load is
+reported as contention and every one of its rows looks incomparable — the failure is silent and
+looks like a real finding. cEOS and SR Linux run dozens of agents each and those lists are the
+main ones, not complete.
+
+Three more traps, each of which made the feature report a *clean* machine while it was busy — the
+worst possible failure for something whose output is "0 means the machine was yours":
+
+- **Never allowlist interpreters.** `python`, `python3`, `sh` and `bash` were in the list at first,
+  and `/proc/<pid>/comm` for a script-driven workload is the interpreter — so a neighbouring
+  `python3 train.py` on eight cores was filtered out entirely. bgperf2's own Python is excluded by
+  PID via `own_process_tree()`, which walks descendants of `os.getpid()`.
+- **Kernel threads are excluded** (`PF_KTHREAD`). The ones that appear during a run — `ksoftirqd`,
+  `kworker` — are doing *the benchmark's own* veth and bridge softirq work.
+- **A process with no baseline is charged, capped at the interval.** Skipping first-seen processes
+  scored a fully saturated machine at 0, because a parallel build is thousands of sub-second `cc1`
+  processes that never appear in two consecutive samples.
+
+The column goes **before** the three provenance columns, not after: `test_provenance.py` requires
+provenance to stay last, and every graph index in `create_batch_graphs()` points at a column before
+either group, so both invariants hold.
+
+**The controller threads must actually stop.** They are governed by the `controller_stop`
+`threading.Event`: `bench()` clears it before starting the samplers, `finish_bench()` sets it. This
+was previously a module-level bool that `finish_bench()` assigned *without* `global`, so the
+assignment created a local and was a no-op — and since `batch()` calls `bench()` in-process once per
+cell, a 40-run batch ended with 40 `mpstat` loops, 40 `free` loops and 40 `ps` loops still polling.
+bgperf was manufacturing the contention it now reports, and it grew run over run, so later cells of
+a long batch were quietly noisier than earlier ones. Two things follow: clearing the event at the
+start of each run is required or every cell after the first gets a sampler that exits immediately
+and a contention column stuck at 0, and the samplers wait on the event instead of `time.sleep()` so
+they stop at once rather than lingering a poll interval. `tests/test_controller_threads.py` covers
+both directions.
+
 ### Recording versions — provenance
 
 A result nobody can trace back to a build is not reproducible, so every run records the version
@@ -264,6 +346,28 @@ It also detects failure: a count that stops moving for `STUCK_SAMPLES` (600), a 
 over 10 samples, or nothing arriving at all within 15s. `bench()` feeds it one sample per monitor
 poll via `update()` and acts on the returned status; `note_neighbors_checkpoint()` is called from the
 target branch when every neighbor has finished sending.
+
+Three rules here are load-bearing and were each broken at some point. Any change to `update()`
+should be checked against all of them:
+
+1. **Stability is tracked on every sample, including ones below the peak.** It used to sit behind
+   the regression branch, so a count that came to rest under an earlier peak by *less than*
+   `DROP_FRACTION` advanced neither the stability counter nor the stuck counter: the run could
+   neither converge nor fail, and polled forever with the target idle. Every one of the four FRR
+   MRT runs settles 0.07–0.43% below its peak, so this hung the entire FRR test, not an edge case.
+2. **Regression is measured against the high-water mark, not the previous sample** — otherwise a
+   count resting below its peak compares equal to the sample before it and a real slide is missed.
+3. **A count sitting more than `DROP_FRACTION` below its peak must not be reported CONVERGED**,
+   however steady it looks. Every real run reaches the neighbor checkpoint, which shortens the
+   assurance window to 5 samples — fewer than the 10 the regression streak needs — so without that
+   gate a run that lost half its routes and held there was reported CONVERGED at sample 6, with the
+   loss visible only as a low `received` column. None of the original drop tests set the
+   checkpoint, so this was uncovered; `test_a_big_drop_still_fails_once_the_checkpoint_is_set`
+   pins it now.
+
+Both halves of the regression rule apply to the same samples: the streak counts only samples that
+are themselves past `DROP_FRACTION`. If sub-threshold wobble armed the streak instead, one later
+sample past the threshold would fail the run instantly.
 
 ## Targets and images
 

@@ -179,11 +179,26 @@ no bgp ebgp-requires-policy
             neighbors_accepted[n] = peers[n]['pfxRcd']
         return neighbors_received, neighbors_accepted
 
-    EOR_RE = re.compile(r".*rcvd End-of-RIB for IPv4 Unicast from (\d+\.\d+\.\d+\.\d+)")
+    # A bytes pattern, matched against the raw log without decoding it first.
+    # No leading .* -- this is used with finditer, which scans.
+    EOR_RE = re.compile(rb"rcvd End-of-RIB for IPv4 Unicast from (\d+\.\d+\.\d+\.\d+)")
 
-    # most a single poll will pull out of bgpd.log; a 1s poll never produces
-    # anywhere near this, it only bounds the catch-up read after a stall
-    EOR_READ_MAX = 32 * 1024 * 1024
+    # Most a single poll will pull out of bgpd.log. This has to stay well above
+    # the rate the log grows, not just above a typical poll: if the reader
+    # cannot keep up, it only catches up once the log stops growing, which
+    # delays note_neighbors_checkpoint() and inflates the reported elapsed time
+    # -- corrupting a headline number rather than merely costing CPU. A 10-peer
+    # 1.05M-prefix run writes 1.04GB over a ~70s injection, about 15MB/s, and a
+    # bigger or faster run scales past that. Scanning is done in place with
+    # finditer over a memoryview, so a large cap costs the read itself and no
+    # extra copies; 256MB against a machine with tens of GB is invisible in the
+    # min_free column.
+    EOR_READ_MAX = 256 * 1024 * 1024
+
+    # ...but no single read is that big. The cap bounds throughput per poll;
+    # this bounds the allocation, so catching up on a backlog costs several
+    # small reads rather than one enormous one.
+    EOR_READ_BLOCK = 4 * 1024 * 1024
 
     def _get_EOR_from_log(self, neighbors):
         # we are looking at the log files for End-Of-RIB
@@ -226,26 +241,37 @@ no bgp ebgp-requires-policy
             self._eor_log_id = log_id
 
         if st.st_size > self._eor_log_pos:
+            # Read in bounded blocks rather than one big read(). RSS matters
+            # here -- this process's own memory feeds the recorded min_free
+            # column -- so the total a poll may consume is capped, but no
+            # single allocation is anywhere near that cap.
+            consumed = 0
             with open(path, 'rb') as f:
-                f.seek(self._eor_log_pos)
-                # Capped rather than read(): this process's own RSS feeds the
-                # recorded min_free statistic, so swallowing a multi-hundred-MB
-                # backlog in one poll would show up as a dip in a published
-                # column. Whatever is left is picked up next second.
-                chunk = f.read(self.EOR_READ_MAX)
-            # bgpd may be mid-write, so stop at the last complete line and
-            # resume from the start of the partial one next poll
-            end = chunk.rfind(b'\n')
-            if end >= 0:
-                for line in chunk[:end].decode('utf-8', errors='replace').split('\n'):
-                    m_eor = self.EOR_RE.match(line)
-                    if m_eor:
-                        self._eor_seen.add(m_eor.groups()[0])
-                self._eor_log_pos += end + 1
-            elif len(chunk) == self.EOR_READ_MAX:
-                # a full cap with no newline would otherwise re-read the same
-                # bytes forever
-                self._eor_log_pos += len(chunk)
+                while consumed < self.EOR_READ_MAX:
+                    f.seek(self._eor_log_pos)
+                    block = f.read(min(self.EOR_READ_BLOCK,
+                                       self.EOR_READ_MAX - consumed))
+                    if not block:
+                        break
+                    # bgpd may be mid-write, so stop at the last complete line
+                    # and resume from the start of the partial one next time
+                    end = block.rfind(b'\n')
+                    if end < 0:
+                        if len(block) < self.EOR_READ_BLOCK:
+                            break       # trailing partial line; wait for more
+                        # a whole block with no newline at all would otherwise
+                        # be re-read forever
+                        self._eor_log_pos += len(block)
+                        consumed += len(block)
+                        continue
+                    # Scan in place. Slicing, decoding and splitting into lines
+                    # would hold three more copies at once, which is the whole
+                    # thing the cap exists to avoid; finditer over a memoryview
+                    # allocates only the matches.
+                    for m_eor in self.EOR_RE.finditer(memoryview(block)[:end]):
+                        self._eor_seen.add(m_eor.group(1).decode('ascii'))
+                    self._eor_log_pos += end + 1
+                    consumed += end + 1
 
         for addr in self._eor_seen:
             if addr in neighbors:

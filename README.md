@@ -85,11 +85,111 @@ prefix and run `./bgperf2.py` directly; the rest of this document does that.
 On a fresh VM, `new_vm.sh` installs the system packages, creates the venv, and
 downloads a RouteViews MRT file into `mrt/` for the MRT-based benchmarks.
 
+### Getting a current MRT table
+
+`new_vm.sh` fetches the 2021 table the older benchmarks used. Grabbing a
+present-day one is a two-minute job, and worth doing — a 2021 table is a
+smaller internet than the one being benchmarked today:
+
+```bash
+mkdir -p mrt
+curl -o mrt/rib.bz2 \
+  https://archive.routeviews.org/route-views2/bgpdata/2026.08/RIBS/rib.20260808.0000.bz2
+bunzip2 mrt/rib.bz2 && mv mrt/rib mrt/rib.20260808.0000
+```
+
+RouteViews posts a RIB dump every two hours under `<year>.<month>/RIBS/`. They
+are about 80 MB compressed and 1.3 GB expanded. To see what a table actually
+holds before benchmarking against it — `bench` exits if no peer has as many
+prefixes as you asked for:
+
+```bash
+docker run --rm --entrypoint= -v $PWD/mrt/rib.20260808.0000:/root/mrt_file \
+    bgperf/bgpdump2 /usr/local/sbin/bgpdump2 -c /root/mrt_file
+```
+
+That prints a per-peer prefix count. The 2026-08-08 table has 28 peers, 17 of
+them carrying a full ~1.05M-prefix table, which is what makes
+`prefixes: [1_050_000]` across 10 peers possible.
+
 ### Where output goes
 
 Generated graphs and CSVs are written to `results/`, overridable with
 `--results-dir`. That directory is gitignored, so runs no longer leave files
 scattered in the repo root.
+
+### Results you can trust: the machine has to be yours
+
+A benchmark sharing its host produces numbers that look fine and mean nothing,
+so every run records what else was running. This is not a theoretical worry:
+FRR 8.5, 9.1 and 10.0 finished a 95-second MRT run **within 0.11s of each
+other**. A competing job of a few cores is more than enough to invent a version
+ranking that never existed.
+
+Two guards:
+
+- `bench` prints a warning before it starts if processes outside the benchmark
+  are already using more than one core's worth of CPU, and names them.
+- Every row carries a **`max foreign cpu %`** column: the worst competition seen
+  during the run, as a percentage of one core (so `400` means four cores). `0`
+  means the machine was yours.
+
+`min idle%` cannot do this job alone, which is why the column exists: it also
+moves when *bgperf's own* daemons work, so it cannot separate "the target worked
+hard" from "something else was running."
+
+**CPU is measured as a delta between two samples of `/proc`, not with
+`ps -eo pcpu`.** This matters more than it sounds. `ps` reports a *lifetime
+average* — CPU time divided by how long the process has been alive — which is
+wrong in both directions here. A job that finished hammering the machine an hour
+ago still reports a high number and would condemn a perfectly good run. Worse,
+the case the check exists for is invisible to it: a long-lived process that
+starts burning four cores for the 95 seconds of a run barely moves its average.
+Measured on a real box, a process alive 16,821s having used 1,475s of CPU reads
+8.7%, and four cores for 95s would take it only to about 11%.
+
+bgperf's own processes are recognised two ways: its daemons by name, and the
+harness itself by walking the process tree from its own PID. Interpreter names
+are deliberately *not* allowlisted — `/proc/<pid>/comm` for a script-driven job
+is just `python3`, so allowlisting it would hide a neighbouring `python3
+train.py` completely.
+
+If a row shows foreign CPU, re-run it before comparing it against anything.
+The logic lives in `contention.py`, kept free of Docker so it is unit-tested.
+Every daemon that a target can run is listed in `BGPERF_PROCESSES`; **if you add
+a target, add its process names there** or that target reports its own load as
+contention and all of its rows look incomparable. The cEOS and SR Linux entries
+are the main agents, not the complete set.
+
+### Reading a result: `testers (s)` tells you what you measured
+
+`elapsed (s)` is how long the monitor took to see the full table; `testers (s)`
+is how long the generators took to send it. **When those two are close, the run
+measured injection throughput, not the daemon** — the target kept pace with
+everything thrown at it, and the number would not improve if the daemon got
+faster.
+
+A 10-peer × 1.05M-prefix MRT run is injection-bound for most of FRR: 8.5, 9.1
+and 10.0 all converge about 3s behind the last route in, with total times
+within 0.11s of each other. What separates them there is memory (4.88 / 5.26 /
+5.15 GB), not time. FRR 10.7 is the exception and shows what a real difference
+looks like: its testers took 97s instead of 67s on identical input because it
+could not drain its input as fast, and its peak CPU *fell* from 205% to 141%
+while doing so — slower, not busier.
+
+To measure the daemon rather than the generators, raise the peer count or use
+the synthetic BIRD tester, which can outrun a target more easily than MRT
+playback does.
+
+### IPv4 only
+
+Everything here is IPv4, in four separate places: synthetic prefixes are
+generated as IPv4 `/32`s (`gen_paths`), the gobgp MRT injector is invoked with
+`--no-ipv6`, the monitor and gobgp read `afi_safis[0]` — the first address
+family — so v6 routes would not be counted even if they arrived, and peering
+uses an IPv4 `--local-address-prefix`. Supporting IPv6 means all four: prefix
+generation, a v6 peering plane, dropping `--no-ipv6`, and summing across
+families instead of indexing `[0]`.
 ## <a name="how_to_use">How to use
 
 Use `bench` command to start benchmark test.
@@ -110,8 +210,8 @@ Min %idle 94.7, Min mem free 57.15GB
 Time since first received prefix: 4
 total time: 31.32s
 
-name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date, cores, Mem (GB), tester errors, tester timeouts, failed, MSG, filters
-bird,bird,2.17.1+branch.master.fe0c22277c21,100,100,9900,10000,18,5,1,4,31.32,23,0.01,95,57.152,,2026-08-07,32,60.73GB,0,0,,,
+name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date, cores, Mem (GB), tester errors, tester timeouts, failed, MSG, filters, max foreign cpu %, target image, tester version, monitor version
+bird,bird,2.17.1+branch.master.fe0c22277c21,100,100,9900,10000,18,5,1,4,31.32,23,0.01,95,57.152,,2026-08-07,32,60.73GB,0,0,,,,0,bgperf/bird:latest,2.17.1+branch.master.fe0c22277c21,3.37.0
 ```
 
 As you might notice, the interesting statistics are shown twice, once in an easy to read format and the second

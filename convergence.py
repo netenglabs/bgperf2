@@ -48,6 +48,9 @@ class ConvergenceTracker(object):
         # True once every tester neighbor has sent everything it was going to.
         self.neighbors_checkpoint = False
         self.last_recved = 0
+        # Highest received count seen so far; regressions are judged against
+        # this rather than the previous sample.
+        self.peak_recved = 0
         # Consecutive samples with an unchanged received count.
         self.last_recved_count = 0
         self.last_neighbors_checked = 0
@@ -69,20 +72,58 @@ class ConvergenceTracker(object):
     def update(self, elapsed_seconds, recved, neighbors_checked,
                neighbors_received_full, checked):
         '''Fold in one monitor sample and return the resulting status.'''
-        if self.last_recved > recved:
-            # Going backwards. If the number of finished neighbors also went
-            # down, a peer dropped out and the route loss is explained, so the
-            # regression streak restarts. Otherwise it counts against us.
-            if neighbors_checked >= self.last_neighbors_checked:
+        previous_recved = self.last_recved
+        # Regression is measured against the high-water mark, not the previous
+        # sample. Comparing against the previous sample means a count that
+        # settles one step below its peak keeps comparing equal afterwards, so
+        # the streak stops growing and a real slide is missed.
+        if recved > self.peak_recved:
+            self.peak_recved = recved
+            self.less_last_received = 0
+
+        dropped = ((self.peak_recved - recved) / self.peak_recved
+                   if self.peak_recved else 0)
+
+        # Both halves of the regression rule are evaluated on the same samples:
+        # a streak counts only samples that are themselves a big enough drop.
+        # Counting every sample below the peak instead would let harmless
+        # sub-threshold wobble arm the streak, so a single later sample past
+        # the threshold would fail the run instantly.
+        if dropped > DROP_FRACTION:
+            if recved > previous_recved:
+                # Climbing back toward the peak is recovery, not regression.
+                # Without this a run that dipped once -- a tester session
+                # flapping, say -- had DROP_SAMPLES (about 10s) to get back
+                # within 1% of its peak or it was failed while its count was
+                # rising on every single sample. Predates the peak-based
+                # rewrite: the old comparison never updated last_recved inside
+                # this branch, so it was already an effective high-water mark.
+                self.less_last_received = 0
+            # If the number of finished neighbors also went down, a peer
+            # dropped out mid-sample and the loss is explained *for now*, so
+            # the streak restarts. The peak is deliberately NOT rebaselined to
+            # the smaller table: a peer that leaves and takes 20% of the routes
+            # with it is a failed run, and rebaselining reported it CONVERGED
+            # at the lower number as though nothing had happened.
+            elif neighbors_checked >= self.last_neighbors_checked:
                 self.less_last_received += 1
             else:
                 self.less_last_received = 0
-            dropped = (self.last_recved - recved) / self.last_recved
-            if self.less_last_received >= DROP_SAMPLES and dropped > DROP_FRACTION:
+            if self.less_last_received >= DROP_SAMPLES:
                 self.fail_msg = (f"FAILED: dropping received count {recved} "
                                  f"neighbors_checked {neighbors_checked}")
                 return self.FAILED
-        elif (self.last_neighbors_checked > 0 or neighbors_received_full > 0) \
+        else:
+            self.less_last_received = 0
+
+        # Stability is tracked on every sample, including ones below the peak.
+        # This used to sit behind the regression branch, so a count that came
+        # to rest under an earlier peak by less than DROP_FRACTION advanced
+        # neither counter: it could not converge, and it could not reach
+        # STUCK_SAMPLES either. A real 10-peer MRT run peaked at 973368 and
+        # settled at 971957 -- 0.145% down -- and hung there indefinitely with
+        # the target long since idle.
+        if (self.last_neighbors_checked > 0 or neighbors_received_full > 0) \
                 and recved == self.last_recved:
             self.last_recved_count += 1
         else:
@@ -98,7 +139,16 @@ class ConvergenceTracker(object):
         if checked:
             self.recved_checkpoint = True
 
-        if self.neighbors_checkpoint and self.last_recved_count >= self.assurance_samples:
+        # A count parked well below its peak is not converged, however steady
+        # it looks. Without this gate the checkpoint shortens the assurance
+        # window to ASSURANCE_SAMPLES_AFTER_CHECKPOINT (5), which is reached
+        # before the regression streak reaches DROP_SAMPLES (10) -- so a run
+        # that lost half its routes and held there was reported CONVERGED, with
+        # the loss visible only as a low 'received' column. Every real run sets
+        # the checkpoint, so this is the ordinary path, not a corner case.
+        if (self.neighbors_checkpoint
+                and self.last_recved_count >= self.assurance_samples
+                and dropped <= DROP_FRACTION):
             return self.CONVERGED
 
         if (elapsed_seconds > NO_PROGRESS_DEADLINE_SECONDS

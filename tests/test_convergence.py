@@ -132,6 +132,129 @@ def test_drop_streak_resets_when_a_neighbor_drops_out():
         assert status == ConvergenceTracker.CONTINUE
 
 
+def test_converges_when_the_count_settles_just_below_its_peak():
+    '''A count that comes to rest slightly under an earlier peak is converged,
+    not regressing.
+
+    Regression used to be measured against the previous sample, so a count
+    resting below the peak kept taking the regression branch and advanced
+    neither the stability counter nor the stuck counter -- it could not
+    converge and could not fail. Taken from a real 10-peer 1.05M-prefix MRT
+    run that peaked at 973368, settled at 971957 (0.145% down, well under
+    DROP_FRACTION) and hung there with the target already idle.
+    '''
+    t = ConvergenceTracker()
+    for value in (973075, 973355, 973368, 971891):
+        t.update(1, value, 10, 10, False)
+    t.note_neighbors_checkpoint()
+
+    status = None
+    for i in range(ASSURANCE_SAMPLES + 5):
+        status = t.update(10 + i, 971957, 10, 10, True)
+        if status != ConvergenceTracker.CONTINUE:
+            break
+    assert status == ConvergenceTracker.CONVERGED
+
+
+def test_a_big_drop_still_fails_once_the_checkpoint_is_set():
+    '''A steady count far below its peak is route loss, not convergence.
+
+    Every real run reaches the neighbor checkpoint, which shortens the
+    assurance window to ASSURANCE_SAMPLES_AFTER_CHECKPOINT (5) -- fewer than
+    the DROP_SAMPLES (10) the regression streak needs. Without a gate on how
+    far below the peak the count is sitting, a run that lost half its routes
+    and held there reported CONVERGED at sample 6, with the loss showing up
+    only as a low 'received' column. None of the other drop tests set the
+    checkpoint, so this path was uncovered.
+    '''
+    t = ConvergenceTracker()
+    t.update(1, 100000, 5, 5, False)
+    t.note_neighbors_checkpoint()
+
+    status = None
+    for i in range(DROP_SAMPLES * 2):
+        status = t.update(2 + i, 50000, 5, 5, True)
+        if status != ConvergenceTracker.CONTINUE:
+            break
+    assert status == ConvergenceTracker.FAILED
+    assert 'dropping received count' in t.fail_msg
+
+
+def test_a_recovering_count_is_not_failed():
+    '''A count climbing back toward its peak is recovering, not regressing.
+
+    A single dip -- a tester session flapping, say -- left the run only
+    DROP_SAMPLES (about ten seconds) to get back within DROP_FRACTION of its
+    peak, and it was failed while its count rose on every one of those samples.
+    Predates the peak-based rewrite: the old comparison never updated
+    last_recved inside the regression branch, so it was already an effective
+    high-water mark and behaved the same way.
+    '''
+    t = ConvergenceTracker()
+    t.update(1, 1_000_000, 5, 5, False)
+    t.note_neighbors_checkpoint()
+    t.update(2, 800_000, 4, 5, True)         # the flap
+
+    recved = 800_000
+    for i in range(DROP_SAMPLES * 3):
+        recved += 5_000                       # climbing back
+        status = t.update(3 + i, recved, 5, 5, True)
+        assert status != ConvergenceTracker.FAILED, (
+            'failed at {0} routes while the count was still rising'.format(recved))
+
+
+def test_losing_a_peer_mid_run_still_fails():
+    '''A peer that leaves and takes a fifth of the table with it is a failed
+    run, not a smaller successful one.
+
+    The dropout branch restarts the regression streak, but must not rebaseline
+    the peak to the smaller table: doing so reported CONVERGED at the lower
+    number as though nothing had happened, and the row looked comparable with
+    runs that kept all their peers.
+    '''
+    t = ConvergenceTracker()
+    t.update(1, 100000, 5, 5, False)
+    t.note_neighbors_checkpoint()
+    t.update(2, 80000, 4, 5, True)          # the sample where the peer goes
+
+    status = None
+    for i in range(DROP_SAMPLES * 3):
+        status = t.update(3 + i, 80000, 4, 5, True)
+        if status != ConvergenceTracker.CONTINUE:
+            break
+    assert status == ConvergenceTracker.FAILED
+
+
+def test_sub_threshold_wobble_does_not_arm_the_drop_streak():
+    '''Both halves of the regression rule must apply to the same samples.
+
+    The streak counts only samples that are themselves past DROP_FRACTION. If
+    harmless wobble armed it instead, a run could sit 0.1% under its peak for a
+    while and then be failed by a single later sample past the threshold.
+    '''
+    t = ConvergenceTracker()
+    t.update(1, 100000, 5, 5, False)
+    for i in range(DROP_SAMPLES * 2):
+        assert t.update(2 + i, 99999, 5, 5, False) == ConvergenceTracker.CONTINUE
+    assert t.less_last_received == 0
+
+
+def test_a_count_resting_below_its_peak_can_still_go_stuck():
+    '''The same path must not lose the stuck check: with no neighbor
+    checkpoint, a count parked under its peak has to fail rather than poll
+    forever.
+    '''
+    t = ConvergenceTracker()
+    t.update(1, 100000, 5, 5, False)
+    status = None
+    for i in range(STUCK_SAMPLES + 2):
+        status = t.update(2 + i, 99999, 5, 5, False)   # 0.001%, under DROP_FRACTION
+        if status == ConvergenceTracker.FAILED:
+            break
+    assert status == ConvergenceTracker.FAILED
+    assert 'stuck received count' in t.fail_msg
+
+
 def test_drop_streak_accumulates_when_neighbor_count_is_steady():
     '''Routes disappearing with no change in finished neighbors is unexplained,
     and after DROP_SAMPLES of it the run is failed.

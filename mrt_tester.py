@@ -81,6 +81,18 @@ class ExaBGPMrtTester(Tester, ExaBGP_MRTParse, MRTTester):
     def __init__(self, name, host_dir, conf, image='bgperf/exabgp_mrtparse'):
         super(ExaBGPMrtTester, self).__init__(name, host_dir, conf, image)
 
+    # Without these it inherited base.Tester's hardcoded 0 while bgpdump2 and
+    # gobgp rows reported real counts, so the two columns were not comparable
+    # between rows of the same batch CSV -- which is the whole reason they are
+    # in the row.
+    @staticmethod
+    def find_errors(log_dirs=()):
+        return count_matching_lines(log_dirs, 'error')
+
+    @staticmethod
+    def find_timeouts(log_dirs=()):
+        return count_matching_lines(log_dirs, 'timeout')
+
     def configure_neighbors(self, target_conf):
         tester_mrt_guest_file_path = self.get_mrt_file(self.conf, self.name)
 

@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import sys
+import threading
 import yaml
 import time
 import shutil
@@ -53,6 +54,8 @@ from mrt_tester import GoBGPMRTTester, ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
 from monitor import Monitor
 from convergence import ConvergenceTracker
+from contention import (describe_contention, foreign_cpu_percent,
+                        own_process_tree, sample_processes)
 from settings import dckr
 from queue import Queue
 from mako.template import Template
@@ -638,13 +641,12 @@ def remove_old_containers():
 
 def controller_idle_percent(queue):
     '''collect stats on the whole machine that is running the tests'''
-    stop_monitoring = False
     def stats():
         output = {}
         output['who'] = 'controller'
 
         while True:
-            if stop_monitoring == True:
+            if controller_stop.is_set():
                 return
             utilization = check_output(['mpstat', '1' ,'1']).decode('utf-8').split('\n')[3]
             g = re.match(r'.*all\s+.*\d+\s+(\d+\.\d+)', utilization).groups()
@@ -657,28 +659,103 @@ def controller_idle_percent(queue):
     t.daemon = True
     t.start()
 
+PREFLIGHT_SAMPLE_SECONDS = 0.5
+
+
+def warn_if_machine_is_busy():
+    '''Say up front if something else is already using the machine.
+
+    A run that starts on a busy box produces a plausible-looking row that
+    cannot be compared with the others, and the only trace is a slightly low
+    min_idle. Better to say so before spending the minutes.
+
+    Two samples half a second apart, because CPU has to be measured as a delta
+    -- see contention.py on why a lifetime average cannot answer this.
+    '''
+    try:
+        first = sample_processes()
+        # Time the real window, not the nominal sleep: walking /proc on a box
+        # with thousands of processes -- exactly the busy machine this is
+        # looking for -- adds enough to overstate the percentage and print a
+        # spurious warning.
+        started = time.time()
+        time.sleep(PREFLIGHT_SAMPLE_SECONDS)
+        second = sample_processes()
+        complaint = describe_contention(first, second, time.time() - started,
+                                        own_pids=own_process_tree(second))
+    except Exception:
+        return
+    if complaint:
+        print('WARNING: this machine is busy -- ' + complaint)
+        print('         timings will not be comparable with runs made on an idle machine')
+
+
+def controller_foreign_cpu(queue, interval=5):
+    '''Track CPU used by anything that is not part of the benchmark.
+
+    min_idle already records that the machine was busy, but not who made it
+    busy -- and bgperf's own load moves that number too, so it cannot separate
+    "the daemon worked hard" from "something else was running".
+
+    CPU is a delta across `interval`, so the first sample arrives one interval
+    in. The tests pass a short one to stay fast.
+    '''
+    def stats():
+        output = {'who': 'controller'}
+        previous = sample_processes()
+        previous_at = time.time()
+        while True:
+            # wait() rather than sleep() so the thread stops the moment the run
+            # ends instead of lingering for the rest of its poll interval
+            if controller_stop.wait(interval):
+                return
+            try:
+                current = sample_processes()
+            except Exception:
+                # never let a sampling hiccup take down a running benchmark
+                continue
+            now = time.time()
+            output['foreign_cpu'] = foreign_cpu_percent(
+                previous, current, now - previous_at,
+                own_pids=own_process_tree(current))
+            output['time'] = datetime.datetime.now()
+            queue.put(dict(output))
+            previous, previous_at = current, now
+
+    t = Thread(target=stats)
+    t.daemon = True
+    t.start()
+
+
 def controller_memory_free(queue):
     '''collect stats on the whole machine that is running the tests'''
-    stop_monitoring = False
     def stats():
         output = {}
         output['who'] = 'controller'
 
         while True:
-            if stop_monitoring == True:
+            if controller_stop.is_set():
                 return
             free = check_output(['free', '-m']).decode('utf-8').split('\n')[1]
             g = re.match(r'.*\d+\s+(\d+)', free).groups()
             output['free'] = float(g[0]) * 1024 * 1024
             output['time'] = datetime.datetime.now()
             queue.put(output)
-            time.sleep(1)
+            controller_stop.wait(1)
 
     t = Thread(target=stats)
     t.daemon = True
     t.start()
 
-stop_monitoring = False
+# Stops the controller sampling threads at the end of a run. This used to be a
+# plain module-level bool that finish_bench() assigned without `global`, so the
+# assignment created a local and the threads never stopped -- and batch() calls
+# bench() in-process once per cell, so a 40-run batch finished with 40 mpstat
+# loops, 40 `free` loops and 40 `ps` loops still polling. bgperf was
+# manufacturing the very contention it now reports, growing run over run.
+# Runs are strictly sequential, so one module-level Event is enough.
+controller_stop = threading.Event()
+
 
 def bench(args):
     output_stats = {}
@@ -703,6 +780,11 @@ def bench(args):
 
         if os.path.exists(config_dir):
             shutil.rmtree(config_dir, ignore_errors=True)
+
+    # Only once the previous run's containers are gone. batch() reuses this
+    # process for every cell, so checking earlier would see the last cell's own
+    # target daemon still running and report it as somebody else's job.
+    warn_if_machine_is_busy()
 
     bench_start = time.time()
     if args.file:
@@ -932,9 +1014,15 @@ def bench(args):
 
     q = Queue()
 
+    # Let the previous run's samplers go before starting this run's. batch()
+    # reuses this process for every cell, so without the clear the new threads
+    # would exit immediately on a flag the last run left set.
+    controller_stop.clear()
+
     m.stats(q)
     controller_idle_percent(q)
     controller_memory_free(q)
+    controller_foreign_cpu(q)
     if not is_remote:
         target.stats(q)
         target.neighbor_stats(q)
@@ -960,6 +1048,12 @@ def bench(args):
     output_stats['first_received_time'] = start - start
     output_stats['min_idle'] = 100
     output_stats['min_free'] = 1_000_000_000_000_000
+    output_stats['max_foreign_cpu'] = 0
+    # finish_bench() fills these in once the clock has stopped; a run with no
+    # testers (a remote target) never gets there, and they are printed and
+    # written into the row unconditionally.
+    output_stats['tester_errors'] = 0
+    output_stats['tester_timeouts'] = 0
 
     output_stats['required'] = conf['monitor']['check-points'][0]
     bench_stats = []
@@ -1000,6 +1094,10 @@ def bench(args):
             elif 'idle' in info:
                 percent_idle = info['idle']
                 output_stats['min_idle'] = percent_idle if percent_idle < output_stats['min_idle'] else output_stats['min_idle']
+            elif 'foreign_cpu' in info:
+                foreign = info['foreign_cpu']
+                if foreign > output_stats['max_foreign_cpu']:
+                    output_stats['max_foreign_cpu'] = foreign
         if info['who'] == m.name:
 
             elapsed = info['time'] - start
@@ -1024,9 +1122,6 @@ def bench(args):
             if status == ConvergenceTracker.FAILED:
                 output_stats['recved'] = recved
                 output_stats['fail_msg'] = tracker.fail_msg
-                tester_dirs = [t.host_dir for t in testers]
-                output_stats['tester_errors'] = tester_class.find_errors(tester_dirs)
-                output_stats['tester_timeouts'] = tester_class.find_timeouts(tester_dirs)
                 f.close() if f else None
                 print("FAILED")
                 return finish_bench(args, output_stats, bench_stats, bench_start, target, m, testers, fail=True)
@@ -1034,9 +1129,6 @@ def bench(args):
             if status == ConvergenceTracker.CONVERGED:
                 assurance = tracker.assurance_samples
                 output_stats['recved'] = recved
-                tester_dirs = [t.host_dir for t in testers]
-                output_stats['tester_errors'] = tester_class.find_errors(tester_dirs)
-                output_stats['tester_timeouts'] = tester_class.find_timeouts(tester_dirs)
 
                 f.close() if f else None
 
@@ -1113,7 +1205,17 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
     output_stats['total_time'] = bench_stop - bench_start
     m.stop_monitoring = True
     target.stop_monitoring = True
-    stop_monitoring = True
+    controller_stop.set()
+
+    # Scan the tester logs only after the clock has stopped. These used to run
+    # in bench() before bench_stop, so walking every tester log line by line --
+    # twice, once per needle, over logs that reach hundreds of MB on a 1M-prefix
+    # MRT run -- was billed to total_time, a column create_batch_graphs() plots.
+    tester_dirs = [t.host_dir for t in testers]
+    tester_class = type(testers[0]) if testers else None
+    if tester_class is not None:
+        output_stats['tester_errors'] = tester_class.find_errors(tester_dirs)
+        output_stats['tester_timeouts'] = tester_class.find_timeouts(tester_dirs)
 
     # Read every version before the containers go away -- this is the last
     # moment any of them can be asked.
@@ -1158,7 +1260,7 @@ def stats_header():
     # The provenance columns are appended at the END on purpose:
     # create_batch_graphs() indexes this row positionally, so inserting a column
     # anywhere earlier silently shifts every graph and every existing CSV.
-    return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date, cores, Mem (GB), tester errors, tester timeouts, failed, MSG, filters, target image, tester version, monitor version")
+    return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date, cores, Mem (GB), tester errors, tester timeouts, failed, MSG, filters, max foreign cpu %, target image, tester version, monitor version")
 
 
 def create_output_stats(args, target_version, stats, fail=False, provenance=None):
@@ -1175,6 +1277,12 @@ def create_output_stats(args, target_version, stats, fail=False, provenance=None
     out.extend(['FAILED']) if fail else out.extend([''])
     out.extend([stats['fail_msg']]) if 'fail_msg' in stats else out.extend([''])
     out.extend([args.filter_test]) if 'filter_test' in args  and args.filter_test else out.extend([''])
+    # Worst competition seen from outside the benchmark, as a percentage of one
+    # core. Anything much above 0 means this row's timings cannot be compared
+    # with rows measured on an idle machine -- min_idle alone cannot say that,
+    # because bgperf's own load moves it too. Placed before the provenance
+    # columns so those stay last, which test_provenance.py requires.
+    out.extend([round(stats.get('max_foreign_cpu', 0))])
     # Which builds produced this row. The target's own version already sits in
     # the 'version' column; these say which image it came from and which builds
     # generated and measured the load.

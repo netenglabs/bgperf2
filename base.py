@@ -169,6 +169,21 @@ class Container(object):
     # `prepare -t openbgp` into a failure it never used to be.
     PULL_BASE = False
 
+    # --- image verification -----------------------------------------------
+    #
+    # `bgperf2 verify` starts a throwaway container per built image and asks
+    # the daemon about itself. It covers the seam the test suite cannot: a
+    # parser meeting a real container. Both bugs that reached master this way
+    # -- rustybgp reading its version with GoBGP's parser, openbgpd's bgpctl
+    # under a path that does not exist -- look fine in isolation and only fail
+    # against the image.
+    #
+    #   DAEMON_BINARY        the binary under test, for build-hygiene checks
+    #   VERSION_NEEDS_DAEMON version command talks to a running daemon, so it
+    #                        cannot be probed from a bare container
+    DAEMON_BINARY = None
+    VERSION_NEEDS_DAEMON = False
+
     @classmethod
     def pulls_base(cls, tag):
         '''Whether this build should re-pull its FROM image.'''

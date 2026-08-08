@@ -10,6 +10,11 @@ class FRRoutingCompiled(Container):
     CONTAINER_NAME = None
     GUEST_DIR = '/root/config'
     IMAGE_REPO = 'bgperf/frr_c'
+    DAEMON_BINARY = '/usr/lib/frr/bgpd'
+    # vtysh reaches bgpd over a socket, so `show version` cannot be answered by
+    # a bare container -- it prints "Exiting: failed to connect to any daemons."
+    # `verify` says so rather than reporting the image as broken.
+    VERSION_NEEDS_DAEMON = True
     # What `prepare -t frr_c` builds alongside the master build: the end of the
     # 8.x and 9.x series, and both ends of 10.x. Each one is a full FRR compile,
     # so this stays a shortlist -- add others with `update frr_c --version X.Y`.

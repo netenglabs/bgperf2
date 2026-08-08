@@ -6,6 +6,7 @@ class OpenBGP(Container):
     CONTAINER_NAME = None
     GUEST_DIR = '/root/config'
     IMAGE_REPO = 'bgperf/openbgp'
+    DAEMON_BINARY = '/usr/sbin/bgpd'
     # OpenBGPD is not compiled here -- it is repackaged from the upstream
     # image, so a version is a tag on openbgpd/openbgpd rather than a git ref,
     # and the inherited passthrough resolve_ref() is already correct. Upstream

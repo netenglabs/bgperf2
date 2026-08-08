@@ -8,6 +8,7 @@ class RustyBGP(Container):
     CONTAINER_NAME = None
     GUEST_DIR = '/root/config'
     IMAGE_REPO = 'bgperf/rustybgp'
+    DAEMON_BINARY = '/root/rustybgpd'
     # RustyBGP has never cut a release: the crate has read 0.2.0 since 2020 and
     # the v0.2.0 git tag was only created in 2026. So a "version" here is a date
     # label for a git ref, and anything not in VERSION_REFS passes through as a

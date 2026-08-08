@@ -21,6 +21,7 @@ class BIRD(Container):
     CONTAINER_NAME = None
     GUEST_DIR = '/root/config'
     IMAGE_REPO = 'bgperf/bird'
+    DAEMON_BINARY = '/usr/local/sbin/bird'
     VERSIONS = ('2.19.2', '3.3.2')
     DEFAULT_REF = 'master'
 

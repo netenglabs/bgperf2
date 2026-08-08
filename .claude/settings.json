@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(venv/bin/python -m pytest *)",
-      "Bash(venv/bin/python bgperf2.py doctor)"
+      "Bash(venv/bin/python bgperf2.py doctor)",
+      "Bash(venv/bin/python bgperf2.py doctor *)",
+      "Bash(venv/bin/python bgperf2.py images)",
+      "Bash(venv/bin/python bgperf2.py images *)",
+      "Bash(venv/bin/python bgperf2.py dockerfile *)"
     ]
   },
   "hooks": {

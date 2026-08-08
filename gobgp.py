@@ -22,6 +22,7 @@ class GoBGP(Container):
     CONTAINER_NAME = None
     GUEST_DIR = '/root/config'
     IMAGE_REPO = 'bgperf/gobgp'
+    DAEMON_BINARY = '/go/bin/gobgpd'
     VERSIONS = ('3.35.0', '3.37.0')
     DEFAULT_REF = 'master'
 

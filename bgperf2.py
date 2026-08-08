@@ -82,6 +82,19 @@ PREPARE_IMAGES = ['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'rustybgp',
 
 # Targets `bench -t` accepts. The class both selects the daemon's behaviour and
 # supplies the image naming used to resolve --version.
+# The class each image runs as when it is a load generator rather than the
+# target. `verify` probes through these so it exercises the MRO bench really
+# builds -- probing a daemon base class is exactly the blind spot that let
+# rustybgp read its version with GoBGP's parser: correct on the base, wrong
+# through the real subclass.
+TESTER_CLASSES = {
+    'exabgp': ExaBGPTester,
+    'exabgp_mrtparse': ExaBGPMrtTester,
+    'bgpdump2': Bgpdump2Tester,
+    'bird': BIRDTester,
+    'gobgp': GoBGPMRTTester,
+}
+
 TARGET_CLASSES = {
     'gobgp': GoBGPTarget,
     'bird': BIRDTarget,
@@ -179,6 +192,255 @@ def doctor(args):
             name, '{0} ({1})'.format(cls.IMAGE_REPO, ', '.join(tags)) if tags else 'not found'))
 
     print('/proc/sys/net/ipv4/neigh/default/gc_thresh3 ... {0}'.format(gc_thresh3()))
+
+
+VERIFY_CONTAINER_PREFIX = 'bgperf_verify_'
+
+# Signature of a gcov-instrumented binary, as an ERE for grep -E inside the
+# image (no image is required to ship nm or strings). '.gcda' only counts where
+# a non-letter follows it: a bare '\.gcda' also matches Go's runtime.gcdata and
+# reported every gobgp image as instrumented.
+GCOV_PATTERN = r'__gcov|\.gcda([^a-zA-Z]|$)'
+
+
+def looks_like_sha(ref):
+    '''A git object name, as opposed to a release number or a branch.'''
+    return bool(re.fullmatch(r'[0-9a-f]{6,40}', ref))
+
+
+def expect_version_in_banner(cls, version):
+    '''Should the daemon's banner be expected to carry this version label?
+
+    Only for a release the daemon names. resolve_ref() passes anything it does
+    not recognize through as a raw ref, so `update gobgp --version master` is
+    supported and produces bgperf/gobgp:master -- whose banner says '3.38.0' and
+    never the word 'master'. Demanding a match there fails a perfectly good
+    image, so a branch or a bare sha is not checked at all.
+    '''
+    version = str(version)
+    return bool(re.fullmatch(r'\d+(\.\d+)+', version)) or version in cls.VERSIONS
+
+
+def version_matches(reported, version, ref):
+    '''Does `reported` look like it came from the build `version` names?
+
+    The version is matched on a numeric boundary, not as a bare substring: a
+    plain `in` makes '3.1' match 'BIRD version 3.13', so an image tagged 3.1 but
+    built from v3.13 would verify clean -- the same 10.1-vs-10.10 confusion
+    BatchLoader exists to prevent, in the one check meant to catch a wrong ref.
+    A following '.' is still fine, because FRR 10.7 legitimately reports 10.7.0.
+
+    The resolved ref is tried too, since a daemon's banner is not obliged to
+    carry the label bgperf files it under: rustybgp 2026-02 reports
+    'rustybgpd v0.2.0-0cc685c882', naming the commit rather than the label. A
+    sha is matched as a prefix -- the daemon prints a longer abbreviation than
+    the one written in VERSION_REFS.
+    '''
+    def anchored(needle):
+        return re.search(r'(?<![\d.])' + re.escape(needle) + r'(?!\d)', reported)
+
+    if anchored(version):
+        return True
+    for cand in (ref, ref.rsplit('/', 1)[-1], ref.lstrip('v')):
+        if not cand:
+            continue
+        if looks_like_sha(cand):
+            if cand in reported:
+                return True
+        elif anchored(cand):
+            return True
+    return False
+
+
+def probe_image(cls, tag):
+    '''Start a throwaway container from `tag` and ask the daemon about itself.
+
+    Returns a list of (ok, label, detail). The container runs `sleep` rather
+    than the image's own command: nothing here needs the daemon running, and
+    starting it would need a config and, for some images, privileges.
+    '''
+    results = []
+    name = VERIFY_CONTAINER_PREFIX + sanitize_tag(tag).replace('/', '_')
+    if ctn_exists(name):
+        dckr.remove_container(name, force=True)
+    # entrypoint=[] clears the image's own: `command` is *appended* to an
+    # ENTRYPOINT, not run instead of it, and exabgp and bgpdump2 both set
+    # ENTRYPOINT ["/bin/bash"] -- so the container would run `bash sleep 600`,
+    # fail to open a script called 'sleep', and exit while dckr.start() still
+    # reported success. Every later exec would then fail with "not running" and
+    # a healthy image would read as unprobeable.
+    dckr.create_container(image=tag, command=['sleep', '600'], entrypoint=[],
+                          detach=True, stdin_open=True, name=name)
+    try:
+        dckr.start(container=name)
+
+        # The probe deliberately goes through the class bench instantiates, not
+        # the daemon base class: rustybgp's version parser was only wrong via
+        # RustyBGPTarget's MRO, and was correct when the base was asked directly.
+        probe = cls.__new__(cls)
+        probe.name = name
+
+        if cls.VERSION_NEEDS_DAEMON:
+            results.append((None, 'version', 'needs a running daemon; not probed'))
+        else:
+            try:
+                cls.get_version_cmd(probe)
+                implemented = True
+            except NotImplementedError:
+                implemented = False
+            if not implemented:
+                # A declared gap, not a broken image: some testers never grew a
+                # version command. Worth showing -- provenance records UNKNOWN
+                # for them -- but failing on it would make `verify` always red
+                # and so worth nothing.
+                results.append((None, 'version',
+                                'no version command implemented; provenance records UNKNOWN'))
+            else:
+                reported = probe.version_string()
+                ok = not reported.startswith(VERSION_UNKNOWN)
+                results.append((ok, 'version', reported))
+
+        if cls.DAEMON_BINARY:
+            results.extend(check_binary(name, cls.DAEMON_BINARY))
+    finally:
+        dckr.remove_container(name, force=True)
+    return results
+
+
+def check_binary(container, path):
+    '''Build-hygiene checks on the daemon binary itself.
+
+    gcov instrumentation is the one that has actually bitten: every frr_c image
+    carried it for years, so FRR was timed as an instrumented binary against
+    everyone else's optimized one -- 103% CPU against 45% on identical source.
+    It is invisible at runtime apart from 'profiling: ... .gcda' lines in the
+    log, which read as noise.
+
+    Detected by grep on the binary so no image needs nm or strings. The pattern
+    matches the gcov runtime symbol prefix, plus '.gcda' only where a non-letter
+    follows: a bare '\\.gcda' also matches Go's runtime.gcdata and reported
+    every gobgp image as instrumented. Both halves were checked against a
+    purpose-built pair -- gcc -fprofile-arcs -ftest-coverage scores 2, the same
+    source without it scores 0 -- because a detector that never fires is worse
+    than none.
+    '''
+    # `|| true` because grep exits 1 when the count is zero, which an earlier
+    # `test -f X && grep ... || echo MISSING` turned into a bogus MISSING for
+    # every clean binary.
+    script = ('if [ -f {path} ]; then grep -acE \'{pat}\' {path} || true; '
+              'else echo MISSING; fi').format(path=path, pat=GCOV_PATTERN)
+    i = dckr.exec_create(container=container, cmd=['sh', '-c', script], stderr=True)
+    out = dckr.exec_start(i['Id'], stream=False, detach=False).decode('utf-8').strip()
+    if out == 'MISSING':
+        return [(False, 'binary', '{0} not found in the image'.format(path))]
+    try:
+        hits = int(out.split()[-1])
+    except (ValueError, IndexError):
+        return [(None, 'binary', 'could not be checked: {0!r}'.format(out))]
+    if hits:
+        return [(False, 'instrumentation',
+                 'gcov-instrumented ({0} matches in {1}); rebuild it, '
+                 'benchmarks are not comparable'.format(hits, path))]
+    return [(True, 'instrumentation', 'clean')]
+
+
+def verify(args):
+    '''Check that every built image reports its own version correctly.
+
+    The test suite deliberately cannot touch Docker, so nothing else covers the
+    seam where a parser meets a real container -- and that is where the bugs
+    have been: rustybgp read its version with GoBGP's parser and recorded
+    UNKNOWN on every run, openbgpd looked for bgpctl under a path that does not
+    exist in the image. Both pass every unit test. A full bench catches them,
+    but nobody runs one per change; this takes a second per image.
+    '''
+    names = args.target or sorted(BUILDABLE_IMAGES)
+    versions = parse_versions(getattr(args, 'versions', None))
+    if versions and len(names) != 1:
+        sys.exit('--versions needs exactly one -t/--target: version names mean different '
+                 'things to different daemons')
+
+    failed = []
+    checked = 0
+    for name in names:
+        buildable = BUILDABLE_IMAGES[name]
+        # Probe through every class that really runs this image -- the target
+        # and the tester have different MROs, and it was an MRO that broke
+        # rustybgp. De-duplicated so a daemon that is only ever one role is
+        # still probed once, via the base class.
+        roles = []
+        for label, table in (('target', TARGET_CLASSES), ('tester', TESTER_CLASSES)):
+            cls = table.get(name)
+            if cls is not None and cls not in [c for _, c in roles]:
+                roles.append((label, cls))
+        if not roles:
+            roles = [('image', buildable)]
+
+        built = buildable.built_versions()
+        wanted = versions or [None if v == 'latest' else v for v in built]
+        if not wanted:
+            print('{0} ... nothing built'.format(name))
+            continue
+
+        print(name)
+        for v in wanted:
+            shown = v or 'latest'
+            try:
+                tag = buildable.image_tag(v)
+            except VersionNotSupported:
+                # Only reachable for an explicitly named version, so it is a
+                # bad request rather than something to pass over quietly.
+                msg = '{0} has no selectable versions'.format(name)
+                print('  {0:<12} {1:<28} FAIL  {2}'.format(shown, '-', msg))
+                failed.append(('{0}:{1}'.format(name, shown), msg))
+                continue
+            if not img_exists(tag):
+                # Never built is only an error when this version was asked for
+                # by name: reporting success for a version nothing checked is
+                # the one result a caller must not be able to trust.
+                if versions:
+                    print('  {0:<12} {1:<28} FAIL  not built'.format(shown, tag))
+                    failed.append((tag, 'not built'))
+                else:
+                    print('  {0:<12} {1:<28} not built'.format(shown, tag))
+                continue
+            checked += 1
+            for role, cls in roles:
+                try:
+                    results = probe_image(cls, tag)
+                except Exception as e:
+                    print('  {0:<12} {1:<28} FAIL  could not probe as {2}: {3}'.format(
+                        shown, tag, role, e))
+                    failed.append((tag, 'as {0}: {1}'.format(role, e)))
+                    continue
+
+                for ok, label, detail in results:
+                    mark = 'ok  ' if ok else ('--  ' if ok is None else 'FAIL')
+                    print('  {0:<12} {1:<28} {2}  {3} {4}: {5}'.format(
+                        shown, tag, mark, role, label, detail))
+                    if ok is False:
+                        failed.append((tag, '{0} {1}: {2}'.format(role, label, detail)))
+
+                # A tag that names a release should report that release. This
+                # catches an image built from the wrong ref, or a repackaged one
+                # whose upstream tag moved underneath it.
+                reported = next((d for ok, l, d in results if l == 'version' and ok), None)
+                if (v and reported and expect_version_in_banner(buildable, v)
+                        and not version_matches(reported, str(v), buildable.resolve_ref(v))):
+                    msg = 'tagged {0} but reports {1!r}'.format(v, reported)
+                    print('  {0:<12} {1:<28} FAIL  {2} version: {3}'.format(shown, tag, role, msg))
+                    failed.append((tag, msg))
+
+    print()
+    if failed:
+        print('{0} problem(s) across {1} image(s):'.format(len(failed), checked))
+        for tag, msg in failed:
+            print('  {0:<28} {1}'.format(tag, msg))
+        sys.exit(1)
+    if not checked:
+        # "all ok" over nothing checked is worse than saying so.
+        sys.exit('nothing was checked -- no matching images are built')
+    print('{0} image(s) checked, all ok'.format(checked))
 
 
 def images(args):
@@ -1380,6 +1642,15 @@ def create_args_parser(main=True):
 
     parser_images = s.add_parser('images', help='list daemon versions and which are built')
     parser_images.set_defaults(func=images)
+
+    parser_verify = s.add_parser(
+        'verify', help='start each built image and check it reports its own version')
+    parser_verify.add_argument('-t', '--target', action='append', choices=sorted(BUILDABLE_IMAGES),
+                               help='check only this image; repeatable. default: all built images')
+    parser_verify.add_argument('--versions', type=str,
+                               help='comma-separated versions to check instead of every built one; '
+                                    'requires -t')
+    parser_verify.set_defaults(func=verify)
 
     parser_dockerfile = s.add_parser('dockerfile',
                                      help='print the Dockerfile a version would build')

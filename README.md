@@ -8,6 +8,7 @@ bgperf2 is a performance measurement tool for BGP implementation. This was forke
 * [How bgperf2 works](https://github.com/netenglabs/bgperf2/blob/master/docs/how_bgperf_works.md)
 * [Benchmark remote target](https://github.com/netenglabs/bgperf2/blob/master/docs/benchmark_remote_target.md)
 * [MRT injection](https://github.com/netenglabs/bgperf2/blob/master/docs/mrt.md)
+* [Running on AWS EC2](https://github.com/netenglabs/bgperf2/blob/master/docs/howto_aws.md)
 
 ## Updates from original bgperf
 I've changed bgperf to work with python 3 and work with new versions of all the NOSes. It actually works, the original version that this is a fork of does not work anymore because of newer version of python and each of the routing stacks.

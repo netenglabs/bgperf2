@@ -74,7 +74,15 @@ class BIRDTester(Tester, BIRD):
         for p in peers:
             with open('{0}/{1}.conf'.format(self.host_dir, p['router-id']), 'w') as f:
                 local_address = p['local-address']
-                config = '''log "{5}/{2}.log" all;
+                # Log classes, not `all`. `all` includes trace, and a BIRD
+                # tester traces every route event: 50 peers x 100k prefixes
+                # wrote 700MB per peer, 31GB in total. /tmp is tmpfs on a
+                # typical box, so that is 31GB of *RAM* -- it dragged the
+                # recorded min_free from 56GB to 28.5GB on a run whose target
+                # daemon used 0.56GB, making that column a measure of tester
+                # logging rather than of the daemon. find_errors() only needs
+                # <RMT>, and nothing reads the logs during a run.
+                config = '''log "{5}/{2}.log" {{ info, remote, warning, error, auth, bug, fatal }};
 #debug protocols all;
 debug protocols {{states}};
 router id {2};

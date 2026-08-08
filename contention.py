@@ -82,6 +82,41 @@ except (ValueError, OSError):        # pragma: no cover - every Linux has it
     CLOCK_TICKS = 100
 
 
+MEMORY_BACKED_FILESYSTEMS = frozenset(('tmpfs', 'ramfs'))
+
+
+def filesystem_type(path, mounts_text):
+    '''Filesystem type backing `path`, from the contents of /proc/mounts.
+
+    The longest matching mount point wins, so /tmp beats / when both are
+    mounted.
+    '''
+    best_type, best_len = None, -1
+    for line in mounts_text.splitlines():
+        fields = line.split()
+        if len(fields) < 3:
+            continue
+        mount_point, fs_type = fields[1], fields[2]
+        if path == mount_point or path.startswith(mount_point.rstrip('/') + '/'):
+            if len(mount_point) > best_len:
+                best_type, best_len = fs_type, len(mount_point)
+    return best_type
+
+
+def is_memory_backed(path, mounts_text):
+    '''True if writing to `path` consumes RAM rather than disk.
+
+    -d/--dir defaults to /tmp, which systemd mounts as tmpfs on many distros,
+    and every tester and target log is bind-mounted under it. A 50-peer
+    100k-prefix BIRD run wrote 31GB of logs there -- half this machine's
+    memory -- which dragged the recorded min_free from 56GB to 28.5GB on a run
+    whose target daemon used 0.56GB. That makes a published column a measure of
+    log volume, and on a smaller box it is an out-of-memory failure rather than
+    a distorted number.
+    '''
+    return filesystem_type(path, mounts_text) in MEMORY_BACKED_FILESYSTEMS
+
+
 def parse_proc_stat(text, skip_kernel_threads=True):
     '''Pull (command, ppid, cpu_ticks) out of the contents of /proc/<pid>/stat.
 

@@ -263,6 +263,25 @@ and a contention column stuck at 0, and the samplers wait on the event instead o
 they stop at once rather than lingering a poll interval. `tests/test_controller_threads.py` covers
 both directions.
 
+### The bench directory is in RAM by default
+
+`-d/--dir` defaults to `/tmp`, which is tmpfs on most systemd distros, and every role's config and
+logs are bind-mounted under it. A 50-peer 100k-prefix BIRD run wrote **31GB** of tester logs there
+— half this machine's RAM — pulling the recorded `min free mem` from 56GB to **28.5GB** on a run
+whose target daemon used **0.56GB**. A published, graphed column was measuring tester logging.
+`warn_if_log_dir_is_in_ram()` says so at the start of a run; `is_memory_backed()` in
+`contention.py` is the pure part.
+
+Two things made it that large, and only one is fixed:
+
+- The BIRD tester config used `log ... all`, which includes `trace` — every route event, ~7KB per
+  prefix. It now names the classes `find_errors()` actually needs, about 6x less.
+- What remains is `<RMT> Invalid route ... withdrawn`: the target re-advertises everything it
+  learns back to the testers, which reject it. That is normal operation — `find_errors()` already
+  excludes those lines — but they are class `remote`, which `find_errors()` needs, so they cannot be filtered
+  out without blinding it. Stopping the target from exporting to testers would remove the noise but
+  would also change the workload (no RIB-out to N peers), so it is left alone.
+
 ### Recording versions — provenance
 
 A result nobody can trace back to a build is not reproducible, so every run records the version

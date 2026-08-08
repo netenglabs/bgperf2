@@ -55,7 +55,7 @@ from bgpdump2 import Bgpdump2, Bgpdump2Tester
 from monitor import Monitor
 from convergence import ConvergenceTracker
 from contention import (describe_contention, foreign_cpu_percent,
-                        own_process_tree, sample_processes)
+                        is_memory_backed, own_process_tree, sample_processes)
 from settings import dckr
 from queue import Queue
 from mako.template import Template
@@ -690,6 +690,23 @@ def warn_if_machine_is_busy():
         print('         timings will not be comparable with runs made on an idle machine')
 
 
+def warn_if_log_dir_is_in_ram(config_dir):
+    '''Warn when the bench directory is tmpfs, because the logs go into RAM.'''
+    try:
+        with open('/proc/mounts') as f:
+            mounts = f.read()
+    except OSError:
+        return
+    if not is_memory_backed(os.path.abspath(config_dir), mounts):
+        return
+    print('WARNING: {0} is on a memory-backed filesystem, so tester and target '
+          'logs consume RAM.'.format(config_dir))
+    print('         A 50-peer 100k-prefix BIRD run writes several GB there, which '
+          'lowers the recorded')
+    print('         min free mem without the daemon using it. Pass -d/--dir with a '
+          'disk-backed path.')
+
+
 def controller_foreign_cpu(queue, interval=5):
     '''Track CPU used by anything that is not part of the benchmark.
 
@@ -785,6 +802,7 @@ def bench(args):
     # process for every cell, so checking earlier would see the last cell's own
     # target daemon still running and report it as somebody else's job.
     warn_if_machine_is_busy()
+    warn_if_log_dir_is_in_ram(config_dir)
 
     bench_start = time.time()
     if args.file:

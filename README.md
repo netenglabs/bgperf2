@@ -161,6 +161,29 @@ a target, add its process names there** or that target reports its own load as
 contention and all of its rows look incomparable. The cEOS and SR Linux entries
 are the main agents, not the complete set.
 
+### Keep the bench directory off tmpfs
+
+`-d/--dir` defaults to `/tmp`, and systemd mounts `/tmp` as tmpfs on many
+distros — so every tester and target log is written into **RAM**. That is not a
+small effect. A 50-peer × 100k-prefix BIRD run wrote **31 GB** of tester logs,
+half the machine's memory, and dragged the recorded `min free mem` from 56 GB
+down to **28.5 GB** on a run whose target daemon used **0.56 GB**. The column
+was measuring log volume, not the daemon; on a smaller box it is an
+out-of-memory failure instead of a misleading number.
+
+`bench` warns when it detects this. Pass a disk-backed path:
+
+```bash
+./bgperf2.py bench -d /var/tmp -t bird ...
+```
+
+The BIRD tester's logging was also `log ... all`, which includes `trace` and
+recorded every route event at about 7 KB per prefix. It now logs only the
+classes `find_errors()` needs, cutting roughly 6× off the volume. What remains
+is almost entirely `<RMT> Invalid route ... withdrawn` — the target reflecting
+routes back to testers that reject them, which is normal and which
+`find_errors()` already discards.
+
 ### Reading a result: `testers (s)` tells you what you measured
 
 `elapsed (s)` is how long the monitor took to see the full table; `testers (s)`

@@ -15,7 +15,9 @@ import pytest
 from contention import (
     CONTENTION_PERCENT,
     describe_contention,
+    filesystem_type,
     foreign_cpu_percent,
+    is_memory_backed,
     own_process_tree,
     parse_proc_stat,
     sample_processes,
@@ -228,3 +230,36 @@ class TestOwnProcessTree:
         '''A pid whose parent is itself must not loop forever.'''
         looped = {'5': ('a', '5', 0), '6': ('b', '5', 0)}
         assert own_process_tree(looped, root_pid=5) == {'5', '6'}
+
+
+class TestMemoryBackedLogDir:
+    '''-d/--dir defaults to /tmp, which is tmpfs on many distros, so every
+    tester and target log is written into RAM. A 50-peer 100k-prefix BIRD run
+    put 31GB there and dragged the recorded min_free from 56GB to 28.5GB on a
+    run whose daemon used 0.56GB.
+    '''
+    MOUNTS = (
+        '/dev/sda5 / ext4 rw,relatime 0 0\n'
+        'tmpfs /tmp tmpfs rw,nosuid,nodev 0 0\n'
+        'tmpfs /dev/shm tmpfs rw 0 0\n'
+        '/dev/sda5 /var ext4 rw 0 0\n'
+    )
+
+    def test_tmp_is_detected_as_memory_backed(self):
+        assert is_memory_backed('/tmp/bgperf2', self.MOUNTS)
+
+    def test_a_disk_path_is_not(self):
+        assert not is_memory_backed('/var/lib/bgperf2', self.MOUNTS)
+        assert not is_memory_backed('/home/user/bench', self.MOUNTS)
+
+    def test_longest_mount_point_wins(self):
+        '''/tmp must beat / even though both match.'''
+        assert filesystem_type('/tmp/bgperf2', self.MOUNTS) == 'tmpfs'
+        assert filesystem_type('/var/tmpfoo', self.MOUNTS) == 'ext4'
+
+    def test_a_prefix_that_is_not_a_path_component_does_not_match(self):
+        '''/tmpfoo is not inside /tmp.'''
+        assert not is_memory_backed('/tmpfoo/bench', self.MOUNTS)
+
+    def test_unparsable_mounts_do_not_raise(self):
+        assert filesystem_type('/tmp', 'garbage\n\nshort line\n') is None

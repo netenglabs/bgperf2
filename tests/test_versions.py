@@ -18,6 +18,7 @@ from flock import Flock
 from frr_compiled import FRRoutingCompiled
 from gobgp import GoBGP
 from junos import Junos
+from rustybgp import RustyBGP
 
 
 class TestResolveRef:
@@ -50,6 +51,49 @@ class TestResolveRef:
 
     def test_gobgp(self):
         assert GoBGP.resolve_ref('3.37.0') == 'v3.37.0'
+
+    @pytest.mark.parametrize('version,ref', [
+        ('2026-02', '0cc685c'),   # date labels map onto the commit they name
+        ('master', 'master'),     # raw refs still pass through
+        ('16cc827', '16cc827'),
+    ])
+    def test_rustybgp(self, version, ref):
+        '''RustyBGP has never cut a release, so versions are date labels.'''
+        assert RustyBGP.resolve_ref(version) == ref
+
+    def test_rustybgp_default(self):
+        assert RustyBGP.resolve_ref(None) == 'master'
+
+    @pytest.mark.parametrize('spelling', [
+        '0cc685c',      # the abbreviation written in VERSION_BUILD_VARS
+        '0cc685c882',   # what `rustybgpd --version` actually prints
+        '0cc685',       # a shorter abbreviation than the one written here
+    ])
+    def test_rustybgp_sha_gets_the_same_recipe_as_its_label(self, spelling):
+        '''A version is matched as typed, not as resolved, so naming a commit by
+        sha has to reach its own build overrides. The abbreviation a user has in
+        hand is the one the daemon printed (v0.2.0-0cc685c882), so matching the
+        exact 7 characters written here would miss it and silently bundle a v4.7
+        gobgp CLI with a daemon serving the v4.0 API.
+        '''
+        assert (RustyBGP.build_vars(spelling)['gobgp_version']
+                == RustyBGP.build_vars('2026-02')['gobgp_version'])
+
+    @pytest.mark.parametrize('spelling', ['master', '0', '16cc827', ''])
+    def test_rustybgp_other_refs_keep_the_default_recipe(self, spelling):
+        '''A too-short or unrelated ref must not claim the pinned commit.'''
+        assert (RustyBGP.build_vars(spelling)['gobgp_version']
+                == RustyBGP.BUILD_VARS['gobgp_version'])
+
+    def test_rustybgp_builder_and_runtime_glibc_match(self):
+        '''A trixie builder with a bookworm runtime builds fine and then dies at
+        startup with "GLIBC_2.xx not found" -- a bench that will not come up
+        rather than a build error.
+        '''
+        for v in (None, '2026-02'):
+            build = RustyBGP.build_vars(v)
+            assert build['base_image'].endswith('-bookworm')
+            assert build['runtime_image'] == 'debian:bookworm'
 
 
 class TestImageTag:

@@ -15,6 +15,7 @@
 
 from base import *
 import json
+import os
 import re
 
 class FRRouting(Container):
@@ -178,18 +179,77 @@ no bgp ebgp-requires-policy
             neighbors_accepted[n] = peers[n]['pfxRcd']
         return neighbors_received, neighbors_accepted
 
+    EOR_RE = re.compile(r".*rcvd End-of-RIB for IPv4 Unicast from (\d+\.\d+\.\d+\.\d+)")
+
+    # most a single poll will pull out of bgpd.log; a 1s poll never produces
+    # anywhere near this, it only bounds the catch-up read after a stall
+    EOR_READ_MAX = 32 * 1024 * 1024
+
     def _get_EOR_from_log(self, neighbors):
         # we are looking at the log files for End-Of-RIB
         # 2021/11/05 16:34:38 BGP: bgp_update_receive: rcvd End-of-RIB for IPv4 Unicast from 10.10.0.3 in vrf default
+        #
+        # bench() polls this once a second for the whole run, and End-of-RIB is
+        # only visible at all because write_config() sets `log stdout debug`,
+        # so bgpd.log grows with the route count -- a 10-peer 1.05M-prefix MRT
+        # run puts it past 1GB. This used to readlines() the entire file and
+        # rematch every line on every poll, which made the measuring instrument
+        # the bottleneck: ~15s of CPU per poll, the per-second progress line
+        # stopped printing, and the run never terminated even though the target
+        # had converged minutes earlier.
+        #
+        # Read only what was appended since the last poll and remember which
+        # neighbors already reported, so a poll costs the new bytes rather than
+        # the whole log.
+        if not hasattr(self, '_eor_seen'):
+            self._eor_seen = set()
+            self._eor_log_pos = 0
+            self._eor_log_id = None
 
-        with open(f"{self.host_dir}/bgpd.log") as f:
-            log = f.readlines()
-        EOR = re.compile(r".*rcvd End-of-RIB for IPv4 Unicast from (\d+\.\d+\.\d+\.\d+)")
-        if len(log) > 1:
-            for line in log:
-                m_eor = EOR.match(line)
-                if m_eor:
-                    neighbors[m_eor.groups()[0]] = True
+        path = f"{self.host_dir}/bgpd.log"
+        try:
+            st = os.stat(path)
+        except OSError:
+            # bgpd has not created it yet; polling starts before it is up
+            return neighbors
+
+        # A fresh run replaces the log. Identify it by inode rather than by
+        # size: a replacement that had already grown past the saved offset
+        # would keep the old one and be read from the wrong place, and since
+        # FRR reaches its checkpoint only through End-of-RIB, silently missing
+        # those lines means the run never converges and burns the full
+        # STUCK_SAMPLES timeout before failing.
+        log_id = (st.st_dev, st.st_ino)
+        if log_id != self._eor_log_id:
+            self._eor_seen = set()
+            self._eor_log_pos = 0
+            self._eor_log_id = log_id
+
+        if st.st_size > self._eor_log_pos:
+            with open(path, 'rb') as f:
+                f.seek(self._eor_log_pos)
+                # Capped rather than read(): this process's own RSS feeds the
+                # recorded min_free statistic, so swallowing a multi-hundred-MB
+                # backlog in one poll would show up as a dip in a published
+                # column. Whatever is left is picked up next second.
+                chunk = f.read(self.EOR_READ_MAX)
+            # bgpd may be mid-write, so stop at the last complete line and
+            # resume from the start of the partial one next poll
+            end = chunk.rfind(b'\n')
+            if end >= 0:
+                for line in chunk[:end].decode('utf-8', errors='replace').split('\n'):
+                    m_eor = self.EOR_RE.match(line)
+                    if m_eor:
+                        self._eor_seen.add(m_eor.groups()[0])
+                self._eor_log_pos += end + 1
+            elif len(chunk) == self.EOR_READ_MAX:
+                # a full cap with no newline would otherwise re-read the same
+                # bytes forever
+                self._eor_log_pos += len(chunk)
+
+        for addr in self._eor_seen:
+            if addr in neighbors:
+                neighbors[addr] = True
 
         return neighbors
 

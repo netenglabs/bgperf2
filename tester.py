@@ -124,11 +124,18 @@ ulimit -n 65536
         errors = 0
         for log_dir in log_dirs:
             for log in glob.glob(os.path.join(log_dir, '*.log')):
-                with open(log, errors='replace') as f:
-                    for line in f:
-                        if '<RMT>' not in line:
-                            continue
-                        if 'NEXT_HOP' in line or 'Invalid route' in line:
-                            continue
-                        errors += 1
+                # An unreadable log is skipped rather than raised: this runs
+                # once the run has converged but before its stats row is
+                # written, so letting an OSError out discards the whole run
+                # over a log file.
+                try:
+                    with open(log, errors='replace') as f:
+                        for line in f:
+                            if '<RMT>' not in line:
+                                continue
+                            if 'NEXT_HOP' in line or 'Invalid route' in line:
+                                continue
+                            errors += 1
+                except OSError:
+                    continue
         return errors

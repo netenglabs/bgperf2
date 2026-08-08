@@ -236,3 +236,12 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1 &
         crashed every MRT run *after* it had already converged.
         '''
         return count_matching_lines(log_dirs, 'expired')
+
+    @staticmethod
+    def find_timeouts(log_dirs=()):
+        '''gobgp is the default MRT injector, so without this it inherited
+        base.Tester's hardcoded 0 while a bgpdump2 run of the same scenario
+        reported real counts -- the tester timeouts column was not comparable
+        between two rows of the same batch CSV.
+        '''
+        return count_matching_lines(log_dirs, 'timeout')

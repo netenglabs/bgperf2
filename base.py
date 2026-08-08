@@ -14,6 +14,7 @@
 # limitations under the License.
 
 from settings import dckr
+import glob
 import io
 import os
 import re
@@ -741,3 +742,32 @@ class Tester(Container):
     @staticmethod
     def find_timeouts(log_dirs=()):
         return 0
+
+
+def count_matching_lines(log_dirs, needle):
+    '''Count lines containing `needle` (case-insensitively) in each *.log
+    directly inside each of `log_dirs` -- not recursively, which is all the
+    testers need since they write their logs straight into guest_dir.
+
+    The MRT testers used to shell out to `grep ... /tmp/bgperf2/...  | wc -l`,
+    which hardcoded the bench directory and returned a *string*, so the stats
+    row got '0\\n' where every other tester wrote an int. Reading the
+    directories bench() actually passes keeps -b/--bench-name working.
+
+    An unreadable log is skipped rather than raised: this runs at the moment a
+    run has just converged but not yet written its stats row, so letting an
+    OSError out would throw away the whole run over a log file. The grep this
+    replaced also returned 0 in that case.
+    '''
+    needle = needle.lower()
+    count = 0
+    for log_dir in log_dirs:
+        for log in glob.glob(os.path.join(log_dir, '*.log')):
+            try:
+                with open(log, errors='replace') as f:
+                    for line in f:
+                        if needle in line.lower():
+                            count += 1
+            except OSError:
+                continue
+    return count

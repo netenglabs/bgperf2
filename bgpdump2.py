@@ -1,5 +1,4 @@
 import re
-from subprocess import check_output, Popen, PIPE
 from base import *
 from mrt_tester import MRTTester
 
@@ -113,14 +112,15 @@ ulimit -n 65536
         return startup
 #> {}/bgpdump2.log 2>&1 
 
-    def find_errors():
-        grep1 = Popen(('grep -i error /tmp/bgperf2/mrt-injector*/*.log'), shell=True, stdout=PIPE)
-        errors = check_output(('wc', '-l'), stdin=grep1.stdout)
-        grep1.wait()
-        return errors.decode('utf-8').strip()
+    # Both of these take the tester host directories and must match the
+    # signature in base.Tester -- bench() calls them on the class as
+    # find_errors(tester_dirs). They used to take no arguments and glob
+    # /tmp/bgperf2 themselves, so every bgpdump2 run died with TypeError at the
+    # point it had finished converging and was writing its stats row.
+    @staticmethod
+    def find_errors(log_dirs=()):
+        return count_matching_lines(log_dirs, 'error')
 
-    def find_timeouts():
-        grep1 = Popen(('grep -i timeout /tmp/bgperf2/mrt-injector*/*.log'), shell=True, stdout=PIPE)
-        timeouts = check_output(('wc', '-l'), stdin=grep1.stdout)
-        grep1.wait()
-        return timeouts.decode('utf-8').strip()
+    @staticmethod
+    def find_timeouts(log_dirs=()):
+        return count_matching_lines(log_dirs, 'timeout')

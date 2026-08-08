@@ -18,7 +18,6 @@ from gobgp import GoBGP
 from exabgp import ExaBGP_MRTParse
 import os
 import yaml
-from subprocess import check_output, Popen, PIPE
 from  settings import dckr
 
 from base import *
@@ -227,8 +226,13 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1 &
         #startup += '\n' + 'pkill -SIGHUP gobgpd'
         return startup
 
-    def find_errors():
-        grep1 = Popen(('grep -i expired /tmp/bgperf2/mrt-injector*/*.log'), shell=True, stdout=PIPE)
-        errors = check_output(('wc', '-l'), stdin=grep1.stdout)
-        grep1.wait()
-        return errors.decode('utf-8').strip()
+    @staticmethod
+    def find_errors(log_dirs=()):
+        '''Count expired-session messages across the injector logs.
+
+        bench() calls this on the class with the tester host directories, so it
+        has to match the signature in base.Tester -- it used to take no
+        arguments and glob /tmp/bgperf2 itself, which raised TypeError and
+        crashed every MRT run *after* it had already converged.
+        '''
+        return count_matching_lines(log_dirs, 'expired')

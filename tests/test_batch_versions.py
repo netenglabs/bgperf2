@@ -144,3 +144,105 @@ def test_batch_passes_version_through_to_bench():
     import inspect
     source = inspect.getsource(bgperf2.batch)
     assert "'version'" in source, 'batch() must copy version onto the bench args'
+
+
+class TestReviewFixes:
+    '''Regressions caught by review of the version-selection commits.'''
+
+    def test_explicit_label_still_separates_versions(self):
+        '''An explicit label on a multi-version entry named every run the same
+        thing: duplicate CSV rows, per-run PNGs overwriting each other, and
+        create_graph() raising a shape mismatch because it de-duplicates labels
+        (labels[stat[0]]) but appends data per run.
+        '''
+        out = bgperf2.expand_target_versions(
+            [{'name': 'frr_c', 'versions': ['8.5', '9.1'], 'label': 'frr'}])
+        assert [t['label'] for t in out] == ['frr 8.5', 'frr 9.1']
+        assert len({t['label'] for t in out}) == len(out)
+
+    def test_single_version_keeps_the_label_verbatim(self):
+        '''One run, one label -- nothing to disambiguate against.'''
+        out = bgperf2.expand_target_versions(
+            [{'name': 'frr_c', 'versions': ['10.2'], 'label': 'candidate'}])
+        assert [t['label'] for t in out] == ['candidate']
+
+    def test_batch_checks_every_test_before_running_any(self, fake_img_exists, tmp_path):
+        '''Checking per-test still let a missing image in test 3 surface only
+        after tests 1 and 2 had run -- the multi-hour wait this prevents.
+        '''
+        import yaml
+        config = tmp_path / 'b.yaml'
+        config.write_text(yaml.safe_dump({'tests': [
+            {'name': 'first', 'neighbors': [1], 'prefixes': [1], 'filter_test': ['None'],
+             'targets': [{'name': 'bird'}]},
+            {'name': 'second', 'neighbors': [1], 'prefixes': [1], 'filter_test': ['None'],
+             'targets': [{'name': 'frr_c', 'versions': ['99.9']}]},
+        ]}))
+        fake_img_exists(lambda name: '99.9' not in name)
+
+        ran = []
+        original = bgperf2.bench
+        bgperf2.bench = lambda a: ran.append(a) or []
+        try:
+            with pytest.raises(SystemExit) as e:
+                bgperf2.batch(Namespace(batch_config=str(config), results_dir=str(tmp_path)))
+        finally:
+            bgperf2.bench = original
+        assert 'frr_c:99.9' in str(e.value)
+        assert ran == [], 'test 1 ran before the missing image in test 2 was reported'
+
+
+class TestBuildImageKwargs:
+    def test_base_build_image_tolerates_version_kwargs(self, monkeypatch):
+        '''build_version() always passes checkout=/version=. Forwarding them into
+        build_dockerfile() raised TypeError, so a daemon that did not override
+        build_image -- the case CLAUDE.md tells you to write -- could not build.
+        '''
+        seen = {}
+
+        class Bare(base.Container):
+            IMAGE_REPO = 'bgperf/bare'
+            dockerfile = 'FROM scratch\n'
+
+            @classmethod
+            def build_dockerfile(cls, dockerfile, force, tag, nocache=False, buildargs=None):
+                seen['tag'] = tag
+
+        Bare.build_version('1.0')
+        assert seen['tag'] == 'bgperf/bare:1.0'
+
+
+class TestSecondRoundFixes:
+    '''Regressions caught by review of the first round of review fixes.'''
+
+    def test_image_resolves_before_containers_are_torn_down(self, monkeypatch):
+        '''Moving resolution after the config parse also moved it after
+        remove_target_containers() and the config-dir wipe, so a typo'd
+        --version destroyed the previous run's containers before failing.
+        CLAUDE.md keeps those around deliberately for investigation.
+        '''
+        order = []
+        monkeypatch.setattr(bgperf2, 'remove_target_containers',
+                            lambda: order.append('teardown'))
+        monkeypatch.setattr(bgperf2, 'remove_old_containers', lambda: order.append('teardown'))
+        monkeypatch.setattr(bgperf2, 'target_image',
+                            lambda *a, **k: order.append('resolve') or 'img')
+
+        args = Namespace(dir='/tmp', bench_name='x', docker_network_name=None,
+                         file=None, target='bird', version='99.9', image=None, repeat=True)
+        with pytest.raises(Exception):
+            bgperf2.bench(args)
+        assert order and order[0] == 'resolve', \
+            'containers were torn down before the image was resolved: {0}'.format(order)
+
+    def test_batch_skips_image_check_for_scenario_files(self, fake_img_exists):
+        '''A -f scenario can declare the target remote, which has no local
+        image; checking one aborted the whole batch before anything ran.
+        '''
+        fake_img_exists(lambda name: False)
+        bgperf2.check_batch_images([{'name': 'bird', 'file': 'scenario.yaml'}])
+
+    def test_batch_still_checks_normal_targets(self, fake_img_exists):
+        fake_img_exists(lambda name: False)
+        with pytest.raises(SystemExit):
+            bgperf2.check_batch_images([{'name': 'bird'}])

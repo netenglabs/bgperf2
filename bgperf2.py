@@ -198,9 +198,12 @@ def images(args):
                 tag = cls.image_tag(version)
             except VersionNotSupported:
                 continue
+            # built_versions() returns sanitized tags, so a version containing a
+            # character sanitize_tag() rewrites ('stable/8' -> 'stable_8') would
+            # otherwise always read as not built. doctor already compares this way.
             print('  {0:<12} {1:<28} {2:<18} {3}'.format(
                 v, tag, cls.resolve_ref(version),
-                'built' if v in built else 'not built'))
+                'built' if sanitize_tag(v) in built else 'not built'))
         print()
 
     print('downloaded out of band (tag them yourself):')
@@ -233,8 +236,10 @@ def prepare(args):
     '''
     names = args.target or PREPARE_IMAGES
     versions = parse_versions(getattr(args, 'versions', None))
-    if versions and not args.target:
-        sys.exit('--versions needs -t/--target: version names mean different '
+    # One explicit list cannot span daemons -- `-t bird -t frr_c --versions 10.4`
+    # would build bgperf/bird:10.4 from the nonexistent ref v10.4.
+    if versions and len(names) != 1:
+        sys.exit('--versions needs exactly one -t/--target: version names mean different '
                  'things to different daemons')
 
     for name in names:
@@ -270,7 +275,26 @@ def prepare(args):
 
 def update(args):
     names = sorted(BUILDABLE_IMAGES) if args.image == 'all' else [args.image]
+
+    # --versions used to shadow --version silently, so `--version 10.7
+    # --versions 8.5,9.1` built 8.5 and 9.1 and never mentioned dropping 10.7.
+    if args.version and args.versions:
+        sys.exit('--version and --versions are redundant: pass one or the other')
+
     versions = parse_versions(args.versions) or [args.version]
+
+    # A version string means something different to each project, so one list
+    # cannot span them: `update all --version 10.7` would try v10.7 on bird and
+    # gobgp and abort on flock partway through, after wasting real builds.
+    if any(versions) and args.image == 'all':
+        sys.exit('--version/--versions needs a single image, not `all`: version names mean '
+                 'different things to different daemons')
+
+    # --checkout only applies to the unversioned build; silently dropping it
+    # would ship a mislabeled image (tagged 10.7, built from some other ref).
+    if any(versions) and args.checkout:
+        sys.exit('--checkout and --version are mutually exclusive: a version already selects '
+                 'its ref (use --checkout alone to build a raw ref into the default tag)')
 
     for name in names:
         cls = BUILDABLE_IMAGES[name]
@@ -285,8 +309,11 @@ def update(args):
                                 nocache=args.no_cache)
 
 def remove_target_containers():
-    for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, 
-        RustyBGPTarget, OpenBGPTarget, FlockTarget, JunosTarget, SRLinuxTarget, EosTarget]:
+    # Derived from TARGET_CLASSES so registering a target in one place is
+    # enough. A target missing from this list leaves its container behind and
+    # the next bench fails on the duplicate name -- FRRoutingTarget is included
+    # explicitly because frr_c inherits its container name from it.
+    for target_class in set(TARGET_CLASSES.values()) | {FRRoutingTarget}:
         if ctn_exists(target_class.CONTAINER_NAME):
             print('removing target container', target_class.CONTAINER_NAME)
             dckr.remove_container(target_class.CONTAINER_NAME, force=True)
@@ -357,9 +384,16 @@ def bench(args):
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
     dckr_net_name = args.docker_network_name or args.bench_name + '-br'
 
-    # Resolve the target image first: a version that was never built should
-    # cost nothing, not a monitor, a set of testers and a torn-down network.
-    target_image_name = target_image(args.target, getattr(args, 'version', None), args.image)
+    # Resolve the target image before anything is torn down: a typo'd --version
+    # should cost nothing, and everything below this point destroys the previous
+    # run's containers and config dir, which CLAUDE.md keeps around on purpose so
+    # a failure can be investigated.
+    #
+    # Only a -f scenario can declare the target remote, and a remote target has
+    # no local image to resolve, so that case waits until the scenario is parsed.
+    target_image_name = None
+    if not args.file:
+        target_image_name = target_image(args.target, getattr(args, 'version', None), args.image)
 
     remove_target_containers()
 
@@ -381,6 +415,12 @@ def bench(args):
         with open('{0}/scenario.yaml'.format(config_dir), 'w') as f:
             f.write(conf)
         conf = yaml.safe_load(Template(conf).render())
+
+    # A remote target is not a container bgperf2 starts, so it has no image --
+    # resolving one would fail a remote run on the default target's image.
+    is_remote = bool(conf['target'].get('remote'))
+    if target_image_name is None and not is_remote:
+        target_image_name = target_image(args.target, getattr(args, 'version', None), args.image)
 
     bridge_found = False
     for network in dckr.networks(names=[dckr_net_name]):
@@ -476,8 +516,6 @@ def bench(args):
                 str_conf = gen_mako_macro() + yaml.dump(conf, default_flow_style=False)
                 with open('{0}/scenario.yaml'.format(config_dir), 'w') as f:
                     f.write(str_conf)
-
-    is_remote = True if 'remote' in conf['target'] and conf['target']['remote'] else False
 
     if is_remote:
         print('target is remote ({})'.format(conf['target']['local-address']))
@@ -582,7 +620,10 @@ def bench(args):
 
     output_stats['monitor_wait_time'] = m.wait_established(conf['target']['local-address'])
     output_stats['cores'], output_stats['memory'] = get_hardware_info()
-    if target_class == EosTarget:
+    # target_class is only bound in the local branch above; a remote run used to
+    # die here with NameError. Pre-existing, but the remote path is now something
+    # bench() explicitly supports resolving for.
+    if not is_remote and target_class == EosTarget:
         print("Waiting extra 10 seconds for EOS ")
         time.sleep(10)
 
@@ -894,7 +935,14 @@ def expand_target_versions(targets):
                 # yaml turns 10.1 into a float and 10 into an int; both have to
                 # survive as the string the tag was built from.
                 entry['version'] = str(v)
-                entry.setdefault('label', '{0} {1}'.format(t['name'], v))
+                if 'label' not in t:
+                    entry['label'] = '{0} {1}'.format(t['name'], v)
+                elif len(versions) > 1:
+                    # An explicit label on a multi-version entry would name every
+                    # run the same thing: duplicate rows in the CSV, per-run PNGs
+                    # overwriting each other, and create_graph() raising a shape
+                    # mismatch because it de-duplicates labels but not data.
+                    entry['label'] = '{0} {1}'.format(t['label'], v)
             expanded.append(entry)
     return expanded
 
@@ -907,6 +955,11 @@ def check_batch_images(targets):
     '''
     missing = []
     for t in targets:
+        if t.get('file'):
+            # A hand-written scenario can declare the target remote, in which
+            # case there is no local image to check. bench() sorts it out once
+            # the scenario is parsed.
+            continue
         if t['name'] not in TARGET_CLASSES:
             missing.append("unknown target '{0}'".format(t['name']))
             continue
@@ -932,9 +985,13 @@ def batch(args):
     with open(args.batch_config, 'r') as f:
         batch_config = yaml.load(f, Loader=BatchLoader)
 
-    for test in batch_config['tests']:
-        targets = expand_target_versions(test['targets'])
-        check_batch_images(targets)
+    # Expand and check every test before running any of them. Checking each test
+    # as it came up still let a missing image in test 3 surface only after tests
+    # 1 and 2 had run, which is the multi-hour wait this is meant to prevent.
+    expanded = [(test, expand_target_versions(test['targets'])) for test in batch_config['tests']]
+    check_batch_images([t for _, targets in expanded for t in targets])
+
+    for test, targets in expanded:
         results = []
         for n in test['neighbors']:
             for p in test['prefixes']:

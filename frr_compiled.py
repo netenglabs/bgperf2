@@ -236,7 +236,9 @@ RUN sudo install -m 755 -o frr -g frr -d /var/log/frr && \
 #    sudo mkdir -p /root/config && sudo chown frr:frr /root/config
 
 '''.format(**v)
-        print('FRRoutingCompiled: {0} from {1} (ubuntu {2})'.format(tag, v['ref'], v['ubuntu_version']))
+        # No logging here: render_dockerfile() calls this to get the recipe text,
+        # and anything printed lands in `bgperf2.py dockerfile > frr.dockerfile`,
+        # which Docker then rejects. build_version() announces the build instead.
         super(FRRoutingCompiled, cls).build_image(force, tag, nocache=nocache)
 
 

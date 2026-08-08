@@ -6,7 +6,11 @@ Docker -- the mapping is pure.
 '''
 import pytest
 
+from argparse import Namespace
+
 from conftest import REPO_ROOT
+
+import bgperf2
 
 import base
 from bird import BIRD
@@ -216,3 +220,82 @@ def test_shipped_dockerfile_overrides_are_usable():
         assert path.parent.name in {'frr_c', 'bird', 'gobgp', 'rustybgp', 'openbgp',
                                     'exabgp', 'exabgp_mrtparse', 'bgpdump2', 'flock'}, \
             f'{path}: parent directory is not an image name'
+
+
+class TestArgumentGuards:
+    '''Combinations that used to build a mislabeled image or die partway.'''
+
+    def _update_args(self, **kw):
+        base_args = {'image': 'frr_c', 'version': None, 'versions': None,
+                     'checkout': None, 'no_cache': False}
+        base_args.update(kw)
+        return Namespace(**base_args)
+
+    def test_update_rejects_version_with_all(self):
+        '''`update all --version 10.7` tried v10.7 on bird and gobgp and aborted
+        on flock, after wasting real builds.
+        '''
+        with pytest.raises(SystemExit) as e:
+            bgperf2.update(self._update_args(image='all', version='10.7'))
+        assert 'single image' in str(e.value)
+
+    def test_update_rejects_checkout_with_version(self):
+        '''--checkout was silently dropped, shipping an image tagged 10.7 that
+        was built from stable/10.7 rather than the requested sha.
+        '''
+        with pytest.raises(SystemExit) as e:
+            bgperf2.update(self._update_args(version='10.7', checkout='1a2b3c4'))
+        assert 'mutually exclusive' in str(e.value)
+
+    def test_update_rejects_version_with_versions(self):
+        '''--versions silently shadowed --version, so `--version 10.7
+        --versions 8.5,9.1` built 8.5 and 9.1 and never mentioned 10.7.
+        '''
+        with pytest.raises(SystemExit) as e:
+            bgperf2.update(self._update_args(version='10.7', versions='8.5,9.1'))
+        assert 'redundant' in str(e.value)
+
+    def test_prepare_rejects_versions_across_targets(self):
+        '''`-t bird -t frr_c --versions 10.4` would build bgperf/bird:10.4 from
+        the nonexistent ref v10.4.
+        '''
+        with pytest.raises(SystemExit) as e:
+            bgperf2.prepare(Namespace(target=['bird', 'frr_c'], versions='10.4',
+                                      force=False, no_cache=False))
+        assert 'exactly one' in str(e.value)
+
+
+def test_remove_target_containers_covers_every_target():
+    '''Derived from TARGET_CLASSES: a target registered there but missing from
+    the removal list leaves its container behind, and the next bench fails on
+    the duplicate name.
+    '''
+    import inspect
+    source = inspect.getsource(bgperf2.remove_target_containers)
+    assert 'TARGET_CLASSES' in source, 'removal list must derive from TARGET_CLASSES'
+    names = {c.CONTAINER_NAME for c in bgperf2.TARGET_CLASSES.values()}
+    assert None not in names
+
+
+class TestRenderDockerfileIsQuiet:
+    '''`bgperf2.py dockerfile ... > frr.dockerfile` is the obvious use, so
+    nothing may print into the rendered recipe.
+    '''
+
+    def test_no_log_line_in_rendered_output(self, capsys):
+        text = FRRoutingCompiled.render_dockerfile('8.5')
+        captured = capsys.readouterr()
+        assert captured.out == '', 'render printed to stdout: {0!r}'.format(captured.out)
+        assert 'FRRoutingCompiled:' not in text
+        assert text.lstrip().startswith('ARG UBUNTU_VERSION')
+
+    def test_build_version_still_announces(self, capsys, monkeypatch):
+        '''Moving the print must not lose it -- builds take 20 minutes and
+        need to say what they are doing.
+        '''
+        monkeypatch.setattr(FRRoutingCompiled, 'build_dockerfile',
+                            classmethod(lambda cls, *a, **k: None))
+        monkeypatch.setattr(base, 'img_exists', lambda name: True)
+        FRRoutingCompiled.build_version('8.5')
+        out = capsys.readouterr().out
+        assert 'bgperf/frr_c:8.5' in out and 'stable/8.5' in out

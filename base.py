@@ -220,9 +220,13 @@ class Container(object):
         tag = cls.image_tag(version)
         ref = cls.resolve_ref(version)
         override = cls.dockerfile_override(version)
+        # Announce the build here rather than inside build_image(), which
+        # render_dockerfile() also calls -- a print there ends up inside the
+        # rendered recipe.
+        print('{0}: {1} from {2}{3}'.format(
+            cls.image_name(), tag, ref,
+            ' using {0}'.format(override.relative_to(REPO_ROOT)) if override is not None else ''))
         if override is not None:
-            print('{0}: {1} from {2} using {3}'.format(
-                cls.image_name(), tag, ref, override.relative_to(REPO_ROOT)))
             cls.build_dockerfile(override.read_text(), force, tag, nocache=nocache,
                                  buildargs={'BGPERF_REF': ref, 'BGPERF_VERSION': str(version)})
         else:
@@ -274,9 +278,15 @@ class Container(object):
         print(f"image: {image}")
 
     @classmethod
-    def build_image(cls, force, tag, nocache=False, **kwargs):
-        '''Build cls.dockerfile, which the daemon module has just assembled.'''
-        cls.build_dockerfile(cls.dockerfile, force, tag, nocache=nocache, **kwargs)
+    def build_image(cls, force, tag, nocache=False, checkout=None, version=None, buildargs=None):
+        '''Build cls.dockerfile, which the daemon module has just assembled.
+
+        checkout/version are accepted and ignored so a daemon that does not
+        override this still works with build_version() -- forwarding them to
+        build_dockerfile() raised TypeError instead, which is a trap for exactly
+        the case CLAUDE.md tells you to write.
+        '''
+        cls.build_dockerfile(cls.dockerfile, force, tag, nocache=nocache, buildargs=buildargs)
 
     @classmethod
     def render_dockerfile(cls, version=None):

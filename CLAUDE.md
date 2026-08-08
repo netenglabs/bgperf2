@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## rules
 
 commit-message:
-  max-length: 72
+  max-length: 144
   format: conventional
-  no-body: true
+  no-body: false
 
 ## What this is
 
@@ -133,9 +133,10 @@ target branch when every neighbor has finished sending.
 
 Open-source daemons are built from source into `bgperf/<name>` images by `prepare`/`update`.
 `frr_c` is FRR compiled from a git checkout (`prepare` builds `stable/8.0` and `stable/9.0` variants
-under separate tags); the `frr` target uses a prebuilt upstream container and is currently **disabled**
-— its `build_image` call is commented out in `prepare()` and it is absent from the `bench -t` choices,
-though dead dispatch code for it remains.
+under separate tags); the `frr` target is a thin wrapper over the prebuilt upstream
+`frrouting/frr:v7.5.1` image. Note that `batch()` assigns `args.target` straight from the yaml, so it
+bypasses argparse's `choices` validation — `tests/test_static.py` checks the benchmark configs
+instead.
 
 Commercial NOSes (Junos cRPD, Arista cEOS, SR Linux) are never built. Download them out of band and
 tag them exactly as `crpd:latest` / `ceos:latest` — bgperf2 looks up those literal tags and fails

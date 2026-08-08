@@ -8,7 +8,7 @@ bgperf2 is a performance measurement tool for BGP implementation. This was forke
 * [How bgperf2 works](https://github.com/netenglabs/bgperf2/blob/master/docs/how_bgperf_works.md)
 * [Benchmark remote target](https://github.com/netenglabs/bgperf2/blob/master/docs/benchmark_remote_target.md)
 * [MRT injection](https://github.com/netenglabs/bgperf2/blob/master/docs/mrt.md)
-* [Running on AWS EC2](https://github.com/netenglabs/bgperf2/blob/master/docs/howto_aws.md)
+* [Running on AWS EC2 spot instances](https://github.com/netenglabs/bgperf2/blob/master/docs/howto_aws.md)
 
 ## Updates from original bgperf
 I've changed bgperf to work with python 3 and work with new versions of all the NOSes. It actually works, the original version that this is a fork of does not work anymore because of newer version of python and each of the routing stacks.
@@ -93,24 +93,25 @@ scattered in the repo root.
 ## <a name="how_to_use">How to use
 
 Use `bench` command to start benchmark test.
-By default, `bgperf2` benchmarks [GoBGP](https://github.com/osrg/gobgp).
-`bgperf2` boots 100 BGP test peers each advertises 100 routes to `GoBGP`.
+By default, `bgperf2` benchmarks [BIRD](http://bird.network.cz/).
+`bgperf2` boots 100 BGP test peers each advertising 100 routes to it.
 
 ```bash
-$ python3 bgperf2.py bench
+$ ./bgperf2.py bench
 run monitor
-run gobgp
-Waiting 5 seconds for neighbor
-run tester tester type normal
-tester booting.. (100/100)
-elapsed: 2sec, cpu: 0.79%, mem: 42.27MB, recved: 10000
-gobgp: 2.29.0
-Max cpu: 554.03, max mem: 45.71MB
-Time since first received prefix: 2
-total time: 24.07s
+run bird
+Waiting 18 seconds for monitor
+run tester tester type bird
+launched 1 testers
+elapsed: 5sec, cpu: 1.28%, mem: 10.50MB, mon recved: 10000, neighbors_received: 100, neighbors_accepted: 100, %idle 94.7, free mem 57.15GB
+bird: 2.17.1+branch.master.fe0c22277c21
+Max cpu: 23.41, max mem: 10.50MB
+Min %idle 94.7, Min mem free 57.15GB
+Time since first received prefix: 4
+total time: 31.32s
 
-name, target, version, peers, prefixes per peer, neighbor (s), elapsed (s), prefix received (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)
-gobgp,gobgp,2.29.0,100,100,5,2,0,2,24.07,554,0.045,,2021-08-02,32,62.82GB
+name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date, cores, Mem (GB), tester errors, tester timeouts, failed, MSG, filters
+bird,bird,2.17.1+branch.master.fe0c22277c21,100,100,9900,10000,18,5,1,4,31.32,23,0.01,95,57.152,,2026-08-07,32,60.73GB,0,0,,,
 ```
 
 As you might notice, the interesting statistics are shown twice, once in an easy to read format and the second
@@ -123,20 +124,21 @@ because RustyBGP doesn't support all policy that Bgperf2 tries to use for policy
 do routes and neighbors then RustyBGP works.
 
 ```bash
-$ python3 bgperf2.py bench -t bird
+$ ./bgperf2.py bench -t gobgp
 run monitor
-run bird
-Waiting 4 seconds for neighbor
-run tester tester type normal
-tester booting.. (100/100)
-elapsed: 1sec, cpu: 1.79%, mem: 110.64MB, recved: 10000
-bird: v2.0.8-59-gf761be6b
-Max cpu: 1.79, max mem: 110.64MB
-Time since first received prefix: 1
-total time: 20.73s
+run gobgp
+Waiting 19 seconds for monitor
+run tester tester type bird
+launched 1 testers
+elapsed: 6sec, cpu: 5.28%, mem: 40.15MB, mon recved: 10000, neighbors_received: 100, neighbors_accepted: 100, %idle 57.0, free mem 56.04GB
+gobgp: 3.37.0
+Max cpu: 893.00, max mem: 40.15MB
+Min %idle 57.0, Min mem free 56.04GB
+Time since first received prefix: 5
+total time: 33.27s
 
-name, target, version, peers, prefixes per peer, neighbor (s), elapsed (s), prefix received (s), exabgp (s), total time, max cpu %, max mem (GB), flags, date,cores,Mem (GB)
-bird,bird,v2.0.8-59-gf761be6b,100,100,4,1,0,1,20.73,2,0.108,,2021-08-02,32,62.82GB
+name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date, cores, Mem (GB), tester errors, tester timeouts, failed, MSG, filters
+gobgp,gobgp,3.37.0,100,100,9900,10000,19,6,1,5,33.27,893,0.04,57,56.039,,2026-08-07,32,60.73GB,0,0,,,
 ```
 
 To change a load, use following options.

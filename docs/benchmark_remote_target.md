@@ -33,7 +33,7 @@ testers:
 Use `-f` option to pass the configuration.
 
 ```shell
-$ sudo ./bgperf.py bench -f scenario.yaml
+$ sudo ./bgperf2.py bench -f scenario.yaml
 ```
 
-For remote benchmarking, bgperf.py can't collect cpu/memory stats.
+For remote benchmarking, bgperf2.py can't collect cpu/memory stats.

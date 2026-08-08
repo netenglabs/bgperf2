@@ -7,18 +7,23 @@ from gobgp import GoBGPTarget
 class RustyBGP(Container):
     CONTAINER_NAME = None
     GUEST_DIR = '/root/config'
+    IMAGE_REPO = 'bgperf/rustybgp'
+    # RustyBGP does not cut releases, so versions here are raw git refs
+    # (a branch or a sha) rather than release numbers.
+    DEFAULT_REF = 'master'
 
     def __init__(self, host_dir, conf, image='bgperf/rustybgp'):
         super(RustyBGP, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
 
     @classmethod
-    def build_image(cls, force=False, tag='bgperf/rustybgp', checkout='', nocache=False):
-
+    def build_image(cls, force=False, tag=None, checkout=None, nocache=False, version=None):
+        tag = tag or cls.image_tag()
+        checkout = checkout or cls.build_vars(version)['ref']
         cls.dockerfile = '''
 
 FROM rust:1-bullseye AS rust_builder
 RUN rustup component add rustfmt
-RUN git clone https://github.com/osrg/rustybgp.git 
+RUN git clone https://github.com/osrg/rustybgp.git && cd rustybgp && git checkout {0}
 # I don't know why, but a newer version of futures is required
 RUN cd rustybgp && sed -i "s/0.3.16/0.3.31/g" daemon/Cargo.toml && cargo build --release && cp target/release/rustybgpd /root
 RUN wget https://github.com/osrg/gobgp/releases/download/v3.0.0/gobgp_3.0.0_linux_amd64.tar.gz
@@ -32,7 +37,7 @@ COPY --from=rust_builder /root/rustybgpd ./
 COPY --from=rust_builder /root/gobgp ./
 
 '''.format(checkout)
-        super(RustyBGP, cls).build_image(force, tag, nocache)
+        super(RustyBGP, cls).build_image(force, tag, nocache=nocache)
 
 
 class RustyBGPTarget(RustyBGP, GoBGPTarget):

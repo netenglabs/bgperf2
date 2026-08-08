@@ -9,28 +9,33 @@ tests:
      targets:
        -
          name: frr_c
-         label: frr 8
-         image:  bgperf/frr_c/stable_8
+         # one run per version; each needs `bgperf2.py prepare -t frr_c` first
+         versions: [8.5, 9.1, 10.0, 10.7]
          tester_type: bird
        -
          name: frr_c
-         label: frr 9
-         image:  bgperf/frr_c/stable_9
+         label: frr master
          tester_type: bird
-       -
-         name: frr_c
-         label: frr 10
-         tester_type: bird        
        -
          name: bird
-         label: bird -s
+         version: 2.19.2
+         label: bird 2
          tester_type: bird
-         single_table: True   
        -
          name: bird
-         label: bird
+         version: 2.19.2
+         label: bird 2 -s
          tester_type: bird
-         single_table: False
+         single_table: True
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3
+         tester_type: bird
+       -
+         name: bird
+         label: bird master
+         tester_type: bird
        -
          name: rustybgp
          tester_type: bird

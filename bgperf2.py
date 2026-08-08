@@ -59,6 +59,67 @@ from packaging import version
 from docker.types import IPAMConfig, IPAMPool
 import re
 
+# The daemons bgperf2 can build images for, keyed by the name used on the
+# command line (`update <name>`) and in batch yaml. Adding a daemon here is
+# what makes `prepare`, `update`, `doctor` and --version know about it.
+BUILDABLE_IMAGES = {
+    'exabgp': ExaBGP,
+    'exabgp_mrtparse': ExaBGP_MRTParse,
+    'gobgp': GoBGP,
+    'bird': BIRD,
+    'rustybgp': RustyBGP,
+    'openbgp': OpenBGP,
+    'flock': Flock,
+    'frr_c': FRRoutingCompiled,
+    'bgpdump2': Bgpdump2,
+}
+
+# What `prepare` builds, in order. Flock and the commercial NOSes are left out:
+# they are downloaded rather than compiled.
+PREPARE_IMAGES = ['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'rustybgp',
+                  'openbgp', 'frr_c', 'bgpdump2']
+
+# Targets `bench -t` accepts. The class both selects the daemon's behaviour and
+# supplies the image naming used to resolve --version.
+TARGET_CLASSES = {
+    'gobgp': GoBGPTarget,
+    'bird': BIRDTarget,
+    'frr_c': FRRoutingCompiledTarget,
+    'rustybgp': RustyBGPTarget,
+    'openbgp': OpenBGPTarget,
+    'flock': FlockTarget,
+    'srlinux': SRLinuxTarget,
+    'junos': JunosTarget,
+    'eos': EosTarget,
+}
+
+
+def target_image(target, version=None, image=None):
+    '''Resolve the docker image a bench run should use.
+
+    An explicit --image always wins -- it is the escape hatch for an image
+    bgperf2 did not build. Otherwise the version selects a tag, and a missing
+    one raises ImageNotBuilt with the command that would create it.
+    '''
+    if image:
+        return image
+    return TARGET_CLASSES[target].require_image(version)
+
+
+def run_name(args):
+    '''Name a run for the CSV and for graph filenames.
+
+    An explicit label wins; otherwise a version has to appear in the name or
+    two versions of the same daemon are indistinguishable in the results.
+    '''
+    if 'label' in args and args.label:
+        return args.label
+    version = getattr(args, 'version', None)
+    if version:
+        return '{0} {1}'.format(args.target, version)
+    return args.target
+
+
 def gen_mako_macro():
     return '''<%
     import netaddr
@@ -92,59 +153,136 @@ def doctor(args):
     ok = curr_version >= min_version
     print('docker version ... {1} ({0})'.format(ver, 'ok' if ok else 'update to {} at least'.format(min_version)))
 
-    print('bgperf image', end=' ')
-    if img_exists('bgperf/exabgp'):
-        print('... ok')
-    else:
-        print('... not found. run `bgperf prepare`')
-
-    for name in ['gobgp', 'bird', 'frr_c', 'rustybgp', 'openbgp', 'flock', 'srlinux']:
+    for name in PREPARE_IMAGES:
+        cls = BUILDABLE_IMAGES[name]
+        built = cls.built_versions()
         print('{0} image'.format(name), end=' ')
-        if img_exists('bgperf/{0}'.format(name)):
+        if img_exists(cls.image_tag()):
             print('... ok')
         else:
-            print('... not found. if you want to bench {0}, run `bgperf prepare`'.format(name))
+            print('... not found. if you want to bench {0}, run `bgperf2 prepare -t {0}`'.format(name))
+
+        # Which versions exist matters as much as whether the daemon does --
+        # a batch naming a version that was never built cannot run at all.
+        extra = [v for v in built if v != 'latest']
+        if extra:
+            print('    versions built: {0}'.format(', '.join(extra)))
+        missing = [v for v in cls.VERSIONS if sanitize_tag(v) not in built]
+        if missing:
+            print('    not built: {0}   (bgperf2 prepare -t {1})'.format(', '.join(missing), name))
+
+    for name in ['flock', 'srlinux', 'junos', 'eos']:
+        cls = TARGET_CLASSES[name]
+        tags = cls.built_versions()
+        print('{0} image ... {1}'.format(
+            name, '{0} ({1})'.format(cls.IMAGE_REPO, ', '.join(tags)) if tags else 'not found'))
 
     print('/proc/sys/net/ipv4/neigh/default/gc_thresh3 ... {0}'.format(gc_thresh3()))
 
 
-def prepare(args):
-    ExaBGP.build_image(args.force, nocache=args.no_cache)
-    ExaBGP_MRTParse.build_image(args.force, nocache=args.no_cache)
-    GoBGP.build_image(args.force, nocache=args.no_cache)
-    BIRD.build_image(args.force, nocache=args.no_cache)
-    RustyBGP.build_image(args.force, nocache=args.no_cache)
-    OpenBGP.build_image(args.force, nocache=args.no_cache)
-    FRRoutingCompiled.build_image(args.force, nocache=args.no_cache)
-    FRRoutingCompiled.build_image(args.force, checkout='stable/8.0', tag='bgperf/frr_c/stable_8', nocache=args.no_cache)
-    FRRoutingCompiled.build_image(args.force, checkout='stable/9.0', tag='bgperf/frr_c/stable_9', nocache=args.no_cache)
+def images(args):
+    '''Show what can be benched right now, and what each version resolves to.
 
-    Bgpdump2.build_image(args.force, nocache=args.no_cache)
+    'which versions do I have built' is the question you ask before writing a
+    batch config, and `docker images` cannot answer the second half of it --
+    that bgperf/frr_c:10.1 came from stable/10.1.
+    '''
+    for name in sorted(BUILDABLE_IMAGES):
+        cls = BUILDABLE_IMAGES[name]
+        built = cls.built_versions()
+        print('{0} ({1})'.format(name, cls.IMAGE_REPO))
+        known = list(dict.fromkeys(['latest'] + list(cls.VERSIONS) + built))
+        for v in known:
+            version = None if v == 'latest' else v
+            try:
+                tag = cls.image_tag(version)
+            except VersionNotSupported:
+                continue
+            print('  {0:<12} {1:<28} {2:<18} {3}'.format(
+                v, tag, cls.resolve_ref(version),
+                'built' if v in built else 'not built'))
+        print()
+
+    print('downloaded out of band (tag them yourself):')
+    for name in ['srlinux', 'junos', 'eos']:
+        cls = TARGET_CLASSES[name]
+        tags = cls.built_versions()
+        print('  {0:<10} {1:<28} {2}'.format(
+            name, cls.IMAGE_REPO, ', '.join(tags) if tags else 'nothing tagged'))
+
+
+def dockerfile(args):
+    '''Print the recipe a version would build, without building it.'''
+    cls = BUILDABLE_IMAGES[args.image]
+    print(cls.render_dockerfile(args.version))
+
+
+def parse_versions(value):
+    '''Split a --versions list. Accepts commas and/or whitespace.'''
+    if not value:
+        return []
+    return [v for v in re.split(r'[,\s]+', value.strip()) if v]
+
+
+def prepare(args):
+    '''Build daemon images.
+
+    Bare `prepare` builds one image per daemon, tracking its default branch.
+    Version images are opt-in behind -t, because a daemon's whole version list
+    is hours of compiling -- `doctor` names what is missing and how to get it.
+    '''
+    names = args.target or PREPARE_IMAGES
+    versions = parse_versions(getattr(args, 'versions', None))
+    if versions and not args.target:
+        sys.exit('--versions needs -t/--target: version names mean different '
+                 'things to different daemons')
+
+    for name in names:
+        if name not in BUILDABLE_IMAGES:
+            sys.exit('{0} is not built by bgperf2; known images: {1}'.format(
+                name, ', '.join(sorted(BUILDABLE_IMAGES))))
+
+    plan = []
+    for name in names:
+        cls = BUILDABLE_IMAGES[name]
+        # The unversioned image tracks the daemon's default branch; the version
+        # tags sit beside it so a batch can compare releases.
+        wanted = [None] + list(versions or (cls.VERSIONS if args.target else ()))
+        for v in wanted:
+            tag = cls.image_tag(v)
+            if args.force or not img_exists(tag):
+                plan.append((cls, v, tag))
+
+    if not plan:
+        print('everything requested is already built (use -f to rebuild)')
+        return
+
+    print('building {0} image(s):'.format(len(plan)))
+    for cls, v, tag in plan:
+        print('  {0:<28} from {1}'.format(tag, cls.resolve_ref(v)))
+    print()
+
+    for cls, v, tag in plan:
+        cls.build_version(v, force=args.force, nocache=args.no_cache)
+
     #don't do anything for srlinux, junos, eos because it's just a download out of band
 
 
-
 def update(args):
-    if args.image == 'all' or args.image == 'exabgp':
-        ExaBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
-    if args.image == 'all' or args.image == 'exabgp_mrtparse':
-        ExaBGP_MRTParse.build_image(True, checkout=args.checkout, nocache=args.no_cache)
-    if args.image == 'all' or args.image == 'gobgp':
-        GoBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
-    if args.image == 'all' or args.image == 'bird':
-        BIRD.build_image(True, checkout=args.checkout, nocache=args.no_cache)
-    if args.image == 'all' or args.image == 'rustybgp':
-        RustyBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
-    if args.image == 'all' or args.image == 'openbgp':
-        OpenBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
-    if args.image == 'all' or args.image == 'flock':
-        Flock.build_image(True, checkout=args.checkout, nocache=args.no_cache)
-    if args.image == 'all' or args.image == 'frr_c':
-        FRRoutingCompiled.build_image(True, checkout=args.checkout, nocache=args.no_cache)
-    if args.image == 'eos':
-        Eos.build_image(True, checkout=args.checkout, nocache=args.no_cache)
-    if args.image == 'bgpdump2':
-        Bgpdump2.build_image(True, checkout=args.checkout, nocache=args.no_cache)
+    names = sorted(BUILDABLE_IMAGES) if args.image == 'all' else [args.image]
+    versions = parse_versions(args.versions) or [args.version]
+
+    for name in names:
+        cls = BUILDABLE_IMAGES[name]
+        for v in versions:
+            if v:
+                cls.build_version(v, force=True, nocache=args.no_cache)
+            else:
+                # No version: rebuild the default tag, honouring an explicit
+                # --checkout for a ref that has no version name (a sha, say).
+                cls.build_image(force=True, tag=cls.image_tag(),
+                                checkout=args.checkout or cls.DEFAULT_REF,
+                                nocache=args.no_cache)
 
 def remove_target_containers():
     for target_class in [BIRDTarget, GoBGPTarget, FRRoutingTarget, FRRoutingCompiledTarget, 
@@ -218,7 +356,11 @@ def bench(args):
     output_stats = {}
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
     dckr_net_name = args.docker_network_name or args.bench_name + '-br'
-    
+
+    # Resolve the target image first: a version that was never built should
+    # cost nothing, not a monitor, a set of testers and a torn-down network.
+    target_image_name = target_image(args.target, getattr(args, 'version', None), args.image)
+
     remove_target_containers()
 
     if not args.repeat:
@@ -429,34 +571,11 @@ def bench(args):
                             iface=intf_name, br=curr_bridge_name)))
                 sys.exit(1)
     else:
-        if args.target == 'gobgp':
-            target_class = GoBGPTarget
-        elif args.target == 'bird':
-            target_class = BIRDTarget
-        elif args.target == 'frr_c':
-            target_class = FRRoutingCompiledTarget
-        elif args.target == 'rustybgp':
-            target_class = RustyBGPTarget
-        elif args.target == 'openbgp':
-            target_class = OpenBGPTarget
-        elif args.target == 'flock':
-            target_class = FlockTarget
-        elif args.target == 'srlinux':
-            target_class = SRLinuxTarget
-        elif args.target == 'junos':
-            target_class = JunosTarget
-        elif args.target == 'eos':
-            target_class = EosTarget
-        elif 'frr_c' in args.target:
-            target_class = FRRoutingCompiledTarget
-        else:
-            print(f"incorrect target {args.target}")
-        print('run', args.target)
-        if args.image:
-            target = target_class('{0}/{1}'.format(config_dir, args.target), conf['target'], image=args.image)
-        else:
-            target = target_class('{0}/{1}'.format(config_dir, args.target), conf['target'])
-        
+        target_class = TARGET_CLASSES[args.target]
+        print('run', run_name(args))
+        target = target_class('{0}/{1}'.format(config_dir, args.target), conf['target'],
+                              image=target_image_name)
+
         target.run(conf, dckr_net_name)
 
     time.sleep(1)
@@ -613,9 +732,7 @@ def finish_bench(args, output_stats, bench_stats, bench_start,target, m, fail=Fa
     # it would be better to clean things up, but often I want to to investigate where things ended up
     # remove_old_containers() 
     # remove_target_containers()
-    pre = args.target
-    if 'label' in args and args.label:
-        pre = args.label
+    pre = run_name(args).replace(' ', '_')
     bench_prefix = f"{pre}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
     create_bench_graphs(bench_stats, prefix=bench_prefix, results_dir=args.results_dir)
     return o_s
@@ -645,11 +762,7 @@ def create_output_stats(args, target_version, stats, fail=False):
     e = stats['elapsed'].seconds
     f = stats['first_received_time'].seconds 
     d = datetime.date.today().strftime("%Y-%m-%d")
-    if 'label' in args and args.label:
-        name = args.label
-    else:
-        name = args.target
-    out = [name, args.target, target_version, str(args.neighbor_num), str(args.prefix_num)]
+    out = [run_name(args), args.target, target_version, str(args.neighbor_num), str(args.prefix_num)]
     out.extend([stats['required'], stats['recved']])
     out.extend([stats['monitor_wait_time'], e, f , e-f, float(format(stats['total_time'], ".2f"))])
     out.extend([round(stats['max_cpu']), float(format(stats['max_mem']/1024/1024/1024, ".3f"))])
@@ -746,6 +859,69 @@ def create_graph(stats, test_name='total time', stat_index=8, test_file='total_t
     plt.show()
     plt.savefig(results_path(results_dir, test_file))
 
+class BatchLoader(yaml.SafeLoader):
+    '''YAML loader that leaves version-shaped scalars alone.
+
+    Plain yaml reads `10.10` as the float 10.1, which would quietly bench FRR
+    10.1 when the config asked for 10.10. Nothing in a batch config is
+    legitimately a float, so dropping the implicit float resolver costs
+    nothing and keeps versions as the strings they were written as.
+    '''
+
+
+BatchLoader.yaml_implicit_resolvers = {
+    ch: [(tag, regexp) for tag, regexp in resolvers if tag != 'tag:yaml.org,2002:float']
+    for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+
+
+def expand_target_versions(targets):
+    '''Turn `versions: [8.0, 9.0]` on a target into one entry per version.
+
+    Comparing releases is the common case, and writing them out by hand means
+    repeating the whole target block -- including the image tag, which is the
+    part that is easy to get wrong.
+    '''
+    expanded = []
+    for t in targets:
+        versions = t.get('versions') or [t.get('version')]
+        for v in versions:
+            entry = dict(t)
+            entry.pop('versions', None)
+            if v is None:
+                entry.pop('version', None)
+            else:
+                # yaml turns 10.1 into a float and 10 into an int; both have to
+                # survive as the string the tag was built from.
+                entry['version'] = str(v)
+                entry.setdefault('label', '{0} {1}'.format(t['name'], v))
+            expanded.append(entry)
+    return expanded
+
+
+def check_batch_images(targets):
+    '''Fail before the first run if any image in the batch is missing.
+
+    A batch is hours of work; finding out at target number six that its image
+    was never built means throwing away everything after it.
+    '''
+    missing = []
+    for t in targets:
+        if t['name'] not in TARGET_CLASSES:
+            missing.append("unknown target '{0}'".format(t['name']))
+            continue
+        if t.get('image'):
+            if not img_exists(t['image']):
+                missing.append("{0}: image '{1}' does not exist".format(t['name'], t['image']))
+            continue
+        try:
+            TARGET_CLASSES[t['name']].require_image(t.get('version'))
+        except (ImageNotBuilt, VersionNotSupported) as e:
+            missing.append(str(e))
+    if missing:
+        sys.exit('\n'.join(['this batch cannot run:'] + ['  ' + m for m in missing]))
+
+
 def batch(args):
     """ runs several tests together, produces all the stats together and creates graphs
     requires a yaml file to describe the batch of tests to run
@@ -754,14 +930,16 @@ def batch(args):
     other variables can be set, but not iterated through
     """
     with open(args.batch_config, 'r') as f:
-        batch_config = yaml.safe_load(f)
+        batch_config = yaml.load(f, Loader=BatchLoader)
 
     for test in batch_config['tests']:
+        targets = expand_target_versions(test['targets'])
+        check_batch_images(targets)
         results = []
         for n in test['neighbors']:
             for p in test['prefixes']:
                 for filter in test['filter_test']:
-                    for t in test['targets']:
+                    for t in targets:
                         a = argparse.Namespace(**vars(args))
                         a.func = bench
                         if 'image' in t:
@@ -778,11 +956,11 @@ def batch(args):
                         for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
                                         'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
                                         'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
-                                        'tester_type', 'license_file']:
+                                        'tester_type', 'license_file', 'version']:
                             setattr(a, field, t[field]) if field in t else setattr(a, field, None)
 
                         for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
-                            setattr(a, field, t[field]) if field in t else setattr(a, field, 0)    
+                            setattr(a, field, t[field]) if field in t else setattr(a, field, 0)
                         results.append(bench(a))
 
                         # update this each time in case something crashes
@@ -1032,15 +1210,36 @@ def create_args_parser(main=True):
     parser_doctor = s.add_parser('doctor', help='check env')
     parser_doctor.set_defaults(func=doctor)
 
+    parser_images = s.add_parser('images', help='list daemon versions and which are built')
+    parser_images.set_defaults(func=images)
+
+    parser_dockerfile = s.add_parser('dockerfile',
+                                     help='print the Dockerfile a version would build')
+    parser_dockerfile.add_argument('image', choices=sorted(BUILDABLE_IMAGES))
+    parser_dockerfile.add_argument('--version', type=str,
+                                   help='version to render; default: the unversioned build')
+    parser_dockerfile.set_defaults(func=dockerfile)
+
     parser_prepare = s.add_parser('prepare', help='prepare env')
     parser_prepare.add_argument('-f', '--force', action='store_true', help='build even if the container already exists')
     parser_prepare.add_argument('-n', '--no-cache', action='store_true')
+    parser_prepare.add_argument('-t', '--target', action='append', choices=sorted(BUILDABLE_IMAGES),
+                                help='build only this image; repeatable. default: all of them')
+    parser_prepare.add_argument('--versions', type=str,
+                                help='comma-separated versions to build instead of the daemon\'s '
+                                     'default list; requires -t')
     parser_prepare.set_defaults(func=prepare)
 
     parser_update = s.add_parser('update', help='rebuild bgp docker images')
-    parser_update.add_argument('image', choices=['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'frr_c', 
-                                'rustybgp', 'openbgp', 'flock',  'bgpdump2', 'all'])
-    parser_update.add_argument('-c', '--checkout', default='HEAD')
+    parser_update.add_argument('image', choices=sorted(BUILDABLE_IMAGES) + ['all'])
+    parser_update.add_argument('--version', type=str,
+                               help='daemon version to build, e.g. 10.1 for FRR or 2.19.2 for '
+                                    'BIRD; tagged as <image>:<version> and selectable with '
+                                    '`bench --version`')
+    parser_update.add_argument('--versions', type=str,
+                               help='comma-separated list of versions to build in one go')
+    parser_update.add_argument('-c', '--checkout', default=None,
+                               help='raw git ref to build into the default (unversioned) tag')
     parser_update.add_argument('-n', '--no-cache', action='store_true')
     parser_update.set_defaults(func=update)
 
@@ -1071,8 +1270,11 @@ def create_args_parser(main=True):
         parser.add_argument('--filter_test', choices=['transit', 'ixp'], default=None)
 
     parser_bench = s.add_parser('bench', help='run benchmarks')
-    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr_c', 'rustybgp',
-                              'openbgp', 'flock', 'srlinux', 'junos', 'eos'], default='bird')
+    parser_bench.add_argument('-t', '--target', choices=sorted(TARGET_CLASSES), default='bird')
+    parser_bench.add_argument('-v', '--version', type=str,
+                              help='version of the target daemon to bench, e.g. 10.1; uses the '
+                                   'image built by `prepare`/`update`. default: the unversioned '
+                                   'image, which tracks the daemon\'s default branch')
     parser_bench.add_argument('-i', '--image', help='specify custom docker image')
     parser_bench.add_argument('--mrt-file', type=str, 
                               help='mrt file, requires absolute path')
@@ -1118,4 +1320,10 @@ if __name__ == '__main__':
         func = args.func
     except AttributeError:
         parser.error("too few arguments")
-    args.func(args)
+
+    try:
+        args.func(args)
+    except (ImageNotBuilt, VersionNotSupported) as e:
+        # A missing or unselectable image is a setup mistake, not a crash --
+        # the message already carries the command that fixes it.
+        sys.exit(str(e))

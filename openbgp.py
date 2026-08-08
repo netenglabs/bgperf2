@@ -5,18 +5,22 @@ import json
 class OpenBGP(Container):
     CONTAINER_NAME = None
     GUEST_DIR = '/root/config'
+    IMAGE_REPO = 'bgperf/openbgp'
+    # OpenBGPD is not compiled here -- it is repackaged from the upstream
+    # image, so a version is a tag on openbgpd/openbgpd rather than a git ref.
+    DEFAULT_REF = 'latest'
 
     def __init__(self, host_dir, conf, image='bgperf/openbgp'):
         super(OpenBGP, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
 
     @classmethod
-    def build_image(cls, force=False, tag='bgperf/openbgp', checkout='', nocache=False):
-
+    def build_image(cls, force=False, tag=None, checkout=None, nocache=False, version=None):
+        tag = tag or cls.image_tag()
         cls.dockerfile = '''
-FROM openbgpd/openbgpd
+FROM openbgpd/openbgpd:{0}
 
-'''.format(checkout)
-        super(OpenBGP, cls).build_image(force, tag, nocache)
+'''.format(checkout or cls.build_vars(version)['ref'])
+        super(OpenBGP, cls).build_image(force, tag, nocache=nocache)
 
 
 class OpenBGPTarget(OpenBGP, Target):

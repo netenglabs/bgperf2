@@ -20,22 +20,48 @@ class BIRD(Container):
 
     CONTAINER_NAME = None
     GUEST_DIR = '/root/config'
+    IMAGE_REPO = 'bgperf/bird'
+    VERSIONS = ('2.19.2', '3.3.2')
+    DEFAULT_REF = 'master'
 
     def __init__(self, host_dir, conf, image='bgperf/bird', name=None):
         super(BIRD, self).__init__(name if name is not None else self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
 
     @classmethod
-    def build_image(cls, force=False, tag='bgperf/bird', checkout='HEAD', branch='master', nocache=False):
+    def resolve_ref(cls, version):
+        '''BIRD tags releases as v<version>; branches pass through.'''
+        if not version:
+            return cls.DEFAULT_REF
+        version = str(version).strip()
+        if re.fullmatch(r'\d+(\.\d+)*', version):
+            return 'v{0}'.format(version)
+        return version
+
+    BUILD_VARS = {
+        'base_image': 'ubuntu:latest',
+        'packages': 'git autoconf libtool gawk make flex bison libncurses-dev '
+                    'libreadline6-dev iproute2',
+        'configure_extra': '',
+    }
+    # BIRD 3 has different build dependencies from BIRD 2; override per series
+    # here, or drop a whole Dockerfile in dockerfiles/bird/<version>.dockerfile.
+    VERSION_BUILD_VARS = ()
+
+    @classmethod
+    def build_image(cls, force=False, tag=None, checkout=None, nocache=False, version=None):
+        # Clone and checkout share a layer so the ref is part of the layer key:
+        # a cached clone from an older build would not know a newer tag.
+        tag = tag or cls.image_tag()
+        v = cls.build_vars(version)
+        v['ref'] = checkout or v['ref']
         cls.dockerfile = '''
-FROM ubuntu:latest
+FROM {base_image}
 WORKDIR /root
-RUN apt-get update && apt-get install -qy git autoconf libtool gawk make \
-flex bison libncurses-dev libreadline6-dev iproute2
-RUN apt-get install -qy flex
-RUN git config --global http.sslverify false && git clone https://gitlab.nic.cz/labs/bird.git -b {0} bird
-RUN cd bird && git checkout {0} && autoreconf -i && ./configure && make && make install
-'''.format(branch)
-        super(BIRD, cls).build_image(force, tag, nocache)
+RUN apt-get update && apt-get install -qy {packages}
+RUN git config --global http.sslverify false && git clone https://gitlab.nic.cz/labs/bird.git bird && cd bird && git checkout {ref}
+RUN cd bird && autoreconf -i && ./configure {configure_extra} && make && make install
+'''.format(**v)
+        super(BIRD, cls).build_image(force, tag, nocache=nocache)
 
 
 class BIRDTarget(BIRD, Target):

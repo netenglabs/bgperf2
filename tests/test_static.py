@@ -60,7 +60,7 @@ def test_benchmark_configs_reference_supported_targets():
     supported = set(next(a for a in bench._actions if a.dest == 'target').choices)
 
     for config in sorted((REPO_ROOT / 'benchmarks').glob('*.yaml')):
-        data = yaml.safe_load(config.read_text())
+        data = yaml.load(config.read_text(), Loader=bgperf2.BatchLoader)
         for i, test in enumerate(data.get('tests') or []):
             # a stray '-' in the yaml yields a null entry, which crashes batch()
             # partway through the run
@@ -69,3 +69,26 @@ def test_benchmark_configs_reference_supported_targets():
                 assert target is not None, f"{config.name}: tests[{i}] has an empty target"
                 assert target['name'] in supported, \
                     f"{config.name}: target '{target['name']}' is not in {sorted(supported)}"
+
+
+def test_benchmark_config_versions_are_resolvable():
+    '''A version in a batch config has to name an image that `prepare`/`update`
+    could actually produce -- expansion happens before any run, so a bad one
+    kills the whole batch.
+    '''
+    yaml = pytest.importorskip('yaml')
+    import base
+    import bgperf2
+
+    for config in sorted((REPO_ROOT / 'benchmarks').glob('*.yaml')):
+        data = yaml.load(config.read_text(), Loader=bgperf2.BatchLoader)
+        for test in data.get('tests') or []:
+            for target in bgperf2.expand_target_versions(test.get('targets') or []):
+                version = target.get('version')
+                if version is None:
+                    continue
+                cls = bgperf2.TARGET_CLASSES[target['name']]
+                try:
+                    cls.image_tag(version)
+                except base.VersionNotSupported as e:
+                    pytest.fail(f"{config.name}: {e}")

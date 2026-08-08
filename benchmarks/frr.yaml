@@ -7,24 +7,8 @@ tests:
      prefixes: [800_000]
      filter_test: [None]
      targets:
-         
        -
          name: frr_c
-         label: frr 10
+         versions: [8.5, 9.1, 10.0, 10.7]
          tester_type: bgpdump2
          mrt_file: mrt/rib.20210801.0000
-       -
-         name: frr_c
-         label: frr 8
-         image:  bgperf/frr_c/stable_8
-         tester_type: bgpdump2
-         mrt_file: mrt/rib.20210801.0000
-       -
-         name: frr_c
-         label: frr 9
-         image:  bgperf/frr_c/stable_9
-         tester_type: bgpdump2
-         mrt_file: mrt/rib.20210801.0000   
-        
-         
-         

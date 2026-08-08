@@ -21,21 +21,44 @@ class GoBGP(Container):
 
     CONTAINER_NAME = None
     GUEST_DIR = '/root/config'
+    IMAGE_REPO = 'bgperf/gobgp'
+    VERSIONS = ('3.35.0', '3.37.0')
+    DEFAULT_REF = 'master'
 
     def __init__(self, host_dir, conf, image='bgperf/gobgp'):
         super(GoBGP, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
 
     @classmethod
-    def build_image(cls, force=False, tag='bgperf/gobgp', checkout='HEAD', nocache=False):
+    def resolve_ref(cls, version):
+        '''GoBGP tags releases as v<version>; branches pass through.'''
+        if not version:
+            return cls.DEFAULT_REF
+        version = str(version).strip()
+        if re.fullmatch(r'\d+(\.\d+)*', version):
+            return 'v{0}'.format(version)
+        return version
+
+    # Old GoBGP releases need the Go toolchain they were written against;
+    # 'golang:latest' stops working eventually, so pin per series when it does.
+    BUILD_VARS = {'base_image': 'golang:latest'}
+    VERSION_BUILD_VARS = ()
+
+    @classmethod
+    def build_image(cls, force=False, tag=None, checkout=None, nocache=False, version=None):
+        # The checkout used to be interpolated into a string with no placeholder,
+        # so every build silently produced master regardless of the ref asked for.
+        tag = tag or cls.image_tag()
+        v = cls.build_vars(version)
+        v['ref'] = checkout or v['ref']
         cls.dockerfile = '''
-FROM golang:latest
+FROM {base_image}
 WORKDIR /root
-RUN git clone https://github.com/osrg/gobgp.git && cd gobgp && go mod download
+RUN git clone https://github.com/osrg/gobgp.git && cd gobgp && git checkout {ref} && go mod download
 RUN cd gobgp && go install ./cmd/gobgpd
 RUN cd gobgp && go install ./cmd/gobgp
 RUN rm -rf /root/gobgp && cp /go/bin/gobgp /root/gobgp
-'''.format(checkout)
-        super(GoBGP, cls).build_image(force, tag, nocache)
+'''.format(**v)
+        super(GoBGP, cls).build_image(force, tag, nocache=nocache)
 
 
 class GoBGPTarget(GoBGP, Target):

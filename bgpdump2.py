@@ -8,13 +8,17 @@ class Bgpdump2(Container):
     GUEST_DIR = '/root/config'
 
     CONTAINER_NAME = 'bgperf_bgpdump2_target'
+    IMAGE_REPO = 'bgperf/bgpdump2'
+    DEFAULT_REF = 'master'
 
     def __init__(self, host_dir, conf, image='bgperf/bgpdump2'):
         super(Bgpdump2, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
 
 
     @classmethod
-    def build_image(cls, force=False, tag='bgperf/bgpdump2', checkout='HEAD', nocache=False):
+    def build_image(cls, force=False, tag=None, checkout=None, nocache=False, version=None):
+        tag = tag or cls.image_tag()
+        checkout = checkout or cls.build_vars(version)['ref']
         cls.dockerfile = '''
 FROM ubuntu:20.04
 WORKDIR /root
@@ -28,6 +32,7 @@ RUN apt update \
 
 RUN git clone https://github.com/rtbrick/bgpdump2.git \
     && cd bgpdump2 \
+    && git checkout {0} \
     && ./configure \
     && make \
     && mv src/bgpdump2 /usr/local/sbin/
@@ -36,7 +41,7 @@ RUN touch /root/mrt_file
 
 ENTRYPOINT ["/bin/bash"]
 '''.format(checkout)
-        super(Bgpdump2, cls).build_image(force, tag, nocache)
+        super(Bgpdump2, cls).build_image(force, tag, nocache=nocache)
 
 
 

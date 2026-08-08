@@ -183,15 +183,75 @@ container hardcoded to 7.5.1, which meant the version you tested was whatever th
 to pin. It has been removed. The `frr_c` target replaces it: it checks FRRouting out of git and
 builds the container, so you choose the version.
 
-`prepare` builds `bgperf/frr_c` from the default branch plus `bgperf/frr_c/stable_8` and
-`bgperf/frr_c/stable_9`. Point a batch target at a specific one with `image:`, and give it a
-`label:` so the graphs and CSV distinguish them:
+## Testing several versions of one daemon
+
+Each buildable daemon gets one image per version, tagged `bgperf/<name>:<version>`. Build them
+with `prepare` (which builds the daemon's default list) or `update` (for anything else):
+
+```bash
+./bgperf2.py prepare -t frr_c                              # master + 8.5, 9.1, 10.0, 10.7
+./bgperf2.py prepare -t frr_c --versions 10.4,10.5         # just these two, plus master
+./bgperf2.py update frr_c --version 10.7                   # add one later
+./bgperf2.py images                                        # what is built, and from which ref
+```
+
+Then bench one directly, or list several in a batch config:
+
+```bash
+./bgperf2.py bench -t frr_c --version 10.1 -n 10 -p 100000
+```
 
 ```YAML
       -
         name: frr_c
-        image: bgperf/frr_c/stable_9
-        label: frr 9
+        versions: [8.5, 9.1, 10.0, 10.7]
+        tester_type: bird
+```
+
+That runs once per version and labels each row `frr_c 10.1` and so on, so the CSV and the graphs
+tell them apart. Add your own `label:` to override. A target with no `versions:` uses the
+unversioned image, which tracks the daemon's default branch.
+
+Versions are named the way the project names its releases, and each daemon module translates:
+FRR `10.1` is the branch `stable/10.1`, FRR `10.1.1` is the tag `frr-10.1.1`, BIRD `2.19.2` and
+GoBGP `3.37.0` are the tags `v2.19.2` and `v3.37.0`. Anything unrecognized is passed through as a
+raw git ref, so `--version master` or a commit sha also work. `./bgperf2.py images` prints the
+mapping.
+
+A bare `prepare` builds one image per daemon, tracking its default branch. Version images are
+opt-in behind `-t`, because a daemon's whole version list is hours of compiling. Either way it
+skips what already exists, so re-running after adding a version is cheap; `-f` forces a rebuild.
+`doctor` lists which versions are built and which are not.
+
+Every version image must exist before a run starts — `bench` and `batch` both check up front and
+tell you the exact `update` command rather than failing an hour into a batch.
+
+The commercial NOSes work the same way once you tag what you downloaded (`docker tag <image>
+crpd:24.2`, then `-t junos --version 24.2`).
+
+### When an old version will not build
+
+Build instructions drift: the base distro moves on, dependencies get renamed, configure flags come
+and go. Two levels of override, cheapest first.
+
+For a different *value* — base image, extra packages, configure flags — add a rule to the daemon
+class's `VERSION_BUILD_VARS`, keyed by version prefix:
+
+```python
+class FRRoutingCompiled(Container):
+    VERSION_BUILD_VARS = (
+        ('8.', {'ubuntu_version': '20.04', 'extra_setup': 'apt-get install -y libyang-dev'}),
+    )
+```
+
+For a genuinely different recipe, drop a whole Dockerfile in
+`dockerfiles/<name>/<version>.dockerfile` (see `dockerfiles/README.md`). The longest matching
+version prefix wins, so `10.dockerfile` covers the whole 10.x series.
+
+Either way, check the result without paying for a build:
+
+```bash
+./bgperf2.py dockerfile frr_c --version 8.0
 ```
 
 ### Testing commercial BGP Stacks

@@ -23,9 +23,13 @@ source venv/bin/activate          # or prefix commands with venv/bin/python
 pip install -r pip-requirements.txt
 
 ./bgperf2.py doctor               # verify docker version + which bgperf/* images exist
+./bgperf2.py images               # which daemon versions are built, and from which git ref
 ./bgperf2.py prepare              # build all daemon images (slow; compiles from source)
-./bgperf2.py update <image>       # force-rebuild one image, e.g. update bird -c <git-ref>
+./bgperf2.py prepare -t frr_c --versions 10.4,10.5   # just these, for one daemon
+./bgperf2.py update <image> --version 10.7           # add one version image
+./bgperf2.py dockerfile frr_c --version 8.0          # print a recipe without building it
 ./bgperf2.py bench -t bird -n 10 -p 1000    # one run: 10 peers x 1000 prefixes
+./bgperf2.py bench -t frr_c --version 10.1  # a specific release
 ./bgperf2.py batch -c bench.yaml  # matrix of runs -> CSV + PNG graphs
 ./bgperf2.py config -o out.yml    # emit scenario.yaml without running
 ```
@@ -96,9 +100,46 @@ MRO order matters — the daemon base comes first so its `GUEST_DIR`/`dockerfile
 same trick (`class Bgpdump2Tester(Tester, Bgpdump2, MRTTester)`).
 
 **To add a daemon target**, implement: `build_image` (the Dockerfile lives inline as a class
-attribute), `write_config`, `get_startup_cmd`, `get_version_cmd`, and `get_neighbors_state`. Then
-register it in three places in `bgperf2.py` — the `-t` choices list, the `if/elif` chain in `bench()`,
-and `remove_target_containers()` — plus `prepare()`/`update()` if it builds from source.
+attribute), `write_config`, `get_startup_cmd`, `get_version_cmd`, and `get_neighbors_state`, and set
+`IMAGE_REPO`. Then register it in two dicts at the top of `bgperf2.py` — `TARGET_CLASSES` (which
+feeds the `-t` choices, `bench()`'s dispatch, and `remove_target_containers()`) and
+`BUILDABLE_IMAGES`/`PREPARE_IMAGES` if it builds from source.
+
+`build_image` should take `(force, tag, checkout, nocache, version)` and default `tag` to
+`cls.image_tag()`, so `build_version()` can drive it.
+
+### Versions
+
+Multi-version testing lives in `Container` (`base.py`). Each daemon declares `IMAGE_REPO`,
+optionally `VERSIONS` (what `prepare` builds), `DEFAULT_REF`, and overrides `resolve_ref()` to map a
+user-facing version onto that project's ref naming — FRR `10.1` → `stable/10.1`, BIRD `2.19.2` →
+`v2.19.2`. Images are `<IMAGE_REPO>:<sanitized version>`, or `:latest` when no version is given.
+
+`img_exists()` is tag-aware. It used to compare only the repository half of `RepoTags[0]`, which is
+why the old FRR builds faked version tags with path-like names (`bgperf/frr_c/stable_8`) — those
+still work if passed explicitly as `image:`, but nothing builds them any more.
+
+Different versions can need different *build instructions*, not just a different checkout, so the
+inline Dockerfiles are format strings over `BUILD_VARS` (`{ubuntu_version}`, `{extra_setup}`,
+`{configure_extra}`, `{ref}`), and `VERSION_BUILD_VARS` overrides those per version prefix. A
+literal brace in one of those recipes has to be doubled. When a version needs a wholly different
+recipe, `dockerfiles/<name>/<version>.dockerfile` replaces the inline one and receives `BGPERF_REF`
+/ `BGPERF_VERSION` as docker build args.
+
+`./bgperf2.py images` lists versions and their refs; `./bgperf2.py dockerfile <name> --version X`
+renders a recipe without building it (`Container.render_dockerfile`, which short-circuits
+`build_dockerfile` via `_RenderOnly`). `doctor` reports built vs not-built versions per daemon.
+
+A bare `prepare` builds only the unversioned images; version lists are opt-in behind `-t`, since
+`FRRoutingCompiled.VERSIONS` alone is four full compiles. It prints its plan and skips what exists.
+
+`bench()` and `batch()` resolve and verify images before starting any container, so a version that
+was never built costs a second rather than an hour.
+
+Batch configs take `versions: [...]` on a target, expanded by `expand_target_versions()` into one
+run per version with an auto label. Batch yaml is parsed with `BatchLoader`, which drops YAML's
+float resolver — plain `yaml.safe_load` reads `10.10` as `10.1` and would silently bench the wrong
+release.
 
 ### get_neighbors_state — the per-daemon wart
 
@@ -133,8 +174,8 @@ target branch when every neighbor has finished sending.
 
 Open-source daemons are built from source into `bgperf/<name>` images by `prepare`/`update`.
 
-FRR is only ever `frr_c` — compiled from a git checkout, with `prepare` building the default branch
-plus `stable/8.0` and `stable/9.0` under separate tags. The old `frr` target (a wrapper over the
+FRR is only ever `frr_c` — compiled from a git checkout, with `prepare` building master plus the
+releases in `FRRoutingCompiled.VERSIONS`. The old `frr` target (a wrapper over the
 prebuilt `frrouting/frr:v7.5.1` image) was removed. **`frr.py` still exists and must stay**: its
 `FRRoutingTarget` holds all the FRR config generation, `get_neighbors_state`, and End-of-RIB parsing,
 which `FRRoutingCompiledTarget` inherits. Only the image build and CLI target went away.
@@ -143,8 +184,8 @@ Note that `batch()` assigns `args.target` straight from the yaml, so it bypasses
 validation — `tests/test_static.py` checks the benchmark configs instead.
 
 Commercial NOSes (Junos cRPD, Arista cEOS, SR Linux) are never built. Download them out of band and
-tag them exactly as `crpd:latest` / `ceos:latest` — bgperf2 looks up those literal tags and fails
-confusingly otherwise. These write root-owned files into `/tmp/bgperf2`, which bgperf2 then cannot
+tag them as `crpd:latest` / `ceos:latest` — or as `crpd:<version>` to select them with `--version`
+like any other daemon. These write root-owned files into `/tmp/bgperf2`, which bgperf2 then cannot
 clean up; `sudo rm -rf /tmp/bgperf2` when that happens. Their licenses prohibit publishing results.
 
 ## Conventions

@@ -9,17 +9,9 @@ tests:
      targets:
        -
          name: frr_c
-         label: frr 8
-         image:  bgperf/frr_c/stable_8
+         versions: [8.5, 9.1, 10.7]
          tester_type: bird
        -
          name: frr_c
-         label: frr 9
-         image:  bgperf/frr_c/stable_9
+         label: frr master
          tester_type: bird
-       -
-         name: frr_c
-         label: frr 10
-         tester_type: bird        
-         
-         

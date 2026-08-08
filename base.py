@@ -16,6 +16,7 @@
 from settings import dckr
 import io
 import os
+import re
 from itertools import chain
 from pathlib import Path
 from threading import Thread
@@ -42,8 +43,73 @@ def ctn_exists(name):
     return name in get_ctn_names()
 
 
+def normalize_image_name(name):
+    '''Add the implicit ':latest' to a bare repository name.
+
+    A tag only counts as a tag if it comes after the last '/' -- otherwise the
+    port in a registry host ('localhost:5000/bgperf/bird') reads as one.
+    '''
+    return name if ':' in name.rsplit('/', 1)[-1] else name + ':latest'
+
+
 def img_exists(name):
-    return name in [ctn['RepoTags'][0].split(':')[0] for ctn in dckr.images() if ctn['RepoTags'] != None and len(ctn['RepoTags']) > 0]
+    '''True if a local image carries exactly this repository:tag.
+
+    This used to compare only the repository half of RepoTags[0], so
+    'bgperf/frr_c:10.1' looked present the moment any bgperf/frr_c image
+    existed -- which is why version tags were impossible and the old FRR
+    builds had to fake them with path-like names ('bgperf/frr_c/stable_8').
+    Reading every RepoTag also fixes images that carry more than one tag.
+    '''
+    name = normalize_image_name(name)
+    for img in dckr.images():
+        if name in (img.get('RepoTags') or []):
+            return True
+    return False
+
+
+def sanitize_tag(version):
+    '''Turn a version string into something Docker will accept as a tag.
+
+    Docker tags are [A-Za-z0-9_.-] only, so refs like 'stable/10.1' have to be
+    flattened. The tag is display-only -- resolve_ref() is what the build
+    actually checks out.
+    '''
+    tag = re.sub(r'[^A-Za-z0-9_.-]', '_', str(version).strip())
+    return tag.lstrip('.-')[:128] or 'latest'
+
+
+class _RenderOnly:
+    '''Flag that makes build_dockerfile assemble the recipe but not run it.
+
+    Set only by Container.render_dockerfile, which needs the text a build
+    would use without spending a build to get it.
+    '''
+    active = False
+
+
+class VersionNotSupported(Exception):
+    '''A version was asked for from a daemon that only has the one build.'''
+
+
+class ImageNotBuilt(Exception):
+    '''A run asked for a version whose image does not exist locally.
+
+    Carries the command that would produce it, because guessing the tag by
+    hand is exactly the step this whole mechanism exists to remove.
+    '''
+    def __init__(self, image_name, version, tag, buildable=True):
+        self.image_name = image_name
+        self.version = version
+        self.tag = tag
+        if buildable:
+            fix = './bgperf2.py update {0}{1}'.format(
+                image_name, ' --version {0}'.format(version) if version else '')
+        else:
+            fix = ('download the image out of band and tag it: '
+                   'docker tag <downloaded-image> {0}'.format(tag))
+        super(ImageNotBuilt, self).__init__(
+            "docker image '{0}' does not exist. To create it, {1}".format(tag, fix))
 
 
 def rm_line():
@@ -51,6 +117,143 @@ def rm_line():
 
 
 class Container(object):
+    # --- image naming and daemon versions ---------------------------------
+    #
+    # Every image bgperf2 knows about is <IMAGE_REPO>:<tag>, where the tag comes
+    # from a user-facing version string ('10.1', '9.0', '2.15.1'). resolve_ref()
+    # translates that version into the git ref (or upstream image tag) the build
+    # actually uses -- that is where each daemon's release-naming quirks live,
+    # so nothing outside the daemon module has to know that FRR 10.1 means
+    # 'stable/10.1' while BIRD 2.15.1 means 'v2.15.1'.
+    #
+    #   IMAGE_REPO        repository half of the image name
+    #   VERSIONS          versions `prepare` builds in addition to the default
+    #   DEFAULT_REF       ref used when no version is given (the ':latest' tag)
+    #   SUPPORTS_VERSIONS False for daemons pinned to one build (Flock)
+    #   IMAGE_BUILDABLE   False for images downloaded out of band (crpd, cEOS)
+    IMAGE_REPO = None
+    VERSIONS = ()
+    DEFAULT_REF = 'HEAD'
+    SUPPORTS_VERSIONS = True
+    IMAGE_BUILDABLE = True
+
+    # --- version-dependent build recipes ----------------------------------
+    #
+    # Old releases rarely build with the current recipe: the base distro moves
+    # on, dependency packages get renamed, configure flags appear and vanish.
+    # Two levels of override, cheapest first:
+    #
+    # BUILD_VARS holds the slots the inline Dockerfile interpolates by name
+    # ({base_image}, {configure_extra}, ...). VERSION_BUILD_VARS overrides
+    # some of them for a version series -- a list of (match, overrides) pairs
+    # where match is a version prefix ('8.', '10') or a callable taking the
+    # version string. The first match wins, so put the specific ones first.
+    #
+    # When a version needs a genuinely different Dockerfile rather than
+    # different values, drop one in dockerfiles/<name>/<version>.dockerfile;
+    # it is used verbatim and wins over the inline recipe. Longest version
+    # prefix wins ('10.1.1' tries 10.1.1, then 10.1, then 10), so one file can
+    # cover a whole series. Those files get BGPERF_REF and BGPERF_VERSION as
+    # docker build args -- declare `ARG BGPERF_REF` after FROM to use them.
+    BUILD_VARS = {}
+    VERSION_BUILD_VARS = ()
+
+    @classmethod
+    def image_name(cls):
+        '''The name this daemon goes by on the command line and in batch yaml.'''
+        return (cls.IMAGE_REPO or '').split('/')[-1]
+
+    @classmethod
+    def build_vars(cls, version=None):
+        '''Dockerfile slots for this version: defaults plus the first match.'''
+        out = dict(cls.BUILD_VARS)
+        version = '' if version is None else str(version).strip()
+        for match, overrides in cls.VERSION_BUILD_VARS:
+            hit = match(version) if callable(match) else version.startswith(match)
+            if hit:
+                out.update(overrides)
+                break
+        out.setdefault('version', version)
+        out.setdefault('ref', cls.resolve_ref(version or None))
+        return out
+
+    @classmethod
+    def dockerfile_override(cls, version=None):
+        '''A hand-written Dockerfile for this version, if the repo has one.'''
+        if not version:
+            return None
+        name = cls.image_name()
+        parts = str(version).strip().split('.')
+        for i in range(len(parts), 0, -1):
+            path = REPO_ROOT / 'dockerfiles' / name / ('.'.join(parts[:i]) + '.dockerfile')
+            if path.exists():
+                return path
+        return None
+
+    @classmethod
+    def resolve_ref(cls, version):
+        '''Map a user-facing version onto the ref the Dockerfile checks out.
+
+        The default is a passthrough, so an unrecognized value is always usable
+        as a raw ref (a branch, tag, or sha) without special-casing.
+        '''
+        if not version:
+            return cls.DEFAULT_REF
+        return version
+
+    @classmethod
+    def image_tag(cls, version=None):
+        if cls.IMAGE_REPO is None:
+            raise NotImplementedError(
+                '{0} has no IMAGE_REPO, so it cannot be addressed by version'.format(cls.__name__))
+        if not version:
+            return normalize_image_name(cls.IMAGE_REPO)
+        if not cls.SUPPORTS_VERSIONS:
+            raise VersionNotSupported(
+                '{0} is built from a fixed upstream release; it has no selectable '
+                'versions (asked for {1!r})'.format(cls.image_name(), version))
+        return '{0}:{1}'.format(cls.IMAGE_REPO, sanitize_tag(version))
+
+    @classmethod
+    def build_version(cls, version=None, force=False, nocache=False):
+        '''Build one version of this daemon into its own tag.'''
+        tag = cls.image_tag(version)
+        ref = cls.resolve_ref(version)
+        override = cls.dockerfile_override(version)
+        if override is not None:
+            print('{0}: {1} from {2} using {3}'.format(
+                cls.image_name(), tag, ref, override.relative_to(REPO_ROOT)))
+            cls.build_dockerfile(override.read_text(), force, tag, nocache=nocache,
+                                 buildargs={'BGPERF_REF': ref, 'BGPERF_VERSION': str(version)})
+        else:
+            cls.build_image(force=force, tag=tag, checkout=ref, nocache=nocache, version=version)
+        return tag
+
+    @classmethod
+    def require_image(cls, version=None):
+        '''Return the image for this version, or explain how to build it.
+
+        bench() calls this before touching Docker so a long batch fails in the
+        first second rather than an hour in, and with the fix in the message.
+        '''
+        tag = cls.image_tag(version)
+        if not img_exists(tag):
+            raise ImageNotBuilt(cls.image_name(), version, tag, cls.IMAGE_BUILDABLE)
+        return tag
+
+    @classmethod
+    def built_versions(cls):
+        '''Version tags of this daemon that exist locally, for `doctor`.'''
+        if cls.IMAGE_REPO is None:
+            return []
+        prefix = cls.IMAGE_REPO + ':'
+        tags = set()
+        for img in dckr.images():
+            for repo_tag in img.get('RepoTags') or []:
+                if repo_tag.startswith(prefix):
+                    tags.add(repo_tag[len(prefix):])
+        return sorted(tags)
+
     def __init__(self, name, image, host_dir, guest_dir, conf):
         self.name = name
         self.image = image
@@ -71,7 +274,39 @@ class Container(object):
         print(f"image: {image}")
 
     @classmethod
-    def build_image(cls, force, tag, nocache=False):
+    def build_image(cls, force, tag, nocache=False, **kwargs):
+        '''Build cls.dockerfile, which the daemon module has just assembled.'''
+        cls.build_dockerfile(cls.dockerfile, force, tag, nocache=nocache, **kwargs)
+
+    @classmethod
+    def render_dockerfile(cls, version=None):
+        '''The Dockerfile a version would build, without building it.
+
+        Debugging a failed build by running it is a compile-length round trip
+        per attempt, so let the recipe be read directly instead.
+        '''
+        override = cls.dockerfile_override(version)
+        if override is not None:
+            return override.read_text()
+        _RenderOnly.active = True
+        try:
+            cls.build_image(force=False, tag=cls.image_tag(version),
+                            checkout=cls.resolve_ref(version), version=version)
+        finally:
+            _RenderOnly.active = False
+        return cls.dockerfile
+
+    @classmethod
+    def build_dockerfile(cls, dockerfile, force, tag, nocache=False, buildargs=None):
+        '''Hand one Dockerfile to Docker.
+
+        Separate from build_image so a version can supply its own Dockerfile
+        (see dockerfile_override) without going through the daemon module's
+        inline recipe -- the two paths differ only in where the text came from.
+        '''
+        cls.dockerfile = dockerfile
+        if _RenderOnly.active:
+            return
         def insert_after_from(dockerfile, line):
             lines = dockerfile.split('\n')
             i = -1
@@ -86,12 +321,13 @@ class Container(object):
 
         for env in ['http_proxy', 'https_proxy']:
             if env in os.environ:
-                cls.dockerfile = insert_after_from(cls.dockerfile, 'ENV {0} {1}'.format(env, os.environ[env]))
+                dockerfile = insert_after_from(dockerfile, 'ENV {0} {1}'.format(env, os.environ[env]))
 
-        f = io.BytesIO(cls.dockerfile.encode('utf-8'))
+        f = io.BytesIO(dockerfile.encode('utf-8'))
         if force or not img_exists(tag):
             print('build {0}...'.format(tag))
-            for line in dckr.build(fileobj=f, rm=False, tag=tag, decode=True, nocache=nocache):
+            for line in dckr.build(fileobj=f, rm=False, tag=tag, decode=True, nocache=nocache,
+                                   buildargs=buildargs or {}):
                 if 'stream' in line:
                     print(line['stream'].strip())
 

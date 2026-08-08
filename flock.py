@@ -4,12 +4,18 @@ import json
 class Flock(Container):
     CONTAINER_NAME = None
     GUEST_DIR = '/root/config'
+    IMAGE_REPO = 'bgperf/flock'
+    # The .deb comes from a download link with a fixed release id baked into it,
+    # so there is nothing to select -- asking for a version is an error rather
+    # than something that silently builds the same binary under another tag.
+    SUPPORTS_VERSIONS = False
 
     def __init__(self, host_dir, conf, image='bgperf/flock'):
         super(Flock, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
 
     @classmethod
-    def build_image(cls, force=False, tag='bgperf/flock', checkout='', nocache=False):
+    def build_image(cls, force=False, tag=None, checkout='', nocache=False, version=None):
+        tag = tag or cls.image_tag()
 
         cls.dockerfile = '''
 FROM debian:latest
@@ -23,8 +29,8 @@ RUN apt update \
 RUN curl 'https://www.flocknetworks.com/?smd_process_download=1&download_id=429' --output flockd_21.1.0_amd64.deb && \
     dpkg -i ./flockd_21.1.0_amd64.deb
 
-'''.format(checkout)
-        super(Flock, cls).build_image(force, tag, nocache)
+'''
+        super(Flock, cls).build_image(force, tag, nocache=nocache)
 
 
 class FlockTarget(Flock, Target):

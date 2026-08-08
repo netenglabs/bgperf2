@@ -21,6 +21,15 @@ This is not ceremony. There is no CI on this repo and the test suite deliberatel
 Docker, so it covers the pure layers only — a real `bench` is the sole end-to-end check and nobody
 runs one per commit. Review is the only thing standing between a bad edit and master.
 
+git:
+  never-cd: required
+
+**Never `cd` into a directory to run git — use `git -C <dir> ...`.** It works from any cwd, leaves
+the shell's working directory alone, and matches the permission rules already allowed here, so it
+does not trigger a fresh approval prompt for every command. This applies to *any* repo, including
+scratch clones outside the project. A `PreToolUse` hook in `.claude/settings.json` denies
+`cd ... && git ...`, so the shortcut will simply fail rather than prompt.
+
 ## What this is
 
 bgperf2 benchmarks BGP daemons by running them in Docker containers, blasting routes at them from

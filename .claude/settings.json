@@ -14,6 +14,11 @@
             "type": "command",
             "command": "c=$(jq -r \".tool_input.command // \\\"\\\"\"); if printf \"%s\" \"$c\" | grep -qE \"(^|[;&|] *)git +(-[^ ]+ +)*commit\\b\"; then jq -nc \"{hookSpecificOutput:{hookEventName:\\\"PreToolUse\\\",additionalContext:\\\"CLAUDE.md requires /code-review on the diff before committing. If no review has run for this change, run it and act on the findings first. If it already ran, or this commit changes no code, proceed.\\\"}}\"; fi",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "c=$(jq -r '.tool_input.command // \"\"'); segs=$(printf '%s' \"$c\" | sed -E 's/(\\|\\||&&|[;&|])/\\n/g'); has_cd=$(printf '%s\\n' \"$segs\" | grep -cE '^[[:space:]]*cd ' || true); bad_git=$(printf '%s\\n' \"$segs\" | grep -E '^[[:space:]]*git ' | grep -cvE '^[[:space:]]*git +(--no-pager +)?-C ' || true); if [ \"${has_cd:-0}\" -gt 0 ] && [ \"${bad_git:-0}\" -gt 0 ]; then jq -nc '{hookSpecificOutput:{hookEventName:\"PreToolUse\",permissionDecision:\"deny\",permissionDecisionReason:\"Do not cd into a directory to run git. Use `git -C <dir> ...` instead: it works from any cwd, keeps the shell cwd unchanged, and matches the permission rules already allowed for this project.\"}}'; fi",
+            "timeout": 10
           }
         ]
       }

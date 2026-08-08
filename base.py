@@ -59,6 +59,9 @@ class Container(object):
         self.conf = conf
         self.config_name = None
         self.stop_monitoring = False
+        # Interface carrying this container's benchmark addresses; filled in by
+        # run() once Docker has attached the networks.
+        self.dev = 'eth0'
         self.command = None
         self.environment = None
         self.volumes = [self.guest_dir]
@@ -166,23 +169,27 @@ class Container(object):
         dckr.connect_container_to_network(self.ctn_id, net_id, ipv4_address=ipv4_addresses[0])
         dckr.start(container=self.name)
 
-        if len(ipv4_addresses) > 1:
+        # Containers end up on two networks: the default bridge that Docker
+        # attaches at creation, plus the benchmark network connected above.
+        # Which one lands on eth0 is not deterministic, so find the interface
+        # actually carrying our address rather than assuming a name. Config
+        # generation needs this too -- see self.dev.
+        dev = None
+        pxlen = None
+        res = self.local('ip addr').decode("utf-8")
 
-            # get the interface used by the first IP address already added by Docker
-            dev = None
-            pxlen = None
-            res = self.local('ip addr').decode("utf-8")
+        for line in res.split('\n'):
+            if ipv4_addresses[0] in line:
+                dev = line.split(' ')[-1].strip()
+                pxlen = line.split('/')[1].split(' ')[0].strip()
+        if not dev:
+            dev = "eth0"
+            pxlen = 8
 
-            for line in res.split('\n'):
-                if ipv4_addresses[0] in line:
-                    dev = line.split(' ')[-1].strip()
-                    pxlen = line.split('/')[1].split(' ')[0].strip()
-            if not dev:
-                dev = "eth0"
-                pxlen = 8
+        self.dev = dev
 
-            for ip in ipv4_addresses[1:]:
-                self.local(f'ip addr add {ip}/{pxlen} dev {dev}')
+        for ip in ipv4_addresses[1:]:
+            self.local(f'ip addr add {ip}/{pxlen} dev {dev}')
 
         return ctn
 
@@ -376,8 +383,10 @@ class Tester(Container):
 
         return None
 
-    def find_errors():
+    @staticmethod
+    def find_errors(log_dirs=()):
         return 0
 
-    def find_timeouts():
+    @staticmethod
+    def find_timeouts(log_dirs=()):
         return 0

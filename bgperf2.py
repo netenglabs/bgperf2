@@ -569,8 +569,9 @@ def bench(args):
             if status == ConvergenceTracker.FAILED:
                 output_stats['recved'] = recved
                 output_stats['fail_msg'] = tracker.fail_msg
-                output_stats['tester_errors'] = tester_class.find_errors()
-                output_stats['tester_timeouts'] = tester_class.find_timeouts()
+                tester_dirs = [t.host_dir for t in testers]
+                output_stats['tester_errors'] = tester_class.find_errors(tester_dirs)
+                output_stats['tester_timeouts'] = tester_class.find_timeouts(tester_dirs)
                 f.close() if f else None
                 print("FAILED")
                 return finish_bench(args, output_stats, bench_stats, bench_start, target, m, fail=True)
@@ -578,8 +579,9 @@ def bench(args):
             if status == ConvergenceTracker.CONVERGED:
                 assurance = tracker.assurance_samples
                 output_stats['recved'] = recved
-                output_stats['tester_errors'] = tester_class.find_errors()
-                output_stats['tester_timeouts'] = tester_class.find_timeouts()
+                tester_dirs = [t.host_dir for t in testers]
+                output_stats['tester_errors'] = tester_class.find_errors(tester_dirs)
+                output_stats['tester_timeouts'] = tester_class.find_timeouts(tester_dirs)
 
                 f.close() if f else None
 
@@ -809,7 +811,10 @@ def create_batch_graphs(results, name, results_dir=DEFAULT_RESULTS_DIR):
     for test_name, stat_index, suffix, ylabel in [
         ('total time', 11, 'total_time', 'seconds'),
         ('elapsed', 8, 'elapsed', 'seconds'),
-        ('neighbor', 9, 'neighbor', 'seconds'),
+        # index 7 is monitor_wait_time -- the wait for the monitor's session to
+        # the target to establish. This plotted index 9 (first-received time)
+        # under the 'neighbor' label, which is a different measurement.
+        ('neighbor', 7, 'neighbor', 'seconds'),
         ('route reception', 10, 'route_reception', 'seconds'),
         ('max cpu', 12, 'max_cpu', '%'),
         ('max mem', 13, 'max_mem', 'GB'),

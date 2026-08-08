@@ -51,7 +51,10 @@ def test_graph_indices_point_at_the_columns_their_labels_claim():
     fields = header_fields()
     expected = {
         6: 'received',
+        7: 'monitor (s)',          # plotted as 'neighbor'
         8: 'elapsed (s)',
+        9: 'prefix received (s)',
+        10: 'testers (s)',         # plotted as 'route reception'
         11: 'total time',
         12: 'max cpu %',
         13: 'max mem (GB)',

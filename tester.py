@@ -18,6 +18,8 @@ from exabgp import ExaBGP
 from bird import BIRD
 from  settings import dckr
 from subprocess import check_output, Popen, PIPE
+import glob
+import os
 
 
 class ExaBGPTester(Tester, ExaBGP):
@@ -81,7 +83,7 @@ protocol bgp {{
     #hold time 5;
     source address {3};
     connect delay time 1;
-    interface "eth0";
+    interface "{6}";
     strict bind;
     ipv4 {{ import none; export all; }};
     local {3} as {4};
@@ -89,7 +91,7 @@ neighbor {0} as {1};
 }}
 protocol static {{ ipv4;
 '''.format(target_conf['local-address'], target_conf['as'],
-               p['router-id'], local_address, p['as'], self.guest_dir)
+               p['router-id'], local_address, p['as'], self.guest_dir, self.dev)
                 f.write(config)
                 for path in p['paths']:
                     f.write('      route {0} via {1};\n'.format(path, local_address))
@@ -106,10 +108,27 @@ ulimit -n 65536
             startup.append('''bird -c {0}/{1}.conf -s {0}/{1}.ctl >>{0}/{1}.log 2>&1\n'''.format(self.guest_dir, p['router-id']))
         return '\n'.join(startup)
 
-    def find_errors():
-        grep1 = Popen(('grep RMT /tmp/bgperf2/tester/*.log'), shell=True, stdout=PIPE)
-        grep2 = Popen(('grep', '-v', 'NEXT_HOP'), stdin=grep1.stdout, stdout=PIPE)
-        errors = check_output(('wc', '-l'), stdin=grep2.stdout)
-        grep1.wait()
-        grep2.wait()
-        return errors.decode('utf-8').strip()
+    @staticmethod
+    def find_errors(log_dirs=()):
+        '''Count real protocol errors across the tester logs.
+
+        The target re-advertises everything it learns, including back to the
+        testers that sent it. Testers run `import none`, so they reject all of
+        it and log "Invalid route ... withdrawn" for each -- normal operation,
+        not an error, and it dwarfs anything real (10 peers x 900 reflected
+        routes = 9000). Excluded like NEXT_HOP already was.
+
+        Takes the tester host directories rather than assuming /tmp/bgperf2, so
+        it still works with -b/--bench-name and -d/--dir.
+        '''
+        errors = 0
+        for log_dir in log_dirs:
+            for log in glob.glob(os.path.join(log_dir, '*.log')):
+                with open(log, errors='replace') as f:
+                    for line in f:
+                        if '<RMT>' not in line:
+                            continue
+                        if 'NEXT_HOP' in line or 'Invalid route' in line:
+                            continue
+                        errors += 1
+        return errors

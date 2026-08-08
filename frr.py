@@ -18,18 +18,19 @@ import json
 import re
 
 class FRRouting(Container):
+    '''Shared base for FRR containers.
+
+    This no longer builds an image of its own. It used to wrap the prebuilt
+    frrouting/frr:v7.5.1 container as the `frr` target; that target is gone and
+    frr_c (FRR built from a git checkout, see frr_compiled.py) replaces it. The
+    class survives because FRRoutingTarget below holds all the FRR config
+    generation and CLI parsing, which FRRoutingCompiledTarget inherits.
+    '''
     CONTAINER_NAME = None
     GUEST_DIR = '/root/config'
 
-    def __init__(self, host_dir, conf, image='bgperf/frr'):
+    def __init__(self, host_dir, conf, image='bgperf/frr_c'):
         super(FRRouting, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
-
-    @classmethod
-    def build_image(cls, force=False, tag='bgperf/frr', checkout='HEAD', nocache=False):
-        cls.dockerfile = '''
-FROM frrouting/frr:v7.5.1
-'''.format(checkout)
-        super(FRRouting, cls).build_image(force, tag, nocache)
 
 
 class FRRoutingTarget(FRRouting, Target):

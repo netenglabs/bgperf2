@@ -178,10 +178,21 @@ to compile the software ourselves or to try to download containers from the open
 When I originally forked bgperf2 it hadn't changed in 4 years, so almost none of the containers could be built
 and all of the software had changed how they interat. I'm not sure how best to make bgperf2 work over time.
 
-Right now that is demonstrated most readily with FRR. If you use bench -t FRR it will use a prebuilt FRRouting 
-container that is hardcoded to 7.5.1. However, I've also created another target called frr_c, which is a container
-that checks FRRouting out of git with the 8.0 tag and builds the container. This container is not automatically
-built when you do bgperf2 bench.
+FRR is the clearest example. There used to be an `frr` target that used a prebuilt FRRouting
+container hardcoded to 7.5.1, which meant the version you tested was whatever that image happened
+to pin. It has been removed. The `frr_c` target replaces it: it checks FRRouting out of git and
+builds the container, so you choose the version.
+
+`prepare` builds `bgperf/frr_c` from the default branch plus `bgperf/frr_c/stable_8` and
+`bgperf/frr_c/stable_9`. Point a batch target at a specific one with `image:`, and give it a
+`label:` so the graphs and CSV distinguish them:
+
+```YAML
+      -
+        name: frr_c
+        image: bgperf/frr_c/stable_9
+        label: frr 9
+```
 
 ### Testing commercial BGP Stacks
 

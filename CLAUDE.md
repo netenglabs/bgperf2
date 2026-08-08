@@ -132,11 +132,15 @@ target branch when every neighbor has finished sending.
 ## Targets and images
 
 Open-source daemons are built from source into `bgperf/<name>` images by `prepare`/`update`.
-`frr_c` is FRR compiled from a git checkout (`prepare` builds `stable/8.0` and `stable/9.0` variants
-under separate tags); the `frr` target is a thin wrapper over the prebuilt upstream
-`frrouting/frr:v7.5.1` image. Note that `batch()` assigns `args.target` straight from the yaml, so it
-bypasses argparse's `choices` validation — `tests/test_static.py` checks the benchmark configs
-instead.
+
+FRR is only ever `frr_c` — compiled from a git checkout, with `prepare` building the default branch
+plus `stable/8.0` and `stable/9.0` under separate tags. The old `frr` target (a wrapper over the
+prebuilt `frrouting/frr:v7.5.1` image) was removed. **`frr.py` still exists and must stay**: its
+`FRRoutingTarget` holds all the FRR config generation, `get_neighbors_state`, and End-of-RIB parsing,
+which `FRRoutingCompiledTarget` inherits. Only the image build and CLI target went away.
+
+Note that `batch()` assigns `args.target` straight from the yaml, so it bypasses argparse's `choices`
+validation — `tests/test_static.py` checks the benchmark configs instead.
 
 Commercial NOSes (Junos cRPD, Arista cEOS, SR Linux) are never built. Download them out of band and
 tag them exactly as `crpd:latest` / `ceos:latest` — bgperf2 looks up those literal tags and fails

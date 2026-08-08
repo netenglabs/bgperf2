@@ -39,7 +39,7 @@ from base import *
 from exabgp import ExaBGP, ExaBGP_MRTParse
 from gobgp import GoBGP, GoBGPTarget
 from bird import BIRD, BIRDTarget
-from frr import FRRouting, FRRoutingTarget
+from frr import FRRoutingTarget
 from frr_compiled import FRRoutingCompiled, FRRoutingCompiledTarget
 from rustybgp import RustyBGP, RustyBGPTarget
 from openbgp import OpenBGP, OpenBGPTarget
@@ -98,7 +98,7 @@ def doctor(args):
     else:
         print('... not found. run `bgperf prepare`')
 
-    for name in ['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp', 'openbgp', 'flock', 'srlinux']:
+    for name in ['gobgp', 'bird', 'frr_c', 'rustybgp', 'openbgp', 'flock', 'srlinux']:
         print('{0} image'.format(name), end=' ')
         if img_exists('bgperf/{0}'.format(name)):
             print('... ok')
@@ -113,8 +113,6 @@ def prepare(args):
     ExaBGP_MRTParse.build_image(args.force, nocache=args.no_cache)
     GoBGP.build_image(args.force, nocache=args.no_cache)
     BIRD.build_image(args.force, nocache=args.no_cache)
-    # thin wrapper over the upstream frrouting/frr image; benchmarks/big-tests.yaml uses it
-    FRRouting.build_image(args.force, nocache=args.no_cache)
     RustyBGP.build_image(args.force, nocache=args.no_cache)
     OpenBGP.build_image(args.force, nocache=args.no_cache)
     FRRoutingCompiled.build_image(args.force, nocache=args.no_cache)
@@ -135,8 +133,6 @@ def update(args):
         GoBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'all' or args.image == 'bird':
         BIRD.build_image(True, checkout=args.checkout, nocache=args.no_cache)
-    if args.image == 'all' or args.image == 'frr':
-        FRRouting.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'all' or args.image == 'rustybgp':
         RustyBGP.build_image(True, checkout=args.checkout, nocache=args.no_cache)
     if args.image == 'all' or args.image == 'openbgp':
@@ -437,8 +433,6 @@ def bench(args):
             target_class = GoBGPTarget
         elif args.target == 'bird':
             target_class = BIRDTarget
-        elif args.target == 'frr':
-            target_class = FRRoutingTarget
         elif args.target == 'frr_c':
             target_class = FRRoutingCompiledTarget
         elif args.target == 'rustybgp':
@@ -1044,7 +1038,7 @@ def create_args_parser(main=True):
     parser_prepare.set_defaults(func=prepare)
 
     parser_update = s.add_parser('update', help='rebuild bgp docker images')
-    parser_update.add_argument('image', choices=['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'frr', 'frr_c', 
+    parser_update.add_argument('image', choices=['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'frr_c', 
                                 'rustybgp', 'openbgp', 'flock',  'bgpdump2', 'all'])
     parser_update.add_argument('-c', '--checkout', default='HEAD')
     parser_update.add_argument('-n', '--no-cache', action='store_true')
@@ -1077,7 +1071,7 @@ def create_args_parser(main=True):
         parser.add_argument('--filter_test', choices=['transit', 'ixp'], default=None)
 
     parser_bench = s.add_parser('bench', help='run benchmarks')
-    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr', 'frr_c', 'rustybgp',
+    parser_bench.add_argument('-t', '--target', choices=['gobgp', 'bird', 'frr_c', 'rustybgp',
                               'openbgp', 'flock', 'srlinux', 'junos', 'eos'], default='bird')
     parser_bench.add_argument('-i', '--image', help='specify custom docker image')
     parser_bench.add_argument('--mrt-file', type=str, 

@@ -228,8 +228,18 @@ target branch when every neighbor has finished sending.
 Open-source daemons are built from source into `bgperf/<name>` images by `prepare`/`update`.
 
 FRR is only ever `frr_c` — compiled from a git checkout, with `prepare` building master plus the
-releases in `FRRoutingCompiled.VERSIONS`. The old `frr` target (a wrapper over the
-prebuilt `frrouting/frr:v7.5.1` image) was removed. **`frr.py` still exists and must stay**: its
+releases in `FRRoutingCompiled.VERSIONS`.
+
+**If your `bgperf/frr_c:*` images predate 2026-08-08, rebuild them: `prepare -f -t frr_c`.** They
+were compiled with `--enable-gcov`, which links gcov coverage instrumentation into `bgpd` itself, so
+those images benchmark an instrumented binary against everyone else's optimized one. Measured on FRR
+10.7.0, same source, 4 peers × 25k prefixes: **103% CPU instrumented vs 45% clean**, and ~12% more
+memory. Convergence time was unchanged at that size — the run is not CPU-bound there — so the
+distortion sits in the CPU and memory columns, which is exactly where it is hardest to notice.
+`prepare` skips any tag that already exists, so nothing invalidates these automatically; a batch
+mixing a freshly built version with a cached one silently compares the two kinds of binary.
+
+The old `frr` target (a wrapper over the prebuilt `frrouting/frr:v7.5.1` image) was removed. **`frr.py` still exists and must stay**: its
 `FRRoutingTarget` holds all the FRR config generation, `get_neighbors_state`, and End-of-RIB parsing,
 which `FRRoutingCompiledTarget` inherits. Only the image build and CLI target went away.
 

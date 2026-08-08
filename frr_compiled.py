@@ -191,6 +191,11 @@ RUN {extra_setup}
 
 #COPY --chown=frr:frr ./ /home/frr/frr/
 
+# Do NOT add --enable-gcov here. It compiles gcov coverage instrumentation
+# (-fprofile-arcs -ftest-coverage) into bgpd itself, so every benchmark would
+# time an instrumented binary against everyone else's optimized one. It was
+# present for years and was visible at runtime only as "profiling: ... .gcda"
+# lines in the daemon log, which read like harmless noise.
 RUN cd ~/frr && \
     ./bootstrap.sh && \
     ./configure \
@@ -198,7 +203,6 @@ RUN cd ~/frr && \
        --sysconfdir=/etc \
        --localstatedir=/var/run/frr \
        --sbindir=/usr/lib/frr \
-       --enable-gcov \
        --enable-rpki \
        --enable-multipath=256 \
        --enable-user=frr \

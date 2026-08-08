@@ -11,3 +11,4 @@ nos/
 
 # personal benchmark configs
 benchmarks/local/
+.pytest_cache/

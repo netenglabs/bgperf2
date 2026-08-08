@@ -35,7 +35,6 @@ tests:
         label: frr 8
       -
         name: rustybgp
-  -
   - # for more than 1024 neighbors must increase gcthresh3
     # echo 16384 | sudo tee /proc/sys/net/ipv4/neigh/default/gc_thresh3
     name: many_many_neighbors_10p

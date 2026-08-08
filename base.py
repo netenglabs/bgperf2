@@ -150,11 +150,35 @@ class Container(object):
     #   DEFAULT_REF       ref used when no version is given (the ':latest' tag)
     #   SUPPORTS_VERSIONS False for daemons pinned to one build (Flock)
     #   IMAGE_BUILDABLE   False for images downloaded out of band (crpd, cEOS)
+    #   PULL_BASE         re-pull the FROM image on every build
     IMAGE_REPO = None
     VERSIONS = ()
     DEFAULT_REF = 'HEAD'
     SUPPORTS_VERSIONS = True
     IMAGE_BUILDABLE = True
+    # Off by default: most daemons are compiled from a git ref here, so the
+    # base image is only a toolchain and a stale local copy costs nothing that
+    # matters. Set it where the base image IS the daemon under test -- there,
+    # a cached `FROM upstream:latest` means the tag quietly stops tracking
+    # upstream, and the run records a version nobody asked for.
+    #
+    # It applies to the unversioned tag only (see pulls_base()). A version tag
+    # builds `FROM upstream:9.2`, which is immutable, so re-pulling it cannot
+    # find anything new -- and `pull` is fatal when the registry is unreachable
+    # even though the image is already local, which would turn an offline
+    # `prepare -t openbgp` into a failure it never used to be.
+    PULL_BASE = False
+
+    @classmethod
+    def pulls_base(cls, tag):
+        '''Whether this build should re-pull its FROM image.'''
+        if not cls.PULL_BASE or cls.IMAGE_REPO is None:
+            return False
+        # Normalize first: image_tag() returns 'bgperf/openbgp:latest', but the
+        # bare repo name is what every daemon's __init__ defaults to, so a
+        # caller passing 'bgperf/openbgp' would otherwise silently skip the
+        # re-pull with nothing to show it had been skipped.
+        return normalize_image_name(tag) == cls.image_tag()
 
     # --- version-dependent build recipes ----------------------------------
     #
@@ -357,7 +381,7 @@ class Container(object):
             print('build {0}...'.format(tag))
             error = None
             for line in dckr.build(fileobj=f, rm=False, tag=tag, decode=True, nocache=nocache,
-                                   buildargs=buildargs or {}):
+                                   pull=cls.pulls_base(tag), buildargs=buildargs or {}):
                 if 'stream' in line:
                     print(line['stream'].strip())
 

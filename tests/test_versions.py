@@ -18,6 +18,7 @@ from flock import Flock
 from frr_compiled import FRRoutingCompiled
 from gobgp import GoBGP
 from junos import Junos
+from openbgp import OpenBGP
 from rustybgp import RustyBGP
 
 
@@ -94,6 +95,63 @@ class TestResolveRef:
             build = RustyBGP.build_vars(v)
             assert build['base_image'].endswith('-bookworm')
             assert build['runtime_image'] == 'debian:bookworm'
+
+
+class TestOpenBGP:
+    '''OpenBGPD is repackaged, not compiled, so a version is an upstream Docker
+    tag and the inherited passthrough resolve_ref() is already right.
+    '''
+    @pytest.mark.parametrize('version,ref', [
+        ('9.2', '9.2'),
+        ('8.8', '8.8'),
+        ('7.3', '7.3'),   # any upstream tag works, not only the prebuilt ones
+    ])
+    def test_versions_are_upstream_docker_tags(self, version, ref):
+        assert OpenBGP.resolve_ref(version) == ref
+
+    def test_default_is_latest(self):
+        assert OpenBGP.resolve_ref(None) == 'latest'
+
+    def test_the_moving_tag_is_re_pulled(self):
+        '''The FROM image IS the daemon under test here, so a cached copy makes
+        the unversioned tag stop tracking upstream silently. A local
+        openbgpd/openbgpd:latest pulled in 2025-02 kept bgperf/openbgp:latest
+        at 8.8 for months after 9.2 shipped, and nothing looked wrong -- the
+        run just recorded a version nobody asked for.
+        '''
+        assert OpenBGP.pulls_base(OpenBGP.image_tag()) is True
+
+    @pytest.mark.parametrize('version', ['8.8', '9.2'])
+    def test_pinned_versions_are_not_re_pulled(self, version):
+        '''`FROM openbgpd/openbgpd:9.2` is immutable, so a pull cannot find
+        anything new -- and it is fatal when the registry is unreachable even
+        though the image is already local, which would break an offline
+        `prepare -t openbgp` that used to work straight from cache.
+        '''
+        assert OpenBGP.pulls_base(OpenBGP.image_tag(version)) is False
+
+    def test_a_bare_repo_name_still_counts_as_the_moving_tag(self):
+        '''Every daemon's __init__ defaults to the bare repo name, so it is the
+        easy thing to pass -- and comparing it un-normalized against
+        'bgperf/openbgp:latest' would skip the re-pull silently.
+        '''
+        assert OpenBGP.pulls_base('bgperf/openbgp') is True
+
+    def test_pulling_is_off_by_default(self):
+        '''Compiled daemons only use their base image as a toolchain, so
+        re-pulling it every build costs time and buys nothing.
+        '''
+        assert base.Container.PULL_BASE is False
+        assert BIRD.pulls_base(BIRD.image_tag()) is False
+
+    def test_the_upstream_entrypoint_is_neutralized(self):
+        '''openbgpd/openbgpd runs `multirun bgpd ...` as its entrypoint, so
+        bgpd came up on the image's own config before bgperf could act and
+        start.sh then died with "cannot bind to 0.0.0.0:179: Address in use".
+        The target never peered and the run hung waiting for the monitor.
+        '''
+        recipe = OpenBGP.render_dockerfile(version='9.2')
+        assert 'ENTRYPOINT []' in recipe
 
 
 class TestImageTag:

@@ -256,16 +256,23 @@ def prepare(args):
         wanted = [None] + list(versions or (cls.VERSIONS if args.target else ()))
         for v in wanted:
             tag = cls.image_tag(v)
-            if args.force or not img_exists(tag):
-                plan.append((cls, v, tag))
+            # A PULL_BASE daemon's unversioned tag is repackaged straight from a
+            # moving upstream tag, so "already built" says nothing about whether
+            # it is current -- skipping it is what let bgperf/openbgp:latest sit
+            # at 8.8 for months after 9.2 shipped. Rebuild it every time and let
+            # the layer cache make that cheap when upstream has not moved.
+            existed = img_exists(tag)
+            if args.force or not existed or cls.pulls_base(tag):
+                plan.append((cls, v, tag, existed))
 
     if not plan:
         print('everything requested is already built (use -f to rebuild)')
         return
 
     print('building {0} image(s):'.format(len(plan)))
-    for cls, v, tag in plan:
-        print('  {0:<28} from {1}'.format(tag, cls.resolve_ref(v)))
+    for cls, v, tag, existed in plan:
+        print('  {0:<28} from {1}{2}'.format(
+            tag, cls.resolve_ref(v), ' (refresh)' if existed and not args.force else ''))
     print()
 
     # A plan can be eight daemons and several hours. bird/gobgp/rustybgp all
@@ -273,10 +280,25 @@ def prepare(args):
     # be enough to lose every image after it -- keep going and report at the
     # end, but still exit non-zero so the failure cannot pass for success.
     failures = []
-    for cls, v, tag in plan:
+    for cls, v, tag, existed in plan:
         try:
-            cls.build_version(v, force=args.force, nocache=args.no_cache)
+            # pulls_base() implies force: build_dockerfile() skips an existing
+            # tag otherwise, so the image would be planned and then not built,
+            # and the re-pull it was planned for would never happen.
+            cls.build_version(v, force=args.force or cls.pulls_base(tag),
+                              nocache=args.no_cache)
         except ImageBuildFailed as e:
+            # Refreshing an image we already have is best effort. Only a
+            # PULL_BASE tag gets here unforced, and the whole point of that
+            # rebuild is to reach the registry -- so being offline or rate
+            # limited must not turn a working setup into a failed prepare and
+            # a non-zero exit. Keep the image that is already on disk and say
+            # so; the run stays reproducible either way, because the version
+            # actually used is read from the container and recorded.
+            if existed and not args.force:
+                print('WARNING: could not refresh {0}, keeping the image already '
+                      'on disk: {1}'.format(tag, e.message))
+                continue
             print('FAILED: {0}'.format(e))
             failures.append((tag, e))
 

@@ -243,6 +243,29 @@ The old `frr` target (a wrapper over the prebuilt `frrouting/frr:v7.5.1` image) 
 `FRRoutingTarget` holds all the FRR config generation, `get_neighbors_state`, and End-of-RIB parsing,
 which `FRRoutingCompiledTarget` inherits. Only the image build and CLI target went away.
 
+OpenBGPD is the one open-source target that is **repackaged rather than compiled**: the image is
+`FROM openbgpd/openbgpd:<tag>`, so a "version" is an upstream Docker tag (7.3 through 9.2 exist) and
+the inherited passthrough `resolve_ref()` is already correct. Two consequences that do not apply to
+the compiled daemons:
+
+- The upstream image starts the daemon itself — its entrypoint is `multirun bgpd bgplgd haproxy` on
+  the image's own `/etc/bgpd.conf`. bgperf's `start.sh` then died with `cannot bind to
+  0.0.0.0:179: Address in use`, the target never peered, and the run hung in "Waiting N seconds for
+  monitor" forever. The recipe sets `ENTRYPOINT []` so the container idles like every other image
+  and `exec_startup_cmd()` is what starts bgpd, on the config under test.
+- `PULL_BASE = True`, because here the base image *is* the daemon. Docker does not re-pull a `FROM`
+  it already has, so a locally cached `openbgpd/openbgpd:latest` kept `bgperf/openbgp:latest` at 8.8
+  long after 9.2 shipped — a run recording a version nobody asked for, with nothing looking wrong.
+  It is off for everyone else, where the base image is only a toolchain.
+
+  Read it through `Container.pulls_base(tag)`, never the flag directly. It applies to the
+  **unversioned tag only**: `FROM openbgpd/openbgpd:9.2` is immutable so a pull can find nothing
+  new, and `pull` is *fatal* when the registry is unreachable even though the image is already
+  local — which would turn an offline `prepare -t openbgp` into a failure it never used to be.
+  `prepare` also rebuilds such a tag unconditionally, since "already built" says nothing about
+  whether it is current, and passes `force` to match — `build_dockerfile()` skips an existing tag
+  otherwise, so it would be planned and then quietly not built.
+
 Note that `batch()` assigns `args.target` straight from the yaml, so it bypasses argparse's `choices`
 validation — `tests/test_static.py` checks the benchmark configs instead.
 

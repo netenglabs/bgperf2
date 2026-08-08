@@ -7,8 +7,17 @@ class OpenBGP(Container):
     GUEST_DIR = '/root/config'
     IMAGE_REPO = 'bgperf/openbgp'
     # OpenBGPD is not compiled here -- it is repackaged from the upstream
-    # image, so a version is a tag on openbgpd/openbgpd rather than a git ref.
+    # image, so a version is a tag on openbgpd/openbgpd rather than a git ref,
+    # and the inherited passthrough resolve_ref() is already correct. Upstream
+    # tags every release (7.3 through 9.2 at the time of writing), so any of
+    # them can be asked for by name even though only these are prebuilt.
     DEFAULT_REF = 'latest'
+    VERSIONS = ('8.8', '9.2')
+    # The base image is the daemon under test, so a cached copy of
+    # openbgpd/openbgpd:latest means the unversioned tag stops tracking
+    # upstream: a local copy pulled in 2025-02 kept `latest` at 8.8 well after
+    # 9.2 shipped, and the run recorded 8.8 without anything looking wrong.
+    PULL_BASE = True
 
     def __init__(self, host_dir, conf, image='bgperf/openbgp'):
         super(OpenBGP, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
@@ -38,6 +47,17 @@ class OpenBGP(Container):
         cls.dockerfile = '''
 FROM openbgpd/openbgpd:{0}
 
+# Neutralize the upstream entrypoint. It runs `multirun bgpd bgplgd haproxy`,
+# which starts bgpd on the image's own /etc/bgpd.conf before bgperf can do
+# anything -- so bgperf's start.sh then hit "cannot bind to 0.0.0.0:179:
+# Address in use", the target never peered, and every run sat in "Waiting N
+# seconds for monitor" until it was killed.
+#
+# Every other bgperf image idles until exec_startup_cmd() runs start.sh; this
+# makes OpenBGPD behave the same way, so the config under test is the only one
+# bgpd ever reads and startup is timed like the rest.
+ENTRYPOINT []
+CMD ["/bin/sh"]
 '''.format(checkout or cls.build_vars(version)['ref'])
         super(OpenBGP, cls).build_image(force, tag, nocache=nocache)
 

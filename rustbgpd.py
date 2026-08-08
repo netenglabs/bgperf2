@@ -12,7 +12,7 @@ class RustBGPd(Container):
         super(RustBGPd, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
 
     @classmethod
-    def build_image(cls, force=False, tag='bgperf/rustbgpd', checkout='v0.63.0', nocache=False):
+    def build_image(cls, force=False, tag='bgperf/rustbgpd', checkout='v0.64.0', nocache=False):
 
         cls.dockerfile = '''
 FROM rust:1.95-bookworm AS builder

@@ -28,9 +28,12 @@ tests:
          tester_type: bird
          single_table: True
        -
+         # bird 3 is the multi-threaded rewrite, but it runs one worker unless
+         # told otherwise -- without threads: it benches like bird 2
          name: bird
          version: 3.3.2
-         label: bird 3
+         label: bird 3 (4 threads)
+         threads: 4
          tester_type: bird
        -
          name: bird

@@ -71,14 +71,22 @@ class BIRDTarget(BIRD, Target):
     DYNAMIC_NEIGHBORS = True
 
     def write_config(self):
-        config = '''router id {0};
+        # BIRD 3 is the multi-threaded rewrite, but it starts a single worker
+        # unless told otherwise -- benchmarked without this it looks like 2.x.
+        # BIRD 2 parses the keyword and ignores it, so a shared batch config
+        # can set it for both.
+        threads = ''
+        if self.conf.get('threads'):
+            threads = 'threads {0};\n'.format(int(self.conf['threads']))
+
+        config = '''{2}router id {0};
 protocol device {{ }}
 protocol direct {{ disabled; }}
 protocol kernel {{ ipv4 {{ import none; export none; }}; }}
 
 log stderr all;
 #debug protocols all; # this seems to add a lot of extra load especially in internet/mrt tests
-'''.format(self.conf['router-id'], ' sorted' if self.conf['single-table'] else '')
+'''.format(self.conf['router-id'], ' sorted' if self.conf['single-table'] else '', threads)
 
         def gen_filter_assignment(n):
             if 'filter' in n:

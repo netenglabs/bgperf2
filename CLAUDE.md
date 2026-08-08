@@ -133,6 +133,11 @@ renders a recipe without building it (`Container.render_dockerfile`, which short
 A bare `prepare` builds only the unversioned images; version lists are opt-in behind `-t`, since
 `FRRoutingCompiled.VERSIONS` alone is four full compiles. It prints its plan and skips what exists.
 
+`--threads N` sets worker threads on the target (`conf['target']['threads']`). Only BIRD reads it
+so far: **BIRD 3 runs one worker unless the config says otherwise**, so benching 3.x against 2.x
+without it measures nothing (verified: 3.3.2 gives 2 OS threads by default, 5 with `threads 4`;
+2.19.2 accepts the keyword and stays at 1).
+
 `bench()` and `batch()` resolve and verify images before starting any container, so a version that
 was never built costs a second rather than an hour.
 

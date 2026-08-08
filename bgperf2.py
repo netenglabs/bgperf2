@@ -956,7 +956,7 @@ def batch(args):
                         for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
                                         'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
                                         'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
-                                        'tester_type', 'license_file', 'version']:
+                                        'tester_type', 'license_file', 'version', 'threads']:
                             setattr(a, field, t[field]) if field in t else setattr(a, field, None)
 
                         for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
@@ -1058,6 +1058,9 @@ def gen_conf(args):
         'local-address': str(target_local_address),
         'single-table': args.single_table,
     }
+    if getattr(args, 'threads', None):
+        conf['target']['threads'] = args.threads
+
     if args.license_file:
         conf['target']['license_file'] = args.license_file
 
@@ -1252,6 +1255,10 @@ def create_args_parser(main=True):
         parser.add_argument('-c', '--community-list-num', default=0, type=int)
         parser.add_argument('-x', '--ext-community-list-num', default=0, type=int)
         parser.add_argument('-s', '--single-table', action='store_true')
+        parser.add_argument('--threads', type=int,
+                            help='worker threads the target should use. BIRD 3 runs with one '
+                                 'worker unless told otherwise, so a 2.x-vs-3.x comparison needs '
+                                 'this to mean anything. Ignored by daemons with no such setting')
 
         parser.add_argument('--target-config-file', type=str,
                             help='target BGP daemon\'s configuration file')

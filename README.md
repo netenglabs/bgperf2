@@ -229,6 +229,30 @@ tell you the exact `update` command rather than failing an hour into a batch.
 The commercial NOSes work the same way once you tag what you downloaded (`docker tag <image>
 crpd:24.2`, then `-t junos --version 24.2`).
 
+### BIRD 3 and threads
+
+BIRD 3 is the multi-threaded rewrite; BIRD 2 does everything in one thread. But **BIRD 3 starts a
+single worker unless the config asks for more**, so a 2.x-vs-3.x comparison without `--threads`
+measures BIRD 3 pretending to be BIRD 2. Measured on 3.3.2: 2 OS threads by default, 5 with
+`threads 4`. BIRD 2.19.2 parses the keyword and ignores it, staying at 1 — so a batch config can
+set it for both.
+
+```bash
+./bgperf2.py bench -t bird --version 3.3.2 --threads 4 -n 10 -p 100000
+```
+
+```YAML
+      - name: bird
+        version: 2.19.2
+        label: bird 2 (single-threaded)
+      - name: bird
+        version: 3.3.2
+        threads: 4
+        label: bird 3 (4 threads)
+```
+
+`--threads` is ignored by daemons with no such setting.
+
 ### When an old version will not build
 
 Build instructions drift: the base distro moves on, dependencies get renamed, configure flags come

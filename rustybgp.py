@@ -93,7 +93,13 @@ class RustyBGP(Container):
         return "/root/rustybgpd --version"
 
     def exec_version_cmd(self):
-        ret = (super().exec_version_cmd() or '').strip()
+        # Container's, explicitly -- NOT super(). RustyBGPTarget reuses GoBGP's
+        # config writer, so its MRO is RustyBGP -> GoBGPTarget -> GoBGP ->
+        # Container, and super() from here lands on GoBGP.exec_version_cmd,
+        # which feeds rustybgpd's banner to the gobgpd parser and rejects it.
+        # A real bench caught this; a unit test on RustyBGP alone cannot, since
+        # GoBGP is not in that MRO.
+        ret = (Container.exec_version_cmd(self) or '').strip()
         if not ret.startswith('rustybgpd'):
             raise VersionUnavailable(
                 'unexpected output from `{0}`: {1!r}'.format(

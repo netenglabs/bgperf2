@@ -169,6 +169,27 @@ class TestVersionParsers:
         with pytest.raises(base.VersionUnavailable):
             self._parse(monkeypatch, cls, bad)
 
+    @pytest.mark.parametrize('cls_name,output,expected', [
+        # The mixin targets are the ones that can pick up a sibling daemon's
+        # parser, so assert against the classes bench actually instantiates.
+        ('rustybgp.RustyBGPTarget', 'rustybgpd v0.2.0-16cc82756a',
+         'rustybgpd v0.2.0-16cc82756a'),
+        ('bird.BIRDTarget', 'BIRD version 2.19.2', '2.19.2'),
+        ('gobgp.GoBGPTarget', 'gobgpd version 3.37.0', '3.37.0'),
+    ])
+    def test_target_classes_use_their_own_parser(self, monkeypatch, cls_name,
+                                                 output, expected):
+        '''RustyBGPTarget reuses GoBGP's config writer, so its MRO is
+        RustyBGP -> GoBGPTarget -> GoBGP -> Container. A super() call from
+        RustyBGP.exec_version_cmd lands on GoBGP's parser, which rejects
+        rustybgpd's banner and records UNKNOWN for every rustybgp run. Testing
+        RustyBGP on its own cannot catch that -- GoBGP is not in its MRO -- so
+        this goes through the class bench really builds.
+        '''
+        mod, name = cls_name.split('.')
+        cls = getattr(__import__(mod), name)
+        assert self._parse(monkeypatch, cls, output) == expected
+
     def test_a_rejecting_parser_becomes_an_explicit_unknown(self, monkeypatch):
         '''The raise has to surface as UNKNOWN in the results, not a crash.'''
         import frr

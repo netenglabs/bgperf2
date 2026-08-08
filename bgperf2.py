@@ -51,6 +51,7 @@ from tester import ExaBGPTester, BIRDTester
 from mrt_tester import GoBGPMRTTester, ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
 from monitor import Monitor
+from convergence import ConvergenceTracker
 from settings import dckr
 from queue import Queue
 from mako.template import Template
@@ -512,28 +513,23 @@ def bench(args):
     percent_idle = 0
     mem_free = 0
 
-    recved_checkpoint = False
-    neighbors_checkpoint = False
-    last_recved = 0
-    last_recved_count = 0
-    last_neighbors_checked = 0
     recved = 0
-    less_last_received = 0
+    tracker = ConvergenceTracker()
     while True:
         info = q.get()
 
         if not is_remote and info['who'] == target.name:
             if 'neighbors_checked' in info:
-                if len(info['neighbors_checked']) > 0 and all(value == True for value in info['neighbors_checked'].values()):    
+                if len(info['neighbors_checked']) > 0 and all(value == True for value in info['neighbors_checked'].values()):
                     neighbors_checked = sum(1 if value == True else 0 for value in info['neighbors_checked'].values())
-                    neighbors_checkpoint = True
+                    tracker.note_neighbors_checkpoint()
                 else:
                     neighbors_checked = sum(1 if value == True else 0 for value in info['neighbors_checked'].values())
             elif 'neighbors_received_full' in info:
-                
-                if len(info['neighbors_received_full']) >= 1 and all(value == True for value in info['neighbors_received_full'].values()):    
+
+                if len(info['neighbors_received_full']) >= 1 and all(value == True for value in info['neighbors_received_full'].values()):
                     neighbors_received_full = sum(1 if value == True else 0 for value in info['neighbors_received_full'].values())
-                    neighbors_checkpoint = True
+                    tracker.note_neighbors_checkpoint()
                 else:
                     neighbors_received_full = sum(1 if value == True else 0 for value in info['neighbors_received_full'].values())
             else:
@@ -555,31 +551,8 @@ def bench(args):
             output_stats['elapsed'] = elapsed
             recved = info['afi_safis'][0]['state']['accepted'] if 'accepted' in info['afi_safis'][0]['state'] else 0
             
-            if last_recved > recved:
-                if neighbors_checked >= last_neighbors_checked:
-                    less_last_received += 1
-                else:
-                    less_last_received = 0
-                if less_last_received >= 10 and (last_recved - recved) / last_recved > .01: 
-
-                    output_stats['recved'] = recved
-                    f.close() if f else None
-                    output_stats['fail_msg'] = f"FAILED: dropping received count {recved} neighbors_checked {neighbors_checked}"
-                    output_stats['tester_errors'] = tester_class.find_errors() 
-                    output_stats['tester_timeouts'] = tester_class.find_timeouts()      
-                    print("FAILED")
-                    o_s = finish_bench(args, output_stats, bench_stats, bench_start,target, m, fail=True) 
-                    return o_s
-
-            elif (last_neighbors_checked > 0 or neighbors_received_full > 0) and recved == last_recved:
-                last_recved_count +=1
-            else:
-                last_recved = recved
-                last_recved_count = 0
-
-            if neighbors_checked != last_neighbors_checked:
-                last_neighbors_checked = neighbors_checked
-                last_recved_count = 0
+            status = tracker.update(elapsed.seconds, recved, neighbors_checked,
+                                    neighbors_received_full, info['checked'])
 
             if elapsed.seconds > 0:
                 rm_line()
@@ -590,68 +563,39 @@ def bench(args):
             f.write('{0}, {1}, {2}, {3}\n'.format(elapsed.seconds, cpu, mem, recved)) if f else None
             f.flush() if f else None
 
-            if info['checked']:
-                recved_checkpoint = True
-
             if recved > 0 and output_stats['first_received_time'] == start - start:
                 output_stats['first_received_time'] = elapsed
 
-
-            # we are trying to discover if the tests have finished
-            #  in the ieal world, we'd know how many prefixes were sent and we'd just check for that
-            #  that's how things work when generating with bird or exa, but not with MRT playback or when testing filtering
-            #  with MRT Playback, not all prefixes overlap, so we aren't sure how many there will be.
-            #  for example, each instance might send 800K prefixes, but the total amount of unique prefixes
-            #  might be 867342. We don't want to just stop at 800K, we want to wait a while until things have stablized
-            #  similarly with filtering, we don't know the amount that should be received 
-            #  so we have to wait longer to make sure we've received a stable amount of prefixes
-            #  for all cases we make sure that the target has recevied (but not accepted) as many prefixes as specified
-            #  but in the end we want to wait until the monitor has received a stable number of prefixes
-            
-            time_for_assurance = 20
-
-            # make sure it's stable but not wait as long as if we hadn't received 
-            #  at least as many prefixes as specified
-            if recved_checkpoint:
-                time_for_assurance = 5 
-
-            if neighbors_checkpoint and last_recved_count >=time_for_assurance:
-                output_stats['recved']= recved       
-                output_stats['tester_errors'] = tester_class.find_errors() 
-                output_stats['tester_timeouts'] = tester_class.find_timeouts() 
-                
+            if status == ConvergenceTracker.FAILED:
+                output_stats['recved'] = recved
+                output_stats['fail_msg'] = tracker.fail_msg
+                output_stats['tester_errors'] = tester_class.find_errors()
+                output_stats['tester_timeouts'] = tester_class.find_timeouts()
                 f.close() if f else None
-    
-                # subract the last time_for_assurance seconds, it was done by this time, we were just making sure
-                # TODO: recaulate all min/max stats after removing these stats
-                #  should move to always calculating based on bench_stats rather than while counting
+                print("FAILED")
+                return finish_bench(args, output_stats, bench_stats, bench_start, target, m, fail=True)
 
-                if last_recved_count >= time_for_assurance:
-                    print(f"last recevied: {last_recved_count}")
-                    output_stats['elapsed'] = datetime.timedelta(seconds = int(output_stats['elapsed'].seconds) - time_for_assurance + 1)
-                    bench_stats = bench_stats[0:len(bench_stats)-time_for_assurance]
-                o_s = finish_bench(args, output_stats, bench_stats, bench_start,target, m)  
-                return o_s
-        
+            if status == ConvergenceTracker.CONVERGED:
+                assurance = tracker.assurance_samples
+                output_stats['recved'] = recved
+                output_stats['tester_errors'] = tester_class.find_errors()
+                output_stats['tester_timeouts'] = tester_class.find_timeouts()
+
+                f.close() if f else None
+
+                # Drop the trailing assurance samples: the run was already done
+                # by then, we were only confirming the count had stopped moving.
+                # TODO: recalculate all min/max stats after removing these
+                #  should move to always calculating based on bench_stats
+                print(f"last recevied: {tracker.last_recved_count}")
+                output_stats['elapsed'] = datetime.timedelta(
+                    seconds=int(output_stats['elapsed'].seconds) - assurance + 1)
+                bench_stats = bench_stats[0:len(bench_stats)-assurance]
+                return finish_bench(args, output_stats, bench_stats, bench_start, target, m)
+
             if elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
                 bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
                 create_bench_graphs(bench_stats, prefix=bench_prefix, results_dir=args.results_dir)
-
-            if elapsed.seconds > 15 and recved_checkpoint == 0 and last_recved_count == 0 and recved == 0:
-                last_recved_count = 1_000_000 # make it artifically high so things fail quickly
-
-        # Too many of the same counts in a row, not progressing
-        #  using 600 because in high load some stacks take this longer, or longer
-        #  to process and we want to have good assurance it's really stuck
-        if last_recved_count >= 600 : 
-            output_stats['recved']= recved          
-            f.close() if f else None
-            output_stats['fail_msg'] = f"FAILED: stuck received count {recved} neighbors_checked {neighbors_checked}"
-            output_stats['tester_errors'] = tester_class.find_errors()
-            output_stats['tester_timeouts'] = tester_class.find_timeouts() 
-            print("FAILED")
-            o_s = finish_bench(args, output_stats,bench_stats, bench_start,target, m, fail=True)  
-            return o_s
 
 
 def finish_bench(args, output_stats, bench_stats, bench_start,target, m, fail=False):
@@ -696,7 +640,9 @@ def print_final_stats(args, target_version, stats):
     print()
 
 def stats_header():
-    return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date,cores,Mem (GB), tester errors, failed, MSG, filters")
+    # NOTE: must stay in sync with the row built by create_output_stats();
+    # tests/test_stats_contract.py enforces that they are the same length.
+    return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date, cores, Mem (GB), tester errors, tester timeouts, failed, MSG, filters")
 
 
 def create_output_stats(args, target_version, stats, fail=False):

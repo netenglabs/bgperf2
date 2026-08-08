@@ -33,14 +33,20 @@ pip install -r pip-requirements.txt
 Requires Docker (user must be in the `docker` group), and `sysstat` for `mpstat` — `bench` shells out
 to `mpstat` and `free`, and will crash without them.
 
-There is **no test suite** and no linter config. Verification is running an actual `bench`. Use
-`-n1 -p1` for the fastest smoke test; a full run at default settings takes minutes.
+```bash
+venv/bin/pip install -r test-requirements.txt
+venv/bin/python -m pytest tests/ -q        # ~0.5s, no Docker needed
+venv/bin/python -m pytest tests/test_convergence.py -q
+```
+
+The test suite deliberately needs **no Docker daemon and no privileges** — it covers the pure layers
+(stats row/header contract, convergence rules, CLI-output parsers, module imports). Importing
+`bgperf2` works without a reachable daemon, which is what makes that possible; keep it that way.
+There is no coverage of the container orchestration itself, so a real `bench` is still the only
+end-to-end check. Use `-n1 -p1` for the fastest one.
 
 The venv is tied to a specific interpreter — a distro Python upgrade orphans it. Recreate with
 `rm -rf venv && python3 -m venv venv && venv/bin/pip install -r pip-requirements.txt`.
-
-Note `build_bgperf.sh` is stale: it invokes `bgperf.py`, which no longer exists (the file is
-`bgperf2.py`).
 
 ## Architecture
 
@@ -109,15 +115,19 @@ FRR is a special case worth knowing about: it has no received-prefix counter, so
 
 ### Termination detection
 
-This is the subtlest part of `bench()` and the comments around line 598 explain why. The naive check
-("stop when received == expected") only works for synthetic prefix generation. With MRT playback the
-total unique prefix count is unknown (peers' tables overlap), and with filtering enabled the accepted
-count is deliberately lower than what was sent. So the loop instead waits for the count to go
-*stable*: 20 seconds without change, or 5 if the configured checkpoint was already hit. Those
-trailing assurance seconds are subtracted from the reported elapsed time afterward.
+Lives in `convergence.py` as `ConvergenceTracker`, deliberately separated from `bench()`'s container
+plumbing so the rules are testable without Docker (`tests/test_convergence.py`).
 
-The same loop detects failure: a count that stops moving for 600 samples, or one that drops by >1%
-over 10 samples, aborts the run and records a `fail_msg`.
+The naive check ("stop when received == expected") only works for synthetic prefix generation. With
+MRT playback the total unique prefix count is unknown (peers' tables overlap), and with filtering
+enabled the accepted count is deliberately lower than what was sent. So the tracker instead waits for
+the count to go *stable*: `ASSURANCE_SAMPLES` (20) without change, or 5 if the configured checkpoint
+was already hit. Those trailing samples are subtracted from the reported elapsed time afterward.
+
+It also detects failure: a count that stops moving for `STUCK_SAMPLES` (600), a drop of >1% sustained
+over 10 samples, or nothing arriving at all within 15s. `bench()` feeds it one sample per monitor
+poll via `update()` and acts on the returned status; `note_neighbors_checkpoint()` is called from the
+target branch when every neighbor has finished sending.
 
 ## Targets and images
 
@@ -146,4 +156,8 @@ clean up; `sudo rm -rf /tmp/bgperf2` when that happens. Their licenses prohibit 
   so any new `bench` argument must also be added to the field lists in `batch()` or it will be
   missing at runtime.
 - Graph column indices in `create_batch_graphs()` are positional into the stats row built by
-  `create_output_stats()` — changing that row's layout silently mislabels every graph.
+  `create_output_stats()`, and `stats_header()` names those columns by position too. All three must
+  agree; `tests/test_stats_contract.py` enforces it. They drifted once already, silently shifting
+  every batch CSV by one column.
+- Resource files are resolved from `REPO_ROOT` (defined in `base.py`), not the working directory, so
+  bgperf2 can run from anywhere. Generated output goes to `--results-dir` (default `results/`).

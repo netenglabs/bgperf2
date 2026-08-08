@@ -179,6 +179,34 @@ FRR is a special case worth knowing about: it has no received-prefix counter, so
 `FRRoutingTarget.get_neighbor_received_routes()` overrides the base method and greps `bgpd.log` for
 `End-of-RIB` messages instead.
 
+### Recording versions — provenance
+
+A result nobody can trace back to a build is not reproducible, so every run records the version
+**and** image of all three roles, not just the target: the testers generate the load and the monitor
+is the instrument the timings are read from.
+
+- `Container.version_string()` is the only thing that should ever be called for this. It returns
+  what the daemon reported, or a string starting `UNKNOWN` explaining why not — it never guesses.
+  Commas are rewritten to `;` because rows are `','.join()`ed with no quoting.
+- Each daemon's `get_version_cmd`/`exec_version_cmd` belong on the **daemon base class**
+  (`BIRD`, `GoBGP`, `RustyBGP`), not the `*Target` subclass. `Monitor(GoBGP)` and
+  `BIRDTester(Tester, BIRD)` inherit from the base, so a version command defined on the target was
+  invisible to them and asking raised `NotImplementedError`. That is why only targets used to be
+  recorded.
+- Parse defensively. These parsers used to take a fixed word (`ret.split(' ')[2]`), which on an
+  error message produced a plausible-looking value — `benchmarks/baseline/baseline-benchmark.csv`
+  has two rows whose BIRD version is the word `exec`. Match the expected banner and raise
+  `VersionUnavailable` otherwise.
+- `collect_provenance()` asks one tester per distinct image and records a count, so a 100-peer run
+  does not exec into 100 containers.
+- Output goes two places: three columns appended to the **end** of the stats row (`target image`,
+  `tester version`, `monitor version`) and a full `<prefix>.versions.json` manifest beside the
+  graphs. Appending at the end is required — `create_batch_graphs()` indexes the row positionally.
+
+Caveat worth knowing: a git ref pins source, not dependencies. RustyBGP gitignores its `Cargo.lock`,
+so its builds resolve dependencies fresh and old refs rot — `340f521` (the 2024-12 commit the 2025
+baseline benched) no longer compiles on any toolchain, which is why it is not offered as a version.
+
 ### Termination detection
 
 Lives in `convergence.py` as `ConvergenceTracker`, deliberately separated from `bench()`'s container

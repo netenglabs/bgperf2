@@ -16,6 +16,7 @@
 # limitations under the License.
 
 import argparse
+import json
 import os
 import sys
 import yaml
@@ -744,7 +745,7 @@ def bench(args):
                 output_stats['tester_timeouts'] = tester_class.find_timeouts(tester_dirs)
                 f.close() if f else None
                 print("FAILED")
-                return finish_bench(args, output_stats, bench_stats, bench_start, target, m, fail=True)
+                return finish_bench(args, output_stats, bench_stats, bench_start, target, m, testers, fail=True)
 
             if status == ConvergenceTracker.CONVERGED:
                 assurance = tracker.assurance_samples
@@ -763,35 +764,92 @@ def bench(args):
                 output_stats['elapsed'] = datetime.timedelta(
                     seconds=int(output_stats['elapsed'].seconds) - assurance + 1)
                 bench_stats = bench_stats[0:len(bench_stats)-assurance]
-                return finish_bench(args, output_stats, bench_stats, bench_start, target, m)
+                return finish_bench(args, output_stats, bench_stats, bench_start, target, m, testers)
 
             if elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
                 bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
                 create_bench_graphs(bench_stats, prefix=bench_prefix, results_dir=args.results_dir)
 
 
-def finish_bench(args, output_stats, bench_stats, bench_start,target, m, fail=False):
- 
+def collect_provenance(args, target, monitor, testers):
+    '''Version and image of every daemon that took part in the run.
+
+    The target alone does not describe a result: the testers generate the load
+    and the monitor is the instrument every timing is read from, so all three
+    have to be recorded for anyone else to reproduce the numbers. Reading them
+    is only possible while the containers are still up.
+    '''
+    def describe(daemon, container):
+        return {'daemon': daemon,
+                'image': normalize_image_name(container.image),
+                'version': container.version_string()}
+
+    provenance = {
+        'target': describe(args.target, target),
+        'monitor': describe('gobgp', monitor),
+        'testers': [],
+    }
+    # A run can be a hundred tester containers off one image. Ask one per
+    # distinct image and record how many ran, rather than exec'ing into each.
+    by_image = {}
+    for t in testers:
+        key = normalize_image_name(t.image)
+        if key not in by_image:
+            by_image[key] = describe(getattr(args, 'tester_type', None) or 'tester', t)
+            by_image[key]['count'] = 0
+        by_image[key]['count'] += 1
+    provenance['testers'] = list(by_image.values())
+    return provenance
+
+
+def write_provenance(args, provenance, prefix):
+    '''Write the full build manifest beside the run's other output.
+
+    The CSV carries the headline versions so runs can be compared at a glance;
+    this carries the whole set, including the image each container ran from.
+    '''
+    doc = dict(provenance)
+    doc['run'] = {
+        'name': run_name(args),
+        'date': datetime.date.today().strftime('%Y-%m-%d'),
+        'peers': args.neighbor_num,
+        'prefixes_per_peer': args.prefix_num,
+        'tester_type': getattr(args, 'tester_type', None),
+    }
+    path = results_path(args.results_dir, prefix + '.versions.json')
+    with open(path, 'w') as f:
+        json.dump(doc, f, indent=2, sort_keys=True)
+        f.write('\n')
+    return path
+
+
+def finish_bench(args, output_stats, bench_stats, bench_start, target, m, testers=(), fail=False):
+
     bench_stop = time.time()
     output_stats['total_time'] = bench_stop - bench_start
     m.stop_monitoring = True
     target.stop_monitoring = True
     stop_monitoring = True
+
+    # Read every version before the containers go away -- this is the last
+    # moment any of them can be asked.
+    provenance = collect_provenance(args, target, m, testers)
     del m
 
-    target_version = target.exec_version_cmd()
-  
+    target_version = provenance['target']['version']
+
     print_final_stats(args, target_version, output_stats)
-    o_s = create_output_stats(args, target_version, output_stats, fail)
+    o_s = create_output_stats(args, target_version, output_stats, fail, provenance)
     print(stats_header())
     print(','.join(map(str, o_s)))
     print()
     # it would be better to clean things up, but often I want to to investigate where things ended up
-    # remove_old_containers() 
+    # remove_old_containers()
     # remove_target_containers()
     pre = run_name(args).replace(' ', '_')
     bench_prefix = f"{pre}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
     create_bench_graphs(bench_stats, prefix=bench_prefix, results_dir=args.results_dir)
+    write_provenance(args, provenance, bench_prefix)
     return o_s
 
 
@@ -812,12 +870,16 @@ def print_final_stats(args, target_version, stats):
 def stats_header():
     # NOTE: must stay in sync with the row built by create_output_stats();
     # tests/test_stats_contract.py enforces that they are the same length.
-    return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date, cores, Mem (GB), tester errors, tester timeouts, failed, MSG, filters")
+    #
+    # The provenance columns are appended at the END on purpose:
+    # create_batch_graphs() indexes this row positionally, so inserting a column
+    # anywhere earlier silently shifts every graph and every existing CSV.
+    return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date, cores, Mem (GB), tester errors, tester timeouts, failed, MSG, filters, target image, tester version, monitor version")
 
 
-def create_output_stats(args, target_version, stats, fail=False):
+def create_output_stats(args, target_version, stats, fail=False, provenance=None):
     e = stats['elapsed'].seconds
-    f = stats['first_received_time'].seconds 
+    f = stats['first_received_time'].seconds
     d = datetime.date.today().strftime("%Y-%m-%d")
     out = [run_name(args), args.target, target_version, str(args.neighbor_num), str(args.prefix_num)]
     out.extend([stats['required'], stats['recved']])
@@ -829,6 +891,14 @@ def create_output_stats(args, target_version, stats, fail=False):
     out.extend(['FAILED']) if fail else out.extend([''])
     out.extend([stats['fail_msg']]) if 'fail_msg' in stats else out.extend([''])
     out.extend([args.filter_test]) if 'filter_test' in args  and args.filter_test else out.extend([''])
+    # Which builds produced this row. The target's own version already sits in
+    # the 'version' column; these say which image it came from and which builds
+    # generated and measured the load.
+    p = provenance or {}
+    testers = p.get('testers') or []
+    out.extend([(p.get('target') or {}).get('image', ''),
+                '; '.join(sorted({t.get('version', '') for t in testers})),
+                (p.get('monitor') or {}).get('version', '')])
     return out
 
 

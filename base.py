@@ -92,6 +92,16 @@ class VersionNotSupported(Exception):
     '''A version was asked for from a daemon that only has the one build.'''
 
 
+# Marker written into results when a daemon's version could not be read. It is
+# deliberately loud: a blank or guessed version silently makes a run
+# irreproducible, which is only discovered when someone tries to repeat it.
+VERSION_UNKNOWN = 'UNKNOWN'
+
+
+class VersionUnavailable(Exception):
+    '''A daemon's version command ran but did not report a usable version.'''
+
+
 class ImageBuildFailed(Exception):
     '''Docker reported an error while building an image.'''
     def __init__(self, tag, message):
@@ -510,10 +520,49 @@ class Container(object):
     def get_version_cmd(self):
         raise NotImplementedError()
 
-    def exec_version_cmd(self):
+    def exec_version_cmd(self, stderr=False):
+        '''Run this daemon's version command and return its raw output.
+
+        `stderr` is load-bearing for some daemons rather than a nicety: both
+        `bird --version` and `bgpctl -V` print their banner on stderr and
+        nothing at all on stdout, so collecting only stdout returns an empty
+        string and the version reads as unavailable.
+        '''
         version = self.get_version_cmd()
-        i = dckr.exec_create(container=self.name, cmd=version, stderr=False)
+        i = dckr.exec_create(container=self.name, cmd=version, stderr=stderr)
         return dckr.exec_start(i['Id'], stream=False, detach=False).decode('utf-8')
+
+    def version_string(self):
+        '''This daemon's version, or an explicit UNKNOWN saying why not.
+
+        Results are only reproducible if a reader can tell which build produced
+        them, so this never guesses: a daemon whose version command is missing
+        or unparseable records the reason instead of a plausible-looking value.
+        A wrong version in a results file cannot be spotted afterwards -- an
+        earlier run recorded the word 'exec' as a BIRD version and it survived
+        into the published baseline.
+        '''
+        # Every path assigns `reported` and falls through to the single
+        # sanitizing return below. Returning early from a failure branch is
+        # what makes this dangerous: the failure text is the *only* part of
+        # this that is arbitrary -- a docker socket hiccup stringifies as
+        # "('Connection aborted.', RemoteDisconnected('Remote end closed ...'))",
+        # commas and all -- so the branch most in need of sanitizing was the
+        # one that used to skip it.
+        try:
+            reported = self.exec_version_cmd()
+        except NotImplementedError:
+            reported = '{0} (no version command for {1})'.format(
+                VERSION_UNKNOWN, type(self).__name__)
+        except Exception as e:
+            reported = '{0} ({1})'.format(VERSION_UNKNOWN, e)
+        reported = (reported or '').strip()
+        if not reported:
+            reported = '{0} (no output from version command)'.format(VERSION_UNKNOWN)
+        # Results are joined with ',' into CSV rows with no quoting, so a comma
+        # anywhere in a version silently shifts every column after it, and a
+        # newline splits one row across two lines.
+        return re.sub(r'\s+', ' ', reported.replace(',', ';')).strip()
 
     def exec_startup_cmd(self, stream=False, detach=False):
         startup_content = self.get_startup_cmd()

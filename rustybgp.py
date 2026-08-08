@@ -86,6 +86,20 @@ class RustyBGP(Container):
     def __init__(self, host_dir, conf, image='bgperf/rustybgp'):
         super(RustyBGP, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
 
+    # Kept on the daemon base class, beside BIRD's and GoBGP's, so every role
+    # this image can play reports a version. rustybgpd prints to stdout, and
+    # its output already carries the build sha (v0.2.0-16cc82756a).
+    def get_version_cmd(self):
+        return "/root/rustybgpd --version"
+
+    def exec_version_cmd(self):
+        ret = (super().exec_version_cmd() or '').strip()
+        if not ret.startswith('rustybgpd'):
+            raise VersionUnavailable(
+                'unexpected output from `{0}`: {1!r}'.format(
+                    self.get_version_cmd(), ret))
+        return ret
+
     @classmethod
     def resolve_ref(cls, version):
         '''Map a date label onto its git ref; anything else is already a ref.'''
@@ -159,10 +173,3 @@ class RustyBGPTarget(RustyBGP, GoBGPTarget):
             config_file_name=self.CONFIG_FILE_NAME,
             debug_level='info')
 
-    def get_version_cmd(self):
-        return "/root/rustybgpd --version"
-    
-    def exec_version_cmd(self):
-        version = self.get_version_cmd()
-        i= dckr.exec_create(container=self.name, cmd=version, stderr=False)
-        return dckr.exec_start(i['Id'], stream=False, detach=False).decode('utf-8').strip()

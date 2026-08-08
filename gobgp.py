@@ -28,6 +28,21 @@ class GoBGP(Container):
     def __init__(self, host_dir, conf, image='bgperf/gobgp'):
         super(GoBGP, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
 
+    # On the daemon base class rather than GoBGPTarget so the monitor -- which
+    # is a GoBGP, not a target -- can report its version too. It is the
+    # instrument every timing in the results is read from, so which build it
+    # was matters as much as the target's.
+    def get_version_cmd(self):
+        return "gobgpd --version"
+
+    def exec_version_cmd(self):
+        ret = (super().exec_version_cmd() or '').strip()
+        m = re.search(r'gobgpd version (\S+)', ret)
+        if not m:
+            raise VersionUnavailable(
+                'unexpected output from `gobgpd --version`: {0!r}'.format(ret))
+        return m.group(1)
+
     @classmethod
     def resolve_ref(cls, version):
         '''GoBGP tags releases as v<version>; branches pass through.'''
@@ -157,14 +172,6 @@ class GoBGPTarget(GoBGP, Target):
             guest_dir=self.guest_dir,
             config_file_name=self.CONFIG_FILE_NAME,
             debug_level='info')
-
-    def get_version_cmd(self):
-        return "gobgpd --version"
-
-    def exec_version_cmd(self):
-        ret = super().exec_version_cmd()
-        return ret.split(' ')[2].strip('\n')
-
 
     def get_neighbors_state(self):
         neighbors_accepted = {}

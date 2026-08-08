@@ -27,6 +27,24 @@ class BIRD(Container):
     def __init__(self, host_dir, conf, image='bgperf/bird', name=None):
         super(BIRD, self).__init__(name if name is not None else self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
 
+    # Version reading lives on the daemon base class, not on BIRDTarget, so a
+    # BIRD tester can report its version too -- the load generator's build is
+    # part of what makes a result reproducible.
+    def get_version_cmd(self):
+        return "bird --version"
+
+    def exec_version_cmd(self):
+        # bird prints its banner on stderr, so stderr=True is load-bearing.
+        ret = (super().exec_version_cmd(stderr=True) or '').strip()
+        # Match the banner rather than taking the third word of whatever came
+        # back: applied to an error message that produced 'exec', which reached
+        # benchmarks/baseline/baseline-benchmark.csv as a BIRD version.
+        m = re.search(r'BIRD version (\S+)', ret)
+        if not m:
+            raise VersionUnavailable(
+                'unexpected output from `{0}`: {1!r}'.format(version, ret))
+        return m.group(1)
+
     @classmethod
     def resolve_ref(cls, version):
         '''BIRD tags releases as v<version>; branches pass through.'''
@@ -237,18 +255,6 @@ return true;
         ).format(
             guest_dir=self.guest_dir,
             config_file_name=self.CONFIG_FILE_NAME)
-
-    def get_version_cmd(self):
-        return "bird --version"
-
-    def exec_version_cmd(self):
-        version = self.get_version_cmd()
-        i = dckr.exec_create(container=self.name, cmd=version, stderr=True)
-        ret =dckr.exec_start(i['Id'], stream=False, detach=False).decode('utf-8')
-        if len(ret) > 2:
-            return ret.split(' ')[2].strip('\n')
-        else:
-            return ret.strip('\n')
 
     def get_neighbors_state(self):
         neighbors_accepted = {}

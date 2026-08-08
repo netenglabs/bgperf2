@@ -141,11 +141,23 @@ no bgp ebgp-requires-policy
             config_file_name=self.CONFIG_FILE_NAME)
     
     def get_version_cmd(self):
+        # The '|' and 'head -1' are argv words handed to vtysh, not a shell
+        # pipe -- there is no shell here -- so the first line still has to be
+        # taken below.
         return ['vtysh', '-c', 'show version', '|', 'head -1']
 
     def exec_version_cmd(self):
-        ret = super().exec_version_cmd()
-        return ret.split('\n')[0]
+        ret = (super().exec_version_cmd() or '').strip()
+        # Match the banner instead of trusting the first line. vtysh talks to
+        # bgpd over a socket, so before bgpd answers this command succeeds and
+        # prints 'Exiting: failed to connect to any daemons.' -- which the old
+        # split('\n')[0] recorded verbatim as the FRR version. That is how the
+        # word 'exec' became a BIRD version in the published baseline.
+        m = re.search(r'^(FRRouting \S+)', ret, re.MULTILINE)
+        if not m:
+            raise VersionUnavailable(
+                'unexpected output from `vtysh -c "show version"`: {0!r}'.format(ret))
+        return m.group(1)
     
     def get_neighbors_state(self):
         neighbors_accepted = {}

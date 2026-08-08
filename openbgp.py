@@ -13,6 +13,25 @@ class OpenBGP(Container):
     def __init__(self, host_dir, conf, image='bgperf/openbgp'):
         super(OpenBGP, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
 
+    # On the daemon base class, beside BIRD's and GoBGP's, so every role this
+    # image can play reports a version.
+    def get_version_cmd(self):
+        return "/usr/sbin/bgpctl -V"
+
+    def exec_version_cmd(self):
+        # bgpctl prints its banner on stderr, so stderr=True is load-bearing.
+        ret = (super().exec_version_cmd(stderr=True) or '').strip()
+        # Match the banner rather than returning whatever came back. bgpctl is
+        # reached by an absolute path, so a wrong path -- this file just fixed
+        # one -- makes the exec fail and its error text would otherwise be
+        # recorded as the OpenBGPD version.
+        m = re.search(r'OpenBGPD (\S+)', ret)
+        if not m:
+            raise VersionUnavailable(
+                'unexpected output from `{0}`: {1!r}'.format(
+                    self.get_version_cmd(), ret))
+        return m.group(1)
+
     @classmethod
     def build_image(cls, force=False, tag=None, checkout=None, nocache=False, version=None):
         tag = tag or cls.image_tag()
@@ -114,18 +133,10 @@ fib-update no
             config_file_name=self.CONFIG_FILE_NAME,
             debug_level='info')
 
-    def get_version_cmd(self):
-        return "/usr/local/sbin/bgpctl -V"
-
-    def exec_version_cmd(self):
-        version = self.get_version_cmd()
-        i= dckr.exec_create(container=self.name, cmd=version, stderr=True)
-        return dckr.exec_start(i['Id'], stream=False, detach=False).decode('utf-8').strip('\n')
-
     def get_neighbors_state(self):
         neighbors_accepted = {}
         neighbors_received_full = {}
-        neighbor_received_output = json.loads(self.local("/usr/local/sbin/bgpctl -j show neighbor").decode('utf-8'))
+        neighbor_received_output = json.loads(self.local("/usr/sbin/bgpctl -j show neighbor").decode('utf-8'))
         for neigh in neighbor_received_output['neighbors']:
             neighbors_accepted[neigh['remote_addr']] = neigh['stats']['prefixes']['received']
             neighbors_received_full[neigh['remote_addr']] = False if neigh['stats']['update']['received']['eor'] == 0 else True

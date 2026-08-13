@@ -16,8 +16,6 @@
 from base import Tester
 from exabgp import ExaBGP
 from bird import BIRD
-from  settings import dckr
-from subprocess import check_output, Popen, PIPE
 
 
 class ExaBGPTester(Tester, ExaBGP):
@@ -64,7 +62,7 @@ class BIRDTester(Tester, BIRD):
     CONTAINER_NAME_PREFIX = 'bgperf_bird_tester_'
 
     def __init__(self, name, host_dir, conf, image='bgperf/bird'):
-        super(BIRDTester, self).__init__('bgperf_bird_' + name, host_dir, conf, image)
+        super(BIRDTester, self).__init__(name, host_dir, conf, image)
 
     def configure_neighbors(self, target_conf):
         peers = list(self.conf.get('neighbors', {}).values())
@@ -105,10 +103,5 @@ ulimit -n 65536
             startup.append('''bird -c {0}/{1}.conf -s {0}/{1}.ctl >>{0}/{1}.log 2>&1\n'''.format(self.guest_dir, p['router-id']))
         return '\n'.join(startup)
 
-    def find_errors():
-        grep1 = Popen(('grep RMT /tmp/bgperf2/tester/*.log'), shell=True, stdout=PIPE)
-        grep2 = Popen(('grep', '-v', 'NEXT_HOP'), stdin=grep1.stdout, stdout=PIPE)
-        errors = check_output(('wc', '-l'), stdin=grep2.stdout)
-        grep1.wait()
-        grep2.wait()
-        return errors.decode('utf-8').strip()
+    def find_errors(self):
+        return self.count_log_lines(('rmt',), ('collision', 'next_hop'))

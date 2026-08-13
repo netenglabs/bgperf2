@@ -33,6 +33,24 @@ to create prefixes and send them. These are pretty lightweight, so it's easy to 
 of neighbors with a small amount (hundreds or thousands) or prefixes. BIRD is generally faster, so it is the default
 but EXABGP is around for some extra testing.
 
+### Row-local runtime provenance and diagnostics
+
+Each newly created benchmark row writes `runtime-manifest.json` atomically in
+its configuration directory after the monitor, testers, and local target have
+been created. Every entry records the instance role, exact container name and
+ID, configured image and Docker-resolved image ID, attached network name and
+ID, and absolute host directory. The file is row-local evidence of the actual
+runtime objects. Use its Docker-returned identities instead of guessing fixed
+container names, and its per-entry host directories instead of a global `/tmp`
+log glob. Every row creates fresh tester instances; container reuse is unsupported because it
+cannot prove this provenance.
+
+Tester error and timeout counts are also row-local. Each tester reads only log
+files directly inside its own host directory, and the benchmark sums every
+actual tester instance. BIRD connection-collision and `NEXT_HOP` messages are
+expected diagnostics and do not increment the error count; other matching
+diagnostics remain visible in the output statistics.
+
 The second way to generate traffic is by playing back MRT files using [bgpdump2](https://github.com/rtbrick/bgpdump2). 
 This is much faster, and is good for playing back internet size tables.  [RouteViews](http://archive.routeviews.org/)
 is a good place to get MRT files to play back.

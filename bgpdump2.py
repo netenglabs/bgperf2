@@ -1,5 +1,4 @@
 import re
-from subprocess import check_output, Popen, PIPE
 from base import *
 from mrt_tester import MRTTester
 
@@ -108,14 +107,8 @@ ulimit -n 65536
         return startup
 #> {}/bgpdump2.log 2>&1 
 
-    def find_errors():
-        grep1 = Popen(('grep -i error /tmp/bgperf2/mrt-injector*/*.log'), shell=True, stdout=PIPE)
-        errors = check_output(('wc', '-l'), stdin=grep1.stdout)
-        grep1.wait()
-        return errors.decode('utf-8').strip()
+    def find_errors(self):
+        return self.count_log_lines(('error',))
 
-    def find_timeouts():
-        grep1 = Popen(('grep -i timeout /tmp/bgperf2/mrt-injector*/*.log'), shell=True, stdout=PIPE)
-        timeouts = check_output(('wc', '-l'), stdin=grep1.stdout)
-        grep1.wait()
-        return timeouts.decode('utf-8').strip()
+    def find_timeouts(self):
+        return self.count_log_lines(('timeout',))

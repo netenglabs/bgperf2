@@ -18,7 +18,6 @@ from gobgp import GoBGP
 from exabgp import ExaBGP_MRTParse
 import os
 import yaml
-from subprocess import check_output, Popen, PIPE
 from  settings import dckr
 
 from base import *
@@ -211,8 +210,5 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1 &
         #startup += '\n' + 'pkill -SIGHUP gobgpd'
         return startup
 
-    def find_errors():
-        grep1 = Popen(('grep -i expired /tmp/bgperf2/mrt-injector*/*.log'), shell=True, stdout=PIPE)
-        errors = check_output(('wc', '-l'), stdin=grep1.stdout)
-        grep1.wait()
-        return errors.decode('utf-8').strip()
+    def find_errors(self):
+        return self.count_log_lines(('expired',))

@@ -16,6 +16,7 @@
 # limitations under the License.
 
 import argparse
+import json
 import os
 import sys
 import yaml
@@ -79,6 +80,50 @@ def gc_thresh3():
     gc_thresh3 = '/proc/sys/net/ipv4/neigh/default/gc_thresh3'
     with open(gc_thresh3) as f:
         return int(f.read().strip())
+
+
+def collect_tester_diagnostics(testers):
+    return {
+        'errors': sum(tester.find_errors() for tester in testers),
+        'timeouts': sum(tester.find_timeouts() for tester in testers),
+    }
+
+
+def write_runtime_manifest(config_dir, instances):
+    """Atomically retain the identities of the containers used by one row."""
+    records = []
+    container_names = set()
+    container_ids = set()
+
+    for role, instance in instances:
+        container_id = getattr(instance, 'ctn_id', None)
+        if not container_id:
+            raise RuntimeError('runtime manifest instance has no container ID: {0}'.format(instance.name))
+        if instance.name in container_names or container_id in container_ids:
+            raise RuntimeError('runtime manifest contains a duplicate container identity')
+        container_names.add(instance.name)
+        container_ids.add(container_id)
+        records.append({
+            'role': role,
+            'configured_name': getattr(instance, 'configured_name', None),
+            'container_name': instance.name,
+            'container_id': container_id,
+            'configured_image': instance.image,
+            'image_id': instance.image_id,
+            'network_name': instance.network_name,
+            'network_id': instance.network_id,
+            'host_dir': os.path.abspath(instance.host_dir),
+        })
+
+    manifest_path = os.path.join(config_dir, 'runtime-manifest.json')
+    temporary_path = manifest_path + '.tmp'
+    with open(temporary_path, 'w', encoding='utf-8') as manifest_file:
+        json.dump({'instances': records}, manifest_file, indent=2, sort_keys=True)
+        manifest_file.write('\n')
+        manifest_file.flush()
+        os.fsync(manifest_file.fileno())
+    os.replace(temporary_path, manifest_path)
+    return manifest_path
 
 
 def doctor(args):
@@ -217,17 +262,19 @@ def controller_memory_free(queue):
 stop_monitoring = False
 
 def bench(args):
+    if 'repeat' in vars(args):
+        raise ValueError('repeat mode is unsupported; run a fresh row with new tester instances')
+
     output_stats = {}
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
     dckr_net_name = args.docker_network_name or args.bench_name + '-br'
     
     remove_target_containers()
 
-    if not args.repeat:
-        remove_old_containers()
+    remove_old_containers()
 
-        if os.path.exists(config_dir):
-            shutil.rmtree(config_dir, ignore_errors=True)
+    if os.path.exists(config_dir):
+        shutil.rmtree(config_dir, ignore_errors=True)
 
     bench_start = time.time()
     if args.file:
@@ -271,71 +318,70 @@ def bench(args):
     # this is the order
     testers = []
     mrt_injector = None
-    if not args.repeat:
-        valid_indexes = None
-        asns = None
-        for idx, tester in enumerate(conf['testers']):
-            if 'name' not in tester:
-                name = 'tester{0}'.format(idx)
+    valid_indexes = None
+    asns = None
+    for idx, tester in enumerate(conf['testers']):
+        if 'name' not in tester:
+            name = 'tester{0}'.format(idx)
+        else:
+            name = tester['name']
+        if not 'type' in tester:
+            tester_type = 'bird'
+        else:
+            tester_type = tester['type']
+        if tester_type == 'exa':
+            tester_class = ExaBGPTester
+        elif tester_type == 'bird':
+            tester_class = BIRDTester
+        elif tester_type == 'mrt':
+            if 'mrt_injector' not in tester:
+                mrt_injector = 'gobgp'
             else:
-                name = tester['name']
-            if not 'type' in tester:
-                tester_type = 'bird'
+                mrt_injector = tester['mrt_injector']
+            if mrt_injector == 'gobgp':
+                tester_class = GoBGPMRTTester
+            elif mrt_injector == 'exabgp':
+                tester_class = ExaBGPMrtTester
+            elif mrt_injector == 'bgpdump2':
+                tester_class = Bgpdump2Tester
             else:
-                tester_type = tester['type']
-            if tester_type == 'exa':
-                tester_class = ExaBGPTester
-            elif tester_type == 'bird':
-                tester_class = BIRDTester
-            elif tester_type == 'mrt':
-                if 'mrt_injector' not in tester:
-                    mrt_injector = 'gobgp'
-                else:
-                    mrt_injector = tester['mrt_injector']
-                if mrt_injector == 'gobgp':
-                    tester_class = GoBGPMRTTester
-                elif mrt_injector == 'exabgp':
-                    tester_class = ExaBGPMrtTester
-                elif mrt_injector == 'bgpdump2':
-                    tester_class = Bgpdump2Tester
-                else:
-                    print('invalid mrt_injector:', mrt_injector)
-                    sys.exit(1)
-
-            else:
-                print('invalid tester type:', tester_type)
+                print('invalid mrt_injector:', mrt_injector)
                 sys.exit(1)
 
-
-            t = tester_class(name, config_dir+'/'+name, tester)
-            if not mrt_injector:
-                print('run tester', name, 'type', tester_type)
-            else:
-                print('run tester', name, 'type', tester_type, mrt_injector)
-            if idx > 0:
-                rm_line()
-            t.run(conf['target'], dckr_net_name)
-            testers.append(t)
+        else:
+            print('invalid tester type:', tester_type)
+            sys.exit(1)
 
 
-            # have to do some extra stuff with bgpdump2
-            #  because it's sending real data, we need to figure out
-            #  wich neighbor has data and what the actual ASN is
-            if tester_type == 'mrt' and mrt_injector == 'bgpdump2' and not valid_indexes:
-                print("finding asns and such from mrt file")
-                valid_indexes = t.get_index_valid(args.prefix_num)
-                asns = t.get_index_asns()
+        t = tester_class(name, config_dir+'/'+name, tester)
+        if not mrt_injector:
+            print('run tester', name, 'type', tester_type)
+        else:
+            print('run tester', name, 'type', tester_type, mrt_injector)
+        if idx > 0:
+            rm_line()
+        t.run(conf['target'], dckr_net_name)
+        testers.append(t)
 
-                for test in conf['testers']:
-                    test['bgpdump-index'] = valid_indexes[test['mrt-index'] % len(valid_indexes)]
-                    neighbor = next(iter(test['neighbors'].values()))
-                    neighbor['as'] = asns[test['bgpdump-index']]
 
-                # TODO: this needs to all be moved to it's own object and file
-                #  so this stuff isn't copied around
-                str_conf = gen_mako_macro() + yaml.dump(conf, default_flow_style=False)
-                with open('{0}/scenario.yaml'.format(config_dir), 'w') as f:
-                    f.write(str_conf)
+        # have to do some extra stuff with bgpdump2
+        #  because it's sending real data, we need to figure out
+        #  wich neighbor has data and what the actual ASN is
+        if tester_type == 'mrt' and mrt_injector == 'bgpdump2' and not valid_indexes:
+            print("finding asns and such from mrt file")
+            valid_indexes = t.get_index_valid(args.prefix_num)
+            asns = t.get_index_asns()
+
+            for test in conf['testers']:
+                test['bgpdump-index'] = valid_indexes[test['mrt-index'] % len(valid_indexes)]
+                neighbor = next(iter(test['neighbors'].values()))
+                neighbor['as'] = asns[test['bgpdump-index']]
+
+            # TODO: this needs to all be moved to it's own object and file
+            #  so this stuff isn't copied around
+            str_conf = gen_mako_macro() + yaml.dump(conf, default_flow_style=False)
+            with open('{0}/scenario.yaml'.format(config_dir), 'w') as f:
+                f.write(str_conf)
 
     is_remote = True if 'remote' in conf['target'] and conf['target']['remote'] else False
 
@@ -462,6 +508,15 @@ def bench(args):
             target = target_class('{0}/{1}'.format(config_dir, args.target), conf['target'])
         target.run(conf, dckr_net_name)
 
+    runtime_instances = [('monitor', m)]
+    runtime_instances.extend(('tester', tester) for tester in testers)
+    if not is_remote:
+        runtime_instances.append(('target', target))
+    write_runtime_manifest(
+        config_dir,
+        runtime_instances,
+    )
+
     time.sleep(1)
 
     output_stats['monitor_wait_time'] = m.wait_established(conf['target']['local-address'])
@@ -563,8 +618,9 @@ def bench(args):
                     output_stats['recved'] = recved
                     f.close() if f else None
                     output_stats['fail_msg'] = f"FAILED: dropping received count {recved} neighbors_checked {neighbors_checked}"
-                    output_stats['tester_errors'] = tester_class.find_errors() 
-                    output_stats['tester_timeouts'] = tester_class.find_timeouts()      
+                    tester_diagnostics = collect_tester_diagnostics(testers)
+                    output_stats['tester_errors'] = tester_diagnostics['errors']
+                    output_stats['tester_timeouts'] = tester_diagnostics['timeouts']
                     print("FAILED")
                     o_s = finish_bench(args, output_stats, bench_stats, bench_start,target, m, fail=True) 
                     return o_s
@@ -628,8 +684,9 @@ def bench(args):
 
             if neighbors_checkpoint and last_recved_count >=time_for_assurance:
                 output_stats['recved']= recved       
-                output_stats['tester_errors'] = tester_class.find_errors() 
-                output_stats['tester_timeouts'] = tester_class.find_timeouts() 
+                tester_diagnostics = collect_tester_diagnostics(testers)
+                output_stats['tester_errors'] = tester_diagnostics['errors']
+                output_stats['tester_timeouts'] = tester_diagnostics['timeouts']
                 
                 f.close() if f else None
     
@@ -658,8 +715,9 @@ def bench(args):
             output_stats['recved']= recved          
             f.close() if f else None
             output_stats['fail_msg'] = f"FAILED: stuck received count {recved} neighbors_checked {neighbors_checked}"
-            output_stats['tester_errors'] = tester_class.find_errors()
-            output_stats['tester_timeouts'] = tester_class.find_timeouts() 
+            tester_diagnostics = collect_tester_diagnostics(testers)
+            output_stats['tester_errors'] = tester_diagnostics['errors']
+            output_stats['tester_timeouts'] = tester_diagnostics['timeouts']
             print("FAILED")
             o_s = finish_bench(args, output_stats,bench_stats, bench_start,target, m, fail=True)  
             return o_s
@@ -803,6 +861,14 @@ def batch(args):
         batch_config = yaml.safe_load(f)
 
     for test in batch_config['tests']:
+        for target in test['targets']:
+            if 'repeat' in target:
+                raise ValueError(
+                    "batch test '{0}' target '{1}' uses removed repeat mode; "
+                    'run fresh tester instances'.format(test['name'], target['name'])
+                )
+
+    for test in batch_config['tests']:
         results = []
         for n in test['neighbors']:
             for p in test['prefixes']:
@@ -818,8 +884,8 @@ def batch(args):
                         a.filter_test = filter if filter != 'None' else None
                         # read any config attribute that was specified in the yaml batch file
                         a.local_address_prefix = t['local_address_prefix'] if 'local_address_prefix' in t else '10.10.0.0/16'
-                        for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
-                                        'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
+                        for field in ['single_table', 'docker_network_name', 'file', 'target_local_address',
+                                        'label', 'monitor_local_address', 'target_router_id',
                                         'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
                                         'tester_type', 'license_file']:
                             setattr(a, field, t[field]) if field in t else setattr(a, field, None)
@@ -1118,7 +1184,6 @@ def create_args_parser(main=True):
                               'determine the Linux bridge name starting from '
                               'the Docker network name in case of tests of '
                               'remote targets.')
-    parser_bench.add_argument('-r', '--repeat', action='store_true', help='use existing tester/monitor container')
     parser_bench.add_argument('-f', '--file', metavar='CONFIG_FILE')
     parser_bench.add_argument('-o', '--output', metavar='STAT_FILE')
     add_gen_conf_args(parser_bench)

@@ -115,6 +115,13 @@ class Container(object):
                                     detach=True, name=self.name,
                                     stdin_open=True, volumes=self.volumes, host_config=host_config)
         self.ctn_id = ctn['Id']
+        inspected = dckr.inspect_container(self.ctn_id)
+        runtime_name = inspected.get('Name', '').lstrip('/')
+        runtime_image = inspected.get('Image')
+        if not runtime_name or not runtime_image:
+            raise RuntimeError('created container is missing inspected Name or Image')
+        self.name = runtime_name
+        self.image_id = runtime_image
 
         ipv4_addresses = self.get_ipv4_addresses()
 
@@ -157,6 +164,8 @@ class Container(object):
             return
 
         dckr.connect_container_to_network(self.ctn_id, net_id, ipv4_address=ipv4_addresses[0])
+        self.network_name = dckr_net_name
+        self.network_id = net_id
         dckr.start(container=self.name)
 
         if len(ipv4_addresses) > 1:
@@ -333,6 +342,7 @@ class Tester(Container):
     CONTAINER_NAME_PREFIX = None
 
     def __init__(self, name, host_dir, conf, image):
+        self.configured_name = name
         Container.__init__(self, self.CONTAINER_NAME_PREFIX + name, image, host_dir, self.GUEST_DIR, conf)
 
     def get_ipv4_addresses(self):
@@ -380,8 +390,29 @@ class Tester(Container):
 
         return None
 
-    def find_errors():
-        return 0
+    def count_log_lines(self, required, excluded=()):
+        """Count matching evidence in this tester instance's own log files."""
+        required = tuple(value.lower() for value in required)
+        excluded = tuple(value.lower() for value in excluded)
+        matches = 0
 
-    def find_timeouts():
-        return 0
+        if not os.path.isdir(self.host_dir):
+            return matches
+
+        for entry in os.scandir(self.host_dir):
+            if not entry.is_file(follow_symlinks=False) or not entry.name.endswith('.log'):
+                continue
+            with open(entry.path, encoding='utf-8', errors='replace') as log:
+                for line in log:
+                    lowered = line.lower()
+                    if (all(value in lowered for value in required)
+                            and not any(value in lowered for value in excluded)):
+                        matches += 1
+
+        return matches
+
+    def find_errors(self):
+        return self.count_log_lines(('error',))
+
+    def find_timeouts(self):
+        return self.count_log_lines(('timeout',))

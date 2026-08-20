@@ -1,0 +1,53 @@
+# Minimal smoke tests for every open-source target family before larger runs.
+tests:
+  -
+     name: 2026-smoke
+     neighbors: [10]
+     prefixes: [100]
+     filter_test: [None]
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2 smoke
+         tester_type: bird
+       -
+         name: bird
+         label: bird default smoke
+         tester_type: bird
+       -
+         name: frr_c
+         version: 10.7
+         label: frr 10.7 smoke
+         tester_type: bird
+       -
+         name: frr_c
+         label: frr default smoke
+         tester_type: bird
+       -
+         name: openbgp
+         version: 9.2
+         label: openbgp 9.2 smoke
+         tester_type: bird
+       -
+         name: openbgp
+         label: openbgp default smoke
+         tester_type: bird
+       -
+         name: rustybgp
+         version: 2026-02
+         label: rustybgp 2026-02 smoke
+         tester_type: bird
+       -
+         name: rustybgp
+         label: rustybgp default smoke
+         tester_type: bird
+       -
+         name: gobgp
+         version: 3.37.0
+         label: gobgp 3.37.0 smoke
+         tester_type: bird
+       -
+         name: gobgp
+         label: gobgp default smoke
+         tester_type: bird

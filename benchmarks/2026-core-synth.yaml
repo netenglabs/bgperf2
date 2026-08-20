@@ -51,11 +51,3 @@ tests:
          name: rustybgp
          label: rustybgp default
          tester_type: bird
-       -
-         name: gobgp
-         versions: [3.35.0, 3.37.0]
-         tester_type: bird
-       -
-         name: gobgp
-         label: gobgp default
-         tester_type: bird

@@ -42,12 +42,3 @@ tests:
          name: rustybgp
          label: rustybgp default smoke
          tester_type: bird
-       -
-         name: gobgp
-         version: 3.37.0
-         label: gobgp 3.37.0 smoke
-         tester_type: bird
-       -
-         name: gobgp
-         label: gobgp default smoke
-         tester_type: bird

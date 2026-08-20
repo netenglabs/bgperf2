@@ -65,13 +65,3 @@ tests:
          label: rustybgp default
          tester_type: bgpdump2
          mrt_file: mrt/rib.20260808.0000
-       -
-         name: gobgp
-         versions: [3.35.0, 3.37.0]
-         tester_type: bgpdump2
-         mrt_file: mrt/rib.20260808.0000
-       -
-         name: gobgp
-         label: gobgp default
-         tester_type: bgpdump2
-         mrt_file: mrt/rib.20260808.0000

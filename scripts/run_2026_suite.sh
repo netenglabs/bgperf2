@@ -8,7 +8,7 @@ cd "$REPO_ROOT"
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/run_2026_suite.sh <all|smoke|core-synth|core-mrt|filters> [options]
+  scripts/run_2026_suite.sh <next|all|smoke|core-synth|core-mrt|filters> [options]
 
 Options:
   --run-id ID           Stable run ID for results/2026/<run-id>
@@ -109,6 +109,8 @@ suite_config() {
 
 if [[ "$SUITE_SELECTOR" == "all" ]]; then
   SUITES=(smoke core-synth core-mrt filters)
+elif [[ "$SUITE_SELECTOR" == "next" ]]; then
+  SUITES=()
 else
   SUITES=("$SUITE_SELECTOR")
 fi
@@ -128,6 +130,20 @@ CONFIG_SNAPSHOT_DIR="$METADATA_DIR/configs"
 ORIGINAL_CONFIG_DIR="$CONFIG_SNAPSHOT_DIR/original"
 RENDERED_CONFIG_DIR="$CONFIG_SNAPSHOT_DIR/rendered"
 LOG_DIR="$METADATA_DIR/logs"
+
+if [[ "$SUITE_SELECTOR" == "next" ]]; then
+  for candidate in smoke core-synth core-mrt filters; do
+    if [[ ! -f "$RUN_ROOT/$candidate/COMPLETE" ]]; then
+      SUITES=("$candidate")
+      break
+    fi
+  done
+  if [[ ${#SUITES[@]} -eq 0 ]]; then
+    echo "Campaign is complete: $RUN_ROOT"
+    exit 0
+  fi
+  echo "Next incomplete suite: ${SUITES[0]}"
+fi
 
 mkdir -p "$RUN_ROOT" "$METADATA_DIR" "$ORIGINAL_CONFIG_DIR" "$RENDERED_CONFIG_DIR" "$LOG_DIR" "$WORKDIR"
 
@@ -287,7 +303,12 @@ for suite in "${SUITES[@]}"; do
   fi
 
   echo "Running suite: $suite"
+  resume_args=(--resume)
+  if [[ $FORCE -eq 1 ]]; then
+    resume_args=()
+  fi
   "${BGPERF_CMD[@]}" -d "$WORKDIR" batch -c "$cfg" --results-dir "$suite_dir" \
+    "${resume_args[@]}" \
     > "$LOG_DIR/$suite.stdout.log" 2> "$LOG_DIR/$suite.stderr.log"
 
   touch "$complete_marker"

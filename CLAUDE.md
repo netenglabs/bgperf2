@@ -441,6 +441,22 @@ clean up; `sudo rm -rf /tmp/bgperf2` when that happens. Their licenses prohibit 
 
 ## Conventions
 
+### 2026 benchmark campaign operator contract
+
+When the user says `continue the 2026 benchmark campaign`, use these fixed defaults unless durable run metadata
+already records different values:
+
+- run ID: `2026-baseline`
+- results root: `results/2026`
+- work directory: `/var/tmp/bgperf`
+
+Inspect `COMPLETE` markers, progress JSON, CSV rows, logs, and active benchmark processes first. Never run suites
+concurrently. Monitor an active suite or resume an interrupted one; otherwise run exactly one suite with
+`scripts/run_2026_suite.sh next --run-id 2026-baseline --workdir /var/tmp/bgperf`. Review it for failed rows,
+tester errors/timeouts, foreign CPU contention, low free memory, and injection-bound results. Stop after that one
+suite is complete and reviewed, and tell the user to use the same prompt next time. Prerequisite image or MRT work
+is allowed, but do not advance into a second suite in the same continuation.
+
 - Container names are fixed strings (`bgperf_<name>_target`, `bgperf_monitor`) declared as
   `CONTAINER_NAME` class attributes; testers use a `CONTAINER_NAME_PREFIX` plus an index.
 - Policy/filter fragments live in `filters/*.conf` and are read verbatim at config-write time.

@@ -123,6 +123,28 @@ parsing must stay incremental and memory-conscious.
 - The project is effectively IPv4-only today. Changes that appear to add IPv6 support need updates in prefix
   generation, peering, monitor accounting, and MRT playback behavior.
 
+## 2026 Benchmark Campaign Operator Contract
+
+When the user says `continue the 2026 benchmark campaign`, use these fixed defaults unless durable run metadata
+already records different values:
+
+- run ID: `2026-baseline`
+- results root: `results/2026`
+- work directory: `/var/tmp/bgperf`
+
+Then:
+
+1. Inspect `COMPLETE` markers, progress JSON, CSV rows, logs, and any active benchmark process.
+2. Never run benchmark suites concurrently.
+3. If a suite is active, monitor it. If it was interrupted, resume it with the same run ID.
+4. Otherwise run exactly one suite with `scripts/run_2026_suite.sh next --run-id 2026-baseline --workdir /var/tmp/bgperf`.
+5. Review the completed suite for failed rows, tester errors/timeouts, foreign CPU contention, low free memory, and
+   injection-bound results before accepting it.
+6. Stop after that suite is complete and reviewed. Tell the user to use the exact same prompt next time.
+
+Do prerequisite work needed by the selected suite, such as building a missing image or preparing the pinned MRT,
+but do not advance into a second suite in the same continuation.
+
 ## Repo Hygiene
 
 - Large generated results belong in `results/`, which is already gitignored.

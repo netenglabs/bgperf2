@@ -191,6 +191,72 @@ class TestReviewFixes:
         assert 'frr_c:99.9' in str(e.value)
         assert ran == [], 'test 1 ran before the missing image in test 2 was reported'
 
+    def test_batch_resume_skips_durable_cells(self, fake_img_exists, tmp_path, monkeypatch):
+        import yaml
+        config = tmp_path / 'resume.yaml'
+        config.write_text(yaml.safe_dump({'tests': [{
+            'name': 'resume-test',
+            'neighbors': [1],
+            'prefixes': [10],
+            'filter_test': ['None'],
+            'targets': [
+                {'name': 'bird', 'label': 'first'},
+                {'name': 'bird', 'label': 'second'},
+            ],
+        }]}))
+        fake_img_exists(lambda name: True)
+        monkeypatch.setattr(bgperf2, 'create_batch_graphs', lambda *a, **k: None)
+
+        calls = []
+
+        def interrupted(a):
+            calls.append(a.label)
+            if a.label == 'second':
+                raise RuntimeError('interrupted')
+            return ['first-result']
+
+        monkeypatch.setattr(bgperf2, 'bench', interrupted)
+        args = Namespace(batch_config=str(config), results_dir=str(tmp_path), resume=True)
+        with pytest.raises(RuntimeError, match='interrupted'):
+            bgperf2.batch(args)
+        assert calls == ['first', 'second']
+
+        calls.clear()
+        monkeypatch.setattr(
+            bgperf2, 'bench', lambda a: calls.append(a.label) or ['second-result'])
+        bgperf2.batch(args)
+
+        assert calls == ['second']
+        csv_text = (tmp_path / 'resume-test.csv').read_text()
+        assert 'first-result' in csv_text
+        assert 'second-result' in csv_text
+
+    def test_batch_resume_keeps_duplicate_cells_distinct(
+            self, fake_img_exists, tmp_path, monkeypatch):
+        import yaml
+        config = tmp_path / 'duplicates.yaml'
+        config.write_text(yaml.safe_dump({'tests': [{
+            'name': 'duplicate-test',
+            'neighbors': [1],
+            'prefixes': [10],
+            'filter_test': ['None'],
+            'targets': [{'name': 'bird'}, {'name': 'bird'}],
+        }]}))
+        fake_img_exists(lambda name: True)
+        monkeypatch.setattr(bgperf2, 'create_batch_graphs', lambda *a, **k: None)
+
+        calls = []
+        monkeypatch.setattr(
+            bgperf2, 'bench', lambda a: calls.append(a.target) or ['result'])
+        args = Namespace(batch_config=str(config), results_dir=str(tmp_path), resume=True)
+
+        bgperf2.batch(args)
+        assert calls == ['bird', 'bird']
+
+        calls.clear()
+        bgperf2.batch(args)
+        assert calls == []
+
 
 class TestBuildImageKwargs:
     def test_base_build_image_tolerates_version_kwargs(self, monkeypatch):

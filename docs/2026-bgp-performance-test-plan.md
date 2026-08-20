@@ -138,6 +138,35 @@ The repo now also has helper scripts for this workflow:
 - [`scripts/preflight_2026_suite.sh`](../scripts/preflight_2026_suite.sh)
 - [`scripts/run_2026_suite.sh`](../scripts/run_2026_suite.sh)
 
+## One-Prompt Campaign Workflow
+
+Use the stable campaign identity and let the runner choose exactly one
+unfinished suite at a time:
+
+```bash
+scripts/run_2026_suite.sh next \
+  --run-id 2026-baseline \
+  --workdir /var/tmp/bgperf
+```
+
+The batch command checkpoints every completed matrix cell. If a suite is
+interrupted, running the same command resumes at the first unfinished cell.
+The suite-level `COMPLETE` marker advances `next` through this fixed order:
+
+1. smoke
+2. core-synth
+3. core-mrt
+4. filters
+
+For Codex, the operator prompt is always:
+
+> continue the 2026 benchmark campaign
+
+Repository agent guidance defines that phrase to mean: inspect durable state,
+resume or run no more than one suite, review its results, and stop at the next
+clean suite boundary. A new session can use the same prompt; there is no
+session-clearing schedule to remember.
+
 ## Core 64 GB Sweep
 
 This is the main plan for the local AMD server with 64 GB RAM.

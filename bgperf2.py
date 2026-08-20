@@ -1488,11 +1488,26 @@ def batch(args):
     check_batch_images([t for _, targets in expanded for t in targets])
 
     for test, targets in expanded:
+        progress_path = results_path(args.results_dir, f"{test['name']}.progress.json")
+        resume = getattr(args, 'resume', False)
+        completed = load_batch_progress(progress_path) if resume else {}
+        if not resume and os.path.exists(progress_path):
+            os.unlink(progress_path)
         results = []
+        cell_ordinal = 0
         for n in test['neighbors']:
             for p in test['prefixes']:
                 for filter in test['filter_test']:
                     for t in targets:
+                        cell_id = batch_cell_id(
+                            test['name'], cell_ordinal, n, p, filter, t)
+                        cell_ordinal += 1
+                        if cell_id in completed:
+                            print("resume: skipping completed cell: {0}".format(
+                                batch_cell_description(n, p, filter, t)))
+                            results.append(completed[cell_id])
+                            continue
+
                         a = argparse.Namespace(**vars(args))
                         a.func = bench
                         if 'image' in t:
@@ -1514,13 +1529,21 @@ def batch(args):
 
                         for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
                             setattr(a, field, t[field]) if field in t else setattr(a, field, 0)
-                        results.append(bench(a))
+                        stat = bench(a)
+                        results.append(stat)
+                        completed[cell_id] = stat
 
-                        # update this each time in case something crashes
-                        with open(results_path(args.results_dir, f"{test['name']}.csv"), 'w') as f:
-                            f.write(stats_header() + '\n')
-                            for stat in results:
-                                f.write(','.join(map(str, stat)) + '\n')
+                        # Checkpoint both files atomically after every cell. If
+                        # the process dies later, --resume can skip every cell
+                        # whose result made it to disk.
+                        write_batch_progress(progress_path, completed)
+                        write_batch_csv(
+                            results_path(args.results_dir, f"{test['name']}.csv"), results)
+
+        # A crash after the progress checkpoint but before its matching CSV
+        # replacement can leave the CSV one cell behind. Rebuild it even when
+        # resume skipped every cell.
+        write_batch_csv(results_path(args.results_dir, f"{test['name']}.csv"), results)
 
         print()
         print(stats_header())
@@ -1529,6 +1552,66 @@ def batch(args):
 
 
         create_batch_graphs(results, test['name'], results_dir=args.results_dir)
+
+
+def batch_cell_id(test_name, ordinal, neighbors, prefixes, filter_test, target):
+    """Return a stable, human-inspectable identity for one batch matrix cell."""
+    return json.dumps({
+        'test': test_name,
+        'ordinal': ordinal,
+        'neighbors': neighbors,
+        'prefixes': prefixes,
+        'filter': filter_test,
+        'target': target,
+    }, sort_keys=True, separators=(',', ':'), default=str)
+
+
+def batch_cell_description(neighbors, prefixes, filter_test, target):
+    version = target.get('version')
+    target_name = target.get('label') or target['name']
+    if version and version not in target_name:
+        target_name = '{0} {1}'.format(target_name, version)
+    return '{0}, peers={1}, prefixes={2}, filter={3}'.format(
+        target_name, neighbors, prefixes, filter_test)
+
+
+def load_batch_progress(path):
+    if not os.path.exists(path):
+        return {}
+    with open(path, 'r') as f:
+        document = json.load(f)
+    if document.get('schema_version') != 1 or not isinstance(document.get('cells'), dict):
+        raise ValueError('unsupported or malformed batch progress file: {0}'.format(path))
+    return document['cells']
+
+
+def atomic_write(path, write):
+    temp_path = '{0}.tmp'.format(path)
+    try:
+        with open(temp_path, 'w') as f:
+            write(f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+def write_batch_progress(path, completed):
+    def write(f):
+        json.dump({'schema_version': 1, 'cells': completed}, f,
+                  indent=2, sort_keys=True)
+        f.write('\n')
+    atomic_write(path, write)
+
+
+def write_batch_csv(path, results):
+    def write(f):
+        f.write(stats_header() + '\n')
+        for stat in results:
+            f.write(','.join(map(str, stat)) + '\n')
+    atomic_write(path, write)
 
 def create_batch_graphs(results, name, results_dir=DEFAULT_RESULTS_DIR):
     # stat_index values are positions in the row built by create_output_stats();
@@ -1875,6 +1958,8 @@ def create_args_parser(main=True):
     parser_batch.add_argument('--results-dir', default=DEFAULT_RESULTS_DIR,
                               help='directory for generated graphs and CSVs; '
                                    'default: {}'.format(DEFAULT_RESULTS_DIR))
+    parser_batch.add_argument('--resume', action='store_true',
+                              help='resume a partial batch by skipping cells with durable results')
     parser_batch.set_defaults(func=batch)
 
     return parser

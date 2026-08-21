@@ -106,11 +106,14 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
                     info['checked'] = True
                 else:
                     info['checked'] = False
+                # Keep the wall timestamp for compatibility/debug correlation,
+                # but durations are calculated from this monotonic observation
+                # time at the queue boundary.
                 info['time'] = datetime.datetime.now()
+                info['monotonic_s'] = time.monotonic()
                 queue.put(info)
                 time.sleep(1)
 
         t = Thread(target=stats)
         t.daemon = True
         t.start()
-

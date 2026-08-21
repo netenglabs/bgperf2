@@ -43,6 +43,19 @@ def test_row_values_land_in_their_named_columns(bench_args, bench_stats):
     assert named['cores'] == '32'
 
 
+def test_legacy_testers_field_is_post_first_prefix_interval(bench_args, bench_stats):
+    '''Pin the historical formula without endorsing the misleading column name.
+
+    There is no tester-completion timestamp in this schema. The field must stay
+    elapsed minus the first monitor-visible prefix until a new named metric is
+    appended to the compatibility row.
+    '''
+    row = bgperf2.create_output_stats(bench_args, 'v1.2.3', bench_stats)
+    named = dict(zip(header_fields(), row))
+
+    assert named['testers (s)'] == 35
+
+
 def test_graph_indices_point_at_the_columns_their_labels_claim():
     '''create_batch_graphs() indexes the row positionally. Pin each index to the
     header name it is supposed to be plotting, so a change to the row layout

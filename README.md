@@ -186,7 +186,11 @@ routes back to testers that reject them, which is normal and which
 
 ### Reading the legacy timing fields
 
-`elapsed (s)` is how long the monitor took to see the full table.
+The complete field-by-field contract is in the
+[legacy CSV measurement dictionary](docs/measurement-dictionary.md).
+
+`elapsed (s)` is the monitor-observed convergence boundary after trailing
+assurance samples are removed; it is not necessarily a literal full-table time.
 `prefix received (s)` is the time until its first monitor-visible prefix. The
 historical `testers (s)` field is calculated as `elapsed - prefix received`;
 despite its name, it is not the generators' runtime and does not say when they

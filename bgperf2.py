@@ -56,6 +56,7 @@ from monitor import Monitor
 from convergence import ConvergenceTracker
 from contention import (describe_contention, foreign_cpu_percent,
                         is_memory_backed, own_process_tree, sample_processes)
+from measurements import MonitorEventRecorder, event_artifact, monitor_metrics
 from settings import dckr
 from queue import Queue
 from mako.template import Template
@@ -774,6 +775,13 @@ def controller_memory_free(queue):
 controller_stop = threading.Event()
 
 
+def monitor_sample_monotonic_s(info, fallback_clock=None):
+    '''Read a producer timestamp, falling back for legacy queue messages.'''
+    if 'monotonic_s' in info:
+        return info['monotonic_s']
+    return (fallback_clock or time.monotonic)()
+
+
 def bench(args):
     output_stats = {}
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
@@ -1028,7 +1036,8 @@ def bench(args):
         print("Waiting extra 10 seconds for EOS ")
         time.sleep(10)
 
-    start = datetime.datetime.now()
+    bench_clock_started_s = time.monotonic()
+    lifecycle = MonitorEventRecorder(bench_clock_started_s, producer=m.name)
 
     q = Queue()
 
@@ -1063,7 +1072,7 @@ def bench(args):
 
     output_stats['max_cpu'] = 0
     output_stats['max_mem'] = 0
-    output_stats['first_received_time'] = start - start
+    output_stats['first_received_time'] = datetime.timedelta(0)
     output_stats['min_idle'] = 100
     output_stats['min_free'] = 1_000_000_000_000_000
     output_stats['max_foreign_cpu'] = 0
@@ -1118,9 +1127,16 @@ def bench(args):
                     output_stats['max_foreign_cpu'] = foreign
         if info['who'] == m.name:
 
-            elapsed = info['time'] - start
+            sample_monotonic_s = monitor_sample_monotonic_s(info)
+            elapsed = datetime.timedelta(
+                seconds=sample_monotonic_s - bench_clock_started_s)
             output_stats['elapsed'] = elapsed
             recved = info['afi_safis'][0]['state']['accepted'] if 'accepted' in info['afi_safis'][0]['state'] else 0
+            lifecycle.observe(sample_monotonic_s, int(recved), info['checked'])
+            measured = monitor_metrics(lifecycle.events)
+            if measured['first_prefix_s'] is not None:
+                output_stats['first_received_time'] = datetime.timedelta(
+                    seconds=measured['first_prefix_s'])
             
             status = tracker.update(elapsed.seconds, recved, neighbors_checked,
                                     neighbors_received_full, info['checked'])
@@ -1134,17 +1150,17 @@ def bench(args):
             f.write('{0}, {1}, {2}, {3}\n'.format(elapsed.seconds, cpu, mem, recved)) if f else None
             f.flush() if f else None
 
-            if recved > 0 and output_stats['first_received_time'] == start - start:
-                output_stats['first_received_time'] = elapsed
-
             if status == ConvergenceTracker.FAILED:
                 output_stats['recved'] = recved
                 output_stats['fail_msg'] = tracker.fail_msg
                 f.close() if f else None
                 print("FAILED")
-                return finish_bench(args, output_stats, bench_stats, bench_start, target, m, testers, fail=True)
+                return finish_bench(
+                    args, output_stats, bench_stats, bench_start, target, m,
+                    testers, fail=True, lifecycle_events=lifecycle.events)
 
             if status == ConvergenceTracker.CONVERGED:
+                lifecycle.confirm_convergence(sample_monotonic_s)
                 assurance = tracker.assurance_samples
                 output_stats['recved'] = recved
 
@@ -1158,7 +1174,9 @@ def bench(args):
                 output_stats['elapsed'] = datetime.timedelta(
                     seconds=int(output_stats['elapsed'].seconds) - assurance + 1)
                 bench_stats = bench_stats[0:len(bench_stats)-assurance]
-                return finish_bench(args, output_stats, bench_stats, bench_start, target, m, testers)
+                return finish_bench(
+                    args, output_stats, bench_stats, bench_start, target, m,
+                    testers, lifecycle_events=lifecycle.events)
 
             if elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
                 bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
@@ -1217,13 +1235,39 @@ def write_provenance(args, provenance, prefix):
     return path
 
 
-def finish_bench(args, output_stats, bench_stats, bench_start, target, m, testers=(), fail=False):
+def write_event_artifact(args, events, prefix, status):
+    '''Atomically preserve lifecycle evidence before post-run collection.'''
+    doc = event_artifact(events, status)
+    doc['run'] = {
+        'name': run_name(args),
+        'peers': args.neighbor_num,
+        'prefixes_per_peer': args.prefix_num,
+        'tester_type': getattr(args, 'tester_type', None),
+    }
+    path = results_path(args.results_dir, prefix + '.events.json')
+
+    def write(f):
+        json.dump(doc, f, indent=2, sort_keys=True)
+        f.write('\n')
+
+    atomic_write(path, write)
+    return path
+
+
+def finish_bench(args, output_stats, bench_stats, bench_start, target, m, testers=(), fail=False,
+                 lifecycle_events=()):
 
     bench_stop = time.time()
     output_stats['total_time'] = bench_stop - bench_start
     m.stop_monitoring = True
     target.stop_monitoring = True
     controller_stop.set()
+
+    pre = run_name(args).replace(' ', '_')
+    bench_prefix = f"{pre}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
+    write_event_artifact(
+        args, lifecycle_events, bench_prefix,
+        status='failed' if fail else 'converged')
 
     # Scan the tester logs only after the clock has stopped. These used to run
     # in bench() before bench_stop, so walking every tester log line by line --
@@ -1250,8 +1294,6 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
     # it would be better to clean things up, but often I want to to investigate where things ended up
     # remove_old_containers()
     # remove_target_containers()
-    pre = run_name(args).replace(' ', '_')
-    bench_prefix = f"{pre}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
     create_bench_graphs(bench_stats, prefix=bench_prefix, results_dir=args.results_dir)
     write_provenance(args, provenance, bench_prefix)
     return o_s
@@ -1287,7 +1329,12 @@ def create_output_stats(args, target_version, stats, fail=False, provenance=None
     d = datetime.date.today().strftime("%Y-%m-%d")
     out = [run_name(args), args.target, target_version, str(args.neighbor_num), str(args.prefix_num)]
     out.extend([stats['required'], stats['recved']])
-    out.extend([stats['monitor_wait_time'], e, f , e-f, float(format(stats['total_time'], ".2f"))])
+    # Compatibility only: this is the interval after the first monitor-visible
+    # prefix, not tester runtime or tester completion. Keep the historical
+    # formula until a separately named lifecycle metric is appended.
+    legacy_post_first_prefix = e - f
+    out.extend([stats['monitor_wait_time'], e, f, legacy_post_first_prefix,
+                float(format(stats['total_time'], ".2f"))])
     out.extend([round(stats['max_cpu']), float(format(stats['max_mem']/1024/1024/1024, ".3f"))])
     out.extend ([round(stats['min_idle']), float(format(stats['min_free']/1024/1024/1024, ".3f"))])
     out.extend(['-s' if args.single_table else '', d, str(stats['cores']), mem_human(stats['memory'])])

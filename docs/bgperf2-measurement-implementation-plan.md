@@ -149,6 +149,9 @@ migration:
 
 ### Phase 0: Correct the published contract
 
+Status: complete on 2026-08-20. The legacy CSV dictionary, public/operator
+documentation, implementation comment, and regression contract now agree.
+
 #### Work
 
 - Add a measurement dictionary covering every existing stats column.
@@ -174,6 +177,11 @@ Documentation, code comments, tests, and report language agree on the meaning
 of every existing timing column.
 
 ### Phase 1: Introduce typed lifecycle events
+
+Status: complete on 2026-08-20. Monitor queue observations now carry monotonic
+timestamps, the controller boundary converts them to typed events and named
+durations, and an ordered event artifact is written atomically for converged
+and tracked-failure runs.
 
 #### Work
 
@@ -304,6 +312,41 @@ controlled post-injection convergence tail.
 A fake-runtime batch can run three repetitions in deterministic mixed order,
 resume safely, and produce auditable summary statistics.
 
+### Phase 5A: Add BIRD architecture workload controls
+
+#### Work
+
+- Add a peer-scaling workload that can increase session count while keeping
+  total route count modest.
+- Add a path-diversity mode in which multiple peers announce competing paths
+  for the same prefixes instead of always generating disjoint prefixes.
+- Add configurable export fan-out so one target table can feed multiple
+  receiver sessions without treating the extra receivers as route sources.
+- Add bounded withdrawal/reannouncement bursts with explicit operation counts
+  and completion events.
+- Add a loaded-table policy reload/recalculation action and record its start,
+  completion, resulting route counts, and CPU interval.
+- Preserve independent ingress, table-selection, export, and monitor timing so
+  parallel work is not collapsed into one end-to-end number.
+
+These controls target BIRD 3's documented worker-thread responsibilities:
+BGP protocols, routing-table maintenance, and decoupled exports. They are
+generic benchmark primitives, not BIRD-specific shortcuts.
+
+#### Tests
+
+- Prefix overlap and competing-path accounting.
+- Multiple receiver counts without multiplying ingress counts.
+- Deterministic churn operation generation and completion.
+- Policy reload completion, failure, and final-state validation.
+- Small Docker checks for each topology before a combined calibration.
+
+#### Exit criterion
+
+A bounded fake/runtime suite can distinguish high peer count, competing-path
+selection, export fan-out, policy recalculation, and churn while preserving
+correct final route counts and timing events.
+
 ### Phase 6: Calibration and release gate
 
 #### Work
@@ -324,6 +367,8 @@ The follow-up campaign may begin only when all are true:
 - a real synthetic and MRT smoke run passes;
 - results identify all tester images/builds;
 - repetition and order controls pass resume tests;
+- the BIRD architecture workload controls pass their topology and accounting
+  tests;
 - the full unit suite remains Docker-free;
 - documentation and report generators use the new contract.
 
@@ -373,8 +418,10 @@ The operator contract for that prompt is:
 4. Instrument ten-peer bgpdump2 completion and provenance.
 5. Derive conservative bottleneck findings.
 6. Add repetitions, stable IDs, order control, and summaries.
-7. Run controlled and real calibration checks.
-8. Open the release gate for the 64 GB timing validation campaign.
+7. Add peer-scaling, path-diversity, export-fan-out, policy-reload, and churn
+   workload controls.
+8. Run controlled and real calibration checks.
+9. Open the release gate for the 64 GB timing validation campaign.
 
 ## Bottom Line
 

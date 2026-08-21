@@ -138,6 +138,10 @@ The base campaign contains:
 
 - 14 configurations × 2 workloads × 3 repetitions = 84 cells.
 
+The BIRD architecture screen below is additional and deliberately adaptive:
+run one observation per screen cell, then repeat only the scenarios that
+differentiate BIRD 2.19.2 from BIRD 3.3.2 or materially change CPU scaling.
+
 One pass of the two workloads took about 98 minutes in `2026-baseline`. Three
 fresh repetitions therefore imply roughly five hours of measured benchmark
 time before review overhead. Run them in durable blocks rather than one
@@ -219,7 +223,37 @@ evidence.
 Exit criterion per block: 14 reviewed rows or explicit durable exclusions with
 evidence.
 
-### Block 8: variance and version review
+### Block 8: BIRD architecture screen
+
+The baseline's initial-table cells do not reproduce the workload BIRD 3 was
+designed to scale. BIRD's documented worker group runs BGP protocols,
+routing-table maintenance, and exports, while BIRD 3 also decouples exports
+from imports. Screen these three configurations:
+
+- BIRD `2.19.2`;
+- BIRD `3.3.2` with default threads;
+- BIRD `3.3.2` with `threads: 4`.
+
+Run one reviewed observation for each configuration in each bounded scenario:
+
+1. Peer scaling: 50, 250, then 500 peers with 2,000 unique prefixes per peer.
+2. Path diversity: 50 peers advertising competing paths for the same 100,000
+   prefixes (5 million paths, 100,000 selected prefixes).
+3. Export fan-out: 50 ingress peers feeding 10 receiver sessions, with total
+   selected prefixes capped at 1 million.
+4. Loaded policy recalculation: reload a nontrivial import/export policy with
+   50 peers × 50,000 prefixes already present.
+5. Churn: withdraw and reannounce a deterministic 10% of a 50 × 50,000 table.
+
+Calibrate upward within each named cap and stop immediately on the standard
+memory guardrail. Do not substitute a larger initial-table workload: the point
+is to expose independent protocol, route-selection, export, reload, and churn
+work that can be scheduled across BIRD 3 worker threads.
+
+Exit criterion: each feasible scenario has correct counts and complete timing,
+CPU, memory, and operation evidence, or a durable 64 GB exclusion.
+
+### Block 9: variance, version, and BIRD-screen review
 
 For each workload and version comparison:
 
@@ -227,12 +261,14 @@ For each workload and version comparison:
 - review order effects and cold/warm metadata;
 - separate end-to-end, injection, post-injection tail, CPU, and memory findings;
 - select only decision-relevant comparisons for optional repetitions 4–5;
+- select BIRD architecture scenarios for two additional repetitions when they
+  separate versions/thread settings or expose a CPU-scaling change;
 - write the selection and reason to durable metadata before running more.
 
 Exit criterion: every optional repetition has a named hypothesis and variance
 reason, or the campaign advances with no optional repeats.
 
-### Block 9: selected repetitions 4–5
+### Block 10: selected repetitions
 
 - Run only the preselected comparison cells.
 - Never expand workload size.
@@ -241,7 +277,11 @@ reason, or the campaign advances with no optional repeats.
 Exit criterion: selected comparisons have five qualified observations or are
 declared inconclusive with a reason.
 
-### Block 10: final report
+For canonical initial-table comparisons, these are repetitions 4–5. For the
+BIRD architecture screen, run repetitions 2–3 first and expand to five only
+when variance could change the conclusion.
+
+### Block 11: final report
 
 The report must include:
 
@@ -274,6 +314,10 @@ The campaign should answer:
 6. Are RustyBGP pinned/default differences stable or workload-specific?
 7. Is BIRD or bgpdump2 actually limiting any canonical cell?
 8. Is the GoBGP monitor limiting any canonical cell?
+9. Does BIRD 3 overtake BIRD 2 when the workload stresses peer scheduling,
+   competing-path selection, export fan-out, policy recalculation, or churn?
+10. Which BIRD workload dimensions convert additional CPU into lower elapsed
+    or operation-completion time?
 
 ## Explicitly Deferred on 64 GB
 
@@ -281,7 +325,7 @@ The campaign should answer:
 - Larger synthetic cells than `50 × 100k`.
 - Historical 192/384 GB capacity-cliff experiments.
 - Broad route-server or route-reflector matrices.
-- Full withdrawal/churn matrices.
+- Full withdrawal/churn matrices beyond the bounded BIRD architecture screen.
 - Multi-host execution unless needed for a small diagnostic validation.
 - IPv6.
 

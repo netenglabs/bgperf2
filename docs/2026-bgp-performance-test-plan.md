@@ -1,5 +1,27 @@
 # 2026 BGP Performance Test Plan
 
+## Status and Successor Plans
+
+This plan produced the completed `2026-baseline` campaign. Its phases that
+assume more than 64 GB are retained below as historical design context, but
+they are not scheduled while the local 64 GB server is the only available
+host.
+
+Follow-on work is split into two execution plans:
+
+1. [`bgperf2-measurement-implementation-plan.md`](./bgperf2-measurement-implementation-plan.md)
+   adds actual tester-completion timing and the campaign controls needed for
+   defensible repeated comparisons. Continue it with:
+
+   > continue the bgperf2 measurement implementation plan
+
+2. [`2026-64gb-timing-validation-plan.md`](./2026-64gb-timing-validation-plan.md)
+   repeats the most useful synthetic and full-internet comparisons that fit
+   on the existing host. After the implementation release gate passes,
+   continue it with:
+
+   > continue the 64 GB timing validation campaign
+
 ## Purpose
 
 This document is the execution-oriented companion to [`docs/bgp-performance-history-summary.md`](./bgp-performance-history-summary.md).

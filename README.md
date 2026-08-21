@@ -184,25 +184,21 @@ is almost entirely `<RMT> Invalid route ... withdrawn` — the target reflecting
 routes back to testers that reject them, which is normal and which
 `find_errors()` already discards.
 
-### Reading a result: `testers (s)` tells you what you measured
+### Reading the legacy timing fields
 
-`elapsed (s)` is how long the monitor took to see the full table; `testers (s)`
-is how long the generators took to send it. **When those two are close, the run
-measured injection throughput, not the daemon** — the target kept pace with
-everything thrown at it, and the number would not improve if the daemon got
-faster.
+`elapsed (s)` is how long the monitor took to see the full table.
+`prefix received (s)` is the time until its first monitor-visible prefix. The
+historical `testers (s)` field is calculated as `elapsed - prefix received`;
+despite its name, it is not the generators' runtime and does not say when they
+finished sending routes.
 
-A 10-peer × 1.05M-prefix MRT run is injection-bound for most of FRR: 8.5, 9.1
-and 10.0 all converge about 3s behind the last route in, with total times
-within 0.11s of each other. What separates them there is memory (4.88 / 5.26 /
-5.15 GB), not time. FRR 10.7 is the exception and shows what a real difference
-looks like: its testers took 97s instead of 67s on identical input because it
-could not drain its input as fast, and its peak CPU *fell* from 205% to 141%
-while doing so — slower, not busier.
-
-To measure the daemon rather than the generators, raise the peer count or use
-the synthetic BIRD tester, which can outrun a target more easily than MRT
-playback does.
+Consequently, a `testers (s)` value close to `elapsed (s)` cannot establish
+that a run was injection-bound. That conclusion requires an explicit tester
+completion event and comparison of injection time with the post-injection
+convergence tail. The measurement implementation and 64 GB validation plans
+([implementation](docs/bgperf2-measurement-implementation-plan.md),
+[validation](docs/2026-64gb-timing-validation-plan.md)) add that evidence
+before drawing new bottleneck or fine version-ranking conclusions.
 
 ### IPv4 only
 

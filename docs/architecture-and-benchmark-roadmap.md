@@ -29,14 +29,15 @@ As of August 2026:
   daemon from `settings.py`. The suite passed when socket access was allowed.
   The intended Docker-free import/test property is therefore not reliably met
   and should be repaired rather than assumed.
-- The `2026-baseline` campaign has completed smoke, core synthetic, and core
-  MRT suites: 10 smoke rows, 56 synthetic rows, and 14 MRT rows.
-- One core MRT row, BIRD 3.3.2 with default threads, is recorded as failed
-  after a sustained received-route-count drop.
-- In many completed rows, `testers (s)` is close to `elapsed (s)`. This is
-  evidence that injection may be a material part of the measured time. It is
-  not, by itself, proof that every such run is invalid: the two clocks have
-  related endpoints and their exact meanings need to be verified.
+- The `2026-baseline` campaign completed its smoke, core synthetic, core MRT,
+  filter, and targeted-remediation work. Its reviewed report covers 146
+  primary rows plus five remediation reruns.
+- One initial core MRT row, BIRD 3.3.2 with default threads, recorded a
+  sustained received-route-count drop; its targeted rerun is preserved with
+  the original rather than silently replacing it.
+- Code inspection established that the legacy `testers (s)` field is
+  `elapsed (s) - prefix received (s)`. It has no tester-completion endpoint,
+  so closeness to elapsed time is not evidence that injection dominated.
 - Some runs recorded material foreign CPU use. Those rows should not be used
   as clean comparisons without review.
 - The campaign is primarily a single run per matrix cell. It establishes that
@@ -102,9 +103,10 @@ For each existing output field, document:
 - behavior when a session resets or the route count falls;
 - whether the metric is comparable between synthetic and MRT workloads.
 
-In particular, verify the definitions and relationship of `monitor (s)`,
-`elapsed (s)`, `prefix received (s)`, `testers (s)`, and `total time` before
-using their proximity as an automatic injection-bound verdict.
+In particular, document the definitions and relationship of `monitor (s)`,
+`elapsed (s)`, `prefix received (s)`, the legacy `testers (s)`, and
+`total time`. Add an explicit tester-completion event before making an
+injection-bound verdict; the legacy fields cannot support one.
 
 Exit criterion: every published column has an unambiguous definition and a
 unit test for its calculation where the calculation is non-trivial.

@@ -118,8 +118,8 @@ parsing must stay incremental and memory-conscious.
 
 - Host contention matters. If you add a new target daemon, update `BGPERF_PROCESSES` so the benchmark does not
   classify its own load as foreign CPU contention.
-- `testers (s)` versus `elapsed (s)` matters when interpreting results. If they are close, the run is
-  injection-bound rather than target-bound.
+- The legacy `testers (s)` field is `elapsed (s)` minus time to the first monitor-visible prefix. It does not
+  record tester completion, so its proximity to elapsed time cannot establish that a run was injection-bound.
 - The project is effectively IPv4-only today. Changes that appear to add IPv6 support need updates in prefix
   generation, peering, monitor accounting, and MRT playback behavior.
 
@@ -139,11 +139,48 @@ Then:
 3. If a suite is active, monitor it. If it was interrupted, resume it with the same run ID.
 4. Otherwise run exactly one suite with `scripts/run_2026_suite.sh next --run-id 2026-baseline --workdir /var/tmp/bgperf`.
 5. Review the completed suite for failed rows, tester errors/timeouts, foreign CPU contention, low free memory, and
-   injection-bound results before accepting it.
+   timing evidence before accepting it. The legacy `testers (s)` field is elapsed minus time to the first
+   monitor-visible prefix; do not use its proximity to elapsed time as an injection-bound verdict.
 6. Stop after that suite is complete and reviewed. Tell the user to use the exact same prompt next time.
 
 Do prerequisite work needed by the selected suite, such as building a missing image or preparing the pinned MRT,
 but do not advance into a second suite in the same continuation.
+
+## Measurement Implementation Operator Contract
+
+When the user says `continue the bgperf2 measurement implementation plan`, follow
+[`docs/bgperf2-measurement-implementation-plan.md`](/home/jpietsch/code/bgperf2/docs/bgperf2-measurement-implementation-plan.md):
+
+1. Inspect the working tree, recent commits, tests, plan exit criteria, and any durable phase notes.
+2. Resume unfinished work before selecting new work.
+3. Implement exactly one smallest reviewable change set from the first incomplete phase.
+4. Run proportionate tests and any Docker verification explicitly required by that phase.
+5. Review the complete diff and fix findings before accepting the change set.
+6. Stop after that change set and tell the user to use the exact same prompt next time.
+
+Do not start the follow-up benchmark campaign until the implementation plan's release gate passes.
+
+## 64 GB Timing Validation Campaign Operator Contract
+
+When the user says `continue the 64 GB timing validation campaign`, follow
+[`docs/2026-64gb-timing-validation-plan.md`](/home/jpietsch/code/bgperf2/docs/2026-64gb-timing-validation-plan.md)
+with these fixed defaults:
+
+- run ID: `2026-timing-validation`
+- results root: `results/2026`
+- work directory: `/var/tmp/bgperf`
+- hardware ceiling: the local 64 GB host; never schedule a larger-memory workload
+
+Then:
+
+1. Verify the measurement implementation release gate. If it is incomplete, run no benchmark and direct the user
+   to `continue the bgperf2 measurement implementation plan`.
+2. Inspect manifests, `COMPLETE` markers, progress data, rows, logs, and active benchmark processes.
+3. Never run benchmark suites or cells concurrently.
+4. Monitor or resume an active block with the same run ID, schema, seed, and repetition identity; otherwise run
+   exactly one next block.
+5. Review correctness, tester timing evidence, provenance, contention, memory, and timing decomposition.
+6. Stop at the reviewed block boundary and tell the user to use the exact same prompt next time.
 
 ## Repo Hygiene
 

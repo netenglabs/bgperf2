@@ -453,9 +453,28 @@ already records different values:
 Inspect `COMPLETE` markers, progress JSON, CSV rows, logs, and active benchmark processes first. Never run suites
 concurrently. Monitor an active suite or resume an interrupted one; otherwise run exactly one suite with
 `scripts/run_2026_suite.sh next --run-id 2026-baseline --workdir /var/tmp/bgperf`. Review it for failed rows,
-tester errors/timeouts, foreign CPU contention, low free memory, and injection-bound results. Stop after that one
+tester errors/timeouts, foreign CPU contention, low free memory, and timing evidence. The legacy `testers (s)`
+field is elapsed minus time to the first monitor-visible prefix, so its proximity to elapsed must not be used as
+an injection-bound verdict. Stop after that one
 suite is complete and reviewed, and tell the user to use the same prompt next time. Prerequisite image or MRT work
 is allowed, but do not advance into a second suite in the same continuation.
+
+### Measurement implementation operator contract
+
+When the user says `continue the bgperf2 measurement implementation plan`, follow
+[`docs/bgperf2-measurement-implementation-plan.md`](docs/bgperf2-measurement-implementation-plan.md). Inspect durable
+state, resume unfinished work, and complete exactly one smallest reviewable change set from the first incomplete
+phase. Run proportionate tests and any phase-required Docker verification, review the full diff, then stop and tell
+the user to use the same prompt again. Do not start follow-up benchmarking before the release gate passes.
+
+### 64 GB timing validation campaign operator contract
+
+When the user says `continue the 64 GB timing validation campaign`, follow
+[`docs/2026-64gb-timing-validation-plan.md`](docs/2026-64gb-timing-validation-plan.md) with run ID
+`2026-timing-validation`, results root `results/2026`, and work directory `/var/tmp/bgperf`. Verify the measurement
+release gate first. Never run cells or blocks concurrently. Monitor or resume an active block; otherwise run exactly
+one next block, review timing evidence, correctness, provenance, contention, and memory, then stop at the reviewed
+block boundary. The local 64 GB host is a hard ceiling; do not schedule a larger-memory workload.
 
 - Container names are fixed strings (`bgperf_<name>_target`, `bgperf_monitor`) declared as
   `CONTAINER_NAME` class attributes; testers use a `CONTAINER_NAME_PREFIX` plus an index.

@@ -81,26 +81,35 @@ drive sizing.
 | `frr 9` 100 × 100k | 25.3 GB | **46.5 GB** |
 | `frr 10` 100 × 100k | 8.97 GB | 31.2 GB |
 
-BIRD holds its table in 0.62 GB while the host loses 43 GB — that is ~100 BIRD *tester*
-containers plus the GoBGP monitor. Host memory tracks **peer count**, not how fat the daemon
-under test is. (`min free mem` is really `free -m`'s *available* column — the regex in
+BIRD holds its table in 0.62 GB while the host loses 43 GB. The remainder includes one BIRD
+tester container running roughly one BIRD process per peer, the GoBGP monitor, and host
+overhead. Host memory tracks **peer count**, not only how fat the daemon under test is.
+(`min free mem` is really `free -m`'s *available* column — the regex in
 `controller_memory_free()` captures the last field — so it reflects genuine pressure, not
 page cache.)
 
-**Several runs ran out of CPU before memory:**
+**Several runs saturated host CPU before exhausting memory:**
 
 ```
 rustybgp  100 x 50000   maxcpu 2037%   min_idle  0%   min_free 25.1 GB
 frr 9     100 x 100000  maxcpu  117%   min_idle  0%   min_free 14.3 GB
 ```
 
-RustyBGP is multithreaded and took 20 of 32 logical CPUs on its own while 25 GB sat free;
-FRR and BIRD are single-threaded (~100–120%), so their CPU pressure is the testers. Note
+`maxcpu` is the maximum sampled CPU use of the target container, while `min_idle` is the
+minimum sampled host-wide idle percentage. RustyBGP's target container reached roughly 20
+logical CPUs and the host separately reached 0% idle while 25 GB remained available. The
+FRR target container reached only about 1.2 logical CPUs, so other benchmark or host work
+accounted for most of the aggregate CPU pressure at some point in that run. The current
+measurements do not divide that remainder among tester processes, the monitor, controller,
+and kernel work, and the two extrema are not time-aligned evidence that can be subtracted.
+
 `get_hardware_info()` uses `os.cpu_count()`, so that "32 cores" was 32 *logical* CPUs —
 probably 16 physical. A 32-vCPU AMD instance roughly doubles the real compute.
 
-A run that reaches `min_idle 0%` has testers competing with the target for CPU and measures
-host contention as much as daemon performance.
+A run that reaches `min_idle 0%` encountered host CPU saturation and measures shared-host
+contention as well as daemon performance. Without time-aligned per-role CPU measurements,
+record the limiting component as unresolved rather than attributing saturation to the
+tester.
 
 ### Spot prices and interruption rates, us-east-2
 
@@ -146,12 +155,13 @@ capacity, never for price, while still paying the market rate.
 
 ### Then correct it from your own run
 
-Do not trust the table past the first run. The CSV already logs what you need:
+Do not trust the table past the first run. The CSV logs the first warning signals:
 
 * **`min free mem` below ~20% of total** → more memory.
-* **`min idle%` approaching 0** → more cores, *and treat those rows as suspect*.
-* **`max cpu %` well above 100%** → that target is multithreaded (RustyBGP) and will absorb
-  every core you give it.
+* **`min idle%` approaching 0** → inspect time-aligned role evidence, consider more cores,
+  and qualify the row as host-CPU-saturated if the component cannot be resolved.
+* **`max cpu %` well above 100%** → the target *container* used more than one logical CPU;
+  identify the daemon and helper processes involved before calling the daemon multithreaded.
 
 Then launch a different instance against the same data volume.
 

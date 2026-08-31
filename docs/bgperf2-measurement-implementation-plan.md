@@ -132,6 +132,23 @@ MRT and synthetic testers may initially provide different levels of detail.
 Unsupported events must be recorded as unavailable, not synthesized from
 monitor timestamps.
 
+## CPU Attribution Boundary
+
+The legacy resource fields do not identify which benchmark role exhausted
+CPU. `max cpu %` is the maximum sampled CPU use of the target container, while
+`min idle%` is the minimum sampled idle percentage for the whole host. Tester,
+monitor, controller, and kernel CPU are not reported separately, and the two
+published extrema are not time-aligned evidence that can be subtracted.
+
+Reliable component attribution requires time-aligned CPU measurements for the
+target, tester, and monitor, together with host-wide CPU and explicit treatment
+of controller and kernel overhead. Until that instrumentation exists, a run
+with near-zero host idle may receive a `host CPU saturated` finding, but its
+limiting component must remain `unresolved`. In particular, target-container
+CPU near one logical core is consistent with single-core pressure, but a
+maximum alone does not show whether that pressure was sustained or prove that
+the tester caused the remaining host load.
+
 ## Result Compatibility Decision
 
 Do not silently redefine the existing `testers (s)` CSV column. During the
@@ -272,6 +289,8 @@ duration/rate, and reproducible bgpdump2 identity.
 - Require explicit completion and rate evidence for tester-limited findings.
 - Treat TCP backpressure as an end-to-end interaction unless it can be assigned
   reliably to a component.
+- Apply the CPU attribution boundary above: host saturation without time-aligned
+  per-role CPU evidence leaves the limiting component unresolved.
 - Keep the raw durations and the named qualification policy beside every
   verdict.
 
@@ -279,6 +298,8 @@ duration/rate, and reproducible bgpdump2 identity.
 
 - Deliberately rate-limited tester is classified as tester-limited.
 - Deliberately delayed target/monitor tail is not classified as tester-limited.
+- Near-zero host idle without per-role CPU evidence is classified as host CPU
+  saturation with the limiting component unresolved.
 - Missing tester completion produces `inconclusive`, not a guessed result.
 
 #### Exit criterion

@@ -323,7 +323,9 @@ The campaign should answer:
 
 - More than 10 full-internet peers.
 - Larger synthetic cells than `50 × 100k`.
-- Historical 192/384 GB capacity-cliff experiments.
+- Historical 192/384 GB capacity-cliff experiments; see
+  [`2026-memory-capacity-options.md`](./2026-memory-capacity-options.md) for the
+  deferred 128/192/256/384 GB planning envelopes.
 - Broad route-server or route-reflector matrices.
 - Full withdrawal/churn matrices beyond the bounded BIRD architecture screen.
 - Multi-host execution unless needed for a small diagnostic validation.

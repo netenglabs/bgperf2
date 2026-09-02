@@ -404,6 +404,14 @@ distortion sits in the CPU and memory columns, which is exactly where it is hard
 `prepare` skips any tag that already exists, so nothing invalidates these automatically; a batch
 mixing a freshly built version with a cached one silently compares the two kinds of binary.
 
+**If your `bgperf/exabgp*` or `bgperf/bgpdump2` images predate 2026-09-02, rebuild them:
+`prepare -f -t exabgp -t exabgp_mrtparse -t bgpdump2`.** Their recipes changed — the exabgp pair moved
+off archived Debian buster onto bookworm, and bgpdump2 gained the `autoreconf` its link needs — and
+`prepare` skips a tag that already exists, so a cached image keeps the old base image with nothing
+looking wrong. Neither daemon implements a version command, so the `tester version` column records
+`UNKNOWN` either way and the manifest cannot tell the two builds apart. Same trap as the gcov one
+above.
+
 The old `frr` target (a wrapper over the prebuilt `frrouting/frr:v7.5.1` image) was removed. **`frr.py` still exists and must stay**: its
 `FRRoutingTarget` holds all the FRR config generation, `get_neighbors_state`, and End-of-RIB parsing,
 which `FRRoutingCompiledTarget` inherits. Only the image build and CLI target went away.

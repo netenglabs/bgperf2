@@ -29,9 +29,17 @@ RUN apt update \
         gcc wget make iputils-ping automake-1.15 \
     && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
 
+# Upstream ships a src/Makefile.in generated before timer.c was added to
+# Makefile.am, so the recipe it configures has no timer.o in it. A plain build
+# recovers only by luck: automake's maintainer rebuild rules regenerate
+# Makefile.in when the clone happens to write aclocal.m4 before configure.ac,
+# and when it does not, the link dies on timer_add/timespec_sub -- which is
+# exactly how this broke. Regenerate explicitly rather than depend on the
+# mtime order of a git checkout.
 RUN git clone https://github.com/rtbrick/bgpdump2.git \
     && cd bgpdump2 \
     && git checkout {0} \
+    && autoreconf -fi \
     && ./configure \
     && make \
     && mv src/bgpdump2 /usr/local/sbin/

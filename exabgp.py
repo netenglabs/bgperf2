@@ -42,7 +42,10 @@ class ExaBGP(Container):
     def build_image(cls, force=False, tag=None, checkout=None, nocache=False, version=None):
         tag = tag or cls.image_tag()
         cls.dockerfile = '''
-FROM python:3-buster
+# Debian buster is archived: deb.debian.org 404s on its Release file, so any
+# apt step in a buster-based image fails at build time. bookworm is the
+# supported successor; the full (non-slim) variant is deliberate, see 681c541.
+FROM python:3-bookworm
 
 
 ENV PYTHONPATH "/tmp/exabgp/src"
@@ -79,7 +82,7 @@ class ExaBGP_MRTParse(Container):
     def build_image(cls, force=False, tag=None, checkout=None, nocache=False, version=None):
         tag = tag or cls.image_tag()
         cls.dockerfile = '''
-FROM python:3-slim-buster
+FROM python:3-slim-bookworm
 
 ENV PYTHONPATH "/tmp/exabgp/src"
 

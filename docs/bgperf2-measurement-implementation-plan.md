@@ -246,6 +246,23 @@ exit criterion asks for. `post_injection_tail_s` is deliberately still absent â€
 it spans tester and monitor events and needs a signed interval helper, since the
 contract allows it to be negative when injection and convergence overlap.
 
+Three things the wiring has to get right:
+
+- **A BIRD tester runs one `bird` per peer, each on its own control socket.**
+  `BIRDTester.get_startup_cmd()` launches `bird -c <guest_dir>/<router-id>.conf
+  -s <guest_dir>/<router-id>.ctl` per neighbour, so a bare `birdc` inside a
+  tester container reaches no daemon at all. The poller must run
+  `birdc -s <guest_dir>/<router-id>.ctl 'show protocols all'` once per peer and
+  pass the results as one `TesterEventRecorder.observe()` call.
+- **Every configured peer must appear in every poll**, with `offered=None` where
+  the read failed. `observe()` rejects a poll whose session keys differ from the
+  first one, because dropping a key would let `all(complete)` be satisfied by
+  the peers that happen to remain.
+- **`expected` comes from the scenario config**, `len(p['paths'])`, not from
+  `tester_offering()['configured']`. The latter is the generator's own report of
+  what it loaded and is a cross-check; using it as the yardstick would make a
+  generator that loaded half its config look complete.
+
 Two findings worth carrying forward:
 
 - BIRD 3 inserts `RX limit` and `limit` columns into the route-change-stats

@@ -426,6 +426,14 @@ looking wrong. Neither daemon implements a version command, so the `tester versi
 `UNKNOWN` either way and the manifest cannot tell the two builds apart. Same trap as the gcov one
 above.
 
+That rebuild left the exabgp pair **unpinned at both layers**, which is a known open issue rather
+than a settled decision. `FROM python:3-bookworm` floats to whatever Python major is current
+(buster was frozen at 3.9 once it was archived), and `pip_spec('')` installs plain `exabgp`, so two
+`prepare -t exabgp` runs months apart produce testers on a different interpreter *and* a different
+ExaBGP release. With no version command, provenance records `UNKNOWN` for both and nothing can tell
+them apart — the gcov trap again, one layer up. Pinning `python:3.11-bookworm` and a concrete
+`exabgp==` would close it, at the cost of rebuilding those images.
+
 The old `frr` target (a wrapper over the prebuilt `frrouting/frr:v7.5.1` image) was removed. **`frr.py` still exists and must stay**: its
 `FRRoutingTarget` holds all the FRR config generation, `get_neighbors_state`, and End-of-RIB parsing,
 which `FRRoutingCompiledTarget` inherits. Only the image build and CLI target went away.

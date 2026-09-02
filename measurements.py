@@ -540,7 +540,12 @@ def tester_metrics(events: Iterable[LifecycleEvent], producer: str):
     rate = None
     if offered is not None and injection_s and first is not None:
         already_sent = first.counters.get('offered_prefixes')
-        if already_sent is not None:
+        # BIRD resets a protocol's route-change stats when the protocol
+        # restarts, so a session that flapped mid-run can report fewer offered
+        # prefixes at completion than at the first update. That is not a
+        # negative send rate, it is a counter this instrument cannot read
+        # across the reset.
+        if already_sent is not None and offered >= already_sent:
             rate = (offered - already_sent) / injection_s
 
     return {

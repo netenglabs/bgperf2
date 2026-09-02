@@ -533,3 +533,67 @@ def test_a_session_level_queue_depth_survives_an_unreadable_channel():
     TX pending:       99999 bytes
 '''
     assert tester_offering(text)['tx_pending_bytes'] == 99999
+
+
+def test_a_session_whose_channel_is_down_is_not_summed_away(fixture_text):
+    """A DOWN channel prints no `Routes:` and no stats at all.
+
+    Summing the sessions that did answer gives a number indistinguishable from
+    a generator that fell behind, against an `expected` that still covers the
+    unread one. The guard belongs here, not only in the recorder.
+    """
+    text = '''bgp1       BGP        ---        up     20:53:11.819  Established
+  BGP state:          Established
+    Neighbor address: 10.0.0.1
+  Channel ipv4
+    State:          UP
+    Routes:         0 imported, 100 exported, 0 preferred
+    Route change stats:     received   rejected   filtered    ignored   accepted
+      Export updates:            100          0          0        ---        100
+bgp2       BGP        ---        start  20:53:11.819  Connect
+  BGP state:          Connect
+    Neighbor address: 10.0.0.2
+  Channel ipv4
+    State:          DOWN
+    Table:          master4
+'''
+    state = tester_offering(text)
+
+    assert state['sessions'] == 2
+    assert state['sessions_measured'] == 1
+    assert state['offered'] is None
+    assert state['exported'] is None
+
+
+def test_a_partly_unreadable_static_table_reports_no_configured_size():
+    text = '''static1    Static     master4    up     20:53:10.965
+  Channel ipv4
+    Routes:         100 imported, 0 exported, 100 preferred
+static2    Static     master4    up     20:53:10.965
+  Channel ipv4
+    State:          DOWN
+'''
+    assert tester_offering(text)['configured'] is None
+
+
+def test_a_counter_reset_mid_run_yields_no_rate_rather_than_a_negative_one():
+    """BIRD clears a protocol's route-change stats when it restarts, so the
+    count at completion can be below the count at the first update."""
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    r.observe(1.0, {'a': offering(expected=100, offered=90)})
+    r.observe(2.0, {'a': offering(expected=100, offered=100)})
+    # Rebuild the pair by hand: a real reset would be caught by the recorder's
+    # own monotonic bookkeeping, but tester_metrics must not trust its inputs.
+    events = [e for e in r.events]
+    first = [e for e in events if e.kind == EventKind.TESTER_FIRST_UPDATE][0]
+    complete = [e for e in events if e.kind == EventKind.TESTER_COMPLETE][0]
+    swapped = [
+        LifecycleEvent(EventKind.BENCH_CLOCK_STARTED, 0.0, 'controller',
+                       EventPhase.SETUP),
+        LifecycleEvent(first.kind, first.monotonic_s, 'tester', first.phase,
+                       counters={'offered_prefixes': 500}),
+        complete,
+    ]
+
+    m = tester_metrics(swapped, 'tester')
+    assert m['offered_rate_pps'] is None

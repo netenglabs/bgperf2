@@ -257,26 +257,29 @@ Two findings worth carrying forward:
   is 2.19, so backpressure is recorded as unavailable-with-a-reason rather than
   as zero.
 
-#### Defect found while instrumenting: BIRD 3 targets report accepted = 0
+#### Defect found while instrumenting: BIRD 3 targets reported accepted = 0
 
-Not fixed here, because it changes target-side convergence input rather than
-tester instrumentation and needs its own verification against both series.
+Fixed on 2026-09-02, and `bird.tfsm` is deleted.
 
-`bird.tfsm` reads the `Import updates` row positionally
-(`${received}\s+\S+\s+\S+\s+\S+\s+${accepted}`), which is the same
-column-shift described above. Run against the recorded 3.3.2 capture it yields
-`accepted` of 0 for all three neighbours where the true values are 0, 100 and
-100. So for any BIRD 3 target `neighbors_accepted` is always 0,
-`neighbors_checked` never goes all-True, and the `neighbors_checked` route to
-`note_neighbors_checkpoint()` in `bench()` is dead code. Runs still converge
-through `neighbors_received_full` (the `received` capture reads column 1 and is
-correct), so this is quiet rather than fatal, but the per-second progress line
-prints a wrong accepted count and one of the two convergence checkpoints does
-not fire on half the BIRD matrix.
+`bird.tfsm` read the `Import updates` row positionally
+(`${received}\s+\S+\s+\S+\s+\S+\s+${accepted}`) — the same column shift
+described above. So for any BIRD 3 target `neighbors_accepted` was always 0,
+`neighbors_checked` never went all-True, and that route to
+`note_neighbors_checkpoint()` in `bench()` was dead for half the BIRD matrix.
+Runs still converged through `neighbors_received_full` (the `received` capture
+read column 1 and was correct), which is why it stayed hidden: only the
+per-second progress line looked wrong.
 
-`bird.parse_protocols()` is the fix — `BIRDTarget.get_neighbors_state()` should
-read it instead of the TextFSM template. This blocks meaningful BIRD 2 vs 3
-comparison and should land before Phase 5A.
+`BIRDTarget.get_neighbors_state()` now reads `bird.parse_protocols()`. Verified
+on live output from both series, 3 peers x 200 prefixes:
+
+| target | old template (accepted) | new parser (accepted) |
+|---|---|---|
+| bird 2.19 | 200, 200, 200 | 200, 200, 200 |
+| bird 3.3.2 | 0, 0, 0 | 200, 200, 200 |
+
+BIRD 2 is unchanged; BIRD 3 now reaches the neighbor checkpoint. This was a
+prerequisite for meaningful BIRD 2 vs 3 comparison in Phase 5A.
 
 #### Work
 

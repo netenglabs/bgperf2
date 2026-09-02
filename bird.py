@@ -14,7 +14,6 @@
 # limitations under the License.
 
 from base import *
-import textfsm
 
 
 # --- birdc 'show protocols all' --------------------------------------------
@@ -184,8 +183,14 @@ def tester_offering(text, channel='ipv4'):
     # too -- because dropping them is how a slow peer gets hidden.
     bgp = {name: p for name, p in protocols.items()
            if p['proto'] == 'BGP' and p['neighbor_range'] is None}
-    offered = None
-    exported = None
+    # A sum is published only when every session contributed to it. A channel
+    # that is DOWN prints no `Routes:` and no route-change stats at all, so a
+    # peer still coming up would otherwise drop out of the numerator while the
+    # caller's `expected` still covers it -- a failed read that looks exactly
+    # like a generator falling behind. `sessions_measured` says how many
+    # answered, so a partial read stays visible instead of averaging away.
+    offered_total = exported_total = 0
+    offered_seen = exported_seen = 0
     tx_pending = None
     pending_prefixes = None
     for p in bgp.values():
@@ -200,21 +205,23 @@ def tester_offering(text, channel='ipv4'):
             continue
         accepted = c['stats'].get('Export updates', {}).get('accepted')
         if accepted is not None:
-            offered = accepted if offered is None else offered + accepted
+            offered_seen += 1
+            offered_total += accepted
         if 'exported' in c['routes']:
-            exported = c['routes']['exported'] if exported is None \
-                else exported + c['routes']['exported']
+            exported_seen += 1
+            exported_total += c['routes']['exported']
         if c['pending_prefixes'] is not None:
             pending_prefixes = c['pending_prefixes'] if pending_prefixes is None \
                 else pending_prefixes + c['pending_prefixes']
 
-    configured = None
-    for p in protocols.values():
-        if p['proto'] != 'Static':
-            continue
-        imported = p['channels'].get(channel, {}).get('routes', {}).get('imported')
-        if imported is not None:
-            configured = imported if configured is None else configured + imported
+    offered = offered_total if bgp and offered_seen == len(bgp) else None
+    exported = exported_total if bgp and exported_seen == len(bgp) else None
+
+    statics = [p for p in protocols.values() if p['proto'] == 'Static']
+    loaded = [p['channels'].get(channel, {}).get('routes', {}).get('imported')
+              for p in statics]
+    loaded = [count for count in loaded if count is not None]
+    configured = sum(loaded) if statics and len(loaded) == len(statics) else None
 
     return {
         # Every BGP session this generator runs must be up. One established
@@ -222,6 +229,7 @@ def tester_offering(text, channel='ipv4'):
         'established': bool(bgp) and all(
             p['bgp_state'] == 'Established' for p in bgp.values()),
         'sessions': len(bgp),
+        'sessions_measured': offered_seen,
         'offered': offered,
         'exported': exported,
         'configured': configured,
@@ -473,19 +481,33 @@ return true;
             config_file_name=self.CONFIG_FILE_NAME)
 
     def get_neighbors_state(self):
-        neighbors_accepted = {}
-        neighbors_received = {}
-        neighbor_received_output = self.local("birdc 'show protocols all'").decode('utf-8')
-        
-        with open(REPO_ROOT / 'bird.tfsm') as template:
-            fsm = textfsm.TextFSM(template)
-            result = fsm.ParseText(neighbor_received_output)
+        '''Prefixes each neighbor has sent, from the target's own `Import
+        updates` counters.
 
-        for r in result:
-            if r[0] == '' :
+        This used to run a TextFSM template that took the fifth field of the
+        row. That is `accepted` on BIRD 2 and `RX limit` on BIRD 3, so every
+        BIRD 3 target reported accepted=0 for every neighbor: `neighbors_checked`
+        never went all-True, and that route to the convergence checkpoint was
+        dead for half the BIRD matrix. Runs still finished, via
+        `neighbors_received_full`, which is why it stayed hidden -- only the
+        progress line looked wrong. `parse_protocols()` reads the row against
+        its own header instead.
+        '''
+        output = self.local("birdc 'show protocols all'").decode('utf-8')
+
+        neighbors_received = {}
+        neighbors_accepted = {}
+        for protocol in parse_protocols(output).values():
+            # A `neighbor range` listener has no address and is not a peering.
+            if protocol['proto'] != 'BGP' or not protocol['neighbor_address']:
                 continue
-            else:
-                neighbors_accepted[r[0]] = int(r[2]) if r[2] != '' else 0
-                neighbors_received[r[0]] = int(r[1]) if r[1] != '' else 0
+            imported = protocol['channels'].get(
+                'ipv4', {}).get('stats', {}).get('Import updates', {})
+            address = protocol['neighbor_address']
+            # A counter BIRD prints as '---' does not apply to this row; the
+            # caller compares these against configured counts, so absent reads
+            # as none received rather than as a missing neighbor.
+            neighbors_received[address] = imported.get('received') or 0
+            neighbors_accepted[address] = imported.get('accepted') or 0
 
         return neighbors_received, neighbors_accepted

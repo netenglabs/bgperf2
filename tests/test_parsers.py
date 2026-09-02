@@ -6,7 +6,7 @@ stated historical pain of this project. Parsing against recorded output catches
 a format change in a second instead of after a benchmark silently reports zero.
 
 Targets are built with object.__new__ so no container is created; the only
-things these methods touch are self.local() and the TextFSM template.
+things these methods touch are self.local() and their own output parsers.
 '''
 import json
 
@@ -23,7 +23,7 @@ def build(target_class, output):
     return target
 
 
-# --- BIRD: 'birdc show protocols all', parsed with bird.tfsm -----------------
+# --- BIRD: 'birdc show protocols all', parsed by bird.parse_protocols --------
 
 def test_bird_parses_recorded_output(fixture_text):
     target = build(BIRDTarget, fixture_text('bird_show_protocols_all.txt').encode('utf-8'))
@@ -43,6 +43,33 @@ def test_bird_ignores_non_bgp_protocols(fixture_text):
     received, accepted = target.get_neighbors_state()
     for name in accepted:
         assert name.count('.') == 3, f"{name} is not a neighbor address"
+
+
+def test_bird3_accepted_counts_are_not_read_from_the_wrong_column(fixture_text):
+    """The regression that made every BIRD 3 target report accepted = 0.
+
+    BIRD 3's route-change-stats table carries two extra columns, so the
+    positional TextFSM template this replaced landed on `RX limit`. Nothing
+    failed: `neighbors_accepted` was simply always 0, `neighbors_checked` never
+    went all-True, and that route to the convergence checkpoint never fired.
+    """
+    target = build(BIRDTarget,
+                   fixture_text('bird3_show_protocols_all.txt').encode('utf-8'))
+    received, accepted = target.get_neighbors_state()
+
+    assert accepted == {'10.10.0.2': 0, '10.10.0.3': 100, '10.10.0.4': 100}
+    assert received == {'10.10.0.2': 0, '10.10.0.3': 100, '10.10.0.4': 100}
+
+
+def test_bird_skips_the_dynamic_neighbor_listener(fixture_text):
+    """`protocol bgp everything { neighbor range ... }` has no peer address and
+    is not a session; it must not appear as a neighbor."""
+    for capture in ('bird_show_protocols_all.txt',
+                    'bird3_show_protocols_all.txt'):
+        target = build(BIRDTarget, fixture_text(capture).encode('utf-8'))
+        _, accepted = target.get_neighbors_state()
+        assert '' not in accepted
+        assert all(name.count('.') == 3 for name in accepted)
 
 
 def test_bird_handles_empty_output():

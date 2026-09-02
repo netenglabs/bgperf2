@@ -182,7 +182,14 @@ release.
 differently. There is no common API, so each target parses its own CLI:
 
 - FRR: `vtysh -c 'sh ip bgp summary json'`, JSON
-- BIRD: `birdc 'show protocols all'` parsed with a **TextFSM template** (`bird.tfsm`)
+- BIRD: `birdc 'show protocols all'`, parsed by `bird.parse_protocols()` — which reads the
+  route-change-stats table by **column name**. It replaced a positional TextFSM template
+  (`bird.tfsm`, now deleted, along with the `textfsm` dependency): BIRD 3 inserts `RX limit`
+  and `limit` into that table, so the field that is `accepted` on 2.19 is `RX limit` on 3.3.2.
+  Every BIRD 3 target therefore reported `accepted` 0 for every neighbor, `neighbors_checked`
+  never went all-True, and that route to `note_neighbors_checkpoint()` was dead — quietly, since
+  runs still converged through `neighbors_received_full`. Never read a BIRD stats table
+  positionally.
 - Junos/EOS/SR Linux: vendor JSON via their own CLIs
 
 FRR is a special case worth knowing about: it has no received-prefix counter, so

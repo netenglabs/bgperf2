@@ -28,7 +28,7 @@ import datetime
 from jinja2 import Environment, FileSystemLoader, PackageLoader, StrictUndefined, make_logging_undefined
 
 
-# Resource files (filters/, nos_templates/, bird.tfsm) live next to the source,
+# Resource files (filters/, nos_templates/) live next to the source,
 # so anchor them to the source directory rather than the working directory.
 # Without this, bgperf2 can only be run from the repo root.
 REPO_ROOT = Path(__file__).resolve().parent

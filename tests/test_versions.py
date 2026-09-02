@@ -186,7 +186,7 @@ class TestNormalizeImageName:
         ('localhost:5000/bgperf/bird', 'localhost:5000/bgperf/bird:latest'),
         ('localhost:5000/bgperf/bird:10.1', 'localhost:5000/bgperf/bird:10.1'),
     ])
-    def test(self, name, expected):
+    def test_adds_the_implicit_latest_tag(self, name, expected):
         assert base.normalize_image_name(name) == expected
 
 

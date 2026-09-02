@@ -232,6 +232,52 @@ tests, and a failed fake run still produces an event artifact.
 
 ### Phase 2: Instrument the BIRD synthetic tester
 
+Status: in progress. The Docker-free half landed on 2026-09-02 — `bird.py` now
+parses `birdc show protocols all` by column name, `tester_offering()` summarises
+what a generator says it put on the wire, and `measurements.TesterEventRecorder`
+turns polled sessions into `tester_session_ready`/`tester_first_update`/
+`tester_last_update`/`tester_complete` with `tester_metrics()` deriving
+`tester_startup_s`, `injection_s`, `offered_prefixes` and `offered_rate_pps`.
+Both parser and recorder are covered against real 2.19 and 3.3.2 captures.
+
+Remaining: poll the tester containers during `bench()`, merge the tester events
+into the run artifact, and run the one-tester/one-target Docker verification the
+exit criterion asks for. `post_injection_tail_s` is deliberately still absent —
+it spans tester and monitor events and needs a signed interval helper, since the
+contract allows it to be negative when injection and convergence overlap.
+
+Two findings worth carrying forward:
+
+- BIRD 3 inserts `RX limit` and `limit` columns into the route-change-stats
+  table, so the column that is `accepted` on 2.19 is `RX limit` on 3.3.2. Read
+  these tables by name; a positional read returns a plausible wrong number.
+- Blocked-write evidence is version-dependent. BIRD 3 reports `TX pending: N
+  bytes` and `Pending N attribute sets with total M prefixes to send`; 2.19 has
+  neither. The synthetic tester runs the unversioned `bgperf/bird` image, which
+  is 2.19, so backpressure is recorded as unavailable-with-a-reason rather than
+  as zero.
+
+#### Defect found while instrumenting: BIRD 3 targets report accepted = 0
+
+Not fixed here, because it changes target-side convergence input rather than
+tester instrumentation and needs its own verification against both series.
+
+`bird.tfsm` reads the `Import updates` row positionally
+(`${received}\s+\S+\s+\S+\s+\S+\s+${accepted}`), which is the same
+column-shift described above. Run against the recorded 3.3.2 capture it yields
+`accepted` of 0 for all three neighbours where the true values are 0, 100 and
+100. So for any BIRD 3 target `neighbors_accepted` is always 0,
+`neighbors_checked` never goes all-True, and the `neighbors_checked` route to
+`note_neighbors_checkpoint()` in `bench()` is dead code. Runs still converge
+through `neighbors_received_full` (the `received` capture reads column 1 and is
+correct), so this is quiet rather than fatal, but the per-second progress line
+prints a wrong accepted count and one of the two convergence checkpoints does
+not fire on half the BIRD matrix.
+
+`bird.parse_protocols()` is the fix — `BIRDTarget.get_neighbors_state()` should
+read it instead of the TextFSM template. This blocks meaningful BIRD 2 vs 3
+comparison and should land before Phase 5A.
+
 #### Work
 
 - Define when the BIRD tester is ready, when it offers its first update, and

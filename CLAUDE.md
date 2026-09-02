@@ -72,6 +72,13 @@ module imports). Importing
 There is no coverage of the container orchestration itself, so a real `bench` is still the only
 end-to-end check. Use `-n1 -p1` for the fastest one.
 
+`pytest.ini` narrows pytest's collection globs to `test_*` / `Test[A-Z]*`. Several production
+names start with "test" — `measurements.TesterEventRecorder`, `measurements.TesterOffering`,
+`measurements.tester_metrics`, `bird.tester_offering` — and the defaults (`test*`, `Test*`) try to
+collect them as soon as a test module imports them. Keep new test functions on the `test_` prefix:
+a pattern with no glob character is a *prefix* match in pytest, so widening this back out to
+`test` would re-admit every `tester_*` name.
+
 The venv is tied to a specific interpreter — a distro Python upgrade orphans it. Recreate with
 `rm -rf venv && python3 -m venv venv && venv/bin/pip install -r pip-requirements.txt`.
 

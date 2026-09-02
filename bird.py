@@ -16,6 +16,220 @@
 from base import *
 import textfsm
 
+
+# --- birdc 'show protocols all' --------------------------------------------
+#
+# Read by column *name*, never by position. BIRD 3 inserts two columns into the
+# route-change-stats table that BIRD 2 does not have:
+#
+#   2.19  received rejected filtered ignored                accepted
+#   3.3.2 received rejected filtered ignored RX limit limit accepted
+#
+# so `fields[4]` is `accepted` on one and `RX limit` on the other. `prepare`
+# builds both series, and a positional read would not fail -- it would report a
+# plausible wrong number for half the matrix, which is the failure mode this
+# project keeps hitting. The `Routes:` line moves the same way: a channel with
+# a filter reports an extra `filtered` term between `imported` and `exported`.
+
+_PROTOCOL_HEADER = re.compile(
+    r'^(?P<name>\S+)\s+(?P<proto>\S+)\s+(?P<table>\S+)\s+(?P<state>\S+)'
+    r'\s+(?P<since>\S+)\s*(?P<info>.*?)\s*$')
+_ROUTES = re.compile(r'(\d+)\s+([a-z]+)')
+_PENDING_PREFIXES = re.compile(r'total\s+(\d+)\s+prefixes to send')
+_TX_PENDING = re.compile(r'^TX pending:\s+(\d+)\s+bytes')
+
+
+def _stat_value(token):
+    '''A route-change-stats cell: an integer, or None for BIRD\'s `---`.'''
+    return None if token == '---' else int(token)
+
+
+def parse_protocols(text):
+    '''Parse `birdc show protocols all` into {protocol name: facts}.
+
+    Each protocol carries its header fields, any BGP session detail, and a
+    `channels` dict, because a protocol can have more than one channel and only
+    the ipv4 one carries this benchmark\'s workload. Unrecognised lines are
+    skipped rather than guessed at.
+    '''
+    protocols = {}
+    protocol = None
+    channel = None
+    columns = None
+
+    for raw in text.splitlines():
+        if not raw.strip():
+            continue
+
+        if not raw[:1].isspace():
+            # A new protocol header ends the previous protocol's indented
+            # block, so drop the channel/column context with it.
+            protocol = channel = columns = None
+            m = _PROTOCOL_HEADER.match(raw)
+            # The table header and the `BIRD <version> ready.` banner both sit
+            # at column 0; neither is a protocol.
+            if not m or m.group('name') == 'Name':
+                continue
+            protocol = {
+                'proto': m.group('proto'),
+                'table': m.group('table'),
+                'state': m.group('state'),
+                'info': m.group('info'),
+                'bgp_state': None,
+                'neighbor_address': None,
+                'neighbor_range': None,
+                'tx_pending_bytes': None,
+                'channels': {},
+            }
+            protocols[m.group('name')] = protocol
+            continue
+
+        if protocol is None:
+            continue
+        line = raw.strip()
+
+        if line.startswith('Channel '):
+            channel = line.split(None, 1)[1].strip()
+            protocol['channels'][channel] = {
+                'routes': {},
+                'stats': {},
+                'pending_prefixes': None,
+            }
+            columns = None
+            continue
+
+        if line.startswith('BGP state:'):
+            protocol['bgp_state'] = line.split(':', 1)[1].strip()
+            continue
+
+        if line.startswith('Neighbor address:'):
+            # BIRD appends the interface for a link-local or bound session:
+            # `10.10.255.254%eth1`.
+            protocol['neighbor_address'] = \
+                line.split(':', 1)[1].strip().split('%')[0]
+            continue
+
+        if line.startswith('Neighbor range:'):
+            # A `neighbor range` protocol is the listener for dynamic peers,
+            # not a session of its own. It sits in Passive for the whole run.
+            protocol['neighbor_range'] = line.split(':', 1)[1].strip()
+            continue
+
+        m = _TX_PENDING.match(line)
+        if m:
+            # BIRD 3 only. Its absence is what makes backpressure evidence
+            # unavailable on 2.x, and that has to be recorded, not assumed zero.
+            protocol['tx_pending_bytes'] = int(m.group(1))
+            continue
+
+        if channel is None:
+            continue
+
+        if line.startswith('Routes:'):
+            protocol['channels'][channel]['routes'] = {
+                name: int(count)
+                for count, name in _ROUTES.findall(line.split(':', 1)[1])
+            }
+            continue
+
+        if line.startswith('Route change stats:'):
+            # Column names contain spaces ('RX limit'), so split on runs of
+            # two or more spaces rather than on whitespace.
+            columns = re.split(r'\s{2,}', line.split(':', 1)[1].strip())
+            continue
+
+        if line.startswith('Pending '):
+            m = _PENDING_PREFIXES.search(line)
+            if m:
+                protocol['channels'][channel]['pending_prefixes'] = int(m.group(1))
+            continue
+
+        if columns and line.split(':', 1)[0] in (
+                'Import updates', 'Import withdraws',
+                'Export updates', 'Export withdraws'):
+            key, _, rest = line.partition(':')
+            values = rest.split()
+            if len(values) != len(columns):
+                # A row that does not line up with its own header is evidence
+                # of a format this parser has not seen; recording it under
+                # guessed names is how a wrong number gets published.
+                continue
+            protocol['channels'][channel]['stats'][key] = {
+                name: _stat_value(value)
+                for name, value in zip(columns, values)
+            }
+
+    return protocols
+
+
+def tester_offering(text, channel='ipv4'):
+    '''What a BIRD load generator has offered its peer, from its own CLI.
+
+    `offered` is the cumulative count of export updates BIRD accepted for the
+    session -- the generator\'s own account of what it put on the wire, which is
+    the point: it is measured at the tester, independently of what the monitor
+    later sees. `configured` is the size of the static table it was given, so
+    expected and observed workload can be compared without trusting the config.
+
+    Returns counts of None when the evidence is not present rather than 0, so a
+    parse that found nothing cannot be mistaken for a generator that sent
+    nothing.
+    '''
+    protocols = parse_protocols(text)
+
+    # A `neighbor range` template is a listener, not a peering: it stays
+    # Passive for the whole run, so counting it would mean a generator using
+    # dynamic neighbors never reported itself ready. Sessions that have not
+    # come up yet are still counted -- BIRD prints `Neighbor address` for those
+    # too -- because dropping them is how a slow peer gets hidden.
+    bgp = {name: p for name, p in protocols.items()
+           if p['proto'] == 'BGP' and p['neighbor_range'] is None}
+    offered = None
+    exported = None
+    tx_pending = None
+    pending_prefixes = None
+    for p in bgp.values():
+        # Session-level, so it is read before the channel guard: a session that
+        # reports a queue depth but whose channel block could not be read is
+        # still a session we have blocked-write evidence for.
+        if p['tx_pending_bytes'] is not None:
+            tx_pending = p['tx_pending_bytes'] if tx_pending is None \
+                else tx_pending + p['tx_pending_bytes']
+        c = p['channels'].get(channel)
+        if c is None:
+            continue
+        accepted = c['stats'].get('Export updates', {}).get('accepted')
+        if accepted is not None:
+            offered = accepted if offered is None else offered + accepted
+        if 'exported' in c['routes']:
+            exported = c['routes']['exported'] if exported is None \
+                else exported + c['routes']['exported']
+        if c['pending_prefixes'] is not None:
+            pending_prefixes = c['pending_prefixes'] if pending_prefixes is None \
+                else pending_prefixes + c['pending_prefixes']
+
+    configured = None
+    for p in protocols.values():
+        if p['proto'] != 'Static':
+            continue
+        imported = p['channels'].get(channel, {}).get('routes', {}).get('imported')
+        if imported is not None:
+            configured = imported if configured is None else configured + imported
+
+    return {
+        # Every BGP session this generator runs must be up. One established
+        # session out of two is not a generator that is ready to send.
+        'established': bool(bgp) and all(
+            p['bgp_state'] == 'Established' for p in bgp.values()),
+        'sessions': len(bgp),
+        'offered': offered,
+        'exported': exported,
+        'configured': configured,
+        'tx_pending_bytes': tx_pending,
+        'pending_prefixes': pending_prefixes,
+    }
+
+
 class BIRD(Container):
 
     CONTAINER_NAME = None

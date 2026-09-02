@@ -266,6 +266,291 @@ class MonitorEventRecorder:
         self._confirmed = True
 
 
+@dataclass(frozen=True)
+class TesterOffering:
+    '''One poll of what a single generator session has offered so far.
+
+    `offered` is the generator's own cumulative count of updates it put on the
+    wire.  None means the evidence could not be read, which is deliberately
+    distinct from 0: a generator that has sent nothing and a generator we
+    failed to ask must not produce the same measurement.
+
+    `expected` comes from the run configuration, which is always known, and is
+    what completion is judged against.  `configured` is the separate, optional
+    observation of how large a table the generator says it actually loaded --
+    a cross-check that it got the workload it was given, never the source of
+    `expected`.  Deriving `expected` from the generator's own report would make
+    a generator that loaded half its config look complete.
+    '''
+
+    established: bool
+    expected: int
+    offered: Optional[int] = None
+    configured: Optional[int] = None
+    tx_pending_bytes: Optional[int] = None
+    pending_prefixes: Optional[int] = None
+
+    def __post_init__(self):
+        if not isinstance(self.established, bool):
+            raise TypeError('established must be a bool')
+        for name in ('expected', 'offered', 'configured',
+                     'tx_pending_bytes', 'pending_prefixes'):
+            value = getattr(self, name)
+            if value is None and name != 'expected':
+                continue
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(
+                    '{0} must be a non-negative integer'.format(name))
+
+    @property
+    def complete(self):
+        '''True only on positive evidence that the whole table was offered.
+
+        Gated on an established session with something to send. Without that,
+        an `expected` of 0 makes any generator 'complete' on its first poll --
+        which would emit `tester_complete` before `tester_session_ready` and
+        order the lifecycle in a way no consumer can read.
+        '''
+        return (self.established
+                and self.expected > 0
+                and self.offered is not None
+                and self.offered >= self.expected)
+
+
+class TesterEventRecorder:
+    '''Translate polled generator counters into the lifecycle vocabulary.
+
+    One recorder per tester container.  A container can drive several BGP
+    sessions, and the aggregation across them is deliberately pessimistic: the
+    tester is ready when its *last* session comes up and complete when its
+    *slowest* session has offered its whole table.  Taking the first or the
+    best would let one fast session hide a peer that stalled or never came up,
+    which is the specific way a load generator lies about finishing.
+
+    Nothing here synthesizes an event from monitor timestamps.  A run whose
+    generator never reports completion simply has no `tester_complete`, and the
+    derived injection interval is None rather than a plausible guess.
+    '''
+
+    def __init__(self, bench_started_s, producer, sample_interval_s=None):
+        if not isinstance(producer, str) or not producer.strip():
+            raise ValueError('producer must be a non-empty string')
+        if sample_interval_s is not None:
+            if not isinstance(sample_interval_s, (int, float)) \
+                    or isinstance(sample_interval_s, bool) \
+                    or not math.isfinite(sample_interval_s) \
+                    or sample_interval_s <= 0:
+                raise ValueError('sample_interval_s must be a positive number')
+            sample_interval_s = float(sample_interval_s)
+        if not isinstance(bench_started_s, (int, float)) \
+                or isinstance(bench_started_s, bool) \
+                or not math.isfinite(bench_started_s):
+            raise ValueError('bench_started_s must be a finite number')
+        self.producer = producer
+        # Every derived tester interval is quantised by the poll cadence, so
+        # each event carries it: an injection that measures 0.0s at a 1s poll
+        # is not an instant injection, it is an unresolved one.
+        self.sample_interval_s = sample_interval_s
+        self._origin_s = float(bench_started_s)
+        self._events = []
+        self._sessions = None
+        self._last_sample_s = None
+        self._total_offered = 0
+        self._last_update = None
+        self._max_tx_pending_bytes = None
+        self._max_pending_prefixes = None
+        self._backpressure_readable = False
+
+    def _details(self, extra=None):
+        details = {}
+        if self.sample_interval_s is not None:
+            details['sample_interval_s'] = self.sample_interval_s
+        if extra:
+            details.update(extra)
+        return details
+
+    def _add(self, kind, monotonic_s, counters, details=None):
+        self._events.append(LifecycleEvent(
+            kind, monotonic_s, self.producer, EVENT_PHASE[kind],
+            counters=counters, details=self._details(details)))
+
+    @property
+    def events(self):
+        '''Return the recorded facts in deterministic monotonic order.'''
+        # The final increase and the completion verdict land on the same poll,
+        # so break that tie in causal order: the update was observed, and only
+        # then did it satisfy the contract.
+        complete = [e for e in self._events
+                    if e.kind == EventKind.TESTER_COMPLETE]
+        events = [e for e in self._events
+                  if e.kind != EventKind.TESTER_COMPLETE]
+        if self._last_update is not None:
+            events.append(self._last_update)
+        events.extend(complete)
+        return ordered_events(events)
+
+    @property
+    def backpressure(self):
+        '''Blocked-write evidence, or an explicit statement that there is none.
+
+        BIRD 3 reports `TX pending: N bytes` per session; BIRD 2.19 has no
+        equivalent field.  A run on 2.x must record that the evidence was
+        unavailable -- reporting 0 would assert the generator was never blocked
+        on a version that cannot tell us either way.
+        '''
+        if not self._backpressure_readable:
+            return {
+                'available': False,
+                'reason': 'generator reported no blocked-write counter',
+            }
+        evidence = {'available': True}
+        if self._max_tx_pending_bytes is not None:
+            evidence['max_tx_pending_bytes'] = self._max_tx_pending_bytes
+        if self._max_pending_prefixes is not None:
+            evidence['max_pending_prefixes'] = self._max_pending_prefixes
+        return evidence
+
+    def observe(self, monotonic_s, sessions: Mapping[str, TesterOffering]):
+        '''Record one poll covering every session this tester drives.'''
+        if not isinstance(monotonic_s, (int, float)) \
+                or isinstance(monotonic_s, bool) \
+                or not math.isfinite(monotonic_s):
+            raise ValueError('monotonic_s must be a finite number')
+        monotonic_s = float(monotonic_s)
+        if monotonic_s < self._origin_s:
+            raise EventOrderError('tester sample precedes bench_clock_started')
+        if self._last_sample_s is not None and monotonic_s < self._last_sample_s:
+            raise EventOrderError('tester samples are not monotonic')
+        if not sessions:
+            raise MeasurementEventError('a tester sample needs at least one session')
+        for offering in sessions.values():
+            if not isinstance(offering, TesterOffering):
+                raise TypeError('sessions must map to TesterOffering records')
+        # A generator's peers are fixed by its configuration, so the caller
+        # passes every one of them on every poll and marks an unreadable one
+        # with offered=None. Silently dropping a key instead would let
+        # `all(complete)` be satisfied by the sessions that happen to be left,
+        # which is the same "fastest peer hides the slowest" failure this class
+        # aggregates pessimistically to avoid -- only harder to see, because
+        # the counters would look internally consistent.
+        if self._sessions is None:
+            self._sessions = frozenset(sessions)
+        elif frozenset(sessions) != self._sessions:
+            raise MeasurementEventError(
+                'tester sessions changed between polls: expected {0}'.format(
+                    sorted(self._sessions)))
+        self._last_sample_s = monotonic_s
+
+        offerings = list(sessions.values())
+        expected = sum(o.expected for o in offerings)
+        measured = [o.offered for o in offerings if o.offered is not None]
+        # `offered` is published only when every session answered. Summing the
+        # ones that did against an `expected` covering all of them reports a
+        # shortfall that is really a failed read, and nothing downstream could
+        # tell the two apart. `sessions_measured` says how much was legible.
+        offered = sum(measured) if len(measured) == len(offerings) else None
+        counters = {'sessions': len(offerings),
+                    'sessions_measured': len(measured),
+                    'expected_prefixes': expected}
+        if offered is not None:
+            counters['offered_prefixes'] = offered
+        loaded = [o.configured for o in offerings if o.configured is not None]
+        if len(loaded) == len(offerings):
+            counters['configured_prefixes'] = sum(loaded)
+
+        for o in offerings:
+            # Either field is evidence. They come from different parts of the
+            # CLI output, so a capture can carry one and not the other -- and
+            # reporting 'no evidence' while holding a queue depth is the one
+            # answer this must never give.
+            if o.tx_pending_bytes is not None:
+                self._backpressure_readable = True
+                self._max_tx_pending_bytes = o.tx_pending_bytes \
+                    if self._max_tx_pending_bytes is None \
+                    else max(self._max_tx_pending_bytes, o.tx_pending_bytes)
+            if o.pending_prefixes is not None:
+                self._backpressure_readable = True
+                self._max_pending_prefixes = o.pending_prefixes \
+                    if self._max_pending_prefixes is None \
+                    else max(self._max_pending_prefixes, o.pending_prefixes)
+
+        if all(o.established for o in offerings) and unique_event(
+                self._events, EventKind.TESTER_SESSION_READY) is None:
+            self._add(EventKind.TESTER_SESSION_READY, monotonic_s, counters)
+
+        if offered and unique_event(
+                self._events, EventKind.TESTER_FIRST_UPDATE) is None:
+            self._add(EventKind.TESTER_FIRST_UPDATE, monotonic_s, counters)
+
+        # Polling continues until the monitor converges, so a cumulative
+        # counter can still move after completion. Recording that would sort a
+        # `tester_last_update` after `tester_complete`, inverting the
+        # vocabulary's own ordering and the tail interval derived from it.
+        completed = unique_event(
+            self._events, EventKind.TESTER_COMPLETE) is not None
+        if not completed and offered is not None \
+                and offered > self._total_offered:
+            self._last_update = LifecycleEvent(
+                EventKind.TESTER_LAST_UPDATE, monotonic_s, self.producer,
+                EVENT_PHASE[EventKind.TESTER_LAST_UPDATE],
+                counters=counters, details=self._details())
+            self._total_offered = offered
+
+        if all(o.complete for o in offerings) and unique_event(
+                self._events, EventKind.TESTER_COMPLETE) is None:
+            self._add(EventKind.TESTER_COMPLETE, monotonic_s, counters,
+                      {'backpressure': self.backpressure})
+
+
+def tester_metrics(events: Iterable[LifecycleEvent], producer: str):
+    '''Derive one generator's owned intervals from its named endpoints.
+
+    `events` must include the controller's `bench_clock_started`, which a
+    TesterEventRecorder does not produce: the run has one clock origin, and a
+    second copy per tester would make every merged lookup ambiguous. Callers
+    merge the controller's events in. A missing origin raises rather than
+    returning a null startup interval, because that is a wiring mistake that
+    would otherwise be published as a measurement.
+    '''
+    events = tuple(events)
+    if unique_event(events, EventKind.BENCH_CLOCK_STARTED,
+                    'controller') is None:
+        raise MeasurementEventError(
+            'tester metrics need the controller bench_clock_started event')
+    startup_s = duration_s(
+        events, EventKind.BENCH_CLOCK_STARTED, EventKind.TESTER_SESSION_READY,
+        start_producer='controller', end_producer=producer)
+    injection_s = duration_s(
+        events, EventKind.TESTER_FIRST_UPDATE, EventKind.TESTER_COMPLETE,
+        start_producer=producer, end_producer=producer)
+
+    complete = unique_event(events, EventKind.TESTER_COMPLETE, producer)
+    first = unique_event(events, EventKind.TESTER_FIRST_UPDATE, producer)
+    offered = complete.counters.get('offered_prefixes') if complete else None
+
+    # The rate's numerator has to be the prefixes offered *inside* the interval
+    # it is divided by. `injection_s` starts at the first poll that saw a
+    # nonzero count, by which time that many prefixes were already on the wire;
+    # dividing the running total by it counts them twice and biases the rate
+    # high -- most on a short run, but always upward.
+    #
+    # A rate also needs a measured interval to divide by. At a 1s poll a small
+    # workload finishes inside one sample, and 'offered / 0' is not an infinite
+    # rate, it is an interval too short for this instrument to resolve.
+    rate = None
+    if offered is not None and injection_s and first is not None:
+        already_sent = first.counters.get('offered_prefixes')
+        if already_sent is not None:
+            rate = (offered - already_sent) / injection_s
+
+    return {
+        'tester_startup_s': startup_s,
+        'injection_s': injection_s,
+        'offered_prefixes': offered,
+        'offered_rate_pps': rate,
+    }
+
+
 def monitor_metrics(events: Iterable[LifecycleEvent]):
     '''Derive the monitor-owned intervals from their named endpoints.'''
     events = tuple(events)

@@ -161,6 +161,39 @@ def parse_protocols(text):
     return protocols
 
 
+# One `docker exec` per poll, not one per peer. A BIRD tester runs a separate
+# `bird` per neighbour on its own control socket, so reading N peers means N
+# `birdc` invocations -- as N docker execs that is ~50ms each, and at 50 peers a
+# 1s poll cannot keep up and the controller starts burning CPU the run then
+# reports as its own contention. They go in one shell command instead, each
+# section introduced by this marker so the reply can be split back apart.
+SESSION_MARKER = '===bgperf-session '
+
+
+def split_session_output(text):
+    '''Split a marker-separated multi-session capture into {key: text}.
+
+    A key with no section is absent rather than empty: the caller knows every
+    peer it asked about, and "the socket did not answer" has to stay distinct
+    from "the daemon answered and had nothing".
+    '''
+    sections = {}
+    key = None
+    lines = []
+    for raw in text.splitlines():
+        if raw.startswith(SESSION_MARKER):
+            if key is not None:
+                sections[key] = '\n'.join(lines)
+            key = raw[len(SESSION_MARKER):].strip()
+            lines = []
+            continue
+        if key is not None:
+            lines.append(raw)
+    if key is not None:
+        sections[key] = '\n'.join(lines)
+    return sections
+
+
 def tester_offering(text, channel='ipv4'):
     '''What a BIRD load generator has offered its peer, from its own CLI.
 

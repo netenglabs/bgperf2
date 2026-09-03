@@ -11,6 +11,7 @@ from measurements import (
     EventOrderError,
     EventPhase,
     LifecycleEvent,
+    MeasurementEventError,
     MonitorEventRecorder,
     duration_s,
     event_artifact,
@@ -222,3 +223,43 @@ def test_last_change_precedes_confirmation_when_sample_times_tie():
         EventKind.MONITOR_LAST_CHANGE,
         EventKind.CONVERGENCE_CONFIRMED,
     ]
+
+
+def test_a_tester_with_no_events_reports_null_intervals_rather_than_absence():
+    '''A generator that was polled and never answered must still appear: a run
+    where the tester was unreadable and a run with no tester at all are
+    different results.'''
+    recorder = MonitorEventRecorder(0, producer='monitor')
+    recorder.observe(1, 0)
+
+    artifact = event_artifact(recorder.events, status='failed',
+                              testers={'tester': {'backpressure': {'available': False}}})
+
+    assert artifact['testers']['tester'] == {
+        'tester_startup_s': None,
+        'injection_s': None,
+        'offered_prefixes': None,
+        'offered_in_interval': None,
+        'offered_rate_pps': None,
+        'backpressure': {'available': False},
+    }
+
+
+def test_an_artifact_without_testers_keeps_its_original_shape():
+    recorder = MonitorEventRecorder(0, producer='monitor')
+    recorder.observe(1, 0)
+
+    artifact = event_artifact(recorder.events, status='failed')
+
+    assert set(artifact) == {'schema', 'clock', 'status', 'measurements', 'events'}
+
+
+def test_tester_evidence_cannot_overwrite_a_derived_interval():
+    '''The evidence beside the events is caller-supplied. Letting it land on a
+    derived name would publish an interval the event stream does not support.'''
+    recorder = MonitorEventRecorder(0, producer='monitor')
+    recorder.observe(1, 0)
+
+    with pytest.raises(MeasurementEventError, match='injection_s'):
+        event_artifact(recorder.events, status='failed',
+                       testers={'tester': {'injection_s': 4.0}})

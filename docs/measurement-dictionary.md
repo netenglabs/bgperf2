@@ -43,3 +43,32 @@ The canonical compatibility test for the positional schema and the legacy
 `testers (s)` formula is `tests/test_stats_contract.py`. Historical CSV rows
 must be interpreted with this dictionary; they must not be rewritten to match
 future lifecycle-event semantics.
+
+## Event artifact: the `testers` section
+
+Each run also writes `<prefix>.events.json` (`bgperf2/measurement-events/v1alpha1`).
+Generators that can be asked what they put on the wire — currently the BIRD
+synthetic tester — get a `testers` entry keyed by container name:
+
+| Field | Unit/type | Definition and interpretation |
+|---|---|---|
+| `tester_startup_s` | seconds | Bench clock origin to the poll where *every* session this container drives was established. The last session, not the first. |
+| `injection_s` | seconds | First poll with a nonzero offered count to the poll where every session had offered its whole configured table. `0.0` means the table was already fully offered when the instrument first looked — an unresolved interval, not an instant injection. |
+| `offered_prefixes` | prefixes | The generator's own cumulative count at completion, summed across its sessions. Published only when every session was legible; a partial read reports `null` rather than a shortfall. |
+| `offered_in_interval` | prefixes | How much of `offered_prefixes` arrived inside `injection_s`. The rate below is derived from this, not from the total. `null` means the generator's counter went backwards during the run — BIRD clears a protocol's route-change stats when the protocol restarts — so the interval is real but its content is unknown. |
+| `offered_rate_pps` | prefixes/second | `offered_in_interval / injection_s`. It is `null` in two different cases, told apart by `offered_in_interval`: an interval below the poll resolution (`offered_in_interval` is `0`), or a generator whose counter reset mid-run so nothing can be said about what crossed the interval (`offered_in_interval` is `null`). **Read it only beside `offered_in_interval`**: for BIRD 2.19 that share is usually a small tail of the table, and the rate is then a slope of the poll cadence rather than the generator's send rate. |
+| `backpressure` | object | `{"available": false, "reason": ...}` where the generator exposes no blocked-write counter (BIRD 2.19), otherwise the maximum observed `TX pending` bytes/prefixes (BIRD 3). Never `0` for a daemon that cannot answer. |
+| `read_failures` | object | `{"polls": N, "first_reason": ...}` when one or more polls could not be read at all (the container was gone, the control socket refused). Present only when it happened; its absence means every poll was read. |
+| `observation_error` | string | Present only when a poll was rejected and the recorder was retired mid-run. The events recorded before that point are still published. |
+
+Two properties are deliberate. `expected` is always the configured table size
+(`len(paths)`), never the generator's own report of what it loaded, so a
+generator that loaded half its config cannot look complete. And an event is
+absent rather than synthesized: a run whose generator never reported completion
+has no `tester_complete` and a `null` `injection_s`, never an interval inferred
+from monitor timestamps.
+
+**A BIRD 2.19 offered count is queue-side.** `Export updates accepted` counts a
+route when it is handed to the BGP protocol, not when it reaches the wire, so
+the count and the completion fact are trustworthy while the duration is not.
+Do not derive a tester-limited finding from a BIRD 2.19 rate.

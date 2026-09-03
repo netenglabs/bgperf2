@@ -15,7 +15,8 @@
 
 from base import Tester
 from exabgp import ExaBGP
-from bird import BIRD
+from bird import BIRD, SESSION_MARKER, split_session_output, tester_offering
+from measurements import TesterOffering
 from  settings import dckr
 from subprocess import check_output, Popen, PIPE
 import glob
@@ -64,6 +65,7 @@ exabgp {0}/{1}.conf'''.format(self.guest_dir, p['router-id']))
 class BIRDTester(Tester, BIRD):
 
     CONTAINER_NAME_PREFIX = 'bgperf_bird_tester_'
+    REPORTS_OFFERING = True
 
     def __init__(self, name, host_dir, conf, image='bgperf/bird'):
         super(BIRDTester, self).__init__('bgperf_bird_' + name, host_dir, conf, image)
@@ -104,6 +106,64 @@ protocol static {{ ipv4;
                 for path in p['paths']:
                     f.write('      route {0} via {1};\n'.format(path, local_address))
                 f.write('}')
+
+    def _peers(self):
+        return list(self.conf.get('neighbors', {}).values())
+
+    def get_offerings_cmd(self):
+        '''One shell command that asks every peer's `bird` what it has sent.
+
+        A BIRD tester runs one daemon per neighbour on its own control socket,
+        so a bare `birdc` in this container reaches no daemon at all -- each
+        socket has to be named. They are read in a single exec rather than one
+        per peer so the poll cost does not grow with the peer count.
+        '''
+        parts = []
+        for p in self._peers():
+            key = p['router-id']
+            parts.append("echo '{0}{1}'".format(SESSION_MARKER, key))
+            # `|| true` so one dead socket does not abort the rest of the loop
+            # and cost us the peers that would have answered.
+            parts.append(
+                "birdc -s {0}/{1}.ctl 'show protocols all' 2>&1 || true".format(
+                    self.guest_dir, key))
+        return ['sh', '-c', '; '.join(parts)]
+
+    def get_offerings(self):
+        '''What each configured peer says it has offered, from its own CLI.
+
+        Keyed by the peers in the run configuration, not by the sockets that
+        answered: a peer whose daemon is not up yet, or whose read failed,
+        reports offered=None and stays in the poll. Dropping it instead would
+        let the peers that did answer satisfy completion on their own.
+        '''
+        expected = {p['router-id']: len(p.get('paths', ()))
+                    for p in self._peers()}
+        try:
+            output = self.local(self.get_offerings_cmd()).decode('utf-8', 'replace')
+        except Exception:
+            output = ''
+        sessions = split_session_output(output)
+
+        offerings = {}
+        for key, count in expected.items():
+            text = sessions.get(key)
+            if text is None:
+                offerings[key] = TesterOffering(established=False, expected=count)
+                continue
+            # `expected` is the configured table size. tester_offering()'s own
+            # `configured` is the generator's report of what it loaded -- a
+            # cross-check, never the yardstick: taking it would make a
+            # generator that loaded half its config look complete.
+            observed = tester_offering(text)
+            offerings[key] = TesterOffering(
+                established=observed['established'],
+                expected=count,
+                offered=observed['offered'],
+                configured=observed['configured'],
+                tx_pending_bytes=observed['tx_pending_bytes'],
+                pending_prefixes=observed['pending_prefixes'])
+        return offerings
 
     def get_startup_cmd(self):
         startup = [f'''#!/bin/bash

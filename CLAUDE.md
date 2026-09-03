@@ -212,6 +212,55 @@ what was appended, and:
 - the per-poll read is capped, and matching happens on bytes with the decode deferred to lines that
   hit, because this process's own RSS feeds the recorded `min_free` column.
 
+### Asking the generator what it sent — tester offering polls
+
+`bench()` polls every tester whose class sets `REPORTS_OFFERING` (today only
+`BIRDTester`) at the monitor's own 1s cadence, so the two sides of a run are
+read at the same resolution. `Tester.offering_stats()` is the sampler;
+`get_offerings()` returns one `measurements.TesterOffering` per configured peer,
+and `measurements.TesterEventRecorder` turns those polls into
+`tester_session_ready`/`tester_first_update`/`tester_last_update`/
+`tester_complete`. They are merged into the same ordered `<prefix>.events.json`
+stream as the monitor's events, with the derived intervals under `testers`. The
+legacy `testers (s)` CSV column is untouched: it is elapsed minus
+time-to-first-prefix, a property of the target and monitor, and the two must not
+be read as versions of the same measurement.
+
+Four things this depends on:
+
+- **One `docker exec` per poll, not one per peer.** A BIRD tester runs a
+  separate `bird` per neighbour on its own control socket, so a bare `birdc`
+  reaches no daemon at all and each socket must be named. They are read in a
+  single `sh -c` loop, split on `bird.SESSION_MARKER`, because an exec is ~50ms:
+  per-peer execs at 50 peers overrun the poll interval and the controller
+  becomes contention the run then reports as someone else's.
+- **Every configured peer appears in every poll**, with `offered=None` where the
+  read failed. `observe()` rejects a poll whose session keys differ from the
+  first one — dropping a key would let the peers that remain satisfy "the whole
+  table was offered".
+- **`expected` is the configured table size** (`len(p['paths'])`), never
+  `tester_offering()['configured']`. That is the generator's own report of what
+  it loaded, a cross-check; using it as the yardstick would make a generator
+  that loaded half its config look complete.
+- **The poll thread stops.** It waits on `controller_stop` like the other
+  samplers, and `finish_bench()` sets `stop_monitoring` on the testers too, so a
+  batch does not accumulate one exec loop per cell into containers that are gone.
+
+**A BIRD 2.19 offered count is queue-side.** `Export updates accepted` counts a
+route when it is handed to the BGP protocol, not when it hits the wire, so it
+saturates before the instrument first looks: in the 4-peer x 250k verification
+the generator reported all 1,000,000 prefixes offered at 1.94s while the monitor
+had seen 215,552 and the target held full tables from 2 of 4 peers. The count
+and the completion fact are sound; the *duration* is not. Repeated runs put
+between 0 and 153,744 of the million inside the measured interval depending
+purely on where the first poll landed, and polling at 0.2s made it worse — a
+confident-looking 21452 prefixes/s that was the slope of the last 6,436
+prefixes. `tester_metrics()` publishes `offered_in_interval` beside
+`offered_rate_pps` for that reason; never read the rate without it, and do not
+call a BIRD 2.19 run tester-limited from it. Wire-side evidence needs BIRD 3's
+`TX pending`, i.e. running the generator on `bgperf/bird:3.3.2`, which the CLI
+cannot select today.
+
 ### Host contention — `contention.py`
 
 A benchmark sharing its machine reports numbers that look fine and are not comparable with

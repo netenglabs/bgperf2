@@ -537,8 +537,18 @@ def tester_metrics(events: Iterable[LifecycleEvent], producer: str):
     # A rate also needs a measured interval to divide by. At a 1s poll a small
     # workload finishes inside one sample, and 'offered / 0' is not an infinite
     # rate, it is an interval too short for this instrument to resolve.
+    #
+    # `offered_in_interval` is published beside the rate because on its own the
+    # rate cannot be read safely. BIRD 2.19 counts an export when the route is
+    # handed to the BGP protocol, not when it reaches the wire, so a 1M-prefix
+    # table is already fully 'offered' at the first poll: measured at 0.2s
+    # intervals that run reported 21452 prefixes/s, which is the slope of the
+    # last 6436 prefixes and not the generator's send rate at all. Saying how
+    # much of the table the interval covers makes that visible instead of
+    # publishing a precise-looking artifact of the poll cadence.
     rate = None
-    if offered is not None and injection_s and first is not None:
+    offered_in_interval = None
+    if offered is not None and first is not None:
         already_sent = first.counters.get('offered_prefixes')
         # BIRD resets a protocol's route-change stats when the protocol
         # restarts, so a session that flapped mid-run can report fewer offered
@@ -546,12 +556,15 @@ def tester_metrics(events: Iterable[LifecycleEvent], producer: str):
         # negative send rate, it is a counter this instrument cannot read
         # across the reset.
         if already_sent is not None and offered >= already_sent:
-            rate = (offered - already_sent) / injection_s
+            offered_in_interval = offered - already_sent
+            if injection_s:
+                rate = offered_in_interval / injection_s
 
     return {
         'tester_startup_s': startup_s,
         'injection_s': injection_s,
         'offered_prefixes': offered,
+        'offered_in_interval': offered_in_interval,
         'offered_rate_pps': rate,
     }
 
@@ -580,15 +593,48 @@ def monitor_metrics(events: Iterable[LifecycleEvent]):
     }
 
 
-def event_artifact(events: Iterable[LifecycleEvent], status):
-    '''Build the stable JSON-compatible event artifact document.'''
+def event_artifact(events: Iterable[LifecycleEvent], status, testers=None):
+    '''Build the stable JSON-compatible event artifact document.
+
+    `testers` maps a generator's producer name to whatever evidence it holds
+    outside the event stream -- blocked-write availability, a poll that could
+    not be recorded. Its intervals are derived from the events themselves, so a
+    generator that produced none is reported with null intervals rather than
+    left out: a run where the tester was never readable and a run with no
+    tester at all must not produce the same document.
+    '''
     if status not in ('converged', 'failed'):
         raise ValueError('status must be converged or failed')
     events = ordered_events(events)
-    return {
+    artifact = {
         'schema': EVENT_ARTIFACT_SCHEMA,
         'clock': 'monotonic',
         'status': status,
         'measurements': monitor_metrics(events),
         'events': [event.to_dict() for event in events],
     }
+    if testers:
+        artifact['testers'] = {
+            producer: _tester_section(events, producer, evidence)
+            for producer, evidence in testers.items()
+        }
+    return artifact
+
+
+def _tester_section(events, producer, evidence):
+    '''One generator's derived intervals, plus its non-event evidence.
+
+    The evidence is caller-supplied, so it is refused where it would land on a
+    derived name. Merging blindly would let a caller overwrite a measured
+    interval with a value nothing in the event stream supports -- which is the
+    one thing this artifact exists to make impossible.
+    '''
+    measured = tester_metrics(events, producer)
+    evidence = dict(evidence or {})
+    collisions = sorted(set(evidence) & set(measured))
+    if collisions:
+        raise MeasurementEventError(
+            'tester evidence for {0} would overwrite derived {1}'.format(
+                producer, ', '.join(collisions)))
+    measured.update(evidence)
+    return measured

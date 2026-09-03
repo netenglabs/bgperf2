@@ -8,7 +8,9 @@ differs between the two series that `prepare` builds.
 '''
 import pytest
 
-from bird import parse_protocols, tester_offering
+from bird import (SESSION_MARKER, parse_protocols, split_session_output,
+                  tester_offering)
+from tester import BIRDTester
 from measurements import (
     EventKind,
     EventOrderError,
@@ -596,4 +598,172 @@ def test_a_counter_reset_mid_run_yields_no_rate_rather_than_a_negative_one():
     ]
 
     m = tester_metrics(swapped, 'tester')
+    assert m['offered_rate_pps'] is None
+
+
+# --- reading the running containers ------------------------------------------
+
+class StubbedBIRDTester(BIRDTester):
+    '''A BIRD tester whose container reads are canned.
+
+    Only `local()` is replaced, so the command that would be exec'd and the
+    parsing of its reply are the real ones.
+    '''
+
+    def __init__(self, host_dir, conf, reply=''):
+        super().__init__('t1', str(host_dir), conf, image='bgperf/bird')
+        self._reply = reply
+        self.execs = []
+
+    def local(self, cmd, **kwargs):
+        self.execs.append(cmd)
+        if isinstance(self._reply, Exception):
+            raise self._reply
+        return self._reply.encode('utf-8')
+
+
+def peers(*ids, paths=100):
+    return {'neighbors': {i: {'router-id': i, 'paths': ['10.0.0.0/32'] * paths}
+                          for i in ids}}
+
+
+def sessions_reply(*bodies):
+    return ''.join('{0}{1}\n{2}\n'.format(SESSION_MARKER, key, text)
+                   for key, text in bodies)
+
+
+def test_sections_are_split_on_their_marker():
+    text = sessions_reply(('10.0.0.1', 'first'), ('10.0.0.2', 'second\nmore'))
+
+    assert split_session_output(text) == {
+        '10.0.0.1': 'first',
+        '10.0.0.2': 'second\nmore',
+    }
+
+
+def test_output_before_the_first_marker_belongs_to_no_session():
+    '''A shell that greets before the loop starts must not have its banner
+    parsed as the first peer's answer.'''
+    text = 'noise from the shell\n' + sessions_reply(('10.0.0.1', 'first'))
+
+    assert split_session_output(text) == {'10.0.0.1': 'first'}
+
+
+def test_one_poll_covers_every_configured_peer(tmp_path, fixture_text):
+    capture = fixture_text('bird2_tester_show_protocols_all.txt')
+    tester = StubbedBIRDTester(
+        tmp_path, peers('10.0.0.1', '10.0.0.2'),
+        sessions_reply(('10.0.0.1', capture), ('10.0.0.2', capture)))
+
+    offerings = tester.get_offerings()
+
+    assert sorted(offerings) == ['10.0.0.1', '10.0.0.2']
+    assert all(o.established for o in offerings.values())
+    assert [o.offered for o in offerings.values()] == [100, 100]
+
+
+def test_the_poll_is_one_exec_however_many_peers(tmp_path, fixture_text):
+    '''One docker exec per poll, not one per peer: at 50 peers the per-exec
+    cost overruns the poll interval and the controller becomes the contention
+    the run then reports.'''
+    tester = StubbedBIRDTester(tmp_path, peers('10.0.0.1', '10.0.0.2', '10.0.0.3'))
+
+    tester.get_offerings()
+
+    assert len(tester.execs) == 1
+    command = tester.execs[0]
+    assert command[:2] == ['sh', '-c']
+    # Each peer's own control socket is named; a bare `birdc` in a tester
+    # container reaches no daemon at all.
+    for key in ('10.0.0.1', '10.0.0.2', '10.0.0.3'):
+        assert '{0}/{1}.ctl'.format(tester.guest_dir, key) in command[2]
+        assert SESSION_MARKER + key in command[2]
+
+
+def test_a_peer_that_did_not_answer_is_still_polled(tmp_path, fixture_text):
+    '''Dropping the peer instead would change the session key set, and the
+    recorder would then reject every later poll -- losing the run's tester
+    evidence because one socket was slow to appear.'''
+    capture = fixture_text('bird2_tester_show_protocols_all.txt')
+    tester = StubbedBIRDTester(tmp_path, peers('10.0.0.1', '10.0.0.2'),
+                               sessions_reply(('10.0.0.1', capture)))
+
+    offerings = tester.get_offerings()
+
+    assert sorted(offerings) == ['10.0.0.1', '10.0.0.2']
+    silent = offerings['10.0.0.2']
+    assert silent.offered is None
+    assert silent.established is False
+    assert silent.expected == 100
+    assert silent.complete is False
+
+
+def test_a_failed_exec_leaves_every_session_unreadable(tmp_path):
+    tester = StubbedBIRDTester(tmp_path, peers('10.0.0.1', '10.0.0.2'),
+                               RuntimeError('container is not running'))
+
+    offerings = tester.get_offerings()
+
+    assert sorted(offerings) == ['10.0.0.1', '10.0.0.2']
+    assert all(o.offered is None for o in offerings.values())
+
+
+def test_expected_comes_from_the_configuration_not_the_generator(tmp_path,
+                                                                 fixture_text):
+    '''The capture is a generator that loaded 100 routes. Configured for 200,
+    it is half-loaded, and judging it against its own report would call that
+    complete.'''
+    capture = fixture_text('bird2_tester_show_protocols_all.txt')
+    tester = StubbedBIRDTester(tmp_path, peers('10.0.0.1', paths=200),
+                               sessions_reply(('10.0.0.1', capture)))
+
+    offering = tester.get_offerings()['10.0.0.1']
+
+    assert offering.expected == 200
+    assert offering.configured == 100
+    assert offering.offered == 100
+    assert offering.complete is False
+
+
+def test_a_generator_that_cannot_report_backpressure_is_not_polled_for_it(tmp_path,
+                                                                          fixture_text):
+    '''BIRD 2.19 has no TX-pending field, and the synthetic tester image is
+    2.19. Recording 0 would assert the generator was never blocked.'''
+    capture = fixture_text('bird2_tester_show_protocols_all.txt')
+    tester = StubbedBIRDTester(tmp_path, peers('10.0.0.1'),
+                               sessions_reply(('10.0.0.1', capture)))
+
+    offering = tester.get_offerings()['10.0.0.1']
+
+    assert offering.tx_pending_bytes is None
+    assert offering.pending_prefixes is None
+
+
+def test_the_share_of_the_table_the_rate_covers_is_published_with_it():
+    '''BIRD 2.19 counts an export when the route is handed to the BGP
+    protocol, not when it reaches the wire, so a 1M-prefix table is already
+    fully offered at the first poll. Measured at 0.2s that real run reported
+    21452 prefixes/s -- the slope of the last few thousand prefixes, not the
+    generator's send rate. The rate is only safe to read beside the share of
+    the table it covers.'''
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=0.2)
+    r.observe(1.0, {'a': offering(expected=1_000_000, offered=993_564)})
+    r.observe(1.3, {'a': offering(expected=1_000_000, offered=1_000_000)})
+
+    m = metrics(r)
+    assert m['offered_prefixes'] == 1_000_000
+    assert m['offered_in_interval'] == 6_436
+    assert m['offered_rate_pps'] == pytest.approx(6_436 / 0.3)
+
+
+def test_a_table_offered_before_the_first_poll_covers_none_of_the_interval():
+    '''The 1s-poll form of the same run: the whole table is there when the
+    instrument first looks, so nothing at all was measured arriving.'''
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    r.observe(1.9, {'a': offering(expected=1_000_000, offered=1_000_000)})
+
+    m = metrics(r)
+    assert m['offered_prefixes'] == 1_000_000
+    assert m['injection_s'] == 0.0
+    assert m['offered_in_interval'] == 0
     assert m['offered_rate_pps'] is None

@@ -232,28 +232,35 @@ tests, and a failed fake run still produces an event artifact.
 
 ### Phase 2: Instrument the BIRD synthetic tester
 
-Status: in progress. The Docker-free half landed on 2026-09-02 — `bird.py` now
-parses `birdc show protocols all` by column name, `tester_offering()` summarises
-what a generator says it put on the wire, and `measurements.TesterEventRecorder`
-turns polled sessions into `tester_session_ready`/`tester_first_update`/
-`tester_last_update`/`tester_complete` with `tester_metrics()` deriving
-`tester_startup_s`, `injection_s`, `offered_prefixes` and `offered_rate_pps`.
-Both parser and recorder are covered against real 2.19 and 3.3.2 captures.
+Status: complete on 2026-09-02. `bird.py` parses `birdc show protocols all` by
+column name, `tester_offering()` summarises what a generator says it put on the
+wire, and `measurements.TesterEventRecorder` turns polled sessions into
+`tester_session_ready`/`tester_first_update`/`tester_last_update`/
+`tester_complete` with `tester_metrics()` deriving `tester_startup_s`,
+`injection_s`, `offered_prefixes`, `offered_in_interval` and
+`offered_rate_pps`. `bench()` polls each generator that declares
+`REPORTS_OFFERING` at the monitor's own 1s cadence, merges its events into the
+one ordered `<prefix>.events.json` stream, and publishes the derived intervals
+under a per-generator `testers` section beside `backpressure` and any
+`observation_error`. Both parser and recorder are covered against real 2.19 and
+3.3.2 captures.
 
-Remaining: poll the tester containers during `bench()`, merge the tester events
-into the run artifact, and run the one-tester/one-target Docker verification the
-exit criterion asks for. `post_injection_tail_s` is deliberately still absent —
-it spans tester and monitor events and needs a signed interval helper, since the
-contract allows it to be negative when injection and convergence overlap.
+`post_injection_tail_s` is deliberately still absent — it spans tester and
+monitor events and needs a signed interval helper, since the contract allows it
+to be negative when injection and convergence overlap.
 
-Three things the wiring has to get right:
+Four things the wiring had to get right:
 
 - **A BIRD tester runs one `bird` per peer, each on its own control socket.**
   `BIRDTester.get_startup_cmd()` launches `bird -c <guest_dir>/<router-id>.conf
   -s <guest_dir>/<router-id>.ctl` per neighbour, so a bare `birdc` inside a
-  tester container reaches no daemon at all. The poller must run
-  `birdc -s <guest_dir>/<router-id>.ctl 'show protocols all'` once per peer and
-  pass the results as one `TesterEventRecorder.observe()` call.
+  tester container reaches no daemon at all. `get_offerings()` names every
+  socket and passes the results as one `TesterEventRecorder.observe()` call.
+- **One `docker exec` per poll, not one per peer.** Every socket is read in a
+  single `sh -c` loop whose sections are separated by `bird.SESSION_MARKER`,
+  because an exec is ~50ms: at 50 peers a per-peer poll cannot keep up with a
+  1s cadence and the controller becomes contention the run then reports as
+  someone else's.
 - **Every configured peer must appear in every poll**, with `offered=None` where
   the read failed. `observe()` rejects a poll whose session keys differ from the
   first one, because dropping a key would let `all(complete)` be satisfied by
@@ -263,7 +270,7 @@ Three things the wiring has to get right:
   what it loaded and is a cross-check; using it as the yardstick would make a
   generator that loaded half its config look complete.
 
-Two findings worth carrying forward:
+Three findings worth carrying forward:
 
 - BIRD 3 inserts `RX limit` and `limit` columns into the route-change-stats
   table, so the column that is `accepted` on 2.19 is `RX limit` on 3.3.2. Read
@@ -273,6 +280,45 @@ Two findings worth carrying forward:
   neither. The synthetic tester runs the unversioned `bgperf/bird` image, which
   is 2.19, so backpressure is recorded as unavailable-with-a-reason rather than
   as zero.
+
+- **BIRD 2.19's offered counter is queue-side, and saturates.** `Export
+  updates accepted` counts a route when it is handed to the BGP protocol, not
+  when it reaches the wire. In the 4-peer x 250k Docker verification the
+  generator reported all 1,000,000 prefixes offered at 1.94s, while the monitor
+  had seen 215,552 and the target itself held full tables from only 2 of the 4
+  peers. So the *count* is exact and completion is positively observed, but the
+  injection *duration* is not resolvable from this counter: repeated runs put
+  between 0 and 153,744 of the million inside the measured interval purely
+  according to where the first poll landed. Polling at 0.2s did not fix it, it
+  made it worse — it reported a confident `21452 prefixes/s` that was the slope
+  of the last 6,436 prefixes. `tester_metrics()` therefore publishes
+  `offered_in_interval` beside `offered_rate_pps`, so a tail slope cannot be
+  read as a send rate, and Phase 4 must not derive a tester-limited finding
+  from a BIRD 2.19 rate. Wire-side evidence needs BIRD 3's `TX pending`, which
+  means running the generator on `bgperf/bird:3.3.2`; the tester image is not
+  selectable from the CLI today.
+
+#### Docker verification
+
+Run on 2026-09-02 on an 8-core / 30 GB host (not the 64 GB campaign host), with
+`-d /var/tmp/bgperf` and results outside the campaign tree: `bench -t bird -n 1
+-p 50000` and `bench -t bird -n 4 -p 250000`. Both reported the exact expected
+offered count (50,000 and 1,000,000) from the generator's own CLI, an observed
+`tester_complete` for every session, `tester_startup_s` of 1.1s and 1.9s, and
+backpressure recorded as unavailable-with-a-reason on 2.19. No tester errors or
+timeouts; foreign CPU 4-7%.
+
+Review raised one contention question worth recording: the poll runs `sh -c`
+inside the tester, and `sh` is deliberately absent from
+`contention.BGPERF_PROCESSES` (interpreters are excluded because
+`/proc/<pid>/comm` for a script-driven neighbour workload *is* the interpreter),
+so a first-seen shell would be charged as foreign CPU. Measured rather than
+argued: 46 polls in a 10s window — 5x the production rate — put zero `sh` or
+`birdc` processes in either `/proc` sample and contributed 0.0% to
+`foreign_cpu_percent`. The shell forks `birdc` and waits, so its own CPU is
+nil and it is too short-lived to be sampled. Left as it is; allowlisting `sh`
+would reopen the hole that made the whole feature report a clean machine while
+a neighbouring `python3 train.py` used eight cores.
 
 #### Defect found while instrumenting: BIRD 3 targets reported accepted = 0
 

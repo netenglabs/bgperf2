@@ -686,6 +686,11 @@ class Target(Container):
 class Tester(Container):
 
     CONTAINER_NAME_PREFIX = None
+    # Set by a generator that can be asked what it has put on the wire.
+    # bench() polls only those; a generator that cannot answer records its
+    # injection interval as unavailable rather than having one inferred from
+    # the monitor, which would measure the target and call it the tester.
+    REPORTS_OFFERING = False
 
     def __init__(self, name, host_dir, conf, image):
         Container.__init__(self, self.CONTAINER_NAME_PREFIX + name, image, host_dir, self.GUEST_DIR, conf)
@@ -699,6 +704,64 @@ class Tester(Container):
 
     def configure_neighbors(self, target_conf):
         raise NotImplementedError()
+
+    def get_offerings(self):
+        '''One measurements.TesterOffering per configured peer, keyed by
+        session name.
+
+        Every configured peer must appear in every poll, with offered=None
+        where the read failed: TesterEventRecorder rejects a poll whose session
+        keys differ from the first one, because a peer that quietly dropped out
+        would let the peers that remain satisfy 'the whole table was offered'.
+        '''
+        raise NotImplementedError()
+
+    def offering_stats(self, queue, stop, interval=1):
+        '''Poll this generator's own counters into the run's stats queue.
+
+        `stop` is the controller's stop Event rather than a sleep, for the
+        reason the other samplers use it: batch() runs every cell in this
+        process, so a poll loop that outlives its run keeps exec'ing into
+        containers for every later cell and becomes contention the benchmark
+        then reports as someone else's.
+        '''
+        def poll():
+            while not stop.is_set() and not self.stop_monitoring:
+                # Stamped before the read, not after. One poll is a single exec
+                # running a `birdc` per peer, which at 50-100 peers takes long
+                # enough to matter: timestamping on return would date every
+                # counter to when the read *finished* and silently inflate
+                # tester_startup_s by up to a whole read, while each event still
+                # claims the nominal cadence. Before the read is a lower bound
+                # on when the counters were true, which is the honest end of the
+                # interval to report.
+                sampled_at = time.monotonic()
+                try:
+                    sessions = self.get_offerings()
+                except Exception as e:
+                    # A poll that could not be read is missing evidence, not a
+                    # reason to end a run that is otherwise producing a result --
+                    # but it has to be *said*. Swallowing it silently leaves an
+                    # artifact whose null injection interval cannot be told
+                    # apart from a generator that was read fine and never
+                    # finished, which is the one ambiguity this section exists
+                    # to remove.
+                    queue.put({'who': self.name,
+                               'tester_offering_error': repr(e),
+                               'monotonic_s': sampled_at,
+                               'time': datetime.datetime.now()})
+                    sessions = None
+                if sessions:
+                    queue.put({'who': self.name,
+                               'tester_offering': sessions,
+                               'monotonic_s': sampled_at,
+                               'time': datetime.datetime.now()})
+                if stop.wait(interval):
+                    return
+
+        t = Thread(target=poll)
+        t.daemon = True
+        t.start()
 
     def run(self, target_conf, dckr_net_name):
         self.ctn = super(Tester, self).run(dckr_net_name)

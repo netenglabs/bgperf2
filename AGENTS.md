@@ -120,6 +120,10 @@ parsing must stay incremental and memory-conscious.
   classify its own load as foreign CPU contention.
 - The legacy `testers (s)` field is `elapsed (s)` minus time to the first monitor-visible prefix. It does not
   record tester completion, so its proximity to elapsed time cannot establish that a run was injection-bound.
+- Tester completion is recorded separately, in each run's `.events.json` `testers` section, by polling the
+  generator's own counters. A BIRD 2.19 offered count is queue-side: the count and the completion fact are
+  sound, the injection duration and rate are not. Read `offered_rate_pps` only beside `offered_in_interval`,
+  and do not derive a tester-limited verdict from a BIRD 2.19 rate.
 - The project is effectively IPv4-only today. Changes that appear to add IPv6 support need updates in prefix
   generation, peering, monitor accounting, and MRT playback behavior.
 

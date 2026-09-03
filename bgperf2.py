@@ -56,7 +56,8 @@ from monitor import Monitor
 from convergence import ConvergenceTracker
 from contention import (describe_contention, foreign_cpu_percent,
                         is_memory_backed, own_process_tree, sample_processes)
-from measurements import MonitorEventRecorder, event_artifact, monitor_metrics
+from measurements import (MonitorEventRecorder, TesterEventRecorder,
+                          event_artifact, monitor_metrics, tester_metrics)
 from settings import dckr
 from queue import Queue
 from mako.template import Template
@@ -782,6 +783,64 @@ def monitor_sample_monotonic_s(info, fallback_clock=None):
     return (fallback_clock or time.monotonic)()
 
 
+# The generators are polled at the monitor's cadence so the two sides of a run
+# are read at the same resolution. Every derived tester interval is quantised by
+# it, which is why it is recorded on each event rather than assumed.
+TESTER_POLL_INTERVAL_S = 1
+
+
+def observe_tester_sample(info, recorders, errors):
+    '''Feed one polled generator sample to its recorder.
+
+    A recorder that rejects a sample -- a poll that went backwards, or one
+    whose session keys changed -- is retired here with the reason kept for the
+    artifact. The events it already holds stay usable, and a fault in the
+    measurement wiring never ends a run that is otherwise producing a result.
+    '''
+    recorder = recorders.get(info['who'])
+    if recorder is None or info['who'] in errors:
+        return False
+    try:
+        # measurements.MeasurementEventError is a ValueError; the rest of what
+        # observe() rejects (a bad counter, a value that is not an offering)
+        # raises the plain builtin kinds.
+        recorder.observe(info['monotonic_s'], info['tester_offering'])
+    except (ValueError, TypeError) as e:
+        errors[info['who']] = str(e)
+        return False
+    return True
+
+
+def note_tester_read_failure(info, failures):
+    '''Count a poll that could not be read, keeping the first reason.
+
+    Deliberately not the dict that retires a recorder: a read can fail once
+    while the container is still coming up and succeed for the rest of the run,
+    and retiring the generator's measurement over that would throw away the
+    evidence the poll exists to collect.
+    '''
+    record = failures.setdefault(
+        info['who'], {'polls': 0, 'first_reason': info['tester_offering_error']})
+    record['polls'] += 1
+    return record
+
+
+def tester_lifecycle_summary(recorders, errors, read_failures=None):
+    '''Merged generator events, and the evidence that is not an event.'''
+    read_failures = read_failures or {}
+    events = []
+    evidence = {}
+    for name, recorder in recorders.items():
+        events.extend(recorder.events)
+        detail = {'backpressure': recorder.backpressure}
+        if name in errors:
+            detail['observation_error'] = errors[name]
+        if name in read_failures:
+            detail['read_failures'] = read_failures[name]
+        evidence[name] = detail
+    return events, evidence
+
+
 def bench(args):
     output_stats = {}
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
@@ -1066,6 +1125,23 @@ def bench(args):
         # if args.prefix_num >= 100_000:
         #     time.sleep(1)
 
+    # Ask the generators themselves what they have put on the wire. This is
+    # measured at the tester, so an injection interval is evidence rather than
+    # something inferred from when the monitor happened to see prefixes -- the
+    # legacy `testers (s)` column is that inference, and it cannot tell a slow
+    # generator from a slow target. Polling starts after launch because nothing
+    # is running in those containers until start.sh has been exec'd.
+    tester_lifecycles = {}
+    tester_observation_errors = {}
+    tester_read_failures = {}
+    for t in testers:
+        if not getattr(t, 'REPORTS_OFFERING', False):
+            continue
+        tester_lifecycles[t.name] = TesterEventRecorder(
+            bench_clock_started_s, producer=t.name,
+            sample_interval_s=TESTER_POLL_INTERVAL_S)
+        t.offering_stats(q, controller_stop, TESTER_POLL_INTERVAL_S)
+
     f = open(args.output, 'w') if args.output else None
     cpu = 0
     mem = 0
@@ -1125,6 +1201,12 @@ def bench(args):
                 foreign = info['foreign_cpu']
                 if foreign > output_stats['max_foreign_cpu']:
                     output_stats['max_foreign_cpu'] = foreign
+        if 'tester_offering' in info:
+            observe_tester_sample(info, tester_lifecycles,
+                                  tester_observation_errors)
+        elif 'tester_offering_error' in info:
+            note_tester_read_failure(info, tester_read_failures)
+
         if info['who'] == m.name:
 
             sample_monotonic_s = monitor_sample_monotonic_s(info)
@@ -1157,7 +1239,10 @@ def bench(args):
                 print("FAILED")
                 return finish_bench(
                     args, output_stats, bench_stats, bench_start, target, m,
-                    testers, fail=True, lifecycle_events=lifecycle.events)
+                    testers, fail=True, lifecycle_events=lifecycle.events,
+                    tester_lifecycles=tester_lifecycles,
+                    tester_observation_errors=tester_observation_errors,
+                    tester_read_failures=tester_read_failures)
 
             if status == ConvergenceTracker.CONVERGED:
                 lifecycle.confirm_convergence(sample_monotonic_s)
@@ -1176,7 +1261,10 @@ def bench(args):
                 bench_stats = bench_stats[0:len(bench_stats)-assurance]
                 return finish_bench(
                     args, output_stats, bench_stats, bench_start, target, m,
-                    testers, lifecycle_events=lifecycle.events)
+                    testers, lifecycle_events=lifecycle.events,
+                    tester_lifecycles=tester_lifecycles,
+                    tester_observation_errors=tester_observation_errors,
+                    tester_read_failures=tester_read_failures)
 
             if elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
                 bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
@@ -1235,9 +1323,9 @@ def write_provenance(args, provenance, prefix):
     return path
 
 
-def write_event_artifact(args, events, prefix, status):
+def write_event_artifact(args, events, prefix, status, testers=None):
     '''Atomically preserve lifecycle evidence before post-run collection.'''
-    doc = event_artifact(events, status)
+    doc = event_artifact(events, status, testers=testers)
     doc['run'] = {
         'name': run_name(args),
         'peers': args.neighbor_num,
@@ -1255,19 +1343,31 @@ def write_event_artifact(args, events, prefix, status):
 
 
 def finish_bench(args, output_stats, bench_stats, bench_start, target, m, testers=(), fail=False,
-                 lifecycle_events=()):
+                 lifecycle_events=(), tester_lifecycles=None,
+                 tester_observation_errors=None, tester_read_failures=None):
 
     bench_stop = time.time()
     output_stats['total_time'] = bench_stop - bench_start
     m.stop_monitoring = True
     target.stop_monitoring = True
+    for t in testers:
+        # The generator pollers watch controller_stop too, but they exec into
+        # containers this run is about to walk away from, so they are told
+        # twice rather than left racing the teardown.
+        t.stop_monitoring = True
     controller_stop.set()
+
+    tester_events, tester_evidence = tester_lifecycle_summary(
+        tester_lifecycles or {}, tester_observation_errors or {},
+        tester_read_failures or {})
+    lifecycle_events = list(lifecycle_events) + tester_events
 
     pre = run_name(args).replace(' ', '_')
     bench_prefix = f"{pre}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
     write_event_artifact(
         args, lifecycle_events, bench_prefix,
-        status='failed' if fail else 'converged')
+        status='failed' if fail else 'converged',
+        testers=tester_evidence)
 
     # Scan the tester logs only after the clock has stopped. These used to run
     # in bench() before bench_stop, so walking every tester log line by line --
@@ -1287,6 +1387,7 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
     target_version = provenance['target']['version']
 
     print_final_stats(args, target_version, output_stats)
+    print_tester_metrics(lifecycle_events, tester_evidence)
     o_s = create_output_stats(args, target_version, output_stats, fail, provenance)
     print(stats_header())
     print(','.join(map(str, o_s)))
@@ -1298,6 +1399,51 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
     write_provenance(args, provenance, bench_prefix)
     return o_s
 
+
+
+def print_tester_metrics(events, producers):
+    '''Report each generator's own injection interval, or why there is none.
+
+    Deliberately printed beside the legacy `testers (s)` column rather than
+    instead of it: that column is elapsed minus time-to-first-prefix, which is
+    a property of the target and monitor, and the two must not be read as
+    versions of the same measurement.
+    '''
+    for producer in sorted(producers):
+        measured = tester_metrics(events, producer)
+        offered = measured['offered_prefixes']
+        startup = measured['tester_startup_s']
+        startup_text = 'unmeasured' if startup is None else f"{startup:.1f}s"
+        if measured['injection_s'] is None:
+            print(f"{producer}: ready after {startup_text}, injection unmeasured "
+                  f"(no observed completion for every session)")
+            continue
+        covered = measured['offered_in_interval']
+        if covered is None:
+            # The counter went backwards: BIRD clears a protocol's route-change
+            # stats when it restarts, so a session that flapped reports fewer
+            # offered prefixes at completion than at the first update. The
+            # interval is real but nothing can be said about what crossed it --
+            # and calling that 'shorter than one poll' would describe a long
+            # injection as an instant one.
+            print(f"{producer}: ready after {startup_text}, offered {offered} "
+                  f"prefixes over {measured['injection_s']:.1f}s, rate "
+                  f"unavailable (the generator's counter was reset mid-run)")
+            continue
+        rate = measured['offered_rate_pps']
+        if rate is None:
+            # The whole table was already offered when the instrument first
+            # looked. That is not an instant injection, it is one this poll
+            # cadence cannot resolve, and it must not read as a duration.
+            print(f"{producer}: ready after {startup_text}, offered {offered} "
+                  f"prefixes, injection shorter than one poll")
+            continue
+        # The rate covers only the part of the table that arrived inside the
+        # measured interval; printing that share keeps a tail slope from being
+        # read as the generator's send rate.
+        print(f"{producer}: ready after {startup_text}, offered {offered} "
+              f"prefixes, {covered} of them in the measured "
+              f"{measured['injection_s']:.1f}s ({rate:.0f} prefixes/s)")
 
 
 def print_final_stats(args, target_version, stats):

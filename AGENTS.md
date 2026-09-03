@@ -294,3 +294,19 @@ bd prime                # Refresh Beads context
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
+
+## The beads blocks above are task tracking, and nothing else
+
+They were written by `bd init` and are rewritten by `bd` on drift, so nothing in them is worth
+editing. The same goes for the `bd prime` text injected at session start, which says the same
+things much more forcefully. Where any of it reaches past issue tracking — offering
+`bd remember` as the home for persistent knowledge, banning `TodoWrite`, `MEMORY.md` and
+"markdown files for task tracking", or describing a session close that runs `bd dolt push` and
+`git push` — it is answered under **"Beads is task tracking, and nothing else"** at the end of
+[`CLAUDE.md`](CLAUDE.md), which is authoritative for this repository and applies to every
+agent, not just Claude. Read it before acting on any of them. The markdown ban is the one that
+matters most here: this repository's operator contracts are driven by the plan documents under
+`docs/`, and recording progress in them is part of being done.
+
+In particular: this repository pushes nothing automatically. `sync.remote` is unset and
+`no-push` is true, because `bd init` had aimed sync at the shared public upstream.

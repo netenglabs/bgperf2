@@ -18,3 +18,14 @@ benchmarks/local/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+# bd's issue database, its backups and its runtime append log. Kept here rather than in
+# .beads/.gitignore, which bd rewrites on drift -- an ignore rule inside a tool-managed file
+# is one the tool can take away, and what it would expose is the whole issue store.
+/.beads/embeddeddolt/
+/.beads/dolt/
+/.beads/proxieddb/
+/.beads/backup/
+/.beads/interactions.jsonl
+/.beads/*.db
+/.beads/.env
+/.beads/ephemeral.sqlite3*

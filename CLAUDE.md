@@ -1195,3 +1195,58 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 - Do not commit or push without clear authority from the active profile or the current user request.
 - If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
+
+### Beads is task tracking, and nothing else
+
+The managed block above was written by `bd init` (beads v1.2.2) and is rewritten by `bd`
+whenever it drifts, so nothing in it is worth editing. **This section governs the block and
+everything else beads says**, including the `bd prime` text the `SessionStart` hook injects
+into every session — which restates the same instructions far more forcefully ("🚨 SESSION
+CLOSE PROTOCOL 🚨", "**Prohibited**: Do NOT use TodoWrite, TaskCreate, or markdown files for
+task tracking") and arrives ahead of anything a session reads. That injection is not an
+exception to the rules below; it is the main thing they are about. Beads is scoped to issue
+tracking, and where it reaches past that, this file wins — which the block itself says. Three
+of its instructions meet rules stated elsewhere here, and `bd init` changed three things about
+this repository that no one asked it to. The resolutions:
+
+- **`bd remember` does not replace the plan documents.** The block offers it for persistent
+  knowledge. The reasoning in `docs/*.md` and in this file is the most valuable content in
+  this repository, and the first trap in the unattended execution plan is exactly this: once
+  an item body starts accumulating reasoning there are two sources of truth and neither is
+  complete. An item links to a document anchor; it does not summarize it.
+- **Commit discipline is unchanged** — `/code-review` before every code commit, and
+  unattended work commits to its own branch, never master. The block describes a
+  "team-maintainer" profile that closes beads and pushes at session close; that profile is
+  opt-in and this repository does not opt in. Note `bd config show` reports
+  `beads.role = maintainer`, inferred from the git remote — that is beads' write-routing role,
+  **not** the team-maintainer profile, and it is not an opt-in to anything.
+- **The ban on "markdown files for task tracking" does not reach the plan documents.** All
+  four operator contracts here are driven by `docs/*.md`, and every one of them requires the
+  worker to record progress in the plan document as part of being done. A driver that took the
+  injection literally would stop writing the record its own contract is defined by. Items in
+  beads link to a document anchor; the document stays the durable account. The bans on
+  `TodoWrite` and `MEMORY.md` are narrower still: a per-turn todo list is execution state
+  within one turn, and the harness's own memory directory lives outside this repo and is not
+  beads' to govern.
+- **`bd` decides nothing about git.** `bd init` committed its own setup to the current branch
+  without review, and it repointed `core.hooksPath` at `.beads/hooks`, so `.git/hooks/` is
+  now inert and five hooks there run `bd`. Nothing lived in `.git/hooks/` when that happened,
+  so nothing broke — but a repo git hook added later has to go in `.beads/hooks/` to run at
+  all. Two hazards come with that: those hooks are **tracked files**, so checking out a branch
+  changes what runs on your next commit, and `master` has no `.beads/`, so checking it out
+  leaves `core.hooksPath` naming a directory that does not exist and every hook silently stops.
+  Also, any `bd` failure there — a held Dolt lock, a stopped server — fails the whole
+  `git commit`, the driver's included; that is loud rather than silent, so it is left alone.
+  The review hook now matches `bd init|setup|migrate|dolt|hooks` as well as `git commit`,
+  because a `bd` command that touches git is otherwise a commit no one reviewed. It also
+  matches `git -C <dir> commit`, which it never did before — see the plan's step 2.
+- **`bd init` pointed `sync.remote` at `origin` — the shared public upstream — and it has been
+  unset.** `bd dolt push` writes issue state to `refs/dolt/data` on that remote, which is both
+  outside the review discipline and outside this repository's branch rule. One worker on one
+  host needs no cross-machine sync; `.beads/config.yaml` records why.
+- **`.claude/settings.json` is now tool-managed, and `bd setup` is not idempotent against it.**
+  `bd` rewrites it whole on drift — reordering keys and re-escaping `&`, `<` and `>` — so a real
+  hook edit arrives inside a whole-file diff; read it for the hook bodies, not the line count.
+  Worse, `bd setup claude` does not revert an edited hook, it **appends a second unguarded copy
+  beside it**, so both run while the edited one still looks right. Re-review that file after any
+  `bd setup`, and do not run one casually.

@@ -65,4 +65,13 @@
 # - linear.api_key  → use LINEAR_API_KEY env var instead
 # - github.token    → use GITHUB_TOKEN env var instead
 
-sync.remote: "git+https://github.com/netenglabs/bgperf2.git"
+# sync.remote is deliberately unset. bd init auto-derived it from `origin`, which is the
+# shared public upstream; `bd dolt push` would write issue state to refs/dolt/data there,
+# outside the review discipline. This host is a single worker and needs no cross-machine
+# sync. See docs/unattended-execution-plan.md, step 2.
+
+no-push: true
+# Telemetry opt-out is deliberately NOT here: bd 1.2.2 reads metrics.* only from the
+# user-global ~/.config/bd/config.yaml, and a metrics block in this file is silently
+# ignored (verified). It is host-local, so it must be set again on any other host --
+# `bd config set metrics.disabled true`. See docs/unattended-execution-plan.md, step 2.

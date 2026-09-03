@@ -1,13 +1,14 @@
 # Unattended Execution Plan
 
-Status: proposed on 2026-09-03; steps 0 through 4 taken the same day.
+Status: proposed on 2026-09-03; steps 0 through 5 taken the same day.
 The continuation prompt at the end of this document is now an operator contract
 in `CLAUDE.md`, which settles two things this document deliberately left open --
-the driver's scope and where its commits go; see the contract. Step 5 is next:
-`bd` 1.2.2 is installed and initialized, the three epics exist, and the
-measurement plan's phases are seeded, so `bd ready --exclude-type=epic` offers
-the four untaken Phase 5A change sets and nothing else. Nothing here changes how
-the three existing contracts run, or any measurement semantics.
+the driver's scope and where its commits go; see the contract. Step 6 is next:
+`bd` 1.2.2 is installed and initialized, the three epics exist, the measurement
+plan's phases are seeded, and the 64 GB campaign's twelve blocks are seeded
+behind its release gate, so `bd ready --exclude-type=epic` offers the four
+untaken Phase 5A change sets and nothing else. Nothing here changes how the
+three existing contracts run, or any measurement semantics.
 
 ## Purpose
 
@@ -865,6 +866,62 @@ from step 4.
 
 **Exit criterion:** `bd ready` returns no campaign work while the release gate
 is open.
+
+#### Progress on 2026-09-03: twelve blocks behind the gate, and an edge bd will not store
+
+Done. `bd ready --exclude-type=epic` returns the four untaken Phase 5A change
+sets and nothing else; `bd blocked` lists all twelve campaign blocks, and
+they carry `plan:timing-64gb` by inheritance.
+
+**The exit criterion holds under the driver's query, and cannot hold under the
+bare one.** It asks that `bd ready` return no campaign work while the release
+gate is open. Plain `bd ready` still offers all three epics -- that is
+[step 3's finding](#progress-on-2026-09-03-three-epics-and-three-things-the-queue-does-not-say-out-loud),
+not a new one, and the reason the driver's query is
+`bd ready --exclude-type=epic`. No block is offered by either query.
+
+**`bd` refuses to let an epic depend on a task**, so the
+[work model's](#ordering-is-a-dependency-not-a-label) "the campaign epic is
+blocked by the release-gate item" is not expressible as written:
+`bd dep add bgperf2-iee bgperf2-8gg.9` fails with `epics can only block other
+epics, not tasks`. The available substitute -- blocking the campaign epic on
+the *measurement* epic -- was rejected twice over. It is
+[step 4's deadlock](#progress-on-2026-09-03-the-phases-are-seeded-and-a-parent-that-waits-on-its-children-deadlocks-its-children)
+a third time: a blocked parent propagates down to its children, so the whole
+campaign would wait on someone closing a bookkeeping epic the driver never
+claims. And it moves the gate from the plan document's checklist to a worker's
+judgement that the measurement epic is finished, which is exactly what
+[splitting the gate out of Phase 6](#granularity) was for. The structural
+guarantee lives on `bgperf2-iee.1` instead, which depends on `bgperf2-8gg.9`
+directly and is an item the driver does claim. The propagation itself was not
+re-tested here; nothing seeded in this step relies on it either way.
+
+**Block N is `bgperf2-iee.<N+1>`.** bd numbers children from 1 and the plan
+numbers blocks from 0, so the ids are offset by one for all twelve. Every title
+starts `64GB Block N:` so the item's own text is unambiguous; the offset is
+recorded here because a worker matching id suffixes against block numbers would
+be one block off the whole way down.
+
+**Blocks 2-4 and 5-7 are six items, not two.** The plan document gives each
+trio one section, but states its exit criterion *per block* -- "14 reviewed
+rows or explicit durable exclusions" -- and its review boundary is a block, so
+each repetition is its own item and names which of the three it is. Nothing is
+typed `epic` here: no block has turned out to need several reviewable change
+sets, and the [granularity rule](#granularity) says that happens when it turns
+out, not in advance.
+
+**Block 8 needs Phase 5A's four workloads and carries no edge saying so.** The
+BIRD architecture screen runs path diversity, export fan-out, churn and policy
+reload, which are `bgperf2-8gg.7.1` through `.7.4`. It is already blocked by
+all four transitively -- the chain runs through Block 0 to the release gate,
+which is downstream of every Phase 5A item -- and a direct edge would restate
+an ordering the tracker already enforces.
+
+**This step's output is untracked too**, for the reason steps 2 through 4
+record: `git status` is clean after creating twelve items and twelve
+dependencies, and this note is the durable record.
+
+Step 6 is next.
 
 ### Step 6: headless driver
 

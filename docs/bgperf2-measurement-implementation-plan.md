@@ -1801,6 +1801,306 @@ resume safely, and produce auditable summary statistics.
 
 ### Phase 5A: Add BIRD architecture workload controls
 
+Status: in progress. The peer-scaling workload landed on 2026-09-03; the
+remaining five work items below are untaken.
+
+#### Progress on 2026-09-03: peers can move without the table moving with them
+
+`--prefix-scope total` (batch: `prefix_scope: total` on a test) reads
+`--prefix-num` as the whole table and splits it evenly across the peers,
+instead of giving that many prefixes to each of them.
+
+The gap it closes is that **session count and table size are one axis today**.
+`gen_conf()` hands every neighbour its own `gen_paths(p)` off a single shared
+iterator, so the peers get disjoint prefixes and the table is `n * p`. Every
+synthetic matrix in `benchmarks/` therefore sweeps both at once:
+`2026-core-synth.yaml`'s `neighbors: [10, 50]` against `prefixes: [50_000,
+100_000]` holds 500k, 1M, 2.5M and 5M routes, and no reader of that CSV can
+separate "50 sessions were slower" from "five times the routes were slower".
+`benchmarks/2026-peer-scaling.yaml` is the same three targets at 10, 25 and 50
+sessions with 1,000,000 routes throughout.
+
+Three decisions worth keeping:
+
+- **It is normalised to a per-peer count before anything reads it**, in
+  `bench()` beside the image resolution and in `expand_batch_cells()` for a
+  batch -- never carried forward as a scope. `-n 50 -p 100000 --prefix-scope
+  total` and `-n 50 -p 2000` are the same workload, so they must produce the
+  same scenario (verified byte-identical through `./bgperf2.py config`), the
+  same cell identity, the same row and the same bar. Everything downstream is
+  keyed on the per-peer number -- the CSV column is literally `prefixes per
+  peer`, `bench_output_prefix()` names every artifact from `prefix_num`, and
+  `create_graph()` groups its bars by it -- so a scope that survived into those
+  would have to become a fourth dimension in all three, for a distinction that
+  describes how the run was *asked for* rather than what it did.
+- **An inexact division is refused rather than rounded or spread**, and refused
+  for every combination of the two axes before the first container starts. A
+  remainder means the peers do not all offer the same table, so `prefixes per
+  peer` is a number true of none of them, each neighbour's `check-points`
+  differs, and the monitor's own stops being `n * p`. A matrix is where such a
+  split is easy to write without noticing -- 1,050,000 divides by 10 and 25 but
+  not by 9 -- and finding out at cell three costs hours, so `check_batch_test()`
+  checks the whole grid and the message names peer and prefix counts that would
+  work rather than leaving the operator doing arithmetic on a full-table RIB.
+- **It is refused for the MRT testers, on both paths.** `gen_conf()` sets the
+  monitor check-point straight from `-p` for `gobgp` and `bgpdump2`, so `-p` is
+  already the whole table there. The first version refused it only on the CLI:
+  `check_batch_test()` and `expand_batch_cells()` never passed the tester, and
+  `batch()` sets `prefix_scope: per-peer` on the synthesized args, so
+  `bench()`'s own guard never saw it either. A batch would have divided a
+  1,050,000-prefix MRT table by its peer count and reported CONVERGED at
+  103,950 -- a tenth of the table -- with nothing in the row or the artifacts
+  saying so, while `CLAUDE.md` and this note both claimed the combination was
+  refused. The batch path is the one that matters: a CLI mistake costs one run,
+  a batch mistake costs a matrix, and nobody is watching it. One MRT target
+  poisons the whole test rather than only its own cells, because `prefixes` is
+  a single axis shared by every target and a test mixing an MRT generator with
+  a synthetic one under `total` cannot be right for both.
+- **The axes are checked for being numbers before they are divided.** A quoted
+  entry reached the arithmetic as a bare `TypeError` -- the traceback naming
+  neither the test nor the key that `check_batch_test()` exists to eliminate,
+  reintroduced by putting arithmetic in front of the type check.
+- **A suggestion the operator cannot act on is worse than none.** The refusal's
+  "or N peers" fell through to 1 at one end and walked to `prefix_num` at the
+  other, so a prime-ish table was answered with *or 1 or 4999999 peers* after a
+  fifth of a second of scanning. It reads as the tool having thought about it.
+  The scan is bounded by `MAX_SUGGESTED_PEERS` now, and the clause is omitted
+  when nothing usable exists -- the prefix counts either side are always exact
+  by construction, so the message is never empty.
+
+`benchmarks/2026-peer-scaling.yaml` is deliberately **not** registered in
+`scripts/run_2026_suite.sh`. The driver's `suite_config()` knows four suites
+and `all` runs those four; adding a fifth extends what
+`continue the 2026 benchmark campaign` runs, and what that campaign benches is
+the campaign owner's decision rather than a Phase 5A implementation detail --
+the run ID, the results root and the suite sequence are all fixed by that
+contract. Whoever adds it should add it there rather than running it by hand,
+since a `bgperf2.py batch` outside the driver gets none of its `COMPLETE`
+markers, config snapshotting or metadata, and its rows are then not comparable
+with the rest of the run ID.
+
+Its numbers are chosen so the suite can answer its own question, which took
+review to notice. The first version was 100,000 routes over up to 50 sessions
+in a single pass: the baseline's smallest cell (10 peers x 20,000) finished in
+4-5s, `elapsed (s)` is whole seconds off a 1s monitor poll, so the entire
+10-to-50-peer difference would have sat inside one or two polls and the axis
+would have been unreadable at the resolution of the instrument. And a
+single-pass test has no dispersion, so `apply_variance_rule()` withholds every
+verdict and prints nothing -- a suite whose output cannot say whether its
+differences are real is the reading error that rule exists to prevent. It is
+1,000,000 routes over three passes now, and the split stays exact at 10, 25 and
+50 peers as it does for any multiple of 50.
+
+**The suite trades one confound for a smaller one, and says so.** With
+`tester_type: bird` the generator runs one `bird` per neighbour, so the 50-peer
+cell runs 50 generator daemons against the 10-peer cell's 10, on the same box.
+The peer axis therefore still moves two things -- the target's session count
+and the generator fleet -- and no published column can separate them: `bird`
+and `birdc` are in `contention.BGPERF_PROCESSES`, so `max foreign cpu %` cannot
+report that load by construction, and `min idle%` is host-wide and cannot
+attribute it. This is the same blind spot `CLAUDE.md` records for the
+offering-poll `birdc` execs. It is a much smaller confound than the one removed
+-- generator processes rather than 50x the routes -- and the `tester_fleet`
+section says whether the load was delivered, which is the closest thing to
+evidence about it. The suite header states it, and whoever registers the suite
+should read `tester_fleet` alongside the timings rather than the timings alone.
+
+One pre-existing defect was fixed on the way, because it blocked verifying the
+change without Docker: **`./bgperf2.py config` could not be run at all.**
+`gen_conf()` reads `tester_type`, `mrt_file` and `license_file`, and only the
+`bench` subparser declared them, so a documented subcommand raised
+`AttributeError` on every invocation. It is what proves the two forms produce
+the same scenario.
+
+No Docker run was needed or made: the change is confined to scenario generation
+and matrix expansion, both of which are pure and covered by the new
+`tests/test_prefix_scope.py` (84 tests); 814 total, Docker-free.
+
+Two things review found that outlive this change. **A run with no peers or no
+prefixes was never refused**: zero and negative pass a type check, and
+`resolve_prefix_scope()` catches them only under `total`, so under the default
+scope `gen_conf()` built a scenario with no testers and a monitor check-point
+of `int(0 * 0.99)` -- satisfied at zero routes, so the run wrote a row that
+reads as converged. Refused on the batch path first and then, a round later,
+on the CLI as well: adding a single normalisation point in `bench()` is not the
+same as adding a check there, and `bench -n 0` went through it untouched. And
+**a test-level key written under a target was silently ignored**; see below.
+
+Two corrections to earlier rounds of this same change set are worth recording,
+because both were the fix being wrong rather than the original code:
+
+- **The resolution pin was against the wrong constant.** `elapsed (s)` is
+  quantised by *two* things and the coarser wins -- the `timedelta.seconds`
+  truncation, always 1s, and the monitor poll interval, 1s today and a real
+  knob. Pinning `METRIC_RESOLUTION` to the interval alone would have gone red
+  if somebody polled twice a second, and the obvious fix then is to set the
+  resolution to 0.5, which understates the truncation: two cells one whole
+  second apart clear a 0.5 floor and are published `separated` on a rounding
+  boundary, silently. The floor's own test would have reintroduced the defect
+  the floor exists to prevent. It is `max(1.0, MONITOR_POLL_INTERVAL_S)` now.
+- **`MAX_SUGGESTED_PEERS` was applied as an absolute ceiling** where its
+  comment said "how far above the asked-for count", so anybody asking for more
+  than 512 peers got no upward suggestion at all -- 513 peers was never offered
+  625, which divides 1,000,000 exactly. Code and comment disagreeing is the
+  class of defect this repository treats as a defect; it is a distance now. A
+  round later it turned out to reach the degenerate advice from the other end
+  as well -- a peer count equal to the table size divides it exactly and offers
+  each session one route -- so both ends stop at one prefix per peer.
+- **A rival's missing metric was described by its passes.** A cell can have
+  observations and still no median, because a non-numeric value withholds the
+  column, and deciding the reason on "were any passes not observed" described
+  such a cell as `1 failed` -- printed two lines under its own `2 of 3 passes
+  observed`, so the document contradicted itself and pointed at the failed pass
+  rather than at the unreadable value. Where any pass was observed, the
+  metric's own reason leads and the pass counts are an addition to it. This is
+  the fourth variant of the failed-against-not-run collapse, and the first
+  where the missing thing was neither.
+
+Three more rounds later, three gaps of one shape -- a rule applied at one entry
+point and not another. This change set produced that shape fifteen times in all, which is the thing
+worth remembering rather than any of the individual defects. Eight of the
+fifteen were in guards or defaults added by an earlier round of this same
+review -- a guard is code and gets the rule as wrong as the code it guards, one
+of them replaced a loud failure with a quiet wrong answer, and three more got a
+rule wrong that the guard immediately beside them already had right:
+
+- **`config()` had the scope resolution and not the positive-count guard**, and
+  it is the path that most needs it. `bench -f` deliberately skips the guard on
+  the reasoning that a scenario file states its own neighbours; a scenario
+  stating *none* -- `check-points: [0]` and no testers, satisfied at zero
+  routes -- goes straight through, and the tool that would have produced that
+  file is this one.
+- **A batch target that omitted `tester_type` passed every up-front check and
+  then killed the batch mid-run.** `batch()` gave every unset field `None`, and
+  `gen_conf()` routes anything that is not `exa` or `bird` down the MRT branch,
+  where a missing `mrt_file` is a bare `exit(1)` -- the multi-hour failure
+  `check_batch_test()` exists to prevent, reached through the same key it now
+  reads to detect an MRT generator. `BATCH_FIELD_DEFAULTS` gives it the CLI's
+  own default so the two paths agree about what an unstated generator is.
+
+  A side effect worth knowing: this makes `benchmarks/big-tests.yaml` runnable
+  for the first time. Its nine targets all omit `tester_type`, so every cell of
+  it previously died at that `exit(1)` -- the same file `CLAUDE.md` already
+  records as having reached expansion with a missing `filter_test` axis.
+  Synthetic generation is what those tests want (1,000 prefixes across up to
+  5,000 neighbours), so the default is the right answer for that file rather
+  than a guess that happens to run.
+
+  That claim was written a round too early: the default closed the
+  *omitted-`tester_type`* shape and this note said the class was closed, while
+  two more shapes of it were still open. **An MRT target with no `mrt_file`**
+  reaches the same `exit(1)` -- the guard now refuses both halves, since the
+  MRT set is computed two lines away. And **`tester_type:` with nothing after
+  it** parses as a present key holding `None`, so a key-presence test skipped
+  the default for precisely the slip it was added to catch;
+  `batch_target_field()` keys on the value instead. It *reads* the default
+  rather than writing it into the target, because the target dict is part of
+  the cell identity and the cell id is what `--resume` matches on -- filling a
+  default into it renames every completed cell of every in-flight batch, which
+  the first attempt did and three existing tests caught.
+
+  And that guard was *still* keyed on the wrong predicate. `gen_conf()` routes
+  on `tester_type not in ('exa', 'bird')`, not on the MRT list, so anything
+  unrecognised is treated as an MRT injector -- and a batch target bypasses
+  argparse's `choices` entirely, so `tester_type: brid` passed the guard and
+  died at the same `exit(1)`. The generator is validated against
+  `TESTER_TYPES` now, which is also the CLI's `choices`, so the two cannot
+  drift. The same guard additionally refused `file:` targets, whose generator
+  never reaches config generation at all, and raised a bare `TypeError` on a
+  target with neither name nor label -- the traceback this function exists to
+  eliminate, produced by the checks added to eliminate it. A target must have
+  a `name`.
+- **`filter_type` was missing from `BATCH_FIELD_DEFAULTS`**, one field over
+  from the one that prompted it. `batch()` handed `bench()` `None`,
+  `gen_conf()` writes `'filter': {args.filter_type: assignment}`, and every
+  target's config writer looks for the literal key `'in'` -- so a batch target
+  with policy counts and no `filter_type` produced `filter: {null: [p2]}`, ran
+  unfiltered, and reported as a filtered run. Latent rather than active, since
+  no committed config sets those counts. It also changes the shape of every
+  generated GoBGP-family config -- `import-policy-list: []` and
+  `default-import-policy: accept-route` where there was previously no
+  `apply-policy` block -- which is GoBGP's own default and so behaviourally
+  identical, but worth knowing before diffing a generated config against an
+  older run's.
+- **And that default made a wrong workload quiet.** A target naming
+  `mrt_injector` or `mrt_file` and no `tester_type` used to fail loudly:
+  `None` took `gen_conf()`'s MRT branch and `bench()` stopped at `invalid
+  mrt_injector: None`. With the default it became a *synthetic BIRD run* --
+  `mrt_file` never read, the monitor check-point `n * p` instead of `p` -- that
+  converges and writes a row and artifacts with nothing saying the table was
+  never played back. A default that replaces a crash with a plausible wrong
+  answer is worse than the crash, so the intent those two keys state is now
+  checked against the generator that will actually run. This is the strongest
+  argument in the list for why a default on this path needs its own guard: the
+  fix for a loud failure created a silent one.
+
+  That guard was wrong twice over on its first outing, both times in ways its
+  own sibling ten lines away already handled. **`mrt_injector` was read as a
+  statement of intent when `gen_conf()` never reads it at all** -- the injector
+  is derived from `tester_type` -- so `tester_type: gobgp` beside
+  `mrt_injector: bgpdump2` passed every check and played back through gobgp,
+  against a 0.93 check-point factor instead of 0.99, writing a row that reads
+  as a bgpdump2 run. A key the run ignores is now refused when it disagrees
+  with the one it obeys. And **the guard did not exempt `file:` targets**,
+  though the `mrt_file` rule beside it does and for a stated reason: such a
+  target never reaches `gen_conf()`, so its generator is inert and the advice
+  the guard prints would not change what runs. An `mrt_file` left on a scenario
+  target as documentation failed the batch before the first container.
+
+  Then the *default* needed the same exemption the guards had. A scenario
+  target's generator is inert, but `tester_type` is not inert on the `-f`
+  path: `write_provenance()` records it as `run.tester_type`,
+  `collect_provenance()` labels the tester role with it, and
+  `bench_output_prefix()` puts it in the stem. So defaulting it wrote
+  `"tester_type": "bird"` into the versions manifest of a run that played back
+  an MRT file, and named that run's artifacts `bird_bird_...`. Provenance
+  never guesses -- absent is the honest value -- and a scenario target now
+  takes no defaults at all, which also required exempting it from the
+  generator-validity check, since its tester is then `None`. That exemption has
+  to be uniform across all four checks or one contradicts the rest.
+
+- **And the CLI never refused MRT intent with a synthetic generator at all.**
+  The batch guard above was added for that failure; `bench` and `config`
+  accepted it. `-t frr_c -n 10 -p 1050000 --mrt-file rib.mrt` with `-g
+  bgpdump2` forgotten offers 10.5M *synthetic* routes against a check-point of
+  `n * p * 0.99` instead of `p * 0.99`, converges, and publishes a row and
+  artifacts that read like the MRT run it is not. The rule is one function
+  (`mrt_keys_without_an_mrt_generator()`) applied at all four entry points now,
+  rather than three statements of it that were only ever going to be two.
+- **And then only one direction of it.** The mirror -- an MRT generator with no
+  `--mrt-file` -- was refused on the batch path and not on the CLI, and it
+  fails differently: loud, but late. `gen_conf()` ends at a bare `exit(1)`, and
+  by then `bench()` has run `remove_target_containers()`,
+  `remove_old_containers()` and `rmtree()` over the config directory, so the
+  previous run's containers and logs are gone -- the ones this repository keeps
+  deliberately so a failure can be investigated, and the reason the other
+  guards sit above the teardown. `check_generator_matches_workload()` refuses
+  both directions now, and a test asserts nothing was torn down first.
+
+  A known gap deliberately left: `exabgp` as an MRT injector
+  (`ExaBGPMrtTester`) is reachable only from `bench()`'s scenario-reading
+  branch, not from `-g` or from a batch target. That predates this change and
+  closing it means deciding whether the generator is supported, which is not a
+  peer-scaling question.
+- **The `-f` refusal was unreachable from the batch path**, because `batch()`
+  pins `prefix_scope: per-peer` on the synthesized args once the division has
+  happened. A scenario target under `total` would have divided `prefixes`,
+  recorded the divided count in the cell id, the `prefixes per peer` column and
+  every artifact name, and then run whatever the file describes. Refused in
+  `check_batch_test()`, where the batch can still see the scope.
+
+On that second one: **a test-level key written under a target is silently
+ignored**, which is worth keeping beyond this change. There is no allowlist of
+target keys -- `batch()` reads a fixed field list and ignores the rest -- and
+every knob an operator sets *is* a target key (`threads`, `tester_type`,
+`mrt_file`, `image`, `version`), so putting a test key one level too deep is
+the natural slip and each one fails silently and expensively: `prefix_scope:
+total` under a target runs that target at `neighbors x prefixes`, which is
+5,000,000 routes instead of 100,000 at 50 peers, and it converges and writes
+rows and bars that read as a peer sweep. `BATCH_TEST_ONLY_KEYS` refuses the
+seven of them at target level, which is the reverse of the unknown-key check
+and needs no enumeration of what a target may legitimately carry.
+
 #### Work
 
 - Add a peer-scaling workload that can increase session count while keeping

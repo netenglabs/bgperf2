@@ -134,11 +134,17 @@ VARIANCE_RULE = ('two cells are separated when their medians differ by more '
 # units, and 0 for one that is not quantised.
 #
 # `elapsed (s)` reaches the row as `stats['elapsed'].seconds` -- whole seconds
-# -- and that is not a formatting choice that could be widened.  It is counted
-# off the monitor's poll loop at one sample a second
-# (`bgperf2.MONITOR_POLL_INTERVAL_S`, which `test_stats_contract.py` pins
-# against this), with an integer number of assurance samples then subtracted.
-# There is no finer number to publish.
+# -- and that is not a formatting choice that could be widened.  Two things
+# quantise it and the coarser wins: the `timedelta.seconds` truncation, which
+# is 1s whatever else changes, and the monitor's poll interval, which is 1s
+# today and is a real knob (`bgperf2.MONITOR_POLL_INTERVAL_S`, passed into the
+# sampling loop).  So the quantum is `max(1.0, MONITOR_POLL_INTERVAL_S)`, and
+# `test_stats_contract.py` pins it that way rather than to the interval alone:
+# pinning to the interval would go red if somebody polled twice a second and
+# invite the fix of setting this to 0.5, which understates the truncation --
+# two cells one whole second apart would clear a 0.5 floor and be published
+# `separated` on a rounding boundary, silently.  That is the defect this floor
+# exists to prevent, reintroduced through its own test.
 #
 # It matters twice, in opposite directions, and the rule is wrong in both
 # without it:
@@ -262,9 +268,14 @@ SHORTFALL = ('{0} of {1} passes produced an observation, so the shortfall is a '
 # rerun at the count you already had, come back unseparated again" failure the
 # shortfall was added to prevent -- reached through the rival rather than
 # through the cell.
-RIVAL_SHORTFALL = ('{0} produced {1} of {2} passes, so what this pair is short '
-                   'of is that cell\'s failed or unrun passes rather than '
-                   'another repetition of this one')
+# Phrased to start with a word rather than with the rival's name: the printed
+# line capitalises its first character, and a run name is what names an
+# artifact, a CSV row and a bar, so `Bird 2.19.2` is a label the operator
+# cannot search for. `SHORTFALL` above starts with a digit, which is why the
+# same idiom is harmless there.
+RIVAL_SHORTFALL = ('the pair is short because {0} produced {1} of {2} passes, '
+                   'so what it needs is that cell\'s failed or unrun passes '
+                   'rather than another repetition of this one')
 
 
 def _unobserved_because(cell, metric):
@@ -282,6 +293,19 @@ def _unobserved_because(cell, metric):
                for name, label in ((FAILED, 'failed'), (NOT_RUN, 'not run'),
                                    (UNREADABLE, 'unreadable'))]
     present = [(count, label) for count, label in counted if count]
+    if any(state == OBSERVED for state in states):
+        # Some pass did produce a row, so what is missing is the *metric*, not
+        # the passes, and the metric's own reason leads. Deciding this on
+        # "were any passes not observed" instead described a cell with two
+        # observations and one non-numeric value as `1 failed` -- printed two
+        # lines under its own `2 of 3 passes observed`, pointing the operator
+        # at the failed pass rather than at the unreadable value.
+        reason = _dispersion_withheld(cell, metric, 'median')
+        if present:
+            reason += '; of {0} passes, {1}'.format(
+                len(states),
+                ', '.join('{0} {1}'.format(c, l) for c, l in present))
+        return reason
     if not present:
         # Every pass ran and the column is still empty, so the reason is the
         # metric's, not the passes'. Asserting a pass state here contradicted
@@ -537,21 +561,27 @@ def apply_variance_rule(cells, metric=DECISION_METRIC,
                 # cell published that verdict beside a rival whose dispersion
                 # could not support it.
                 verdict['verdict'] = EXPAND
-                if observed < ceiling:
+                # Three separate reasons a pair can be short, and a cell can
+                # carry more than one of them. They are told apart by what the
+                # operator would do about each, and a recommendation is only
+                # emitted where following it would change something.
+                #
+                # A failed pass produces no observation, so a cell can fall
+                # short without the test ever having asked for fewer passes.
+                if observed < expected_passes:
+                    verdict['shortfall'] = SHORTFALL.format(
+                        observed, expected_passes)
+                # Only where the test asked for fewer passes than the ceiling.
+                # Keyed on observations alone, a cell that had already run
+                # `ceiling` passes and lost some of them was told to rerun at
+                # the count it had just run -- the same no-op advice the
+                # `rival_shortfall` branch was added to avoid, reached through
+                # the cell's own shortfall instead of the rival's.
+                if observed < ceiling and expected_passes < ceiling:
                     verdict['passes_recommended'] = ceiling
-                    # A cell can fall short of the ceiling without the test
-                    # ever having asked for fewer passes, because a failed
-                    # pass produces no observation. Rerunning at the same
-                    # count repeats the failure, so the shortfall is named
-                    # rather than buried.
-                    if observed < expected_passes:
-                        verdict['shortfall'] = SHORTFALL.format(
-                            observed, expected_passes)
-                else:
-                    # This cell has spent every pass it was given, so there is
-                    # no count to recommend it -- `ceiling` here is the number
-                    # it already ran. What the pair is short of belongs to the
-                    # rival, and is said rather than left as no-op advice.
+                # And if neither, this cell has spent every pass it was given
+                # and what the pair is short of belongs to the rival.
+                if 'shortfall' not in verdict and 'passes_recommended' not in verdict:
                     verdict['rival_shortfall'] = RIVAL_SHORTFALL.format(
                         binding['description'],
                         binding.get('observations') or 0,
@@ -841,6 +871,11 @@ def _variance_pair(cell):
     return frozenset((cell['cell'], partner))
 
 
+def _sentence(text):
+    '''A clause as a sentence, without rewriting a name it may start with.'''
+    return text[0].upper() + text[1:] if text[:1].islower() else text
+
+
 def _describe_variance(cell):
     """One line about a cell whose passes did not settle it against its rival."""
     variance = cell['variance']
@@ -872,19 +907,17 @@ def _describe_variance(cell):
         # the pair de-duplication suppressed the rival's line that carried the
         # count, and the obvious next move -- fix the pass, rerun at three --
         # comes back unseparated again.
-        if 'passes_recommended' not in variance:
-            # This cell is fully observed and the pair is short because the
-            # rival is. Recommending the count it already ran would be a no-op
-            # printed as advice.
-            return '  variance rule: {0}. {1}.'.format(
-                where, variance['rival_shortfall'][0].upper()
-                + variance['rival_shortfall'][1:])
-        advice = 'Rerun this test with repetitions: {0}.'.format(
-            variance['passes_recommended'])
-        if variance.get('shortfall'):
-            advice += ' {0}.'.format(
-                variance['shortfall'][0].upper() + variance['shortfall'][1:])
-        return '  variance rule: {0}. {1}'.format(where, advice)
+        # Whichever of the three the verdict carries, in the order an
+        # operator would act on them, and never a recommendation that is the
+        # count the test already ran.
+        advice = []
+        if 'passes_recommended' in variance:
+            advice.append('Rerun this test with repetitions: {0}'.format(
+                variance['passes_recommended']))
+        for key in ('shortfall', 'rival_shortfall'):
+            if variance.get(key):
+                advice.append(_sentence(variance[key]))
+        return '  variance rule: {0}. {1}.'.format(where, '. '.join(advice))
     return ('  variance rule: {0}, over {1} passes. More passes will not '
             'decide it: these two are not distinguishable at this '
             'workload.'.format(where, variance['observations']))

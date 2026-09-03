@@ -1,0 +1,58 @@
+# Peer scaling at a constant table size.
+#
+# Every other synthetic matrix here sweeps peers and prefixes together, so the
+# route count moves with the session count and the two cannot be told apart
+# afterwards -- 2026-core-synth.yaml's four cells hold 500k, 1M, 2.5M and 5M
+# routes. `prefix_scope: total` reads `prefixes` as the whole table and splits
+# it across the peers, so every cell here holds 1,000,000 routes and the only
+# thing moving is the session count: 100,000 prefixes each at 10 peers, 40,000
+# at 25, 20,000 at 50.
+#
+# Two things about the numbers, both of which decide whether this suite can
+# answer its own question:
+#
+# - The table is 1,000,000 rather than something smaller because `elapsed (s)`
+#   is whole seconds off a 1s monitor poll. The baseline's smallest cell (10
+#   peers x 20,000) finished in 4-5s, so a 100,000-route version of this matrix
+#   would have put the whole 10-to-50-peer difference inside one or two polls
+#   and the axis would have been unreadable at the resolution of the
+#   instrument. It stays exactly divisible by all three peer counts, as any
+#   multiple of 50 does.
+# - `repetitions: 3` because a single pass has no dispersion, so
+#   `apply_variance_rule()` withholds every verdict and prints nothing at all.
+#   A suite whose output cannot say whether its differences are real is the
+#   reading error the rule exists to prevent.
+# One confound is traded for a smaller one, not eliminated. `tester_type: bird`
+# runs one `bird` per neighbour, so the 50-peer cell runs 50 generator daemons
+# against the 10-peer cell's 10, on this same box -- the peer axis moves the
+# generator fleet as well as the target's session count. No published column
+# can separate them: `bird` and `birdc` are in `contention.BGPERF_PROCESSES`,
+# so `max foreign cpu %` cannot report that load by construction, and
+# `min idle%` is host-wide and cannot attribute it. Read the `tester_fleet`
+# section of each run's events.json alongside the timings; it is what says
+# whether the load was actually delivered at 50 injectors.
+tests:
+  -
+     name: 2026-peer-scaling
+     prefix_scope: total
+     repetitions: 3
+     neighbors: [10, 25, 50]
+     prefixes: [1_000_000]
+     filter_test: [None]
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (4 threads)
+         threads: 4
+         tester_type: bird
+       -
+         name: frr_c
+         version: 10.7
+         label: frr 10.7
+         tester_type: bird

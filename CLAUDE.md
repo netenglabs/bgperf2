@@ -164,6 +164,64 @@ renders a recipe without building it (`Container.render_dockerfile`, which short
 A bare `prepare` builds only the unversioned images; version lists are opt-in behind `-t`, since
 `FRRoutingCompiled.VERSIONS` alone is four full compiles. It prints its plan and skips what exists.
 
+### Peer scaling
+
+`gen_conf()` gives each neighbour its own `gen_paths(p)` off one shared iterator, so peers get
+*disjoint* prefixes and the table is `n * p`. **Session count and table size are therefore one
+axis**, and every synthetic matrix in `benchmarks/` sweeps both at once: `2026-core-synth.yaml`'s
+`neighbors: [10, 50]` x `prefixes: [50_000, 100_000]` holds 500k, 1M, 2.5M and 5M routes, so
+nothing downstream can separate "50 sessions were slower" from "five times the routes were slower".
+
+`--prefix-scope total` (batch: `prefix_scope: total` on a test) reads `-p` as the whole table and
+splits it across the peers instead. `benchmarks/2026-peer-scaling.yaml` is the shape it exists for.
+
+- **It is normalised to a per-peer count before anything reads it** -- in `bench()` beside the
+  image resolution, and in `expand_batch_cells()` for a batch. `-n 50 -p 100000 --prefix-scope
+  total` and `-n 50 -p 2000` are the *same workload* and must produce the same scenario (verified
+  byte-identical), the same cell identity, the same row and the same bar. Everything downstream is
+  keyed on the per-peer number: the CSV column is literally `prefixes per peer`,
+  `bench_output_prefix()` names artifacts from `prefix_num`, and `create_graph()` groups by it. A
+  scope surviving into those would be a fourth dimension in all three. The batch sets
+  `a.prefix_scope = 'per-peer'` on the synthesized args for that reason -- passing the test's scope
+  through as well would divide twice.
+- **The division must be exact, and an inexact one is refused before the first container.** A
+  remainder means the peers do not all offer the same table, so `prefixes per peer` is true of none
+  of them, each neighbour's `check-points` differs, and the monitor's stops being `n * p`.
+  `check_batch_test()` checks every (neighbors, prefixes) combination, not just the first: 1,050,000
+  divides by 10 and 25 but not by 9, and finding that out at cell three is hours lost. The message
+  names peer counts and prefix counts that would work.
+- **It is refused for the MRT testers, on the batch path as well as the CLI.** `gen_conf()` sets
+  the monitor check-point straight from `-p` for `gobgp` and `bgpdump2`, so it is already the whole
+  table. Refusing it only on the CLI let a batch divide a 1.05M-prefix MRT table by its peer count
+  and report CONVERGED at a tenth of it, silently -- `check_batch_test()` therefore reads the
+  tester from the test's targets, and one MRT target refuses the whole test, since `prefixes` is a
+  single axis shared by every target.
+
+**A rule that refuses something must be applied at every entry point, and there are four:**
+`bench`, `bench -f`, `config`, and `batch` (which synthesizes args and so bypasses argparse *and*
+`bench`'s own guards for anything it pins). The peer-scaling change got this wrong seven times in
+review, each time refusing on one path while another accepted it silently -- three of them in
+guards added by an earlier round of the same review, because a guard is code and gets the rule as
+wrong as the code it guards. Note `gen_conf()` routes on `tester_type not in ('exa', 'bird')`, so
+anything unrecognised is an MRT injector: a batch target's `tester_type` is validated against
+`TESTER_TYPES` (the CLI's own `choices`) because a batch target bypasses argparse. A default for a batch
+target belongs in `BATCH_FIELD_DEFAULTS` and must be **read** through `batch_target_field()`, never
+written into the target dict: that dict is part of the cell identity, so filling a default into it
+renames every completed cell of every in-flight batch. **A default needs its own guard**, because it
+can replace a loud failure with a quiet wrong answer -- defaulting `tester_type` to `bird` turned a
+target that named `mrt_file` and no generator from an immediate `invalid mrt_injector: None` into a
+synthetic run that never read the MRT file, converged, and published a row. **A `file:` target
+takes no defaults at all** (`batch_target_defaults()`): its generator is inert, but `tester_type`
+still reaches `write_provenance()` and `bench_output_prefix()`, so a default there writes
+`"tester_type": "bird"` into the manifest of a run that played back MRT. Provenance never guesses. `batch` is the path that
+matters: a CLI mistake costs one run, a batch mistake costs a matrix, and nobody is watching it.
+
+A test key written under a *target* is refused (`BATCH_TEST_ONLY_KEYS`). There is no allowlist of
+target keys -- `batch()` reads a fixed field list and ignores the rest -- and every knob an operator
+sets is a target key, so a test key one level too deep is the natural slip and fails silently:
+`prefix_scope: total` under a target runs that target at `neighbors x prefixes`, converges, and
+writes rows that read as a peer sweep.
+
 `--threads N` sets worker threads on the target (`conf['target']['threads']`). Only BIRD reads it
 so far: **BIRD 3 runs one worker unless the config says otherwise**, so benching 3.x against 2.x
 without it measures nothing (verified: 3.3.2 gives 2 OS threads by default, 5 with `threads 4`;

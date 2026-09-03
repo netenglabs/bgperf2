@@ -92,16 +92,24 @@ def test_the_variance_rules_resolution_matches_the_monitor_poll_interval():
     '''`elapsed (s)` is not quantised by choice.
 
     It reaches the row as `stats['elapsed'].seconds`, counted off the monitor's
-    poll loop with an integer number of assurance samples subtracted, so its
-    resolution is the poll interval. `summary.METRIC_RESOLUTION` cannot import
-    that constant -- bgperf2 imports summary, not the other way round, and the
-    Docker-free import property depends on it staying that way -- so the two
-    are pinned against each other here instead.
+    poll loop with an integer number of assurance samples subtracted, so two
+    things quantise it and the coarser wins: the `timedelta.seconds`
+    truncation, always 1s, and the poll interval, 1s today and a real knob.
+    Hence `max(1.0, ...)` rather than the interval alone -- pinning to the
+    interval would go red if somebody polled twice a second and invite setting
+    the resolution to 0.5, which understates the truncation, and two cells one
+    whole second apart would then clear the floor and be published `separated`
+    on a rounding boundary.
+
+    `summary.METRIC_RESOLUTION` cannot import that constant -- bgperf2 imports
+    summary, not the other way round, and the Docker-free import property
+    depends on it staying that way -- so the two are pinned against each other
+    here instead.
 
     If they drift apart the rule silently goes back to publishing `separated`
     on a difference of one rounding boundary, which is the one thing it must
     never do: it prints nothing about the results it supports, so there is no
     line to notice.
     '''
-    assert summary.METRIC_RESOLUTION[summary.DECISION_METRIC] == float(
-        bgperf2.MONITOR_POLL_INTERVAL_S)
+    assert summary.METRIC_RESOLUTION[summary.DECISION_METRIC] == max(
+        1.0, float(bgperf2.MONITOR_POLL_INTERVAL_S))

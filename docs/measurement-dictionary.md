@@ -329,7 +329,7 @@ mutes its whole group.
 | `verdict` | Meaning |
 |---|---|
 | `separated` | The medians differ by more than the combined deviation. The passes support the ranking; nothing is printed. |
-| `expand` | They do not, and the cell has fewer observations than the ceiling. `passes_recommended` names the count to rerun at: `max(summary.EXPANSION_PASSES, the test's declared repetitions)`. Five is a floor under the recommendation, never a cap on it — telling a `repetitions: 7` test to rerun at five would reduce its passes and discard observations. Where the cell produced fewer observations than the passes it was given, `shortfall` says so as well — never instead: a failed pass to investigate and a rerun count are two different things to do about one cell, and printing only the first invites the operator to fix the pass, rerun at the count they already had, and come back unseparated again. Where the cell is fully observed and it is the *binding rival* that is short, there is no count to recommend — `passes_recommended` is absent and `rival_shortfall` names the rival instead, because recommending the count this cell already ran is a no-op printed as advice, and the rival's own shortfall is filed under whichever pair its verdict binds to, which need not be this one. |
+| `expand` | They do not, and the cell has fewer observations than the ceiling. `passes_recommended` names the count to rerun at: `max(summary.EXPANSION_PASSES, the test's declared repetitions)`. Five is a floor under the recommendation, never a cap on it — telling a `repetitions: 7` test to rerun at five would reduce its passes and discard observations. Where the cell produced fewer observations than the passes it was given, `shortfall` says so as well — never instead: a failed pass to investigate and a rerun count are two different things to do about one cell, and printing only the first invites the operator to fix the pass, rerun at the count they already had, and come back unseparated again. `passes_recommended` is emitted only where following it would change something — that is, where the test declared *fewer* passes than the ceiling. A cell that already ran the ceiling and lost some of its passes to failure is short on observations, not on repetitions, so it carries `shortfall` alone; one that is fully observed while the binding rival is short carries `rival_shortfall` alone, naming that rival. Recommending the count a test already ran is a no-op printed as advice, and it was reachable through both the cell's own shortfall and the rival's. |
 | `unseparated at the expansion limit` | They do not, and **both** cells of the pair have reached the ceiling in observations — both, because the claim is about the pair, and a rival that produced two of its five passes has not spent the passes *more passes will not decide it* assumes. This is a result, not a request for a sixth: those two targets are not distinguishable at this workload, and expanding without a limit is how a batch that cannot decide something spends a weekend failing to. |
 | `undecided` | The rule could not be applied. `reason` says which case it was. |
 
@@ -382,7 +382,15 @@ conclude the number is wrong, which is the failure this document exists to
 prevent. Every verdict also carries
 `rivals_considered` and, where any could not be judged, `rivals_unjudged` —
 including the refusals, so that `rivals_considered: 1` can be told from "one of
-two". The count is `observations`, which
+two".
+
+A refusal that a *particular* cell caused also carries `withheld_by`, the
+ordinal of that cell: the rival at least as near with no dispersion, the rival
+with no observation at all, or the first rival where none has an observation.
+It is load-bearing rather than incidental — the printed lines are
+de-duplicated per pair, and this is the pair such a verdict is about, which is
+not the rival in its `evidence`. Keying those on the `evidence` rival collapsed
+two cells blocked by two different rivals onto one line. The count is `observations`, which
 mirrors the cell's own field of that name — deliberately not `passes_observed`,
 a near-anagram of the sibling `observed_passes`, which is a *list* of
 repetition numbers. This is the shape `findings.py` publishes a verdict in,

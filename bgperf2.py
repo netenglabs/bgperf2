@@ -181,6 +181,140 @@ def bench_output_prefix(args):
     return '_'.join(parts)
 
 
+# How `-p/--prefix-num` is read. `per-peer` is what bgperf has always meant by
+# it, and multiplies: `-n 50 -p 100000` is five million routes. `total` reads it
+# as the whole table and splits it across the sessions.
+PREFIX_SCOPES = ('per-peer', 'total')
+
+# Generators that play back an MRT file rather than synthesising prefixes. For
+# these `-p` is already the size of the whole table -- `gen_conf()` sets the
+# monitor check-point from it directly rather than multiplying -- so a scope
+# has nothing to divide and asking for one is a mistake worth naming.
+MRT_TESTER_TYPES = ('gobgp', 'bgpdump2')
+
+# Every generator `-g` accepts, and the single source for the CLI's `choices`.
+# `gen_conf()` branches on `not in ('exa', 'bird')` rather than on
+# MRT_TESTER_TYPES, so an unrecognised value is treated as an MRT injector: a
+# typo'd `tester_type: brid` on a batch target -- which bypasses argparse
+# entirely -- reached that branch and died at its bare `exit(1)`, taking the
+# rest of the matrix with it.
+SYNTHETIC_TESTER_TYPES = ('exa', 'bird')
+TESTER_TYPES = SYNTHETIC_TESTER_TYPES + MRT_TESTER_TYPES
+
+
+def resolve_prefix_scope(scope, neighbor_num, prefix_num, tester_type=None):
+    """The per-peer prefix count a run should generate, from what was asked for.
+
+    Sessions and table size are one axis today, and that is the gap this
+    closes. `gen_conf()` gives every neighbour its own `gen_paths(p)` off a
+    shared iterator, so the peers get disjoint prefixes and the table is
+    `n * p`: a batch sweeping `neighbors: [10, 25, 50]` at a fixed `prefixes`
+    is sweeping the table size at the same time, and nothing downstream can
+    separate "50 sessions were slower" from "five times the routes were
+    slower". `2026-core-synth.yaml` is exactly this shape -- its four cells
+    hold 500k, 1M, 2.5M and 5M routes.
+
+    Under `total` the peer count moves and the table does not. The result is
+    normalised to a per-peer count here, before anything reads it, because
+    `-n 50 -p 100000 --prefix-scope total` and `-n 50 -p 2000` are the same
+    workload and must produce the same row: the CSV column is called
+    `prefixes per peer`, `bench_output_prefix()` names artifacts from
+    `prefix_num`, and `create_graph()` groups bars by it. A scope that
+    survived into those would have to be a new dimension in all three.
+
+    The division has to be exact, and an inexact one is refused rather than
+    rounded or spread. A remainder means the peers do not all offer the same
+    table, so `prefixes per peer` is a number that is not true of any of them,
+    each neighbour's `check-points` differs, and the monitor's own check-point
+    stops being `n * p`. Refusing costs a message before the first container;
+    the alternative is a column that quietly means something else for those
+    rows.
+    """
+    if scope in (None, 'per-peer'):
+        return prefix_num
+    if scope not in PREFIX_SCOPES:
+        raise ValueError("unknown prefix scope '{0}': expected one of {1}".format(
+            scope, ', '.join(PREFIX_SCOPES)))
+    if tester_type in MRT_TESTER_TYPES:
+        raise ValueError(
+            "--prefix-scope total does not apply to the '{0}' tester: it plays "
+            'back an MRT file, so -p is already the whole table and there is '
+            'nothing to divide across the peers'.format(tester_type))
+    if neighbor_num < 1:
+        raise ValueError('--prefix-scope total needs at least one peer to '
+                         'divide the table across, got {0}'.format(neighbor_num))
+    if prefix_num < neighbor_num:
+        raise ValueError(
+            '--prefix-scope total: {0} prefixes across {1} peers leaves peers '
+            'with none. A session that offers nothing is not a peer under '
+            'test'.format(prefix_num, neighbor_num))
+    if prefix_num % neighbor_num:
+        per_peer = prefix_num // neighbor_num
+        # Prefix counts always -- both are exact by construction. Peer counts
+        # only where a usable one exists, since a table with no divisor near
+        # the asked-for count has nothing to offer and saying so is better
+        # than naming one nobody would run.
+        peers = _divisors_near(prefix_num, neighbor_num)
+        advice = "use {0} or {1} prefixes".format(
+            per_peer * neighbor_num, (per_peer + 1) * neighbor_num)
+        if peers:
+            advice += ', or {0} peers'.format(
+                ' or '.join(str(n) for n in peers))
+        raise ValueError(
+            '--prefix-scope total: {0} prefixes do not divide evenly across '
+            '{1} peers ({2} each, {3} left over). An uneven split makes the '
+            "CSV's `prefixes per peer` untrue of every peer; {4}".format(
+                prefix_num, neighbor_num, per_peer, prefix_num % neighbor_num,
+                advice))
+    return prefix_num // neighbor_num
+
+
+# How far *above* the asked-for peer count the search will look -- a distance,
+# not an absolute ceiling. Only the upward half needs bounding: the scan
+# otherwise walked to `prefix_num` itself, offering five million peers after a
+# fifth of a second of searching, and a suggestion far above what the operator
+# asked for is not one whatever it costs. Downward it is already bounded by the
+# asked-for count, and a divisor below that is by construction a number the
+# operator was willing to be near -- 1443 for someone who asked for 1500 is
+# useful advice, so it is deliberately not capped.
+MAX_SUGGESTED_PEERS = 512
+
+
+def _is_positive_count(value):
+    """A whole number of 1 or more, the one rule both entry points apply.
+
+    `True` is an `int` in Python and is not a peer count.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def _divisors_near(prefix_num, neighbor_num):
+    """Peer counts closest to the one asked for that divide this table.
+
+    A message that only says the division failed leaves the operator doing
+    arithmetic on a 1,050,000-prefix RIB; a workable number either side is the
+    whole fix. One peer is excluded for the same reason a five-million-peer
+    suggestion is: a suggestion the operator cannot act on is worse than none,
+    because it reads as the tool having thought about it.
+    """
+    # Never past two prefixes per peer, at either end: a peer count equal to
+    # the table size divides it exactly and offers each session a single
+    # route, which is the same kind of unusable advice as suggesting five
+    # million peers, and the next divisor down is the first that is not.  Only
+    # reachable on a table small enough to be within MAX_SUGGESTED_PEERS of
+    # the asked-for count.
+    most = prefix_num // 2
+    below = next((n for n in range(min(neighbor_num - 1, most), 1, -1)
+                  if prefix_num % n == 0), None)
+    # A distance above the asked-for count, not an absolute cap: an absolute
+    # one offers nothing at all to anybody who asked for more than it, so a
+    # 513-peer request got no upward suggestion even though 625 divides.
+    ceiling = min(most, neighbor_num + MAX_SUGGESTED_PEERS)
+    above = next((n for n in range(neighbor_num + 1, ceiling + 1)
+                  if prefix_num % n == 0), None)
+    return [n for n in (below, above) if n]
+
+
 def gen_mako_macro():
     return '''<%
     import netaddr
@@ -973,6 +1107,40 @@ def bench(args):
     target_image_name = None
     if not args.file:
         target_image_name = target_image(args.target, getattr(args, 'version', None), args.image)
+
+    # Also before the teardown, and before anything reads `prefix_num`: the
+    # row, the artifact names and the scenario all take the per-peer count, so
+    # the division happens once, here. A scope that cannot be applied should
+    # cost a message rather than the previous run's containers, for the same
+    # reason the image is resolved above. batch() has already divided by the
+    # time it gets here, which is why it passes `per-peer` explicitly.
+    if not args.file:
+        # `check_batch_test()` refuses these on the batch path; nothing did
+        # here. `resolve_prefix_scope()` is the single normalisation point but
+        # it only rejects them under `total`, so `bench -n 0` reached
+        # `gen_conf()` untouched, which builds a scenario with no testers and a
+        # monitor check-point of `int(0 * 0.99)` -- satisfied at zero routes,
+        # so the run writes a row that reads as a converged benchmark.
+        for flag, value in (('-n/--neighbor-num', args.neighbor_num),
+                            ('-p/--prefix-num', args.prefix_num)):
+            if not _is_positive_count(value):
+                sys.exit('{0} must be a whole number of 1 or more, got '
+                         '{1!r}'.format(flag, value))
+        check_generator_matches_workload(args)
+    if args.file and getattr(args, 'prefix_scope', None) not in (None, 'per-peer'):
+        # `-n`/`-p` are already ignored under `-f`, and this would be too --
+        # but the whole point of the flag is that the number means something
+        # different, so accepting it where it does nothing is worse than the
+        # existing silence about the two it joins.
+        sys.exit('--prefix-scope has nothing to divide under -f: a scenario '
+                 'file states each neighbour\'s prefixes itself')
+    if not args.file:
+        try:
+            args.prefix_num = resolve_prefix_scope(
+                getattr(args, 'prefix_scope', None), args.neighbor_num,
+                args.prefix_num, getattr(args, 'tester_type', None))
+        except ValueError as e:
+            sys.exit(str(e))
 
     remove_target_containers()
 
@@ -2024,7 +2192,84 @@ BATCH_TEST_KEYS = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
 # ones that matter here fail silently: `seeds: 7` under `order: shuffle` draws
 # a fresh permutation on every invocation while looking pinned, and
 # `repetitions` misspelt runs one pass of a matrix someone asked three of.
-BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed')
+BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope')
+
+
+# Keys that mean something on a *test* and nothing on a target. There is no
+# allowlist of target keys -- `batch()` reads a fixed field list and ignores
+# the rest, and enumerating every valid one here would reject configs this
+# change has no business rejecting -- but the reverse check is cheap and
+# catches the mistake that actually happens. Every other knob an operator sets
+# is a target key (`threads`, `tester_type`, `mrt_file`, `image`, `version`),
+# so a test key written one level too deep is the natural slip, and each of
+# these fails silently and expensively: `prefix_scope: total` under a target is
+# ignored, and that target runs `neighbors x prefixes` routes -- 5,000,000
+# instead of 100,000 at 50 peers -- converges, and writes rows and bars that
+# read as a peer sweep.
+BATCH_TEST_ONLY_KEYS = ('prefix_scope', 'repetitions', 'order', 'seed',
+                        'neighbors', 'prefixes', 'filter_test')
+
+# Target keys whose absence means something other than `None`. `batch()`
+# otherwise gives every unset field `None`, and `gen_conf()` routes anything
+# that is not `exa` or `bird` down the MRT branch, where a missing `mrt_file`
+# is a bare `exit(1)` -- so a target that simply omitted `tester_type` passed
+# every up-front check and then killed the whole batch part way through, which
+# is the multi-hour failure those checks exist to prevent. The value is the
+# CLI's own default for `-g`, so the two paths agree about what an unstated
+# generator is.
+#
+# `filter_type` is here for the same reason and was found missing one round
+# later: `batch()` handed `bench()` `None`, `gen_conf()` writes
+# `'filter': {args.filter_type: assignment}`, and every target's config writer
+# looks for the literal key `'in'` -- so a batch target with policy counts and
+# no `filter_type` produced `filter: {null: [p2]}`, ran unfiltered, and
+# reported as a filtered run.
+BATCH_FIELD_DEFAULTS = {'tester_type': 'bird', 'filter_type': 'in'}
+
+
+def mrt_keys_without_an_mrt_generator(tester_type, mrt_file=None,
+                                      mrt_injector=None):
+    """MRT intent stated on a run whose generator synthesises prefixes.
+
+    One function because all four entry points have to refuse the same thing
+    and the failure is silent on every one of them: `gen_conf()` takes the
+    synthetic branch, never opens the file, and sets the monitor check-point to
+    `n * p` rather than `p`, so the run converges and writes a row and
+    artifacts with nothing recording that the table was never played back.
+    """
+    if tester_type not in SYNTHETIC_TESTER_TYPES:
+        return []
+    return [name for name, value in (('mrt_injector', mrt_injector),
+                                     ('mrt_file', mrt_file)) if value]
+
+
+def batch_target_defaults(target):
+    """The defaults that apply to this target -- none, for a scenario target.
+
+    `bench -f` reads the workload from the file, so a default here is not a
+    fallback but an assertion about a run bgperf2 did not configure. And
+    `tester_type` is not inert on that path even though the generator is:
+    `write_provenance()` records it as `run.tester_type`, `collect_provenance()`
+    labels the tester role with it, and `bench_output_prefix()` puts it in the
+    stem. Defaulting it wrote `"tester_type": "bird"` into the versions
+    manifest of a run that played back an MRT file, and named its artifacts
+    `bird_bird_...`. Provenance never guesses; absent is the honest value.
+    """
+    return {} if target.get('file') else BATCH_FIELD_DEFAULTS
+
+
+def batch_target_field(target, field):
+    """What `batch()` will put on the synthesized args for this field.
+
+    Read rather than written into the target: the target dict *is* part of the
+    cell identity (`expand_batch_cells()` stores it, and the cell id is what
+    `--resume` matches on), so filling a default into it renames every
+    completed cell of every in-flight batch. An explicitly empty value has to
+    read as absent here all the same, or this scan sees `None` where `batch()`
+    will see the default and the two disagree about what generator a run uses.
+    """
+    value = target.get(field)
+    return batch_target_defaults(target).get(field) if value is None else value
 
 
 def check_batch_test(test):
@@ -2052,6 +2297,149 @@ def check_batch_test(test):
         if not isinstance(test[key], list) or not test[key]:
             sys.exit("test '{0}': {1} must be a non-empty list, got {2!r}".format(
                 test['name'], key, test[key]))
+    # Both numeric axes really are numbers. A quoted entry -- `prefixes:
+    # ["100000"]` -- otherwise reaches the arithmetic below as a bare
+    # `TypeError`, which is the traceback naming neither the test nor the key
+    # that this function exists to eliminate.
+    # Whole numbers, and at least one of each. Zero and negative pass a bare
+    # type check and are caught by `resolve_prefix_scope()` only under
+    # `total`; under the default scope nothing caught them, and `gen_conf()`
+    # then built a scenario with no testers and a monitor check-point of
+    # `int(0 * 0.99)` -- satisfied at zero routes, so the cell wrote a row
+    # that reads as a converged run. That is precisely the typo this function
+    # exists to name before the first container.
+    for key in ('neighbors', 'prefixes'):
+        bad = [v for v in test[key] if not _is_positive_count(v)]
+        if bad:
+            sys.exit(
+                "test '{0}': {1} must be whole numbers of 1 or more, got "
+                '{2}'.format(test['name'], key,
+                             ', '.join(repr(v) for v in bad)))
+    # Every combination of the two axes, before the first container. Under
+    # `prefix_scope: total` the split has to be exact for each of them, and a
+    # matrix is where an inexact one is easy to write: `neighbors: [10, 25,
+    # 50]` against 1,050,000 divides three times and against 100,000 twice.
+    # Finding that out at cell four is hours lost to arithmetic.
+    #
+    # The tester comes from the targets, and one MRT target poisons the whole
+    # test rather than just its own cells: `prefixes` is a single axis shared
+    # by every target, so a test mixing an MRT generator with a synthetic one
+    # under `total` cannot be right for both. Without this the batch path
+    # accepted exactly what the CLI refuses -- `expand_batch_cells()` would
+    # divide a 1,050,000-prefix MRT table by its peer count, `gen_conf()` sets
+    # the monitor check-point straight from `-p` for those generators, and the
+    # run reports CONVERGED at a tenth of the table with nothing in the row or
+    # the artifacts saying so.
+    for target in test['targets']:
+        # A name first: everything below reports against it, and
+        # `', '.join()` on a target that has neither name nor label raised a
+        # bare TypeError -- the traceback naming neither the test nor the key
+        # that this function exists to eliminate, produced by the checks added
+        # to eliminate it.
+        if not isinstance(target, dict) or not target.get('name'):
+            sys.exit("test '{0}': every target needs a `name`, got {1!r}".format(
+                test['name'], target))
+        # Every generator check below exempts a scenario target: it never
+        # reaches `gen_conf()`, so its generator is inert and none of the
+        # advice these print would change what runs.
+        scenario = bool(target.get('file'))
+        tester = batch_target_field(target, 'tester_type')
+        if not scenario and tester not in TESTER_TYPES:
+            sys.exit(
+                "test '{0}': target {1!r} has tester_type {2!r}; expected one "
+                'of {3}. A batch target bypasses argparse, and config '
+                'generation treats anything it does not recognise as an MRT '
+                'injector'.format(test['name'], target['name'], tester,
+                                  ', '.join(TESTER_TYPES)))
+        # A target that named an MRT file or injector and not a generator.
+        # Before `tester_type` had a default this failed loudly -- `None` took
+        # `gen_conf()`'s MRT branch and `bench()` stopped at `invalid
+        # mrt_injector: None`. The default turned that into a *synthetic BIRD
+        # run*: `mrt_file` never read, the monitor check-point `n * p` instead
+        # of `p`, and a converged row and artifacts with nothing saying the
+        # table was never played back. A default that makes a wrong workload
+        # quiet is worse than the crash it replaced, so the intent stated by
+        # these two keys is checked against the generator that will run.
+        # `gen_conf()` derives the injector from `tester_type` and never reads
+        # `mrt_injector`, so one that disagrees is not a second opinion -- it
+        # is a line the run ignores. `tester_type: gobgp` beside
+        # `mrt_injector: bgpdump2` played back through gobgp, against a 0.93
+        # check-point factor instead of 0.99, and wrote a row that reads as a
+        # bgpdump2 run.
+        injector = target.get('mrt_injector')
+        if not scenario and injector and injector != tester:
+            sys.exit(
+                "test '{0}': target {1!r} sets mrt_injector {2!r} and "
+                'tester_type {3!r}. Config generation derives the injector '
+                'from tester_type, so {2!r} would never run'.format(
+                    test['name'], target['name'], injector, tester))
+        # A `file:` target is exempt here for the same reason it is exempt
+        # from the mrt_file check below: it never reaches `gen_conf()`, so its
+        # generator is inert and the advice this prints -- set `tester_type` --
+        # would not change what runs. Rejecting it fails a config that works.
+        named_mrt = [] if scenario else mrt_keys_without_an_mrt_generator(
+            tester, target.get('mrt_file'), target.get('mrt_injector'))
+        if named_mrt:
+            sys.exit(
+                "test '{0}': target {1!r} carries {2} but runs the {3!r} "
+                'generator, which synthesises prefixes and never reads them. '
+                'Set tester_type to one of {4}'.format(
+                    test['name'], target['name'], ' and '.join(named_mrt),
+                    tester, ', '.join(MRT_TESTER_TYPES)))
+        misplaced = sorted(k for k in target if k in BATCH_TEST_ONLY_KEYS)
+        if misplaced:
+            sys.exit(
+                "test '{0}': target {1!r} carries {2} {3}, which {4} only "
+                'meaningful on the test itself and {5} ignored here. Move '
+                '{6} up one level.'.format(
+                    test['name'], target.get('label') or target.get('name'),
+                    'key' if len(misplaced) == 1 else 'keys',
+                    ', '.join(misplaced),
+                    'is' if len(misplaced) == 1 else 'are',
+                    'is' if len(misplaced) == 1 else 'are',
+                    'it' if len(misplaced) == 1 else 'them'))
+    scope = test.get('prefix_scope')
+    if scope not in (None, 'per-peer'):
+        # `bench()` refuses this, and its refusal is unreachable from here:
+        # `batch()` pins `prefix_scope: per-peer` on the synthesized args
+        # because the division has already happened. So a scenario target under
+        # `total` would divide `prefixes`, record the divided count in the cell
+        # id, the `prefixes per peer` column and every artifact name, and then
+        # run whatever workload the file describes.
+        scenarios = [t.get('label') or t['name'] for t in test['targets']
+                     if t.get('file')]
+        if scenarios:
+            sys.exit(
+                "test '{0}': prefix_scope has nothing to divide for {1}, which "
+                'name a scenario file: the file states each neighbour\'s '
+                'prefixes itself'.format(test['name'], ', '.join(scenarios)))
+    mrt = sorted({batch_target_field(t, 'tester_type') for t in test['targets']
+                  if batch_target_field(t, 'tester_type') in MRT_TESTER_TYPES})
+    # The other half of the same guard. `gen_conf()` ends an MRT run with no
+    # file at a bare `exit(1)`, and that `SystemExit` travels out of `bench()`
+    # and out of `batch()`, killing the matrix at whichever cell reached it.
+    # Defaulting an omitted `tester_type` closed one shape of that failure and
+    # this is the other; both are known here, before the first container.
+    # A `file:` target never reaches `gen_conf()` -- `bench()` loads the
+    # scenario instead -- so its generator is inert and refusing it would
+    # reject a config that would have run.
+    fileless = [t.get('label') or t['name'] for t in test['targets']
+                if batch_target_field(t, 'tester_type') in MRT_TESTER_TYPES
+                and not t.get('file') and not t.get('mrt_file')]
+    if fileless:
+        sys.exit(
+            "test '{0}': {1} {2} an MRT generator and no mrt_file. The run "
+            'would end at `exit(1)` inside config generation, taking the rest '
+            'of the batch with it'.format(
+                test['name'], ', '.join(fileless),
+                'names' if len(fileless) == 1 else 'name'))
+    for neighbors in test['neighbors']:
+        for prefixes in test['prefixes']:
+            try:
+                resolve_prefix_scope(scope, neighbors, prefixes,
+                                     mrt[0] if mrt else None)
+            except ValueError as e:
+                sys.exit("test '{0}': {1}".format(test['name'], e))
 
 
 def target_run_name(target):
@@ -2117,6 +2505,7 @@ def expand_batch_cells(test, targets):
     '''
     check_batch_test(test)
     repetitions = batch_repetitions(test)
+    scope = test.get('prefix_scope')
     cells = []
     for repetition in range(1, repetitions + 1):
         ordinal = 0
@@ -2128,7 +2517,14 @@ def expand_batch_cells(test, targets):
                             'repetition': repetition if repetitions > 1 else None,
                             'ordinal': ordinal,
                             'neighbors': n,
-                            'prefixes': p,
+                            # The per-peer count, resolved here rather than
+                            # carried as a scope: `-n 50 -p 100000` under
+                            # `total` and `-n 50 -p 2000` are the same
+                            # workload, so they must produce the same cell
+                            # identity, the same row, the same artifact names
+                            # and the same bar. `check_batch_test()` has
+                            # already refused an inexact division.
+                            'prefixes': resolve_prefix_scope(scope, n, p),
                             'filter': filter_test,
                             'target': t,
                         })
@@ -2473,6 +2869,11 @@ def batch(args):
             a.target = t['name']
             a.prefix_num = cell['prefixes']
             a.neighbor_num = cell['neighbors']
+            # Already per-peer: `expand_batch_cells()` applied the test's
+            # `prefix_scope` when it built the cell, because the cell identity,
+            # the CSV row and the artifact names all have to be the per-peer
+            # count. Passing the scope through as well would divide twice.
+            a.prefix_scope = 'per-peer'
             a.filter_test = cell['filter'] if cell['filter'] != 'None' else None
             # None for a single-pass test, so its rows, graphs and event
             # artifacts keep the names they have always had; set for every pass
@@ -2487,7 +2888,14 @@ def batch(args):
                             'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
                             'tester_type', 'license_file', 'version', 'threads',
                             'tester_trace_io']:
-                setattr(a, field, t[field]) if field in t else setattr(a, field, None)
+                # Keyed on the value, not on the key being present: a target
+                # written `tester_type:` with nothing after it parses as None,
+                # which is the very slip the default exists to catch, and a
+                # presence test skips the default for exactly that case.
+                value = t.get(field)
+                setattr(a, field,
+                        batch_target_defaults(t).get(field) if value is None
+                        else value)
 
             for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
                 setattr(a, field, t[field]) if field in t else setattr(a, field, 0)
@@ -2864,7 +3272,55 @@ def gen_conf(args):
     return gen_mako_macro() + yaml.dump(conf, default_flow_style=False)
 
 
+def check_generator_matches_workload(args):
+    """Refuse a generator and a workload that do not go together, both ways.
+
+    Each direction fails differently and neither was refused here. With
+    `--mrt-file` and a synthetic generator the run is *quietly wrong*: `-t
+    frr_c -n 10 -p 1050000 --mrt-file rib.mrt` with `-g bgpdump2` forgotten
+    offers 10.5M synthetic routes against a check-point of `n * p * 0.99`,
+    converges, and publishes a row that reads like the MRT run it is not.
+
+    With an MRT generator and no file it is loud but *late*: `gen_conf()` ends
+    at a bare `exit(1)`, and by then `bench()` has run
+    `remove_target_containers()`, `remove_old_containers()` and `rmtree()` over
+    the config directory -- the previous run's containers and logs, which this
+    repository keeps deliberately so a failure can be investigated. That is
+    what the guards above the teardown are for, and this belongs with them.
+    """
+    tester = getattr(args, 'tester_type', None)
+    mrt_file = getattr(args, 'mrt_file', None)
+    named = mrt_keys_without_an_mrt_generator(tester, mrt_file)
+    if named:
+        sys.exit(
+            '--mrt-file is set and -g/--tester-type is {0!r}, which '
+            'synthesises prefixes and never reads it. Use one of {1}'.format(
+                tester, ', '.join(MRT_TESTER_TYPES)))
+    if tester in MRT_TESTER_TYPES and not mrt_file:
+        sys.exit(
+            '-g/--tester-type is {0!r}, which plays back an MRT file, and no '
+            '--mrt-file was given'.format(tester))
+
+
 def config(args):
+    # The same guard `bench()` applies, and this is the path that most needs
+    # it: `bench -f` deliberately skips the check on the reasoning that a
+    # scenario file states its own neighbours, so a scenario stating *none* --
+    # `check-points: [0]` and no testers, satisfied at zero routes -- passes
+    # straight through. The tool that would have produced that file is this
+    # one.
+    for flag, value in (('-n/--neighbor-num', args.neighbor_num),
+                        ('-p/--prefix-num', args.prefix_num)):
+        if not _is_positive_count(value):
+            sys.exit('{0} must be a whole number of 1 or more, got {1!r}'.format(
+                flag, value))
+    check_generator_matches_workload(args)
+    try:
+        args.prefix_num = resolve_prefix_scope(
+            getattr(args, 'prefix_scope', None), args.neighbor_num,
+            args.prefix_num, getattr(args, 'tester_type', None))
+    except ValueError as e:
+        sys.exit(str(e))
     conf = gen_conf(args)
 
     with open(args.output, 'w') as f:
@@ -2929,6 +3385,18 @@ def create_args_parser(main=True):
         parser.add_argument('-c', '--community-list-num', default=0, type=int)
         parser.add_argument('-x', '--ext-community-list-num', default=0, type=int)
         parser.add_argument('-s', '--single-table', action='store_true')
+        parser.add_argument('--prefix-scope', choices=PREFIX_SCOPES,
+                            default='per-peer',
+                            help='how to read --prefix-num. per-peer (the '
+                                 'default, and what bgperf has always meant) '
+                                 'gives every peer that many prefixes, so the '
+                                 'table is peers x prefixes. total reads it as '
+                                 'the whole table and splits it evenly across '
+                                 'the peers, which is how to raise the session '
+                                 'count without also raising the route count. '
+                                 'Must divide exactly, and does not apply to '
+                                 'the MRT testers, where -p is already the '
+                                 'whole table')
         parser.add_argument('--threads', type=int,
                             help='worker threads the target should use. BIRD 3 runs with one '
                                  'worker unless told otherwise, so a 2.x-vs-3.x comparison needs '
@@ -2969,7 +3437,7 @@ def create_args_parser(main=True):
     parser_bench.add_argument('--mrt-file', type=str, 
                               help='mrt file, requires absolute path')
     parser_bench.add_argument('--license_file', type=str, help='filename of license necesary for EOS', default=None)
-    parser_bench.add_argument('-g', '--tester-type', choices=['exa', 'bird', 'gobgp', 'bgpdump2'], default='bird')
+    parser_bench.add_argument('-g', '--tester-type', choices=sorted(TESTER_TYPES), default='bird')
     parser_bench.add_argument('--docker-network-name', help='Docker network name; this is the name given by \'docker network ls\'')
     parser_bench.add_argument('--bridge-name', help='Linux bridge name of the '
                               'interface corresponding to the Docker network; '
@@ -2988,6 +3456,17 @@ def create_args_parser(main=True):
 
     parser_config = s.add_parser('config', help='generate config')
     parser_config.add_argument('-o', '--output', default='bgperf.yml', type=str)
+    # `gen_conf()` reads `tester_type` and `mrt_file`, and only `bench` declared
+    # them, so `config` raised AttributeError on every invocation -- a
+    # documented subcommand that could not be run at all. Same defaults as
+    # `bench`, so the scenario it prints is the one a bench would have used.
+    parser_config.add_argument('-g', '--tester-type',
+                               choices=sorted(TESTER_TYPES),
+                               default='bird')
+    parser_config.add_argument('--mrt-file', type=str,
+                               help='mrt file, requires absolute path')
+    parser_config.add_argument('--license_file', type=str, default=None,
+                               help='filename of license necesary for EOS')
     add_gen_conf_args(parser_config)
     parser_config.set_defaults(func=config)
 

@@ -1481,3 +1481,28 @@ class TestWhatTheRuleWillNotClaim:
             a_cell_taking([43], name='frr_c', ordinal=1)], repetitions=1)
         assert 'TypeError' in document['variance_failure']
         assert summary.describe_batch_summary(document, path='sum.json') == []
+
+    def test_a_rival_with_observations_names_the_metric_not_its_passes(self):
+        """A cell can have observations and still no median -- a non-numeric
+        value withholds the column. Deciding the reason on "were any passes not
+        observed" described such a cell as `1 failed`, printed two lines under
+        its own `2 of 3 passes observed`, pointing the operator at the failed
+        pass rather than at the unreadable value.
+        """
+        rows = [a_row(**{'elapsed (s)': 10.0}),
+                a_row(**{'elapsed (s)': 'n/a'}),
+                a_row(**{'failed': 'FAILED', 'MSG': 'stuck at 0'})]
+        verdict = variance_of(
+            a_cell_taking([40, 42, 44], name='bird', ordinal=0),
+            a_group(rows, name='frr_c', ordinal=1, description='frr_c'))['bird']
+        assert summary.NON_NUMERIC in verdict['reason']
+        # The failed pass is still named, as an addition rather than instead.
+        assert 'of 3 passes, 1 failed' in verdict['reason']
+
+    def test_a_rival_with_no_observations_still_names_its_passes(self):
+        failed = [a_row(**{'failed': 'FAILED', 'MSG': 'stuck at 0'})] * 3
+        verdict = variance_of(
+            a_cell_taking([40, 42, 44], name='bird', ordinal=0),
+            a_group(failed, name='frr_c', ordinal=1,
+                    description='frr_c'))['bird']
+        assert 'frr_c (every pass failed)' in verdict['reason']

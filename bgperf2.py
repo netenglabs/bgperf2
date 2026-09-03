@@ -2820,7 +2820,7 @@ def config(args):
 def create_args_parser(main=True):
     parser = ArgumentParser(description='BGP performance measuring tool')
     parser.add_argument('-b', '--bench-name', default='bgperf2')
-    parser.add_argument('-d', '--dir', default='/tmp')
+    parser.add_argument('-d', '--dir', default='/var/tmp')
     s = parser.add_subparsers()
     parser_doctor = s.add_parser('doctor', help='check env')
     parser_doctor.set_defaults(func=doctor)

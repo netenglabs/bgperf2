@@ -752,14 +752,17 @@ and a contention column stuck at 0, and the samplers wait on the event instead o
 they stop at once rather than lingering a poll interval. `tests/test_controller_threads.py` covers
 both directions.
 
-### The bench directory is in RAM by default
+### The bench directory must not be in RAM
 
-`-d/--dir` defaults to `/tmp`, which is tmpfs on most systemd distros, and every role's config and
-logs are bind-mounted under it. A 50-peer 100k-prefix BIRD run wrote **31GB** of tester logs there
-— half this machine's RAM — pulling the recorded `min free mem` from 56GB to **28.5GB** on a run
-whose target daemon used **0.56GB**. A published, graphed column was measuring tester logging.
-`warn_if_log_dir_is_in_ram()` says so at the start of a run; `is_memory_backed()` in
-`contention.py` is the pure part.
+`-d/--dir` holds every role's config and logs, bind-mounted under it, and defaults to `/var/tmp` —
+**not** `/tmp`, which is tmpfs on most systemd distros. A 50-peer 100k-prefix BIRD run wrote
+**31GB** of tester logs there — half this machine's RAM — pulling the recorded `min free mem` from
+56GB to **28.5GB** on a run whose target daemon used **0.56GB**. A published, graphed column was
+measuring tester logging. The default stayed `/tmp` long after that was found, while every operator
+contract and every doc told the operator to pass `-d /var/tmp/bgperf` — so the only runs that hit it
+were the ones nobody had thought about, which is the wrong way round.
+`warn_if_log_dir_is_in_ram()` still runs at the start of every run, because `/var/tmp` is tmpfs on
+some systems and `-d` can still name one; `is_memory_backed()` in `contention.py` is the pure part.
 
 Two things made it that large, and only one is fixed:
 

@@ -5,12 +5,12 @@
 When `bench` command issued, `bgperf` boots three (or more) docker containers,
 `target`, `monitor` and one or more `tester` and connect them via a bridge (`bgperf-br` by default).
 
-By default, `bgperf` stores all configuration files and log files under `/tmp/bgperf`.
+By default, `bgperf` stores all configuration files and log files under `/var/tmp/bgperf`.
 Here is what you can see after issuing `bgperf2.py bench -n 10`.
 
 ```shell
-$ tree /tmp/bgperf2
-/tmp/bgperf2
+$ tree /var/tmp/bgperf2
+/var/tmp/bgperf2
 ├── gobgp
 │   ├── gobgpd.conf
 │   ├── gobgpd.log
@@ -47,10 +47,10 @@ $ tree /tmp/bgperf2
 ```
 
 `scenario.yaml` controls all the configuration of benchmark. You can pass your own scenario by using `-f` option.
-By default, `bgperf` creates it automatically and places it under `/tmp/bgperf2` like above. Let's see what's inside `scenario.yaml`.
+By default, `bgperf` creates it automatically and places it under `/var/tmp/bgperf2` like above. Let's see what's inside `scenario.yaml`.
 
 ```shell
-$ cat /tmp/bgperf2/scenario.yaml
+$ cat /var/tmp/bgperf2/scenario.yaml
 <%
     import netaddr
     from itertools import islice

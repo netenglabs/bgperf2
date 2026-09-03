@@ -122,3 +122,13 @@ def test_benchmark_configs_expand():
                 pytest.fail(f"{config.name}: {e}")
             checked += 1
     assert checked, 'this guard passes green over an empty benchmarks directory'
+
+
+def test_the_bench_dir_default_is_not_tmpfs_by_convention():
+    '''`-d/--dir` carries every role's config and logs, so a tmpfs default
+    spends RAM the run then reports as `min free mem`. It was `/tmp` for years
+    while every operator contract said to pass `/var/tmp/bgperf`; the default
+    agrees with them now. `warn_if_log_dir_is_in_ram()` covers the rest.
+    '''
+    parser = importlib.import_module('bgperf2').create_args_parser()
+    assert parser.get_default('dir') == '/var/tmp'

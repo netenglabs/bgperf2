@@ -182,3 +182,79 @@ The host evidence comes from `bgperf2.host_evidence()`, which maps the
 controller's sentinels back to "never sampled": the minima start above every
 real value so the first sample can only lower them, and an untouched sentinel
 must not read as an idle host with free memory.
+
+## Batch summary: `<test>.summary.json`
+
+A batch writes one summary document
+(`bgperf2/batch-summary/v1alpha1`) beside its CSV, derived by `summary.py`
+from the rows already in that CSV. It exists because one observation per cell
+says nothing about run-to-run variance, and because a summary is only worth
+having if the observations behind it are still there to argue with: every
+statistic is published beside the values it was computed from and the passes
+those came from, and the CSV keeps every row.
+
+It is written before the first cell runs -- naming every cell the batch
+intends, all `not run` -- and rewritten cell by cell like the CSV, so a batch
+that dies in its third pass still says what its first two measured and never
+leaves a discarded run's summary in place. `summary.py` reads the stats row
+by **column name**, never by position — that row is positional for
+`create_batch_graphs()` and has drifted by a column once already.
+
+One entry per matrix cell, in matrix order whatever order the cells ran in.
+
+| Field | Unit/type | Definition and interpretation |
+|---|---|---|
+| `cell` | int | The cell's `ordinal`: its position in one pass over the matrix. Unchanged by repetitions and by a shuffled execution order, so it is the same identity `--resume` matches on. |
+| `name` | string | The run name (label, else target plus version) with no `#N` pass suffix: the passes are inside this entry. |
+| `description` | string | How the cell is named in the printed line, from `batch_cell_description()` — the run name alone is the target, and two cells of one target differ only in their axes. |
+| `identity` | object | What the cell asked for: `peers`, `prefixes`, `filter`, the whole `target` entry (so `threads`, `mrt_file` and `image` are recorded, none of which reach the run name), and `required` as the passes reported it. |
+| `provenance` | object | `target image`, `tester version` and `monitor version` as the observed passes reported them. One value where they agree, the list where they do not. |
+| `inconsistent` | object | Present only when the passes disagreed about a provenance or identity column, mapping the column to every value seen. Two passes that ran against different images are not two observations of one thing — the gcov trap one layer up — so a disagreement is surfaced rather than averaged over. |
+| `passes_expected` | count | How many passes this cell has, i.e. the test's `repetitions`. |
+| `observations` | count | How many of them produced a usable row. |
+| `observed_passes` | list | Which repetitions those were, in the same order as every metric's `values`, so a reader can say which pass produced which number. |
+| `passes` | list of objects | Every pass, in repetition order, with `state` `observed`, `failed` (plus the run's `MSG`), `not run`, or `unreadable`. A failed pass and a pass that has not run are counted apart: one is a result and the other is unfinished work. `unreadable` is a stored row that is not the current header's width — `--resume` onto a progress file written before a column was appended is a supported path, and such a row is one field short. It costs its own pass and nothing else; indexed against this header it would otherwise raise and cost the whole test's document. |
+| `metrics` | object | One entry per column in `summary.METRIC_COLUMNS`, keyed by the CSV column name. |
+
+Each metric entry carries `values` (the observations, in pass order), `n`, and
+`mean`, `median`, `min`, `max`, `stdev`, `cv_percent`. `min` and `max` are
+observations and are copied through unrounded — a summary must not report an
+extreme no run produced — while the derived statistics are rounded to six
+places, enough to keep a 0.4 MB spread in `max mem (GB)` from reading as
+`0.0`. `mean` is published because `cv_percent` is otherwise a number a reader
+cannot check. `stdev` is the **sample** standard deviation (n-1): three passes
+are a sample of what the machine does, and the population formula understates
+the spread of one, to exactly 0 at n=1.
+
+Nothing here is published as a zero when it is really absent. A withheld
+statistic is `null` and the reason is in a `withheld` object beside it:
+
+| Reason | When |
+|---|---|
+| `no observation` | Every pass of the cell failed or has not run. |
+| `non-numeric observation` | A pass reported something that is not a number in that column. The offending pass is not dropped — that would change `n` without saying so, which is the one thing a dispersion cannot survive. |
+| `needs at least two observations` | `stdev` and `cv_percent` over a single pass. A CV of 0 there would say the measurement is perfectly repeatable on the strength of never having been repeated. |
+| `the mean is not positive` | `cv_percent` where the mean is zero, which is the normal shape of `tester errors` and `tester timeouts` in a good run: the spread is real and zero, the ratio to the mean is a division nobody can do. |
+| `never-sampled sentinel` | Any pass reported the value a run writes into that column when it never measured it — `min free mem (GB)` (`min_free` starts above every real value so the first sample can only lower it, and an untouched sentinel reaches the row as ~931,322 GB; `host_evidence()` maps the same sentinel back to `null` for the findings) and `max mem (GB)` (`max_mem` starts at 0 so the first sample can only raise it, and a peak under 0.5 MB is not something a daemon holding a BGP table can produce). The whole column is withheld for that cell rather than the pass being dropped: a cell where one pass of three lost its memory sampler would otherwise publish a ~310,474 GB mean and a 173% coefficient of variation on a 64 GB box, or an 87% one on the target's peak. `min idle%` and `max cpu %` are deliberately not treated this way — the first's sentinel is 100 and the second's rounds to 0 from any peak under 0.5%, both values a real run can report, and for `min idle%` an idle host and an unsampled one are the same finding anyway. |
+
+`describe_batch_summary()` prints one line per cell for a repeated test —
+observations, then `elapsed (s)` and `total time` medians, ranges and CVs, with
+any pass that did not produce an observation named under it — and
+nothing at all for a single-pass test, where every dispersion is withheld and a
+block of "CV unavailable" would say only that the test asked for one pass. A
+provenance disagreement is printed whichever it is: that is the finding, not
+the statistic beside it.
+
+A summariser that raises costs the summary and not the rows. It runs after the
+CSV is on disk and `publish_batch_summary()` catches, printing `summary
+unavailable: <exception>` — at the end of a batch that has already run for
+hours, the rows are the evidence and this is an opinion about them. That line is
+printed from every one of the three call sites, including the two that do not
+ask for the description, because it is the only report that the document beside
+the CSV is not the one describing it. A non-resumed batch also unlinks its
+predecessor's summary along with its progress file, so a write that then fails
+cannot leave a document describing passes that no longer exist.
+
+Values are written with `allow_nan=False`, and a non-finite observation is
+published as its own repr (`"nan"`) rather than as a bare `NaN`: the document
+has to stay readable by jq and by every non-Python parser.

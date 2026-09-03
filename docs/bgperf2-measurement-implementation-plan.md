@@ -1057,9 +1057,11 @@ controlled post-injection convergence tail.
 
 ### Phase 5: Add repetitions and order control
 
-Status: in progress. Repetitions, stable cell identity, resume and
-deterministic order control landed on 2026-09-03; the summary statistics have
-not.
+Status: complete on 2026-09-03, apart from the named variance rule for
+expanding three runs to five, which is a campaign decision rather than
+implementation and belongs to Phase 6. Repetitions, stable cell identity,
+resume, deterministic order control and the per-cell summary statistics all
+landed on 2026-09-03.
 
 #### Progress on 2026-09-03: a matrix can be run more than once
 
@@ -1233,12 +1235,173 @@ A second review pass found two more, also fixed here:
   key outside the required and optional sets -- the same failure the value
   checks exist to prevent, reached one character earlier.
 
-Still open in this phase: the median / min / max / dispersion /
-coefficient-of-variation summary, and the named variance rule for expanding
-three runs to five. No Docker run was needed or made -- the change is confined
-to batch sequencing, the progress file and report assembly, covered by the new
-`tests/test_batch_order.py` (29 tests) plus the extended
+Still open in this phase after that change set: the median / min / max /
+dispersion / coefficient-of-variation summary, and the named variance rule for
+expanding three runs to five. No Docker run was needed or made -- the change is
+confined to batch sequencing, the progress file and report assembly, covered by
+the new `tests/test_batch_order.py` (29 tests) plus the extended
 `test_benchmark_configs_expand`; 595 total, Docker-free.
+
+#### Progress on 2026-09-03: what the passes of a cell agree and disagree about
+
+A batch now writes `<test>.summary.json` beside its CSV: one entry per matrix
+cell, carrying that cell's passes and the distribution over them --
+`mean`, `median`, `min`, `max`, `stdev` and `cv_percent` for each of the
+thirteen measured columns. `summary.py` is the pure module that derives it,
+free of Docker and of bgperf2 imports like `contention.py`, `convergence.py`
+and `findings.py`, and `bgperf2.batch_summary_groups()` is the only thing that
+knows about cells. The document is rewritten cell by cell, like the CSV, so a
+batch that dies in its third pass still says what its first two measured.
+`docs/measurement-dictionary.md` has the field list and every withholding
+reason.
+
+Eight decisions worth keeping:
+
+- **The summary never replaces the rows.** Every pass keeps its CSV row, its
+  `<prefix>.events.json` and its PNGs, and the summary publishes the
+  observations each statistic was computed from beside it, together with which
+  repetition produced which value. The plan's own words for this phase are
+  "without hiding individual runs", and a statistic whose inputs are gone is
+  not one a reader can disagree with -- the same reason a finding carries its
+  evidence.
+- **Nothing absent is published as a zero.** A withheld statistic is `null`
+  with its reason in a `withheld` object beside it. `stdev` and `cv_percent`
+  need two observations, because a coefficient of variation of 0 over one pass
+  would say the measurement is perfectly repeatable on the strength of never
+  having been repeated -- which is exactly the claim this phase exists to stop
+  a single-observation cell from making. `cv_percent` also needs a positive
+  mean: `tester errors` and `tester timeouts` are 0 in every good run, where
+  the spread is real and zero and the ratio to the mean is a division nobody
+  can do.
+- **The dispersion is the sample standard deviation, n-1.** Three passes are a
+  sample of what the machine does, not the population of it, and the
+  population formula understates the spread -- to exactly 0 at n=1, which is
+  the same lie in a different form.
+- **`min` and `max` are observations, and are copied through unrounded.** A
+  summary must not report an extreme no run produced. The derived statistics
+  are rounded, to six places: a 0.4 MB spread in `max mem (GB)` reads as
+  `0.000391` rather than as `0.0`, and `1.4142135623730951` stays out of a
+  document meant to be read. `mean` is published although the plan did not ask
+  for it, because `cv_percent` is otherwise a number a reader cannot check.
+- **A failed pass is counted and named, never averaged in and never silently
+  dropped.** Averaging it would put a crashed run's 3-second elapsed beside two
+  good ones; dropping it silently would make two passes of three look like a
+  complete, tight distribution. A non-numeric value withholds the whole column
+  for the same reason, rather than skipping that pass: dropping an observation
+  changes `n` without saying so, and `n` is what every dispersion here rests
+  on. A pass that has *not run* is counted apart from one that failed, because
+  one is a result and the other is unfinished work, and an operator does
+  something different about each.
+- **Passes that disagree about an image are not repeated observations of one
+  thing.** `target image`, `tester version`, `monitor version` and the
+  `required` count are checked for agreement across the observed passes; a
+  disagreement lands in `inconsistent`, is published as the list of values
+  rather than as one of them, and is printed as a warning even for a
+  single-pass document. This is the gcov trap -- a freshly built version beside
+  a cached one -- reached one layer up: three passes across a rebuild would
+  otherwise publish a tight-looking distribution over two different binaries.
+  The measurement is still published; the disagreement is what is said out loud
+  about it.
+- **Grouping is by `ordinal` and sorted, not left in the order it arrived.**
+  `ordinal` is the one field neither a repetition nor a permuted execution order
+  changes, so the passes of one cell come together whichever way the batch ran.
+  Sorting both levels -- cells by ordinal, passes by repetition -- means the
+  function returns matrix order even when handed a sequenced list, which is the
+  same rule `batch_report_rows()` follows: execution order is a property of the
+  run and not of the report, and a summary dealt in shuffle order would sit
+  under a CSV and a set of bars that were not. Found by review of this change
+  set, which had it inheriting the caller's order.
+- **A summariser that raises costs the summary and not the rows.** It runs
+  after the CSV is on disk and `publish_batch_summary()` catches, printing
+  `summary unavailable: <exception>` -- the same rule
+  `write_event_artifact()` applies to its findings, for the same reason: at the
+  end of a batch that has already run for hours the rows are the evidence and
+  this is an opinion about them.
+- **The document is written before the first cell runs, not only after one
+  finishes.** `batch()` unlinks the progress file of a discarded non-resumed
+  batch but leaves its other output in place, so a summary written only on a
+  completion would leave the previous run's -- three passes that no longer
+  exist, described as though they did -- sitting beside a CSV that had been
+  rewritten. Writing it up front also means the file names the cells a batch
+  intends to run, all `not run`, from the outset.
+
+Review of this change set found four defects, fixed here:
+
+- **The unsampled `min_free` sentinel was summarised as an observation.**
+  `output_stats['min_free']` starts at `UNSAMPLED_MIN_FREE` so the first
+  sample can only lower it, and a run whose `free` poller never fired writes
+  ~931,322 GB into the `min free mem (GB)` column. `host_evidence()` maps that
+  sentinel back to `None` for the findings for exactly this reason and the
+  summary had no equivalent, so the worse case was a mixed cell: the `free`
+  thread raising in one pass of three -- which kills that thread while the run
+  goes on -- would publish a mean of ~310,474 GB, a standard deviation of
+  ~537,000 and a coefficient of variation of 173% on a 64 GB box, which reads
+  as a finding about the daemon. The sentinel is now named by
+  `unsampled_row_values()` in the row's own units, through the single
+  `row_gb()` formatter so the two cannot drift, and one of them withholds the
+  whole column for that cell rather than being dropped from it -- dropping it
+  would change `n` without saying so. `min idle%` is deliberately left alone:
+  its sentinel is 100, which is also a real value, and an idle host and an
+  unsampled one are the same finding.
+- **`max mem (GB)` was the same defect reached the other way round**, found by
+  a second review of the fix above. `max_mem` starts at 0 so the first sample
+  can only raise it, and the target's sampler is as easy to lose:
+  `Container.stats()` has no `try` around its `dckr.stats` walk, and its `mem`
+  comes from a `.get('usage', 0)` that can return 0 with the thread still
+  alive. A 3-pass cell reading 1.0, 0.0, 1.0 published a coefficient of
+  variation of 87% invented by a dead sampler -- immediately beside the
+  `min free mem (GB)` the first fix correctly withheld, so the document would
+  have reported the memory numbers disagreeing wildly while declining to
+  publish the other memory number. A peak under 0.5 MB is not something a
+  daemon holding a BGP table can produce, so `0.0` is distinguishable and is
+  named too. `max cpu %` is left out beside `min idle%`: it rounds to 0 from
+  any peak under 0.5%, so its zero is ambiguous.
+- **A row that was not the header's width cost the whole test's document.**
+  `summarize_batch()` checked that the header carried every name it reads, and
+  then `summarize_cell()` indexed each row by position with no length check.
+  `BATCH_PROGRESS_SCHEMA_VERSION` deliberately did not move when `max foreign
+  cpu %` was appended, so `--resume` onto a progress file written by an older
+  build is a supported path and such a row is one field short: it raised
+  `IndexError`, `publish_batch_summary()` caught it, and the result was no
+  summary file at all for that test plus a line naming neither the cell nor
+  the pass. Such a pass is now `unreadable`, kept apart from `failed` because
+  it says nothing about the daemon, and it costs only itself.
+- **The pre-loop write discarded its own failure, defeating its own purpose.**
+  It exists so a discarded batch's summary is replaced rather than left beside
+  a rewritten CSV, and if `summarize_batch()` raised there -- the legacy-row
+  case above, on the resume path -- nothing was written, the error string was
+  thrown away, and the previous run's document stayed in `results/` with
+  nothing said about it until the end-of-test call hours later. All three call
+  sites print a failure line now, and a non-resumed batch unlinks the stale
+  summary along with the progress file, so a failed write leaves no document
+  rather than the wrong one.
+- **The `isfinite` guard did not achieve what it was added for.** It withheld
+  the statistics but still copied the offending value into `values`, and
+  `json.dump` writes a nan or an inf as a bare word that jq and most
+  non-Python parsers reject -- so the document stayed unreadable, which was
+  the whole reason for the guard. A non-finite value is published as its own
+  repr and the dump runs with `allow_nan=False`, which turns anything else of
+  the kind into a named failure instead of an unparseable file.
+
+Two smaller things came out of the same review. The row is read by **column
+name** throughout, and `summarize_batch()` refuses a header that has lost one
+of the columns it needs rather than guessing -- that row is positional for
+`create_batch_graphs()` and has drifted by a column once already, so a summary
+keyed on index 12 would be arithmetic nobody could check;
+`tests/test_batch_summary.py` pins every name it reads against
+`stats_header()`. And the printed line names a cell with
+`batch_cell_description()` rather than the run name, because a run name is the
+target and two cells of one target differ only in their axes: `bird: 3 of 3
+passes observed` printed four times named none of them.
+
+The exit criterion was demonstrated with a fake-runtime batch: two targets by
+two peer counts, three repetitions, `order: shuffle` with a stated seed, an
+interruption inside pass 2 and a `--resume`, one cell failing in pass 3. The
+resumed batch re-ran only the interrupted cell, the CSV held all twelve rows,
+and the summary reported four cells with their CVs and named the failed pass
+under its own cell. No Docker run was needed or made: the change is confined to
+report assembly over rows the batch has already written, covered by the new
+`tests/test_batch_summary.py` (64 tests); 661 total, Docker-free.
 
 #### Work
 

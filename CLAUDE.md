@@ -261,6 +261,64 @@ Shuffling does not remove that drift; it stops it lining up with one axis.
   resumed as a shuffle, not just a changed seed — a file naming no order at all was written before
   ordering existed, and is read as matrix, because that was the only order there was.
 
+### Summarising the passes — `summary.py`
+
+A batch writes `<test>.summary.json` beside its CSV: one entry per matrix cell, with the
+distribution of that cell's passes. Pure and Docker-free like `contention.py`, `convergence.py`
+and `findings.py`, and it reads the stats row **by column name** — that row is positional for
+`create_batch_graphs()` and has drifted by a column once already, so a summary keyed on index 12
+would be arithmetic nobody could check. `docs/measurement-dictionary.md` has the field list.
+
+- **The summary never replaces the rows.** Every pass keeps its CSV row and its own artifacts; the
+  summary carries the observations it computed each statistic from, and which pass produced each
+  one. A number whose inputs are gone is not auditable.
+- **Nothing absent is published as a zero.** A withheld statistic is `null` with its reason beside
+  it. `stdev`/`cv_percent` need two observations — a CV of 0 over one pass says the measurement is
+  perfectly repeatable on the strength of never having been repeated — and `cv_percent` needs a
+  positive mean, which `tester errors` never has in a good run. `stdev` is the **sample** (n-1)
+  deviation: the population formula understates the spread of one, to exactly 0 at n=1.
+- **`min` and `max` are observations and are not rounded**; the derived statistics are, to six
+  places, so a 0.4 MB spread in `max mem (GB)` does not read as `0.0`.
+- **A failed pass is counted and named, never averaged in and never silently dropped.** Dropping it
+  would change `n` without saying so, which is the one thing a dispersion cannot survive; a pass
+  that has not run is counted apart from one that failed, because one is a result and the other is
+  unfinished work.
+- **An unsampled extreme is not an observation, here as well as in `findings.py`.** `min_free`
+  starts above every real value and `max_mem` at 0, so an untouched sentinel reaches the row as
+  ~931,322 GB or as 0.0 GB; `unsampled_row_values()` names both in the row's own units (via the
+  single `row_gb()` formatter, so the two cannot drift) and the whole column is withheld for that
+  cell. One pass of three losing its sampler would otherwise publish a ~310,474 GB mean and a 173%
+  CV on a 64 GB box, or an 87% CV on the target's peak — and `Container.stats()` has no `try` around
+  its walk, with a `mem` that comes from a `.get('usage', 0)`. `min idle%` and `max cpu %` are
+  deliberately excluded: 100 and a peak rounding to 0 are both values a real run can report.
+- **A stored row that is not the header's width costs its own pass, not the document.** `--resume`
+  onto a progress file written before a column was appended is a supported path — the schema version
+  deliberately did not move for `max foreign cpu %` — and one short row indexed against the current
+  header raises, which the wrapper turns into *no summary at all* for that test. Such a pass is
+  `unreadable`, kept apart from `failed`. A right-width, wrong-layout row cannot be caught here at
+  all, which is why `stats_header()` is the contract.
+- **Passes that disagree about an image are not observations of one thing.** `target image`,
+  `tester version`, `monitor version` and `required` are checked for agreement across the passes
+  and any disagreement lands in `inconsistent` and in a printed warning — the gcov trap (a freshly
+  built version beside a cached one) reached one layer up.
+- **Grouping and reporting are in matrix order**, sorted by `ordinal` rather than left in the order
+  they arrived, for the same reason `batch_report_rows()` is: execution order is a property of the
+  run, not of the report, and a summary dealt in shuffle order would sit under a CSV and a set of
+  bars that were not.
+- **A summariser that raises costs the summary, not the rows.** It runs after the CSV is on disk and
+  `publish_batch_summary()` catches — same rule as `write_event_artifact()` and its findings.
+- **It is written before the first cell, then after each one**, and a non-resumed batch unlinks its
+  predecessor's summary along with its progress file — otherwise a write that then fails leaves the
+  previous run's document beside a rewritten CSV. Every call site prints a failure line, including
+  the two that do not ask for the description: it is the only report that the document beside the
+  CSV is not the one describing it.
+- **The document must stay readable by a strict parser.** `json.dump` runs with `allow_nan=False`
+  and a non-finite observation is published as its own repr — a bare `NaN` is rejected by jq and by
+  most non-Python parsers.
+- The printed block is `elapsed (s)` and `total time` only, and nothing at all for a single-pass
+  test; the cell is named by `batch_cell_description()`, since the run name alone is the target and
+  two cells of one target differ only in their axes.
+
 **Two targets in one test may not share a run name.** A run name is label, else target plus
 version — nothing else — so entries differing only in `threads`, `mrt_file` or `image` are one
 name, and that is the stem `bench_output_prefix()` builds every artifact from, the `name` column

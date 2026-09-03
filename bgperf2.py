@@ -63,6 +63,7 @@ from measurements import (MonitorEventRecorder, TesterEventRecorder,
                           event_artifact, monitor_metrics,
                           tester_fleet_metrics, tester_metrics)
 from settings import dckr
+from summary import describe_batch_summary, summarize_batch
 from queue import Queue
 from mako.template import Template
 from packaging import version
@@ -1752,6 +1753,49 @@ def stats_header():
     return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date, cores, Mem (GB), tester errors, tester timeouts, failed, MSG, filters, max foreign cpu %, target image, tester version, monitor version")
 
 
+def row_gb(value):
+    '''Bytes as the CSV's GB column carries them.
+
+    One function because `unsampled_row_values()` has to produce exactly what
+    an unsampled `min_free` looks like in the row, and a second copy of the
+    formatting would drift from this one without anything failing.
+    '''
+    return float(format(value / 1024 / 1024 / 1024, ".3f"))
+
+
+def unsampled_row_values():
+    '''Row values that mean "never sampled" rather than a measurement.
+
+    `min_free` starts above every real value so the first sample can only
+    lower it, so an untouched sentinel reaches the row as a machine with
+    ~931,322 GB free. `host_evidence()` maps it back to None for the findings
+    for this reason, and a summary needs the same: a cell where one pass of
+    three lost its memory sampler -- `free` raising kills that thread while the
+    run goes on -- would otherwise publish a mean of ~310,474 GB and a
+    coefficient of variation of 173% on a 64 GB box, which reads as a finding
+    about the daemon.
+
+    `max_mem` is the same shape of sentinel reached the other way round: it
+    starts at 0 so the first sample can only raise it, and the target's
+    sampler is as easy to lose -- `Container.stats()` has no `try` around its
+    `dckr.stats` walk, and its `mem` comes from a `.get('usage', 0)` that can
+    return 0 with the thread still alive. A 3-pass cell reading 1.0, 0.0, 1.0
+    publishes a coefficient of variation of 87% invented by a dead sampler,
+    right beside the `min free mem (GB)` this function was added for -- so the
+    document would report the memory numbers disagreeing wildly while
+    declining to publish the other memory number. A peak under 0.5 MB is not
+    something a daemon holding a BGP table can produce, so 0.0 is
+    distinguishable here.
+
+    `min_idle` and `max_cpu` are deliberately not here: `min_idle`'s sentinel
+    is 100 and `max_cpu`'s rounds to 0 from any peak under 0.5%, both of which
+    are values a real run can report, and for `min_idle` an idle host and an
+    unsampled one are the same finding anyway.
+    '''
+    return {'min free mem (GB)': row_gb(UNSAMPLED_MIN_FREE),
+            'max mem (GB)': row_gb(0)}
+
+
 def create_output_stats(args, target_version, stats, fail=False, provenance=None):
     e = stats['elapsed'].seconds
     f = stats['first_received_time'].seconds
@@ -1764,8 +1808,8 @@ def create_output_stats(args, target_version, stats, fail=False, provenance=None
     legacy_post_first_prefix = e - f
     out.extend([stats['monitor_wait_time'], e, f, legacy_post_first_prefix,
                 float(format(stats['total_time'], ".2f"))])
-    out.extend([round(stats['max_cpu']), float(format(stats['max_mem']/1024/1024/1024, ".3f"))])
-    out.extend ([round(stats['min_idle']), float(format(stats['min_free']/1024/1024/1024, ".3f"))])
+    out.extend([round(stats['max_cpu']), row_gb(stats['max_mem'])])
+    out.extend ([round(stats['min_idle']), row_gb(stats['min_free'])])
     out.extend(['-s' if args.single_table else '', d, str(stats['cores']), mem_human(stats['memory'])])
     out.extend([stats['tester_errors'],stats['tester_timeouts']])
     out.extend(['FAILED']) if fail else out.extend([''])
@@ -2164,6 +2208,89 @@ def batch_report_rows(test_name, cells, completed):
     return rows
 
 
+def batch_summary_groups(test_name, cells, completed):
+    """Every pass of one matrix cell, gathered under that cell's identity.
+
+    Grouped by `ordinal`, which is a cell's place in the matrix and the one
+    field a repetition does not change, so the passes of one cell come
+    together whatever order they ran in.
+
+    Both levels are then sorted rather than left in the order they arrived --
+    by ordinal, and by repetition inside a cell -- so this returns matrix order
+    even when handed a sequenced list, and a metric's `values` read pass 1
+    first. Same reason `batch_report_rows()` reports in matrix order:
+    execution order is a property of the run, not of the report, and a summary
+    whose cells were dealt in shuffle order would sit under a CSV and a set of
+    bars that were not.
+
+    The identity comes from the cell rather than from the rows, because it is
+    known whether or not any pass produced one: a cell whose every pass failed
+    still has to say which cell it was. The whole target entry is carried, not
+    just the run name, since `threads`, `mrt_file` and `image` are what a run
+    was asked for and none of them reach the name.
+    """
+    groups = {}
+    for cell in cells:
+        ordinal = cell['ordinal']
+        if ordinal not in groups:
+            groups[ordinal] = {
+                'ordinal': ordinal,
+                'name': target_run_name(cell['target']),
+                # How a cell is named in a printed line, from the one function
+                # that already decides it: `name` alone is the target, and two
+                # cells of one target differ only in their axes.
+                'description': batch_cell_description(cell),
+                'identity': {'peers': cell['neighbors'],
+                             'prefixes': cell['prefixes'],
+                             'filter': cell['filter'],
+                             'target': cell['target']},
+                'passes': [],
+            }
+        groups[ordinal]['passes'].append({
+            'repetition': cell['repetition'],
+            'row': completed.get(batch_cell_id(test_name, cell))})
+    ordered = [groups[ordinal] for ordinal in sorted(groups)]
+    for group in ordered:
+        # A single-pass cell carries `repetition: None`, and it is the only
+        # pass there is.
+        group['passes'].sort(key=lambda p: p['repetition'] or 0)
+    return ordered
+
+
+def write_batch_summary(path, document):
+    def write(f):
+        # allow_nan=False: `json.dump` would otherwise write a NaN or an
+        # Infinity as a bare word that jq and most non-Python parsers reject,
+        # turning an unreadable document into a named failure instead.
+        json.dump(document, f, indent=2, sort_keys=True, default=str, allow_nan=False)
+        f.write('\n')
+    atomic_write(path, write)
+
+
+def publish_batch_summary(path, test_name, cells, completed, repetitions,
+                          describe=True):
+    """Write the per-cell summary beside the CSV, and return its printed lines.
+
+    Wrapped, for the reason `write_event_artifact()` catches its own findings:
+    the summary is derived from rows that are already on disk, so a
+    summariser that raises must cost the summary and not the evidence -- at
+    the end of a batch that has already run for hours.
+
+    A failure always returns a line, whether or not the caller asked for the
+    description: this is the only report that the document beside the CSV is
+    not the one describing it.
+    """
+    try:
+        document = summarize_batch(test_name, [f.strip() for f in stats_header().split(',')],
+                                   batch_summary_groups(test_name, cells, completed),
+                                   repetitions=repetitions,
+                                   unavailable=unsampled_row_values())
+        write_batch_summary(path, document)
+    except Exception as e:
+        return ['summary unavailable: {0}: {1}'.format(type(e).__name__, e)]
+    return describe_batch_summary(document, path=path) if describe else []
+
+
 def check_batch_images(targets):
     '''Fail before the first run if any image in the batch is missing.
 
@@ -2224,11 +2351,18 @@ def batch(args):
     for test, _targets, cells, order, seed in expanded:
         repetitions = batch_repetitions(test)
         progress_path = results_path(args.results_dir, f"{test['name']}.progress.json")
+        summary_path = results_path(args.results_dir, f"{test['name']}.summary.json")
         resume = getattr(args, 'resume', False)
         document = load_batch_progress_document(progress_path) if resume else {'cells': {}}
         completed = document['cells']
         if not resume and os.path.exists(progress_path):
             os.unlink(progress_path)
+        if not resume and os.path.exists(summary_path):
+            # The rows of a discarded batch are replaced by its successor's
+            # first checkpoint, but a summary that then fails to write would
+            # leave the previous run's document -- three passes that no longer
+            # exist -- beside the rewritten CSV.
+            os.unlink(summary_path)
         # A progress file written before ordering existed names no order, and
         # there was only one to have run in: reading it as matrix is what makes
         # the comparison below honest rather than vacuous.
@@ -2260,6 +2394,14 @@ def batch(args):
         # in it, and so --resume finds the sequence rather than drawing another.
         write_batch_progress(progress_path, completed, order=order, seed=seed,
                              previous_seeds=superseded)
+        # Written before the first cell too, so the file describes *this*
+        # batch's cells from the outset rather than leaving a previous run's
+        # summary in place -- a stale document claiming three passes that were
+        # discarded is worse than no document. Nothing is printed yet.
+        for line in publish_batch_summary(summary_path, test['name'], cells,
+                                          completed, repetitions,
+                                          describe=False):
+            print(line)
         for cell in order_batch_cells(test['name'], cells, order, seed):
             t = cell['target']
             cell_id = batch_cell_id(test['name'], cell)
@@ -2306,6 +2448,12 @@ def batch(args):
                                  previous_seeds=superseded)
             write_batch_csv(results_path(args.results_dir, f"{test['name']}.csv"),
                             batch_report_rows(test['name'], cells, completed))
+            # Kept current cell by cell, like the CSV: a batch that dies in its
+            # third pass should still say what its first two measured.
+            for line in publish_batch_summary(summary_path, test['name'], cells,
+                                              completed, repetitions,
+                                              describe=False):
+                print(line)
 
         # A crash after the progress checkpoint but before its matching CSV
         # replacement can leave the CSV one cell behind. Rebuild it even when
@@ -2318,6 +2466,16 @@ def batch(args):
         for stat in results:
             print(','.join(map(str, stat)))
 
+        # Every pass's row is above; this says what they do and do not agree
+        # about. The rows are never replaced by it -- a summary that hid the
+        # observations behind it would be a number nobody could check. A
+        # single-pass test with nothing to report prints nothing at all.
+        summary_lines = publish_batch_summary(summary_path, test['name'], cells,
+                                              completed, repetitions)
+        if summary_lines:
+            print()
+            for line in summary_lines:
+                print(line)
 
         create_batch_graphs(results, test['name'], results_dir=args.results_dir)
 

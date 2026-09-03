@@ -287,3 +287,27 @@ def test_an_unresolved_injection_still_names_what_the_generator_measured(capsys)
     printed = capsys.readouterr().out
     assert 'injection shorter than the 1.0s poll resolution' in printed
     assert 'measured its own send at 0.001030s' in printed
+
+
+def test_an_interval_nothing_crossed_is_not_printed_as_an_instant_one(capsys):
+    '''A real interval with a null rate must not borrow the sub-poll wording.
+
+    'Injection shorter than the 1.0s poll resolution' is true only when first
+    update and completion shared a poll. Here they did not: the interval was
+    measured, and what is missing is any of the table inside it.
+    '''
+    recorder = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    recorder.observe(1.0, {'p1': TesterOffering(established=True, expected=200,
+                                                offered=100)})
+    recorder.observe(2.0, {'p1': TesterOffering(established=True, expected=200,
+                                                offered=100,
+                                                send_complete=True)})
+    origin = LifecycleEvent(EventKind.BENCH_CLOCK_STARTED, 0.0, 'controller',
+                            EventPhase.SETUP)
+
+    bgperf2.print_tester_metrics([origin] + list(recorder.events), ['tester'])
+
+    printed = capsys.readouterr().out
+    assert 'none of them inside the measured 1.0s' in printed
+    assert 'shorter than' not in printed
+    assert 'prefixes/s' not in printed

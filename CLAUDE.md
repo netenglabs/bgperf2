@@ -226,6 +226,31 @@ legacy `testers (s)` CSV column is untouched: it is elapsed minus
 time-to-first-prefix, a property of the target and monitor, and the two must not
 be read as versions of the same measurement.
 
+`measurements.tester_fleet_metrics()` summarises every generator in the run into
+one `tester_fleet` section beside those per-generator ones, aggregated the way
+`TesterEventRecorder` combines the sessions inside one container: ready when the
+**last** generator is ready, injection from the **earliest** first update to the
+**slowest** completion, and completion all-or-nothing. One injector of ten that
+never completed leaves `injection_s` null and its name in `incomplete_testers`
+— an interval bounded by the nine that finished would describe a workload that
+was never fully offered, and it would look entirely ordinary. Counts are summed
+under the same rule; durations are not summed at all, because the generators
+send at the same time. It is a summary of the sections, never a replacement:
+the fleet says whether the load was delivered, the sections say which generator
+was slow.
+
+**A span nothing crossed is not a rate of zero**, at either level. Each MRT
+injector's sub-millisecond walk is over before its own first poll, so a fleet
+span bounded by two injectors completing at different polls contains none of
+the table: the real ten-injector run measured `injection_s` 1.0s with
+`offered_in_interval` 0, and dividing would have published `0 prefixes/s` for
+ten injectors that delivered all 100,000 prefixes. The same shape occurs
+per-generator every time a self-reporting generator's count goes final one poll
+before it says `End-of-RIB`. The rate is withheld in both cases — and the
+printed line does not borrow the sub-poll wording for it, since "shorter than
+the 1.0s poll resolution" is true only when first update and completion shared
+a poll.
+
 Five things this depends on:
 
 - **The published resolution is the gap the loop achieved, not the one it asked

@@ -60,7 +60,7 @@ container name:
 | `reported_injection_s` | seconds | The generator's *own* measurement of its send, where it makes one — for bgpdump2, the `End-of-RIB, walk time` it logs. It is **not** a sharper `injection_s`: a different clock and the generator's own definition of sending (bgpdump2's walk time is encode time bounded by its 256KB write buffer, so it tracks the wire only on a table large enough to fill that buffer). Read it beside `injection_s`, never instead of it — and it is the only thing that says anything at all when `injection_s` is `0.0` because the whole walk finished inside one look. Across a container's sessions it is the longest, not the sum: sessions send at the same time, so it is a lower bound on the container's whole send span. Published only when every session reported one; `null` for a generator that measures nothing (BIRD). No rate is derived from it — dividing an encode-side count by an encode-side interval gives a send rate the generator never achieved. |
 | `offered_prefixes` | prefixes | The generator's own cumulative count at completion, summed across its sessions. Published only when every session was legible; a partial read reports `null` rather than a shortfall. |
 | `offered_in_interval` | prefixes | How much of `offered_prefixes` arrived inside `injection_s`. The rate below is derived from this, not from the total. `null` means the generator's counter went backwards during the run — BIRD clears a protocol's route-change stats when the protocol restarts — so the interval is real but its content is unknown. |
-| `offered_rate_pps` | prefixes/second | `offered_in_interval / injection_s`. It is `null` in two different cases, told apart by `offered_in_interval`: an injection that began and finished inside one look, so there is no interval to divide by (`injection_s` is `0.0` and `offered_in_interval` is `0` — see `injection_resolution_s` for how wide that look was), or a generator whose counter reset mid-run so nothing can be said about what crossed the interval (`offered_in_interval` is `null`). **Read it only beside `offered_in_interval`**: for BIRD 2.19 that share is usually a small tail of the table, and the rate is then a slope of the poll cadence rather than the generator's send rate. |
+| `offered_rate_pps` | prefixes/second | `offered_in_interval / injection_s`. It is `null` in three different cases, told apart by reading `injection_s` **and** `offered_in_interval` together — neither field discriminates on its own: (1) an injection that began and finished inside one look, so there is no interval to divide by (`injection_s` is `0.0`, `offered_in_interval` is `0` — see `injection_resolution_s` for how wide that look was); (2) a measured interval that none of the table crossed (`injection_s` is greater than `0.0`, `offered_in_interval` is `0`), which is the ordinary shape for a generator that reports its own completion, since a bgpdump2 injector's count is final at the poll before it logs `End-of-RIB` — the interval is real and says nothing about the send, and `0 prefixes/s` would describe a generator that delivered everything as one that sent nothing; (3) a generator whose counter reset mid-run, so nothing can be said about what crossed the interval (`offered_in_interval` is `null`). **Read it only beside `offered_in_interval`**: for BIRD 2.19 that share is usually a small tail of the table, and the rate is then a slope of the poll cadence rather than the generator's send rate. |
 | `octets_on_wire` | bytes | The generator's cumulative count of bytes a successful `write()` put on the socket, read at the poll that saw completion and summed across sessions. The one wire-side number here: `offered_prefixes` is counted at the encoder, so where the encoder outruns the socket the two diverge — a real bgpdump2 mid-walk line reads 9,981 prefixes encoded against 88 octets written. It is a property of the paths played back, not of the prefix count: two injectors sending 10,000 prefixes each from different MRT peers wrote 183,852 and 259,226 octets. Published only when every session was legible; `null` for a generator that does not count bytes (BIRD). |
 | `backpressure` | object | `{"available": false, "reason": ...}` where the generator exposes no blocked-write counter (BIRD 2.19), otherwise the maximum observed `TX pending` bytes/prefixes (BIRD 3). Never `0` for a daemon that cannot answer. |
 | `read_failures` | object | `{"polls": N, "first_reason": ...}` when one or more polls could not be read at all (the container was gone, the control socket refused). Present only when it happened; its absence means every poll was read. |
@@ -72,6 +72,36 @@ generator that loaded half its config cannot look complete. And an event is
 absent rather than synthesized: a run whose generator never reported completion
 has no `tester_complete` and a `null` `injection_s`, never an interval inferred
 from monitor timestamps.
+
+## Event artifact: the `tester_fleet` section
+
+The same artifact carries one `tester_fleet` object beside `testers`, present
+whenever a run had at least one generator that could be polled. It answers a
+different question from the per-generator sections: those say which generator
+was slow, this says whether the workload was offered at all. A ten-injector
+full-internet run is why — reading that off ten sections means noticing the one
+with a null interval.
+
+Every aggregate is taken pessimistically, the way a container's own sessions
+are combined: ready at the **last** generator, injection from the **earliest**
+first update to the **slowest** completion, and completion all-or-nothing.
+
+| Field | Unit/type | Definition and interpretation |
+|---|---|---|
+| `testers` | count | Generators polled in this run — the number of `testers` entries. |
+| `testers_complete` | count | How many of them reported completion. |
+| `incomplete_testers` | list of strings | The container names that did not, sorted. Non-empty means the workload was never fully offered, and every interval below is `null` as a result: an interval bounded by the generators that *did* finish would describe a run that did not happen. A generator that was never legible at all appears here too. |
+| `tester_startup_s` | seconds | Bench clock origin to the readiness of the **last** generator, not the first. `null` if any generator was never seen ready. Note that `bench()` launches the tester containers serially before polling starts, so on a large fleet this absorbs the launch cost of the whole fleet. |
+| `startup_resolution_s` | seconds | How coarsely `tester_startup_s` is placed: the gap bounding the poll that found the last generator ready. Same reading as the per-generator field. |
+| `first_update_s` | seconds | Bench clock origin to the earliest first update across the fleet. `null` unless every generator completed. |
+| `complete_s` | seconds | Bench clock origin to the slowest generator's completion. `null` unless every generator completed. |
+| `injection_s` | seconds | `complete_s - first_update_s`: one span covering the whole fleet, **not** a sum of the generators' intervals — they send at the same time, so summing would total time nobody spent sending. |
+| `injection_resolution_s` | seconds | The wider of the two polls bounding that span, which belong to two different generators. Read `injection_s` against it exactly as for a single generator. |
+| `reported_injection_s` | seconds | The **longest** of the generators' own reported send durations, never their sum, and a lower bound on the fleet's send span since generators that started at different moments cover more than the longest of them. Published only when every generator reported one. |
+| `offered_prefixes` | prefixes | Summed across generators, published only when every one of them was legible. Nine of ten injectors is not a 10% shortfall, it is a different measurement. |
+| `offered_in_interval` | prefixes | The sum of the per-generator `offered_in_interval` values. Each generator's own interval sits inside the fleet span and what it had already offered when its first poll landed is outside both, so this is a **lower bound** on what crossed the fleet span. |
+| `offered_rate_pps` | prefixes/second | `offered_in_interval / injection_s`, and therefore a **lower bound**: a numerator measured over each generator's own interval divided by the wider fleet span. `null` under the same three rules as the per-generator field, and case (2) is the *normal* MRT shape rather than an edge case — every injector's sub-millisecond walk is over before its own first poll, so a span bounded by two injectors completing at different polls contains none of the table. The verified ten-injector run measured `injection_s` 1.0s with `offered_in_interval` 0 for 100,000 delivered prefixes. |
+| `octets_on_wire` | bytes | Summed across generators under the same all-or-nothing rule; `null` where any generator does not count bytes. |
 
 **A BIRD 2.19 offered count is queue-side.** `Export updates accepted` counts a
 route when it is handed to the BGP protocol, not when it reaches the wire, so

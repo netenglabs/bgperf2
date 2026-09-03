@@ -57,7 +57,8 @@ from convergence import ConvergenceTracker
 from contention import (describe_contention, foreign_cpu_percent,
                         is_memory_backed, own_process_tree, sample_processes)
 from measurements import (MonitorEventRecorder, TesterEventRecorder,
-                          event_artifact, monitor_metrics, tester_metrics)
+                          event_artifact, monitor_metrics,
+                          tester_fleet_metrics, tester_metrics)
 from settings import dckr
 from queue import Queue
 from mako.template import Template
@@ -1450,7 +1451,7 @@ def print_tester_metrics(events, producers):
                   f"unavailable (the generator's counter was reset mid-run){own}")
             continue
         rate = measured['offered_rate_pps']
-        if rate is None:
+        if rate is None and not measured['injection_s']:
             # There was no interval to divide by: the whole table was already
             # offered when the instrument first looked, so first update and
             # completion landed on the same poll. That is not an instant
@@ -1465,12 +1466,92 @@ def print_tester_metrics(events, producers):
             print(f"{producer}: ready after {startup_text}, offered {offered} "
                   f"prefixes, injection shorter than {bound}{own}")
             continue
+        if rate is None:
+            # There is an interval, and none of the table crossed it: the
+            # count was already final at the first poll that could read it and
+            # the generator said it was done at a later one. A generator that
+            # delivered everything must not be published at 0 prefixes/s.
+            print(f"{producer}: ready after {startup_text}, offered {offered} "
+                  f"prefixes, none of them inside the measured "
+                  f"{measured['injection_s']:.1f}s (the table was offered "
+                  f"before the first poll){own}")
+            continue
         # The rate covers only the part of the table that arrived inside the
         # measured interval; printing that share keeps a tail slope from being
         # read as the generator's send rate.
         print(f"{producer}: ready after {startup_text}, offered {offered} "
               f"prefixes, {covered} of them in the measured "
               f"{measured['injection_s']:.1f}s ({rate:.0f} prefixes/s){own}")
+    if len(producers) > 1:
+        print_tester_fleet_metrics(events, producers)
+
+
+def print_tester_fleet_metrics(events, producers):
+    '''Report whether the whole generator fleet offered the workload.
+
+    A ten-injector MRT run prints ten lines above this one, and the fact that
+    matters for the run is whether *every* one of them finished. Reading that
+    off ten lines means noticing the single one that says `injection
+    unmeasured`, which is the line a reader skims. This says it once, and names
+    the generators that did not finish rather than reporting a fleet interval
+    the ones that did could supply.
+    '''
+    fleet = tester_fleet_metrics(events, producers)
+    count = fleet['testers']
+    startup = fleet['tester_startup_s']
+    startup_text = 'unmeasured' if startup is None else f"{startup:.1f}s"
+    missing = fleet['incomplete_testers']
+    if missing:
+        named = ', '.join(missing[:4])
+        if len(missing) > 4:
+            named += f", and {len(missing) - 4} more"
+        print(f"all {count} generators: {fleet['testers_complete']} reported "
+              f"completion, last ready after {startup_text}, fleet injection "
+              f"unmeasured (no completion from {named})")
+        return
+    # The longest of the generators' own measurements, not their sum: they send
+    # at the same time, so adding them totals intervals that overlapped.
+    reported = fleet['reported_injection_s']
+    own = '' if reported is None \
+        else (f"; the slowest generator measured its own send at "
+              f"{reported:.6f}s")
+    offered = fleet['offered_prefixes']
+    covered = fleet['offered_in_interval']
+    rate = fleet['offered_rate_pps']
+    # One span from the earliest first update to the slowest completion, for
+    # the same reason -- not a sum of the generators' intervals.
+    injection = fleet['injection_s']
+    if offered is None:
+        print(f"all {count} generators: last ready after {startup_text}, all "
+              f"complete over {injection:.1f}s, offered count unavailable (a "
+              f"generator had no readable count at completion){own}")
+        return
+    if covered is None:
+        print(f"all {count} generators: last ready after {startup_text}, "
+              f"offered {offered} prefixes over {injection:.1f}s, rate "
+              f"unavailable (a generator's counter was reset mid-run){own}")
+        return
+    if rate is None and not injection:
+        resolution = fleet['injection_resolution_s']
+        bound = 'one poll' if resolution is None \
+            else f"the {resolution:.1f}s poll resolution"
+        print(f"all {count} generators: last ready after {startup_text}, "
+              f"offered {offered} prefixes, fleet injection shorter than "
+              f"{bound}{own}")
+        return
+    if rate is None:
+        # The MRT shape: every injector's walk finished before its own first
+        # poll, and the span only records that they completed at different
+        # polls. It is an interval nothing was measured crossing, which is not
+        # the same as a slow fleet -- and 0 prefixes/s would say it was one.
+        print(f"all {count} generators: last ready after {startup_text}, "
+              f"offered {offered} prefixes, none of them inside the "
+              f"{injection:.1f}s between the first and last completion (each "
+              f"generator finished before it was first looked at){own}")
+        return
+    print(f"all {count} generators: last ready after {startup_text}, offered "
+          f"{offered} prefixes, {covered} of them in the measured "
+          f"{injection:.1f}s ({rate:.0f} prefixes/s){own}")
 
 
 def print_final_stats(args, target_version, stats):

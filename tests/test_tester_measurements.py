@@ -984,3 +984,23 @@ def test_a_table_offered_before_the_first_poll_covers_none_of_the_interval():
     assert m['injection_s'] == 0.0
     assert m['offered_in_interval'] == 0
     assert m['offered_rate_pps'] is None
+
+
+def test_a_measured_interval_nothing_crossed_is_not_a_rate_of_zero():
+    '''The shape a self-reporting generator produces every time.
+
+    A bgpdump2 injector's count is final at the poll before it says
+    `End-of-RIB`, so the measured interval between the first legible count and
+    the reported completion contains none of the table. Dividing publishes
+    `0 prefixes/s` for a generator that delivered everything.
+    '''
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    r.observe(1.0, {'a': TesterOffering(established=True, expected=200,
+                                        offered=100)})
+    r.observe(2.0, {'a': TesterOffering(established=True, expected=200,
+                                        offered=100, send_complete=True)})
+
+    m = metrics(r)
+    assert m['injection_s'] == 1.0
+    assert m['offered_in_interval'] == 0
+    assert m['offered_rate_pps'] is None

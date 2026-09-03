@@ -683,7 +683,14 @@ def tester_metrics(events: Iterable[LifecycleEvent], producer: str):
         # across the reset.
         if already_sent is not None and offered >= already_sent:
             offered_in_interval = offered - already_sent
-            if injection_s:
+            # A numerator of zero is not a rate of zero. It says the whole
+            # table was already offered when the first poll landed and the
+            # completion arrived at a later one -- which is the ordinary shape
+            # for a generator that reports its own completion, since its final
+            # count is legible a poll before it says it is done. Dividing
+            # publishes `0 prefixes/s` for a generator that delivered
+            # everything, and that reads as a broken one.
+            if injection_s and offered_in_interval:
                 rate = offered_in_interval / injection_s
 
     # Each interval gets the resolution of the polls that bound *it*. One
@@ -754,6 +761,138 @@ def _bounding_resolution(*events):
     return max(seen) if seen else None
 
 
+def _fleet_total(values):
+    '''Sum a per-generator count, or refuse the total if one is missing.
+
+    Same all-or-nothing rule the sessions inside one container already use, one
+    level up and for a sharper reason: a total covering nine of ten injectors
+    is not a small shortfall, it is a different measurement, and a run whose
+    tenth injector was never legible would publish a fleet count that looks
+    like a workload 10% short of its configuration.
+    '''
+    values = list(values)
+    if not values or any(value is None for value in values):
+        return None
+    return sum(values)
+
+
+def tester_fleet_metrics(events: Iterable[LifecycleEvent], producers):
+    '''Aggregate every generator in a run without letting the fastest speak.
+
+    A full-internet MRT run drives ten injector containers, and the question
+    the run as a whole asks is not what any one of them did but whether the
+    workload was offered at all.  Every aggregate here is taken pessimistically,
+    the same way TesterEventRecorder combines the sessions inside one container:
+    the fleet is ready when its *last* generator is ready, its injection starts
+    at the *earliest* first update and ends when its *slowest* generator
+    completes.
+
+    Completion gates every interval, and it is all-or-nothing.  One injector
+    that never reported completion leaves `injection_s` None and its name in
+    `incomplete_testers`, rather than an interval bounded by the nine that did
+    finish -- that number would describe a workload that was never fully
+    offered, which is precisely the failure an aggregate is added to expose and
+    the one it must not average away.
+
+    This is a summary of the per-generator sections, never a replacement for
+    them: the fleet says whether the workload was delivered, and the individual
+    sections say which generator was slow.
+    '''
+    events = tuple(events)
+    producers = sorted(producers)
+    if not producers:
+        raise MeasurementEventError(
+            'a fleet summary needs at least one generator')
+    origin = unique_event(events, EventKind.BENCH_CLOCK_STARTED, 'controller')
+    if origin is None:
+        raise MeasurementEventError(
+            'fleet metrics need the controller bench_clock_started event')
+
+    per = [tester_metrics(events, producer) for producer in producers]
+    ready = {p: unique_event(events, EventKind.TESTER_SESSION_READY, p)
+             for p in producers}
+    first = {p: unique_event(events, EventKind.TESTER_FIRST_UPDATE, p)
+             for p in producers}
+    done = {p: unique_event(events, EventKind.TESTER_COMPLETE, p)
+            for p in producers}
+
+    # A generator that completed without ever being seen to offer anything is
+    # counted as incomplete too. The recorder cannot produce that stream -- it
+    # holds `tester_complete` until an update is observed -- but a fleet
+    # interval measured from a first update some other generator supplied would
+    # be exactly the substitution this function exists to refuse.
+    incomplete = [p for p in producers
+                  if done[p] is None or first[p] is None]
+
+    first_update_s = None
+    complete_s = None
+    injection_s = None
+    injection_resolution_s = None
+    if not incomplete:
+        start = min(first.values(), key=lambda e: e.monotonic_s)
+        end = max(done.values(), key=lambda e: e.monotonic_s)
+        if end.monotonic_s < start.monotonic_s:
+            raise EventOrderError(
+                'fleet {0} at {1} precedes {2} at {3}'.format(
+                    end.kind.value, end.monotonic_s,
+                    start.kind.value, start.monotonic_s))
+        first_update_s = start.monotonic_s - origin.monotonic_s
+        complete_s = end.monotonic_s - origin.monotonic_s
+        injection_s = complete_s - first_update_s
+        # The fleet interval is bounded by two polls belonging to two different
+        # generators, and it is only as sharp as the wider of them.
+        injection_resolution_s = _bounding_resolution(start, end)
+
+    startup_s = None
+    startup_resolution_s = None
+    if all(event is not None for event in ready.values()):
+        last_ready = max(ready.values(), key=lambda e: e.monotonic_s)
+        startup_s = last_ready.monotonic_s - origin.monotonic_s
+        startup_resolution_s = _poll_resolution(last_ready)
+
+    offered = _fleet_total(m['offered_prefixes'] for m in per)
+    # Summed rather than recomputed against the fleet interval, which makes it
+    # a lower bound: each generator's own interval sits inside the fleet's, and
+    # what it had already offered when its own first poll landed is outside
+    # both. The bias is downward, which is the only safe direction for a
+    # number a rate is divided from -- an overstated numerator would publish a
+    # send rate no generator achieved.
+    in_interval = _fleet_total(m['offered_in_interval'] for m in per)
+    # Zero prefixes inside the span is not a send rate of zero, and at the
+    # fleet level it is the *normal* case for MRT playback: every injector's
+    # sub-millisecond walk finishes before its own first poll, so a span
+    # bounded by two injectors completing at different polls contains none of
+    # the table. Publishing 0 prefixes/s there would describe ten injectors
+    # that delivered everything instantly as ten that sent nothing.
+    rate = in_interval / injection_s \
+        if in_interval and injection_s else None
+    # Not summed. The generators send at the same time, so adding their own
+    # reported durations would total intervals that overlapped. The longest is
+    # taken for the reason the per-container aggregate takes it: it is a lower
+    # bound on the span, since generators that started at different moments
+    # cover more than the longest of them alone.
+    reported = [m['reported_injection_s'] for m in per]
+    reported_injection_s = max(reported) \
+        if reported and all(value is not None for value in reported) else None
+
+    return {
+        'testers': len(producers),
+        'testers_complete': len(producers) - len(incomplete),
+        'incomplete_testers': incomplete,
+        'tester_startup_s': startup_s,
+        'startup_resolution_s': startup_resolution_s,
+        'first_update_s': first_update_s,
+        'complete_s': complete_s,
+        'injection_s': injection_s,
+        'injection_resolution_s': injection_resolution_s,
+        'reported_injection_s': reported_injection_s,
+        'offered_prefixes': offered,
+        'offered_in_interval': in_interval,
+        'offered_rate_pps': rate,
+        'octets_on_wire': _fleet_total(m['octets_on_wire'] for m in per),
+    }
+
+
 def monitor_metrics(events: Iterable[LifecycleEvent]):
     '''Derive the monitor-owned intervals from their named endpoints.'''
     events = tuple(events)
@@ -803,6 +942,12 @@ def event_artifact(events: Iterable[LifecycleEvent], status, testers=None):
             producer: _tester_section(events, producer, evidence)
             for producer, evidence in testers.items()
         }
+        # Beside the per-generator sections, never instead of them. A ten
+        # injector MRT run needs one place that says whether the whole
+        # workload was offered -- reading that off ten sections means noticing
+        # the one with a null interval, which is exactly the thing a reader
+        # skims past.
+        artifact['tester_fleet'] = tester_fleet_metrics(events, testers)
     return artifact
 
 

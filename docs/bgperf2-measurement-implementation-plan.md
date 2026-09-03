@@ -586,9 +586,9 @@ property of the paths played back, not of the table size. No read failures, no
 tester errors or timeouts, foreign CPU 4%.
 
 Left for the next change sets in this phase: an aggregate across injectors that
-cannot let the fastest speak for the rest; and blocked-write evidence (`-t io`
-enables bgpdump2's `Partial write`/`Full write` lines, at the cost of a log line
-per write).
+cannot let the fastest speak for the rest (done below); and blocked-write
+evidence (`-t io` enables bgpdump2's `Partial write`/`Full write` lines, at the
+cost of a log line per write).
 
 Also open, raised by review of the provenance change set and belonging to the
 Phase 2 poll loop rather than to bgpdump2: **`Tester.offering_stats()` does not
@@ -655,6 +655,70 @@ recorded. No tester errors or timeouts, foreign CPU 4%.
 
 Still open for the exabgp pair, which implements no version command at all and
 is unpinned at both layers.
+
+#### Progress on 2026-09-03: one line for whether the fleet delivered the load
+
+A full-internet run drives ten injector containers, and until this change set
+the only account of them was ten per-generator sections. Reading "was the
+workload offered?" off ten sections means noticing the one with a null
+interval, which is the line a reader skims.
+
+`measurements.tester_fleet_metrics()` summarises them into one
+`tester_fleet` section beside the per-generator ones, and
+`print_tester_fleet_metrics()` prints one line beside the per-generator lines.
+Every aggregate is taken the way `TesterEventRecorder` already combines the
+sessions inside one container: the fleet is ready when its **last** generator
+is ready, its injection runs from the **earliest** first update to the
+**slowest** completion, and completion is all-or-nothing.
+
+Four rules in it:
+
+- **One generator that never completed leaves the fleet unmeasured and named.**
+  `incomplete_testers` carries it and `injection_s` stays None. An interval
+  bounded by the nine that did finish would describe a workload that was never
+  fully offered, and it would look entirely ordinary. The count is refused for
+  the same reason: 90,000 of an expected 100,000 reads as a workload 10% short
+  rather than as an injector nobody could ask.
+- **Durations are not summed and rates are not added.** The injectors send at
+  the same time, so summing their intervals totals time nobody spent sending.
+  The rate divides the prefixes measured crossing the fleet span by that span,
+  which makes it lower than any single generator's slope -- the conservative
+  direction, and the only one an aggregate can take. `reported_injection_s` is
+  the longest of the generators' own measurements, not their sum, and stays a
+  lower bound on the fleet's whole send span.
+- **A span nothing crossed is not a rate of zero.** This is the *normal* MRT
+  shape, not an edge case: each injector's sub-millisecond walk is over before
+  its own first poll, so a span bounded by two injectors completing at
+  different polls contains none of the table. The ten-injector verification
+  below measured exactly that -- `injection_s` 1.0s with `offered_in_interval`
+  0 -- and dividing would have published `0 prefixes/s` for ten injectors that
+  delivered all 100,000 prefixes. The rule is shared with the per-generator
+  metrics, where the same shape occurs every time a self-reporting generator's
+  count goes final one poll before it says `End-of-RIB`; that case previously
+  printed `0 prefixes/s` too. `print_tester_metrics()` no longer borrows the
+  sub-poll wording for it either: "shorter than the 1.0s poll resolution" is
+  true only when first update and completion shared a poll, and here they did
+  not.
+- **It is a summary of the sections, never a replacement.** The fleet says
+  whether the workload was delivered; the per-generator sections say which
+  generator was slow. The line is printed only when a run has more than one
+  generator, since with one it would restate the line above it less precisely.
+
+##### Docker verification
+
+Run on 2026-09-03 on the 8-core / 30 GB host, `-d /var/tmp/bgperf` with results
+outside the campaign tree: `bench -t bird -g bgpdump2 -n 10 -p 10000
+--mrt-file mrt/rib.20210801.0000`. Converged in 4s. All ten injectors reported
+completion -- `testers_complete: 10`, `incomplete_testers: []` -- with the
+exact expected 100,000 offered prefixes and 2,214,093 wire-side octets summed
+across them, `tester_startup_s` 3.26s (the last injector's readiness, not the
+first's), and a fleet injection of 1.0s that the run correctly refused to turn
+into a rate. `tester version` reads `2.0.14 (a019184)`. No read failures, no
+tester errors or timeouts, foreign CPU 5%.
+
+The remaining Phase 3 item is blocked-write evidence (`-t io` enables
+bgpdump2's `Partial write`/`Full write` lines, at the cost of a log line per
+write).
 
 #### Work
 

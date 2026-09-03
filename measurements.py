@@ -628,6 +628,47 @@ class TesterEventRecorder:
             self._add(EventKind.TESTER_COMPLETE, monotonic_s, counters, details)
 
 
+def offering_poll_can_stop(sessions: Mapping[str, TesterOffering]) -> bool:
+    '''True when one more poll of this generator could not learn anything.
+
+    The poll loop otherwise runs until the monitor converges, which for a
+    bind-mounted log costs a file read but for a BIRD tester is a `docker exec`
+    running one `birdc` per configured peer, once a second, for the whole run.
+    At 50-100 peers that is a hundred short-lived processes a second spawned by
+    the instrument itself -- and `birdc` is in `contention.BGPERF_PROCESSES`, so
+    it is the one load the `max foreign cpu %` column cannot see, in a column
+    whose whole meaning is "0 means the machine was yours".
+
+    The rule is deliberately the exact condition under which
+    `TesterEventRecorder.observe()` records `tester_complete` on this same poll,
+    not merely `all(o.complete)`:
+
+    - every session complete, aggregated pessimistically like the recorder, so
+      one finished peer cannot end the poll while another is still sending;
+    - every session's count legible and their sum nonzero, because the recorder
+      holds `tester_complete` until it has seen a `tester_first_update`. A
+      generator can report its own completion on a poll whose counters were not
+      yet readable -- bgpdump2 logs `RIB walk complete` before its final `Sent`
+      counters -- and stopping there would take away the later poll that would
+      have supplied the update, leaving a converged run with a generator that
+      never completed.
+
+    Nothing after completion is lost by stopping. `offered` is cumulative and
+    the recorder already refuses to move it past completion, and blocked-write
+    evidence is a maximum over polls that cannot grow afterwards: a queue stops
+    filling once the last update has been handed to the session, so the poll
+    that observes completion is the poll that reads the largest queue there
+    will be.
+    '''
+    if not sessions:
+        return False
+    offerings = list(sessions.values())
+    if not all(o.complete for o in offerings):
+        return False
+    measured = [o.offered for o in offerings if o.offered is not None]
+    return len(measured) == len(offerings) and sum(measured) > 0
+
+
 def tester_metrics(events: Iterable[LifecycleEvent], producer: str):
     '''Derive one generator's owned intervals from its named endpoints.
 
@@ -756,8 +797,16 @@ def _bounding_resolution(*events):
     somewhere inside one look, and this says how wide that look was. Taking
     the worst rather than an average keeps the qualification conservative --
     the direction that reports less certainty than there is, never more.
+
+    A missing endpoint yields no resolution at all. There is no interval to
+    qualify when one of the two polls never happened, and publishing the other
+    one's gap beside a null `injection_s` describes an unmeasured injection as
+    a bounded one -- which is exactly what a generator that stalled and never
+    completed produces.
     '''
-    seen = [r for r in (_poll_resolution(e) for e in events) if r is not None]
+    seen = [_poll_resolution(e) for e in events]
+    if any(r is None for r in seen):
+        return None
     return max(seen) if seen else None
 
 

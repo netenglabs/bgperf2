@@ -67,14 +67,29 @@ def test_a_second_run_gets_a_working_sampler():
 
 
 class FakeTester(Tester):
-    '''A tester whose containers are not there, only its poll loop.'''
+    '''A tester whose containers are not there, only its poll loop.
+
+    Mid-run on purpose: the loop ends itself once the generator reports the
+    whole table offered, so a fake that answers 'finished' on its first poll
+    would make every shutdown test below pass without testing a shutdown.
+    '''
 
     CONTAINER_NAME_PREFIX = 'fake_tester_'
     GUEST_DIR = '/root/config'
     REPORTS_OFFERING = True
 
     def get_offerings(self):
-        return {'p1': TesterOffering(established=True, expected=1, offered=1)}
+        return {'p1': TesterOffering(established=True, expected=100, offered=1)}
+
+
+class FinishedTester(FakeTester):
+    '''A generator that has offered its whole configured table.'''
+
+    CONTAINER_NAME_PREFIX = 'finished_tester_'
+
+    def get_offerings(self):
+        return {'p1': TesterOffering(established=True, expected=100,
+                                     offered=100)}
 
 
 def test_tester_offering_thread_samples_then_stops(tmp_path):
@@ -186,3 +201,32 @@ def test_a_read_that_overruns_the_interval_still_waits(tmp_path):
 
     # Polling back-to-back would put every gap at the read time alone.
     assert min(gaps) > SlowReadTester.READ_S + interval / 2
+
+
+def test_a_finished_generator_is_not_polled_for_the_rest_of_the_run(tmp_path):
+    '''One poll of a BIRD tester is a `docker exec` running a `birdc` per
+    configured peer. Polling on until the monitor converges spends that on a
+    generator with nothing left to say -- and `birdc` is in
+    contention.BGPERF_PROCESSES, so it is the one load `max foreign cpu %`
+    cannot report.
+    '''
+    before = threading.active_count()
+    bgperf2.controller_stop.clear()
+    tester = FinishedTester('1', str(tmp_path), {}, 'bgperf/bird')
+    q = queue.Queue()
+
+    try:
+        tester.offering_stats(q, bgperf2.controller_stop, interval=0.05)
+
+        deadline = time.time() + 5
+        while threading.active_count() > before and time.time() < deadline:
+            time.sleep(0.01)
+        assert threading.active_count() == before, \
+            'the poll kept asking a generator that had finished'
+    finally:
+        bgperf2.controller_stop.set()
+
+    # The poll that ends the loop still carries the completion evidence: the
+    # sample is queued before the loop looks at it.
+    assert not q.empty(), 'the final poll was dropped rather than reported'
+    assert 'tester_offering' in q.get()

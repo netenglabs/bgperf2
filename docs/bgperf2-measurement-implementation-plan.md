@@ -590,17 +590,6 @@ cannot let the fastest speak for the rest (done below); and blocked-write
 evidence (`-t io` enables bgpdump2's `Partial write`/`Full write` lines, at the
 cost of a log line per write).
 
-Also open, raised by review of the provenance change set and belonging to the
-Phase 2 poll loop rather than to bgpdump2: **`Tester.offering_stats()` does not
-stop once every session has reported `tester_complete`.** It keeps polling until
-convergence. That costs nothing for bgpdump2, whose poll is a host-side file
-read, but a BIRD poll is a `docker exec` running one `birdc` per configured
-peer, so a 50-100 peer run keeps spawning that many short-lived processes a
-second for the whole run with nothing left to learn from them. `birdc` is in
-`contention.BGPERF_PROCESSES`, so this is load the `max foreign cpu %` column
-deliberately cannot see -- the instrument's own overhead being the one thing
-invisible in the column whose whole meaning is "0 means the machine was yours".
-Stopping the loop when all sessions are complete removes nearly all of it.
 
 #### Progress on 2026-09-03: the injector now says which build it is
 
@@ -719,6 +708,81 @@ tester errors or timeouts, foreign CPU 5%.
 The remaining Phase 3 item is blocked-write evidence (`-t io` enables
 bgpdump2's `Partial write`/`Full write` lines, at the cost of a log line per
 write).
+
+#### Progress on 2026-09-03: the poll stops asking a generator that has finished
+
+Raised by review of the provenance change set, and belonging to the Phase 2
+poll loop rather than to bgpdump2: `Tester.offering_stats()` polled until the
+monitor converged, however long ago the generator had finished. That costs
+nothing for bgpdump2, whose poll is a host-side file read, but a BIRD poll is a
+`docker exec` running one `birdc` per configured peer, so a 50-100 peer run kept
+spawning that many short-lived processes a second for the whole run with nothing
+left to learn from them. `birdc` is in `contention.BGPERF_PROCESSES`, which
+makes this the one load `max foreign cpu %` deliberately cannot see -- the
+instrument's own overhead invisible in the column whose whole meaning is "0
+means the machine was yours".
+
+The loop now ends itself, and the rule is
+`measurements.offering_poll_can_stop()` -- pure, beside the recorder whose
+behaviour it has to match.
+
+Three things it had to get right:
+
+- **The stop rule is not `all(o.complete)`.** It is the exact condition under
+  which `TesterEventRecorder.observe()` records `tester_complete` on that same
+  poll, which additionally requires every session's count to be legible and
+  their sum nonzero: the recorder holds completion until it has seen a
+  `tester_first_update`, and a generator can report its own completion on a poll
+  whose counters are not yet readable -- bgpdump2 logs `RIB walk complete`
+  before its final `Sent ...` counters. Stopping there would take away the later
+  poll that would have supplied the update and leave a converged run with a
+  generator that never completed. A unit helper asserts the two agree on every
+  case rather than trusting the two code paths to stay in step.
+- **The sample is queued before the loop looks at it**, so the poll that ends
+  the loop is the poll that carries the completion evidence.
+- **Nothing observable is lost after completion.** `offered` is cumulative and
+  the recorder already refuses to move it past completion, and blocked-write
+  evidence is a maximum over polls that cannot grow afterwards -- a session's
+  queue stops filling once the last update has been handed to it, so the poll
+  that observes completion reads the largest queue there will be.
+
+The test fake had to change with it: it reported a finished generator on its
+first poll, which after this change would have made every shutdown test in
+`tests/test_controller_threads.py` pass without testing a shutdown.
+
+##### Docker verification
+
+Two runs on the 8-core / 30 GB host, `-d /var/tmp/bgperf` with results outside
+the campaign tree. The count is taken from `docker events --filter
+event=exec_create`, which is the thing being removed; sampling `/proc` for
+`birdc` finds nothing either way, because the process is too short-lived to be
+caught -- the same reason `contention.py` cannot see it.
+
+`bench -t bird -g bird -n 4 -p 50000`: converged in 3s with all four tester
+events, the exact 200,000 offered, and backpressure unavailable-with-a-reason on
+2.19. The monitor and target were exec'd once a second from t+0 to t+10; the
+last exec into the tester was at **t+3**, one poll after the generator reported
+its whole table. Before this change it would have been exec'd for the remaining
+seven.
+
+`bench -t bird -g bgpdump2 -n 2 -p 10000 --mrt-file mrt/rib.20210801.0000`:
+converged in 3s, both injectors carrying all four events, the exact 10,000 each,
+`reported_injection_s` 0.000969s and 0.011226s, and `octets_on_wire` 183,852 and
+259,226 -- unchanged from the run before this change set, which is the point for
+a generator whose poll was never the expensive kind. No read failures, no tester
+errors or timeouts, foreign CPU 3% in both runs.
+
+##### Also found by review of this change set: a bound on an interval nobody measured
+
+`tester_metrics()` published `injection_resolution_s` from whichever bounding
+poll it could find, so a generator that offered updates and then stalled --
+`injection_s` null, no `tester_complete` -- carried a 1.0s bound on the
+injection it never measured. `startup_resolution_s` already got this right, so
+the two fields disagreed about their own contract, and a consumer keying on the
+resolution would read a resolved interval that does not exist. The printed line
+was unaffected: it handles a null `injection_s` before it reaches the
+resolution. `_bounding_resolution()` now returns None unless every endpoint is
+present. From the poll-resolution change set, not yet released.
 
 #### Work
 

@@ -285,9 +285,24 @@ Five things this depends on:
   `tester_offering()['configured']`. That is the generator's own report of what
   it loaded, a cross-check; using it as the yardstick would make a generator
   that loaded half its config look complete.
-- **The poll thread stops.** It waits on `controller_stop` like the other
-  samplers, and `finish_bench()` sets `stop_monitoring` on the testers too, so a
-  batch does not accumulate one exec loop per cell into containers that are gone.
+- **The poll thread stops, twice over.** It waits on `controller_stop` like the
+  other samplers, and `finish_bench()` sets `stop_monitoring` on the testers
+  too, so a batch does not accumulate one exec loop per cell into containers
+  that are gone. It also ends itself the moment the generator has reported the
+  whole table offered, since polling on until the monitor converges spends a
+  `birdc` per peer per second on a generator with nothing left to say — and
+  `birdc` is in `contention.BGPERF_PROCESSES`, so that is the one load `max
+  foreign cpu %` cannot report. The rule is
+  `measurements.offering_poll_can_stop()`, and it is deliberately not
+  `all(o.complete)`: it is the exact condition under which `observe()` records
+  `tester_complete` on that same poll, which also needs every session's count
+  legible and nonzero. A generator can report completion on a poll whose
+  counters are not yet readable — bgpdump2 logs `RIB walk complete` before its
+  final `Sent ...` counters — and stopping there would take away the poll that
+  would have supplied the update, leaving a converged run with a generator that
+  never completed. Nothing is lost by stopping: `offered` cannot move past
+  completion, and a session's queue stops filling once the last update is handed
+  to it, so the completion poll reads the largest queue there will be.
 
 **A BIRD 2.19 offered count is queue-side.** `Export updates accepted` counts a
 route when it is handed to the BGP protocol, not when it hits the wire, so it

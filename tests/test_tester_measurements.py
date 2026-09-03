@@ -19,6 +19,7 @@ from measurements import (
     MeasurementEventError,
     TesterEventRecorder,
     TesterOffering,
+    offering_poll_can_stop,
     tester_metrics,
 )
 
@@ -1004,3 +1005,96 @@ def test_a_measured_interval_nothing_crossed_is_not_a_rate_of_zero():
     assert m['injection_s'] == 1.0
     assert m['offered_in_interval'] == 0
     assert m['offered_rate_pps'] is None
+
+
+# --- when the poll loop has nothing left to ask -----------------------------
+
+def stops(sessions):
+    '''The stop rule, paired with what the recorder does on that same poll.
+
+    The two must agree: the loop may only end on a poll the recorder reads as
+    completion, because ending earlier takes away the poll that would have
+    supplied the missing evidence.
+    '''
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    r.observe(1.0, sessions)
+    recorded = EventKind.TESTER_COMPLETE in kinds(r)
+    stopped = offering_poll_can_stop(sessions)
+    assert stopped == recorded, \
+        'the poll loop and the recorder disagree about completion'
+    return stopped
+
+
+def test_the_poll_stops_once_the_whole_table_has_been_offered():
+    assert stops({'a': offering(expected=100, offered=100)})
+
+
+def test_the_poll_keeps_going_while_a_session_is_still_sending():
+    '''Aggregated the way the recorder does: the slowest session decides.
+
+    One peer finishing must not end the loop, or the sessions still sending go
+    unobserved for the rest of the run and the container completes on the
+    strength of its fastest peer.
+    '''
+    assert not stops({'a': offering(expected=100, offered=100),
+                      'b': offering(expected=100, offered=40)})
+
+
+def test_the_poll_keeps_going_when_completion_arrives_without_a_count():
+    '''bgpdump2 logs `RIB walk complete` before its final `Sent ...` counters.
+
+    A poll can therefore see the generator's own completion while its count is
+    still unreadable. The recorder holds tester_complete until it has seen an
+    update, so stopping here would leave a converged run with a generator that
+    never completed.
+    '''
+    assert not stops({'a': TesterOffering(established=True, expected=100,
+                                          offered=None, send_complete=True)})
+
+
+def test_the_poll_keeps_going_when_a_completed_generator_sent_nothing():
+    '''Same rule, the other way a count can fail to be an update: zero.'''
+    assert not stops({'a': TesterOffering(established=True, expected=100,
+                                          offered=0, send_complete=True)})
+
+
+def test_a_generator_that_says_it_is_not_finished_holds_the_poll_open():
+    '''Its own report decides in both directions, counts notwithstanding.'''
+    assert not stops({'a': TesterOffering(established=True, expected=100,
+                                          offered=100, send_complete=False)})
+
+
+def test_an_unreadable_session_holds_the_poll_open():
+    '''`offered=None` is a failed read, not a small number.
+
+    Stopping on the sessions that answered is the same "the peers that remain
+    satisfy the contract" failure observe() rejects a changed key set for.
+    '''
+    assert not stops({'a': offering(expected=100, offered=100),
+                      'b': TesterOffering(established=True, expected=100,
+                                          offered=None, send_complete=True)})
+
+
+def test_a_poll_that_read_nothing_at_all_does_not_stop_the_loop():
+    '''An empty mapping is a generator that could not be asked; observe()
+    rejects it outright, so the loop must not read it as finished.'''
+    assert offering_poll_can_stop({}) is False
+
+
+def test_an_injection_that_was_never_measured_is_not_given_a_bound():
+    '''A generator that stalled has no interval for a resolution to qualify.
+
+    `injection_s` is None when completion was never observed, and publishing
+    the first update's poll gap beside it describes an unmeasured injection as
+    one bounded to a second -- a consumer keying on the resolution reads an
+    interval that does not exist.
+    '''
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    r.observe(1.0, {'a': offering(offered=10)})
+    r.observe(2.0, {'a': offering(offered=20)})
+
+    m = metrics(r)
+    assert m['injection_s'] is None
+    assert m['injection_resolution_s'] is None
+    # The startup interval was measured, so its own bound stays.
+    assert m['startup_resolution_s'] == 1.0

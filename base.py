@@ -27,6 +27,8 @@ import time
 import datetime
 from jinja2 import Environment, FileSystemLoader, PackageLoader, StrictUndefined, make_logging_undefined
 
+from measurements import offering_poll_can_stop
+
 
 # Resource files (filters/, nos_templates/) live next to the source,
 # so anchor them to the source directory rather than the working directory.
@@ -724,6 +726,10 @@ class Tester(Container):
         process, so a poll loop that outlives its run keeps exec'ing into
         containers for every later cell and becomes contention the benchmark
         then reports as someone else's.
+
+        The loop also ends itself once the generator has reported the whole
+        workload offered -- see measurements.offering_poll_can_stop() for what
+        that requires and why nothing observable is lost by stopping there.
         '''
         def poll():
             while not stop.is_set() and not self.stop_monitoring:
@@ -756,6 +762,19 @@ class Tester(Container):
                                'tester_offering': sessions,
                                'monotonic_s': sampled_at,
                                'time': datetime.datetime.now()})
+                    # A generator that has finished has nothing further to
+                    # say, and asking it anyway is the instrument charging the
+                    # run for its own overhead: one poll of a BIRD tester is a
+                    # `docker exec` running a `birdc` per configured peer, so a
+                    # 50-100 peer run keeps spawning that many short-lived
+                    # processes a second until the monitor converges. `birdc`
+                    # is in contention.BGPERF_PROCESSES, which means it is the
+                    # one load `max foreign cpu %` deliberately cannot see.
+                    #
+                    # The sample above is queued first: the poll that ends the
+                    # loop is the poll that carries the completion evidence.
+                    if offering_poll_can_stop(sessions):
+                        return
                 # Wait to a deadline measured from the sample, not a fixed
                 # interval piled on top of the read. The read is the expensive
                 # half -- one exec running a birdc per peer -- so sleeping a

@@ -1,11 +1,12 @@
 # Unattended Execution Plan
 
-Status: proposed on 2026-09-03; step 0 taken the same day, step 1 in progress.
+Status: proposed on 2026-09-03; steps 0 and 1 taken the same day.
 The continuation prompt at the end of this document is now an operator contract
 in `CLAUDE.md`, which settles two things this document deliberately left open --
-the driver's scope and where its commits go; see the contract. Steps 2 onward
-are untaken: beads is not installed and no epics or items exist. Nothing here
-changes how the three existing contracts run, or any measurement semantics.
+the driver's scope and where its commits go; see the contract. Step 2 is next,
+and steps 2 onward are untaken: beads is not installed and no epics or items
+exist. Nothing here changes how the three existing contracts run, or any
+measurement semantics.
 
 ## Purpose
 
@@ -200,7 +201,10 @@ Two stages, in order.
 /loop continue the bgperf2 measurement implementation plan
 ```
 
-One session. The agent works a change set, then schedules its own next wakeup
+One session, and its iteration is *review until clean*, not one review per
+change set -- see the step 1 progress note, where two small change sets took
+twenty-five rounds and a third of the findings were in code the earlier rounds
+had added. The agent works a change set, then schedules its own next wakeup
 instead of stopping. The existing continuation prompt drops in unchanged, so
 this stage requires no beads and no other work in this plan. It is the whole
 benefit of removing the human from the loop, available immediately, and it
@@ -290,6 +294,47 @@ observation.
 **Exit criterion:** two consecutive change sets completed and committed without
 the operator typing the continuation prompt, and without a review finding that
 required reverting.
+
+#### Progress on 2026-09-03: two change sets, and what the driver actually costs
+
+Exit criterion met. Two consecutive measurement-plan change sets were completed
+and committed from one continuation, with the operator typing nothing between
+them:
+
+- `9eba403` -- Phase 5's named variance rule (`summary.py`), which completes
+  Phase 5.
+- `79dc690` -- Phase 5A's first work item, peer scaling at a constant table
+  size.
+
+The host was rebooted mid-change-set before this session began. The first thing
+the contract asks for -- inspect durable state, resume unfinished work -- is
+what recovered it: the working tree held a complete, uncommitted change set,
+and nothing was lost. That is the failure mode a driver has to survive, and it
+survived it by accident rather than by design, which is worth saying plainly.
+
+**No review finding required reverting**, which is the other half of the
+criterion. One came close: the first attempt at reading a batch default filled
+it into the target dict, which is part of the cell identity, and three existing
+tests went red because it would have renamed every completed cell of every
+in-flight batch. That is the test suite doing the job the criterion describes.
+
+Two things this exposed about the discipline, both of which belong to whoever
+runs stage 2:
+
+- **Review is the expensive part, not the work.** The two change sets took
+  twenty-five `/code-review` rounds between them and thirty-odd findings, and
+  the rounds ran five to fourteen minutes each. Neither change set was large.
+  A driver that assumes one review round per change set will commit unreviewed
+  work; the loop has to be *review until clean*, and the clean round is the
+  commit signal.
+- **Roughly a third of the findings were in code added by an earlier round of
+  the same review.** A guard is code and gets the rule as wrong as the code it
+  guards, and a default can replace a loud failure with a quiet wrong answer.
+  Re-reviewing after each fix is not ceremony here; it is where a third of the
+  defects were found.
+
+Both are recorded in `CLAUDE.md` and in the measurement plan's own notes rather
+than only here, since they outlive this step.
 
 ### Step 2: install and inspect beads
 

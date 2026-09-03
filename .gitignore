@@ -12,3 +12,9 @@ nos/
 # personal benchmark configs
 benchmarks/local/
 .pytest_cache/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/

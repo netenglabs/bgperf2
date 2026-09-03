@@ -176,6 +176,54 @@ run per version with an auto label. Batch yaml is parsed with `BatchLoader`, whi
 float resolver — plain `yaml.safe_load` reads `10.10` as `10.1` and would silently bench the wrong
 release.
 
+### Repetitions
+
+One observation per cell says nothing about run-to-run variance. A test may declare
+`repetitions: N`; `expand_batch_cells()` turns the matrix into the ordered list of runs, and
+`batch_repetitions()` rejects anything that is not a positive int **before the first container
+starts** — a `repetitions: 0` that ran nothing would otherwise be found hours in. `check_batch_test()`
+does the same for the matrix axes, which had no such check: a test with no `filter_test` reached
+expansion as a bare `KeyError` naming neither the test nor the key, which is what
+`benchmarks/big-tests.yaml` did. An axis is required rather than defaulted, so a typo cannot quietly
+run the matrix unfiltered.
+
+- **A repetition repeats the whole matrix, not each cell.** Three back-to-back runs of one cell
+  share a page cache, a thermal state, and whatever else the machine was doing a minute ago, so
+  part of what they measure is that. Block order also means an interrupted batch holds one
+  observation of everything rather than every observation of the first few cells.
+- **A repetition is part of the run's *name*, not a column beside it.** Everything a run writes is
+  named from `bench_output_prefix()` — `<prefix>.events.json`, `<prefix>.versions.json`, the six
+  per-run PNGs — and those are written with `os.replace`/`open(...,'w')`, so a second pass under
+  the same name silently replaces the first one's evidence and the CSV grows two rows nothing can
+  tell apart. `create_graph()` needs it too: it keys the x axis off a dict of row names and appends
+  one bar height per row, so rows sharing a name give it fewer ticks than heights — a wrong graph
+  or a crash, depending on the matplotlib version, at the end of a batch that has already run for
+  hours. The artifacts also carry `run.repetition` so a summary does not have to parse a label to
+  group passes.
+- **`bench_output_prefix()` is the one place that names a run's files**, for the same reason, and
+  it must carry every dimension a batch iterates. `filter_test` was missing: the three policy cells
+  of `benchmarks/2026-filters.yaml` all wrote `bird_2.19.2_bgpdump2_1050000_10.*`, so two thirds of
+  that suite's per-run evidence was overwritten and no `run` dict recorded which policy the
+  survivor came from. The periodic mid-run graphs were worse — built from `args.target` alone, they
+  dropped label, version, filter and repetition. Both now use the same stem, and each dimension is
+  appended only when set, so an unfiltered single-pass run keeps the name it has always had.
+- **A cell id says what the cell is, never when it ran.** `ordinal` is its position within one pass
+  and `repetition` says which pass, so raising a test from two passes to three does not move the
+  ids of the two that already have results, and resume keeps matching once execution order can be
+  permuted.
+- **The id and the name must agree about a single-pass test.** Both say "no repetition" — the cell
+  carries `repetition: None` and the id omits the key entirely. Suffixing only when `repetitions >
+  1` while the id always said `repetition: 1` meant a completed single-pass batch whose config
+  later gained `repetitions: 3` matched its stored pass-1 ids under `--resume`, reused those rows,
+  and produced a CSV holding `bird` beside `bird #2` and `bird #3`. Omitting the key also means a
+  single-pass id has exactly its pre-repetition shape, so `BATCH_PROGRESS_SCHEMA_VERSION` did not
+  have to move and an in-flight batch from an older build still resumes instead of costing the
+  operator every completed cell.
+
+Note the container work directory (`<--dir>/<bench-name>`) is wiped at the start of every cell, so
+raw daemon and tester logs only ever survive for the run in progress — that is true across cells
+already, and repetitions do not change it. The published artifacts are the durable record.
+
 ### get_neighbors_state — the per-daemon wart
 
 `bench` needs to know how many prefixes each neighbor has sent, and every daemon reports this

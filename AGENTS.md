@@ -101,6 +101,13 @@ Version-aware behavior lives in `Container` in `base.py`. Daemons may define `IM
 Batch configs can expand `versions: [...]` into one run per version. Preserve the custom YAML loading behavior
 that avoids turning values like `10.10` into `10.1`.
 
+A test may also declare `repetitions: N`, which repeats the whole matrix N times rather than each cell N times.
+Every pass gets its own run name (`bird 2.19.2 #2`), because every artifact a run writes is named from
+`bench_output_prefix()` -- a shared name means the second pass replaces the first one's evidence. That stem must
+carry every dimension a batch iterates, `filter_test` included. Cell ids carry the cell's position within one
+pass and which pass it is, never its position in the execution order, and a single-pass test says "no
+repetition" in both the name and the id so the two cannot disagree under `--resume`.
+
 ### Neighbor-state parsing
 
 Each daemon reports neighbor state differently. `bench` depends on target-specific parsing in

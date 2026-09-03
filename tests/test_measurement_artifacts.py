@@ -311,3 +311,49 @@ def test_an_interval_nothing_crossed_is_not_printed_as_an_instant_one(capsys):
     assert 'none of them inside the measured 1.0s' in printed
     assert 'shorter than' not in printed
     assert 'prefixes/s' not in printed
+
+
+class TestBenchOutputPrefix:
+    '''Every artifact a run writes is named from one stem.
+
+    `.events.json`, `.versions.json` and the six per-run PNGs are written with
+    `os.replace` or a plain `open(..., 'w')`, so any dimension a batch iterates
+    that the stem omits means the last cell along it silently replaces the
+    others -- with the survivor not even identifiable afterwards.
+    '''
+
+    def args(self, **overrides):
+        args = Namespace(
+            target='bird', label=None, version=None, repetition=None,
+            tester_type='bgpdump2', prefix_num=1050000, neighbor_num=10,
+            filter_test=None)
+        for k, v in overrides.items():
+            setattr(args, k, v)
+        return args
+
+    def test_an_unfiltered_single_pass_run_keeps_its_name(self):
+        assert bgperf2.bench_output_prefix(
+            self.args(label='bird 2.19.2')) == 'bird_2.19.2_bgpdump2_1050000_10'
+
+    def test_the_filter_is_part_of_the_name(self):
+        '''benchmarks/2026-filters.yaml runs one target and table under three
+        policies; all three used to write the same files.
+        '''
+        names = {bgperf2.bench_output_prefix(self.args(label='bird 2.19.2', filter_test=f))
+                 for f in [None, 'transit', 'ixp']}
+        assert len(names) == 3
+
+    def test_the_repetition_is_part_of_the_name(self):
+        names = {bgperf2.bench_output_prefix(self.args(label='bird 2.19.2', repetition=r))
+                 for r in [1, 2, 3]}
+        assert len(names) == 3
+
+    def test_the_run_manifest_records_both_dimensions(self, tmp_path):
+        args = self.args(label='bird 2.19.2', filter_test='ixp', repetition=2,
+                         results_dir=str(tmp_path))
+        path = bgperf2.write_provenance(args, {'target': {}, 'testers': []},
+                                        bgperf2.bench_output_prefix(args))
+        run = json.loads(open(path).read())['run']
+        assert run['filter_test'] == 'ixp'
+        assert run['repetition'] == 2
+        assert run['name'] == 'bird 2.19.2 #2'

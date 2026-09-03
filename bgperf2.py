@@ -132,13 +132,49 @@ def run_name(args):
 
     An explicit label wins; otherwise a version has to appear in the name or
     two versions of the same daemon are indistinguishable in the results.
+
+    A repetition is part of a run's identity, not a footnote to it: this is the
+    CSV's name column and the label on every graph bar, and `bench_output_prefix()`
+    builds each of the run's filenames from it, so two passes of one cell sharing
+    a name leaves two rows nothing can tell apart and has the second replace the
+    first's files. `batch()` sets `repetition` only when a test asks for more than
+    one pass, so a single-pass batch keeps the names it has always had -- and the
+    cell id agrees with it, or resume can mix the two.
     '''
+    name = args.target
     if 'label' in args and args.label:
-        return args.label
-    version = getattr(args, 'version', None)
-    if version:
-        return '{0} {1}'.format(args.target, version)
-    return args.target
+        name = args.label
+    else:
+        version = getattr(args, 'version', None)
+        if version:
+            name = '{0} {1}'.format(args.target, version)
+    repetition = getattr(args, 'repetition', None)
+    if repetition:
+        name = '{0} #{1}'.format(name, repetition)
+    return name
+
+
+def bench_output_prefix(args):
+    '''The filename stem every artifact a run writes is built from.
+
+    One function because a run's evidence is only preserved if every piece of
+    it is named by the same dimensions: `<prefix>.events.json`,
+    `<prefix>.versions.json` and the per-run PNGs are written with `os.replace`
+    or a plain `open(..., 'w')`, so any dimension the batch iterates and this
+    stem omits means the last cell along it silently replaces the others.
+
+    `filter_test` is one of those dimensions -- `benchmarks/2026-filters.yaml`
+    runs the same target and table under three policies -- and it is appended
+    only when set, so an unfiltered run keeps the name it has always had.
+    '''
+    parts = [run_name(args).replace(' ', '_'),
+             str(getattr(args, 'tester_type', None)),
+             str(args.prefix_num),
+             str(args.neighbor_num)]
+    filter_test = getattr(args, 'filter_test', None)
+    if filter_test:
+        parts.append(str(filter_test).replace(' ', '_'))
+    return '_'.join(parts)
 
 
 def gen_mako_macro():
@@ -1313,8 +1349,12 @@ def bench(args):
                     tester_read_failures=tester_read_failures)
 
             if elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
-                bench_prefix = f"{args.target}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
-                create_bench_graphs(bench_stats, prefix=bench_prefix, results_dir=args.results_dir)
+                # The same stem the final graphs use. Built from args.target
+                # alone, these dropped the label, the version, the filter and
+                # the repetition, so a long run's in-progress graphs were
+                # overwritten by the next cell of the same daemon.
+                create_bench_graphs(bench_stats, prefix=bench_output_prefix(args),
+                                    results_dir=args.results_dir)
 
 
 def collect_provenance(args, target, monitor, testers):
@@ -1361,6 +1401,11 @@ def write_provenance(args, provenance, prefix):
         'peers': args.neighbor_num,
         'prefixes_per_peer': args.prefix_num,
         'tester_type': getattr(args, 'tester_type', None),
+        # Which pass over the matrix this row came from, or None for a batch
+        # that made one pass. The name carries it too, but a summary over
+        # repetitions should not have to parse a label to group them.
+        'repetition': getattr(args, 'repetition', None),
+        'filter_test': getattr(args, 'filter_test', None),
     }
     path = results_path(args.results_dir, prefix + '.versions.json')
     with open(path, 'w') as f:
@@ -1415,6 +1460,8 @@ def write_event_artifact(args, events, prefix, status, testers=None,
         'peers': args.neighbor_num,
         'prefixes_per_peer': args.prefix_num,
         'tester_type': getattr(args, 'tester_type', None),
+        'repetition': getattr(args, 'repetition', None),
+        'filter_test': getattr(args, 'filter_test', None),
     }
     path = results_path(args.results_dir, prefix + '.events.json')
 
@@ -1446,8 +1493,7 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
         tester_read_failures or {})
     lifecycle_events = list(lifecycle_events) + tester_events
 
-    pre = run_name(args).replace(' ', '_')
-    bench_prefix = f"{pre}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
+    bench_prefix = bench_output_prefix(args)
     artifact = write_event_artifact(
         args, lifecycle_events, bench_prefix,
         status='failed' if fail else 'converged',
@@ -1871,6 +1917,89 @@ def expand_target_versions(targets):
     return expanded
 
 
+def batch_repetitions(test):
+    '''How many times a test asks for its whole matrix to be run.
+
+    Checked here rather than where it is used, because `batch()` validates the
+    whole config before starting the first container: a `repetitions: 0` typo
+    that ran nothing, or a `repetitions: "3"` that ran once, would otherwise be
+    discovered hours in or not at all.
+    '''
+    value = test.get('repetitions', 1)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        sys.exit("test '{0}': repetitions must be a positive integer, got {1!r}".format(
+            test.get('name'), value))
+    return value
+
+
+# Everything `batch()` needs from a test before it can expand or run it.
+BATCH_TEST_KEYS = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
+
+
+def check_batch_test(test):
+    '''Reject a test that cannot be expanded, before any container starts.
+
+    Same reason as `batch_repetitions()`, and it was the gap next to it:
+    expansion would otherwise die on a bare `KeyError: 'filter_test'` -- which
+    is exactly what `benchmarks/big-tests.yaml` did -- so a mistyped or omitted
+    axis took the whole batch down with a traceback naming neither the test nor
+    the key. An axis is required rather than defaulted, because a typo that
+    quietly ran the matrix unfiltered is the failure this is here to prevent.
+    '''
+    missing = [key for key in BATCH_TEST_KEYS if key not in test]
+    if missing:
+        sys.exit("test '{0}': missing required {1}: {2}".format(
+            test.get('name', '<unnamed>'),
+            'key' if len(missing) == 1 else 'keys', ', '.join(missing)))
+    for key in ('neighbors', 'prefixes', 'filter_test', 'targets'):
+        if not isinstance(test[key], list) or not test[key]:
+            sys.exit("test '{0}': {1} must be a non-empty list, got {2!r}".format(
+                test['name'], key, test[key]))
+
+
+def expand_batch_cells(test, targets):
+    '''Enumerate one test's matrix into the ordered list of runs it asks for.
+
+    Repetitions repeat the whole matrix, not each cell: three back-to-back runs
+    of one cell share a page cache, a thermal state and whatever else the
+    machine happened to be doing for the last few minutes, so what they measure
+    is partly that rather than the daemon. Running the matrix as a block also
+    means an interrupted batch holds one observation of everything rather than
+    every observation of the first few cells.
+
+    The ordinal is a cell's position within one pass, so the same cell keeps
+    the same ordinal in every repetition and `repetition` is the only thing
+    that separates them. Neither is a position in the execution order, which is
+    what lets that order be permuted later without moving any cell's identity.
+
+    A single-pass test gets `repetition` None rather than 1, and that one value
+    has to reach the cell id as well as the run name or the two disagree: a
+    completed single-pass batch whose config then gained `repetitions: 3` would
+    match its stored pass-1 ids, reuse those rows unchanged, and produce a CSV
+    holding `bird` beside `bird #2` and `bird #3`. Adding repetitions changes
+    what every row is, so it should cost a re-run rather than a mixed table.
+    '''
+    check_batch_test(test)
+    repetitions = batch_repetitions(test)
+    cells = []
+    for repetition in range(1, repetitions + 1):
+        ordinal = 0
+        for n in test['neighbors']:
+            for p in test['prefixes']:
+                for filter_test in test['filter_test']:
+                    for t in targets:
+                        cells.append({
+                            'repetition': repetition if repetitions > 1 else None,
+                            'ordinal': ordinal,
+                            'neighbors': n,
+                            'prefixes': p,
+                            'filter': filter_test,
+                            'target': t,
+                        })
+                        ordinal += 1
+    return cells
+
+
 def check_batch_images(targets):
     '''Fail before the first run if any image in the batch is missing.
 
@@ -1912,62 +2041,71 @@ def batch(args):
     # Expand and check every test before running any of them. Checking each test
     # as it came up still let a missing image in test 3 surface only after tests
     # 1 and 2 had run, which is the multi-hour wait this is meant to prevent.
-    expanded = [(test, expand_target_versions(test['targets'])) for test in batch_config['tests']]
-    check_batch_images([t for _, targets in expanded for t in targets])
+    expanded = []
+    for test in batch_config['tests']:
+        targets = expand_target_versions(test['targets'])
+        expanded.append((test, targets, expand_batch_cells(test, targets)))
+    # One entry per target, not per cell: a repeated matrix asks about the same
+    # images every pass, and reporting a missing image once per repetition
+    # buries the list this exists to print.
+    check_batch_images([t for _, targets, _ in expanded for t in targets])
 
-    for test, targets in expanded:
+    for test, _targets, cells in expanded:
+        repetitions = batch_repetitions(test)
         progress_path = results_path(args.results_dir, f"{test['name']}.progress.json")
         resume = getattr(args, 'resume', False)
         completed = load_batch_progress(progress_path) if resume else {}
         if not resume and os.path.exists(progress_path):
             os.unlink(progress_path)
         results = []
-        cell_ordinal = 0
-        for n in test['neighbors']:
-            for p in test['prefixes']:
-                for filter in test['filter_test']:
-                    for t in targets:
-                        cell_id = batch_cell_id(
-                            test['name'], cell_ordinal, n, p, filter, t)
-                        cell_ordinal += 1
-                        if cell_id in completed:
-                            print("resume: skipping completed cell: {0}".format(
-                                batch_cell_description(n, p, filter, t)))
-                            results.append(completed[cell_id])
-                            continue
+        for cell in cells:
+            t = cell['target']
+            cell_id = batch_cell_id(test['name'], cell)
+            if cell_id in completed:
+                print("resume: skipping completed cell: {0}".format(
+                    batch_cell_description(cell, repetitions)))
+                results.append(completed[cell_id])
+                continue
 
-                        a = argparse.Namespace(**vars(args))
-                        a.func = bench
-                        if 'image' in t:
-                            a.image = t['image']
-                        else:
-                            a.image = None
-                        a.output = None
-                        a.target = t['name']
-                        a.prefix_num = p
-                        a.neighbor_num = n
-                        a.filter_test = filter if filter != 'None' else None
-                        # read any config attribute that was specified in the yaml batch file
-                        a.local_address_prefix = t['local_address_prefix'] if 'local_address_prefix' in t else '10.10.0.0/16'
-                        for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
-                                        'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
-                                        'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
-                                        'tester_type', 'license_file', 'version', 'threads',
-                                        'tester_trace_io']:
-                            setattr(a, field, t[field]) if field in t else setattr(a, field, None)
+            a = argparse.Namespace(**vars(args))
+            a.func = bench
+            if 'image' in t:
+                a.image = t['image']
+            else:
+                a.image = None
+            a.output = None
+            a.target = t['name']
+            a.prefix_num = cell['prefixes']
+            a.neighbor_num = cell['neighbors']
+            a.filter_test = cell['filter'] if cell['filter'] != 'None' else None
+            # None for a single-pass test, so its rows, graphs and event
+            # artifacts keep the names they have always had; set for every pass
+            # of a repeated one, including the first, because a run named
+            # `bird 2.19.2` sitting beside `bird 2.19.2 #2` reads as a
+            # different thing rather than as the first of three.
+            a.repetition = cell['repetition']
+            # read any config attribute that was specified in the yaml batch file
+            a.local_address_prefix = t['local_address_prefix'] if 'local_address_prefix' in t else '10.10.0.0/16'
+            for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
+                            'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
+                            'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
+                            'tester_type', 'license_file', 'version', 'threads',
+                            'tester_trace_io']:
+                setattr(a, field, t[field]) if field in t else setattr(a, field, None)
 
-                        for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
-                            setattr(a, field, t[field]) if field in t else setattr(a, field, 0)
-                        stat = bench(a)
-                        results.append(stat)
-                        completed[cell_id] = stat
+            for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
+                setattr(a, field, t[field]) if field in t else setattr(a, field, 0)
+            stat = bench(a)
+            results.append(stat)
+            completed[cell_id] = stat
 
-                        # Checkpoint both files atomically after every cell. If
-                        # the process dies later, --resume can skip every cell
-                        # whose result made it to disk.
-                        write_batch_progress(progress_path, completed)
-                        write_batch_csv(
-                            results_path(args.results_dir, f"{test['name']}.csv"), results)
+            # Checkpoint both files atomically after every cell. If the process
+            # dies later, --resume can skip every cell whose result made it to
+            # disk -- including a repetition interrupted part way through, since
+            # a cell's identity does not depend on how many of its siblings ran.
+            write_batch_progress(progress_path, completed)
+            write_batch_csv(
+                results_path(args.results_dir, f"{test['name']}.csv"), results)
 
         # A crash after the progress checkpoint but before its matching CSV
         # replacement can leave the CSV one cell behind. Rebuild it even when
@@ -1983,25 +2121,50 @@ def batch(args):
         create_batch_graphs(results, test['name'], results_dir=args.results_dir)
 
 
-def batch_cell_id(test_name, ordinal, neighbors, prefixes, filter_test, target):
-    """Return a stable, human-inspectable identity for one batch matrix cell."""
-    return json.dumps({
+def batch_cell_id(test_name, cell):
+    """Return a stable, human-inspectable identity for one batch matrix cell.
+
+    Keyed by what the cell is, never by when it ran: `ordinal` is its position
+    within one pass over the matrix and `repetition` says which pass, so
+    resume keeps matching when the execution order changes and two passes of
+    one cell are told apart by the one field that differs.
+
+    A single-pass test carries no `repetition` key at all, which is what a cell
+    id looked like before repetitions existed. That is deliberate: an in-flight
+    batch written by an older build resumes exactly as it did, instead of
+    finding no id it recognises and silently re-running hours of finished work.
+    """
+    identity = {
         'test': test_name,
-        'ordinal': ordinal,
-        'neighbors': neighbors,
-        'prefixes': prefixes,
-        'filter': filter_test,
-        'target': target,
-    }, sort_keys=True, separators=(',', ':'), default=str)
+        'ordinal': cell['ordinal'],
+        'neighbors': cell['neighbors'],
+        'prefixes': cell['prefixes'],
+        'filter': cell['filter'],
+        'target': cell['target'],
+    }
+    if cell['repetition'] is not None:
+        identity['repetition'] = cell['repetition']
+    return json.dumps(identity, sort_keys=True, separators=(',', ':'), default=str)
 
 
-def batch_cell_description(neighbors, prefixes, filter_test, target):
+def batch_cell_description(cell, repetitions=1):
+    target = cell['target']
     version = target.get('version')
     target_name = target.get('label') or target['name']
     if version and version not in target_name:
         target_name = '{0} {1}'.format(target_name, version)
-    return '{0}, peers={1}, prefixes={2}, filter={3}'.format(
-        target_name, neighbors, prefixes, filter_test)
+    described = '{0}, peers={1}, prefixes={2}, filter={3}'.format(
+        target_name, cell['neighbors'], cell['prefixes'], cell['filter'])
+    if repetitions > 1:
+        described = '{0}, repetition {1}/{2}'.format(
+            described, cell['repetition'], repetitions)
+    return described
+
+
+# Unchanged by repetitions: a single-pass cell id has the shape it always had,
+# so a file written by an older build still resumes rather than costing the
+# operator every completed cell.
+BATCH_PROGRESS_SCHEMA_VERSION = 1
 
 
 def load_batch_progress(path):
@@ -2009,7 +2172,8 @@ def load_batch_progress(path):
         return {}
     with open(path, 'r') as f:
         document = json.load(f)
-    if document.get('schema_version') != 1 or not isinstance(document.get('cells'), dict):
+    if (document.get('schema_version') != BATCH_PROGRESS_SCHEMA_VERSION
+            or not isinstance(document.get('cells'), dict)):
         raise ValueError('unsupported or malformed batch progress file: {0}'.format(path))
     return document['cells']
 
@@ -2029,7 +2193,7 @@ def atomic_write(path, write):
 
 def write_batch_progress(path, completed):
     def write(f):
-        json.dump({'schema_version': 1, 'cells': completed}, f,
+        json.dump({'schema_version': BATCH_PROGRESS_SCHEMA_VERSION, 'cells': completed}, f,
                   indent=2, sort_keys=True)
         f.write('\n')
     atomic_write(path, write)

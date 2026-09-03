@@ -4,6 +4,7 @@ tests:
     # with 384 GB RAM, can't do more than 1000n at 1000p
     neighbors: [1, 500, 750, 1000]
     prefixes: [1000]
+    filter_test: [None]
     targets:
       -
         name: bird
@@ -18,6 +19,7 @@ tests:
     name: many_neighbors_100p
     neighbors: [1500, 1750, 2000, 2250, 2500, 3000]
     prefixes: [100]
+    filter_test: [None]
     targets:
       -
         name: bird
@@ -32,6 +34,7 @@ tests:
     name: many_many_neighbors_10p
     neighbors: [3000, 4000, 5000]
     prefixes: [10]
+    filter_test: [None]
     targets:
       -
         name: bird

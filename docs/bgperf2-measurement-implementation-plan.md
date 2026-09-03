@@ -1057,6 +1057,82 @@ controlled post-injection convergence tail.
 
 ### Phase 5: Add repetitions and order control
 
+Status: in progress. Repetitions, stable cell identity and resume landed on
+2026-09-03; deterministic order control and the summary statistics have not.
+
+#### Progress on 2026-09-03: a matrix can be run more than once
+
+A test may declare `repetitions: N`. `expand_batch_cells()` turns the matrix
+into the ordered list of runs it asks for and `batch()` iterates that list,
+replacing the four nested loops it used to walk. `batch_repetitions()` rejects
+anything that is not a positive integer before the first container starts --
+`repetitions: 0` would otherwise run nothing and `repetitions: "3"` would run
+once, either of them discovered hours in or not at all.
+
+Four decisions worth keeping:
+
+- **A repetition repeats the whole matrix, not each cell.** Three back-to-back
+  runs of one cell share a page cache, a thermal state, and whatever else the
+  machine was doing a minute ago, so part of what they measure is that. Block
+  order also means an interrupted batch holds one observation of everything
+  rather than every observation of the first few cells.
+- **A repetition is part of the run's name, not a column beside it.** Every
+  artifact a run writes is named from one stem -- `<prefix>.events.json`,
+  `<prefix>.versions.json`, six per-run PNGs -- and each is written with
+  `os.replace` or a plain `open(..., 'w')`. A second pass under the same name
+  replaces the first one's evidence with no error, which is the opposite of
+  "preserve every raw observation", and leaves two CSV rows nothing can tell
+  apart. `create_graph()` needs the distinction too: it keys the x axis off a
+  dict of row names and appends one bar height per row, so rows sharing a name
+  give it fewer ticks than heights -- a wrong graph or a crash depending on the
+  matplotlib version, produced at the end of a batch that has already run for
+  hours. The artifacts also carry `run.repetition` so a later summary need not
+  parse a label to group passes.
+- **That stem is now one function, and it was already losing evidence.**
+  `bench_output_prefix()` must carry every dimension a batch iterates.
+  `filter_test` was not among them: the three policy cells of
+  `benchmarks/2026-filters.yaml` all wrote
+  `bird_2.19.2_bgpdump2_1050000_10.*`, so two thirds of that suite's per-run
+  artifacts were overwritten and no `run` dict recorded which policy the
+  survivor came from. The periodic mid-run graphs were built from `args.target`
+  alone and dropped label, version, filter and repetition together. Both use
+  the stem now, and both new dimensions reach the `run` dict; each is appended
+  only when set, so an unfiltered single-pass run keeps the name it has always
+  had.
+- **A cell id says what the cell is, never when it ran.** `ordinal` is the
+  cell's position within one pass and `repetition` says which pass. Raising a
+  test from two passes to three therefore does not move the ids of the two that
+  already have results, and the ids will survive the permuted execution order
+  the next change set introduces.
+- **The id and the name must agree about a single-pass test.** Both say "no
+  repetition": the cell carries `repetition: None` and the id omits the key.
+  Suffixing the name only when `repetitions > 1` while the id always carried
+  `repetition: 1` meant a completed single-pass batch whose config later gained
+  `repetitions: 3` matched its stored pass-1 ids under `--resume` -- which
+  `scripts/run_2026_suite.sh` passes by default -- reused those rows unchanged,
+  and produced a CSV holding `bird` beside `bird #2` and `bird #3`. Adding
+  repetitions changes what every row is, so it costs a re-run rather than a
+  mixed table. Omitting the key also leaves a single-pass id with exactly its
+  pre-repetition shape, so the progress schema version did not have to move and
+  an in-flight batch from an older build still resumes rather than costing the
+  operator every completed cell.
+
+`check_batch_test()` came out of reviewing the above: `batch_repetitions()`
+turns a bad repetition count into an up-front message, and the matrix axes next
+to it had no such check -- a test with no `filter_test` reached expansion as a
+bare `KeyError` naming neither the test nor the key, which all three tests in
+`benchmarks/big-tests.yaml` did. They now declare `filter_test: [None]`, and an
+axis is required rather than defaulted so a typo cannot quietly run the matrix
+unfiltered.
+
+Not addressed here, and still open in this phase: deterministic order from a
+recorded seed, and the median / min / max / dispersion / coefficient-of-
+variation summary. Both build on the enumerated cell list this change set
+introduced. No Docker run was needed or made: the change is confined to batch
+expansion, run naming and the progress file, all of which the unit suite
+covers (`tests/test_batch_repetitions.py` plus `TestBenchOutputPrefix` in
+`tests/test_measurement_artifacts.py`; 562 total, Docker-free).
+
 #### Work
 
 - Add explicit repetitions to batch configuration or a validation runner.

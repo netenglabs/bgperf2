@@ -92,3 +92,27 @@ def test_benchmark_config_versions_are_resolvable():
                     cls.image_tag(version)
                 except base.VersionNotSupported as e:
                     pytest.fail(f"{config.name}: {e}")
+
+
+def test_benchmark_configs_expand():
+    '''Every config in the tree has to survive expansion.
+
+    A missing axis used to reach `expand_batch_cells()` as a bare KeyError --
+    `benchmarks/big-tests.yaml` had no `filter_test` on any of its three tests
+    -- and a `repetitions: 0` runs nothing while `repetitions: "3"` runs once.
+    All of them are discovered when the batch starts, which may be hours away.
+    '''
+    yaml = pytest.importorskip('yaml')
+    import bgperf2
+
+    checked = 0
+    for config in sorted((REPO_ROOT / 'benchmarks').glob('*.yaml')):
+        data = yaml.load(config.read_text(), Loader=bgperf2.BatchLoader)
+        for test in data.get('tests') or []:
+            try:
+                bgperf2.check_batch_test(test)
+                bgperf2.batch_repetitions(test)
+            except SystemExit as e:
+                pytest.fail(f"{config.name}: {e}")
+            checked += 1
+    assert checked, 'this guard passes green over an empty benchmarks directory'

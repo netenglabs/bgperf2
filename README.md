@@ -555,6 +555,34 @@ Configs that play back MRT data expect the file at `mrt/rib.20210801.0000`, whic
 downloads. Paths in a batch config may be relative or use `~`; they are resolved before being
 handed to Docker. Keep personal, unshared configs in `benchmarks/local/` — that path is gitignored.
 
+### Repeating a matrix
+
+One run of a cell tells you nothing about how much that number moves between runs. Add
+`repetitions` to a test to run the whole matrix more than once:
+
+```YAML
+tests:
+  - name: variance
+    repetitions: 3
+    neighbors: [10]
+    prefixes: [100_000]
+    filter_test: [None]
+    targets:
+      - {name: bird, version: 2.19.2, label: bird 2.19.2, tester_type: bird}
+```
+
+The matrix is repeated as a block — every cell once, then every cell again — rather than each cell
+three times in a row, so consecutive runs of the same cell do not share a warm page cache and the
+same thermal state, and an interrupted batch has one observation of everything rather than every
+observation of the first few cells.
+
+Each pass gets its own run name (`bird 2.19.2 #1`, `#2`, `#3`), so its CSV row, its graph bar and
+its `.events.json` / `.versions.json` are its own; a shared name would have the second pass
+overwrite the first one's files. `--resume` skips exactly the passes that finished, including an
+interruption part way through one. A test without `repetitions` runs once and is named exactly as
+before — and adding `repetitions` to a config that has already run re-runs it, rather than leaving
+one unnamed row beside `#2` and `#3`.
+
 If you use a file that looks like this:
 
 ```YAML

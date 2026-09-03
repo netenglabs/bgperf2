@@ -5,6 +5,11 @@ The fixtures are real `bgpdump2 --blaster` logs, captured from a two-injector
 caught the walk in progress on one poll; `bgpdump2_blaster_one_poll.log` is the
 injector whose whole walk landed between two lines of log.
 
+`bgpdump2_blaster_io.log` is a third, from a single-injector 500,000-prefix run
+on 2026-09-03 started with `-t io`: the only shape that carries blocked-write
+evidence, and the reason it was run with one injector is that the log of a
+second one is 23 MB of the target's echo.
+
 Earlier polls are modelled by truncating those captures rather than by writing
 plausible-looking log text, since the shapes that matter here -- a counter that
 has not appeared yet, a session that is not up -- are exactly the ones an
@@ -23,6 +28,9 @@ from measurements import (
     tester_metrics,
     unique_event,
 )
+
+
+IO_LOG = 'bgpdump2_blaster_io.log'
 
 
 @pytest.fixture
@@ -119,6 +127,117 @@ def test_unstamped_and_half_written_lines_contribute_nothing(blaster_log):
 
     assert parsed['prefixes_sent'] == 10000
     assert parsed['ribs'][0]['walk_time_s'] is None
+
+
+# --- blocked writes, when the injector was told to report them --------------
+
+def test_the_write_lines_are_counted_by_what_they_mean(blaster_log):
+    '''Three IO-class lines, only two of which are backpressure.
+
+    `Partial write` is the socket taking part of the buffer and refusing the
+    rest. `Write buffer full` is an encode pass finding no room in the 256KB
+    session buffer, which is also the only place a write() that returned
+    EAGAIN ever shows up -- bgpdump2 logs nothing for one. `Full write` is the
+    ordinary case and is counted only because seeing one proves the class is
+    on.
+    '''
+    parsed = parse_blaster_log(blaster_log(IO_LOG))
+
+    assert parsed['io_traced'] is True
+    assert parsed['full_writes'] == 28
+    assert parsed['partial_writes'] == 13
+    assert parsed['write_stalls'] == 2
+    # The same capture's ordinary facts are unaffected by the extra lines.
+    assert parsed['walk_complete'] is True
+    assert parsed['prefixes_sent'] == 500000
+    assert parsed['octets_sent'] == 7891005
+
+
+def test_a_log_that_was_never_asked_reports_no_evidence_at_all(blaster_log):
+    parsed = parse_blaster_log(blaster_log())
+
+    assert parsed['io_traced'] is False
+    assert parsed['partial_writes'] == 0
+
+    offering = tester_offering(blaster_log())
+    assert offering['blocked_writes'] is None
+    assert offering['send_stalls'] is None
+
+
+def test_never_blocked_and_never_asked_are_different_answers(blaster_log):
+    '''The distinction the whole `io_traced` flag exists for.
+
+    Both of these injectors have logged zero partial writes. One of them was
+    reporting its writes and had none refused; the other was never told to
+    report. Publishing 0 for the second would say the generator was never
+    blocked on the strength of lines it was never asked to write.
+    '''
+    # Up to and including the first `Full write`, which is the session's OPEN.
+    asked = tester_offering(blaster_log(IO_LOG, lines=5))
+    assert asked['blocked_writes'] == 0
+    assert asked['send_stalls'] == 0
+
+    not_asked = tester_offering(blaster_log(IO_LOG, lines=4))
+    assert not_asked['blocked_writes'] is None
+    assert not_asked['send_stalls'] is None
+
+
+def test_a_refused_write_is_counted_when_its_line_arrives(blaster_log):
+    before_the_first_one = tester_offering(blaster_log(IO_LOG, lines=59))
+    assert before_the_first_one['blocked_writes'] == 0
+
+    after_it = tester_offering(blaster_log(IO_LOG, lines=60))
+    assert after_it['blocked_writes'] == 1
+
+
+def test_a_polled_injector_publishes_what_blocked_it(blaster_log):
+    recorder = TesterEventRecorder(10.0, producer='mrt-injector0',
+                                   sample_interval_s=1)
+
+    def poll(at, lines=None):
+        o = tester_offering(blaster_log(IO_LOG, lines=lines))
+        recorder.observe(at, {'10.10.0.3': TesterOffering(
+            established=o['established'], expected=500000,
+            offered=o['offered'], send_complete=o['send_complete'],
+            blocked_writes=o['blocked_writes'],
+            send_stalls=o['send_stalls'])})
+
+    # Still connecting, and no write line has appeared yet, so there is
+    # nothing to say. One line later the session's OPEN is written and the
+    # evidence becomes available at zero -- which is a real answer.
+    poll(11.0, lines=4)
+    assert recorder.backpressure == {
+        'available': False,
+        'reason': 'generator reported no blocked-write counter'}
+
+    poll(12.0, lines=60)   # mid-walk, one refused write so far
+    poll(13.0)             # finished
+
+    assert recorder.backpressure == {'available': True,
+                                     'max_blocked_writes': 13,
+                                     'max_send_stalls': 2}
+    complete = unique_event(recorder.events, EventKind.TESTER_COMPLETE)
+    assert complete.details['backpressure']['max_blocked_writes'] == 13
+
+
+def test_a_generator_with_no_counter_still_says_so(blaster_log):
+    recorder = TesterEventRecorder(10.0, producer='mrt-injector0',
+                                   sample_interval_s=1)
+    o = tester_offering(blaster_log())
+    recorder.observe(11.0, {'10.10.0.3': TesterOffering(
+        established=o['established'], expected=10000, offered=o['offered'],
+        send_complete=o['send_complete'],
+        blocked_writes=o['blocked_writes'], send_stalls=o['send_stalls'])})
+
+    assert recorder.backpressure['available'] is False
+
+
+def test_blocked_write_counts_must_be_non_negative_integers():
+    for field in ('blocked_writes', 'send_stalls'):
+        with pytest.raises(ValueError):
+            TesterOffering(established=True, expected=1, **{field: -1})
+        with pytest.raises(ValueError):
+            TesterOffering(established=True, expected=1, **{field: 1.5})
 
 
 # --- the offering summary ---------------------------------------------------
@@ -526,16 +645,146 @@ def test_an_injector_that_has_not_started_is_read_without_inventing_one(
 
 def test_blocked_write_evidence_is_absent_rather_than_zero(blaster_log,
                                                            tmp_path):
-    '''bgpdump2 logs writes only under `-t io`, which costs a line per write.
-    Reporting 0 would assert the injector was never blocked.'''
+    '''bgpdump2 logs its writes only under `-t io`, which this run did not ask
+    for. Reporting 0 would assert the injector was never blocked.'''
     write_log(tmp_path, blaster_log())
 
     offering = injector(tmp_path).get_offerings()['10.10.0.3']
 
     assert offering.tx_pending_bytes is None
     assert offering.pending_prefixes is None
+    assert offering.blocked_writes is None
+    assert offering.send_stalls is None
+
+
+def test_an_injector_that_was_asked_reports_what_blocked_it(blaster_log,
+                                                            tmp_path):
+    write_log(tmp_path, blaster_log(IO_LOG))
+
+    offering = injector(tmp_path, expected=500000).get_offerings()['10.10.0.3']
+
+    assert offering.complete is True
+    assert offering.blocked_writes == 13
+    assert offering.send_stalls == 2
+
+
+def test_a_write_read_across_two_polls_is_counted_once(blaster_log, tmp_path):
+    '''These are the only facts here that accumulate rather than overwrite.
+
+    Every other counter comes from a line that carries a running total, so
+    re-reading one is harmless. These are incremented per line, so a reader
+    that handed the same line over twice -- or fed a half-written one and then
+    the whole one -- would report writes that never happened.
+    '''
+    poll = injector(tmp_path, expected=500000).get_offerings
+    lines = blaster_log(IO_LOG).splitlines(keepends=True)
+
+    # Through the first refused write, and no further.
+    write_log(tmp_path, ''.join(lines[:63]))
+    assert poll()['10.10.0.3'].blocked_writes == 1
+
+    # A poll landing in the middle of the *next* refused write's line, which is
+    # the case that would double-count if the half were taken as a record.
+    assert lines[63].split(' ', 3)[3].startswith('Partial write')
+    write_log(tmp_path, lines[63][:40])
+    assert poll()['10.10.0.3'].blocked_writes == 1
+
+    write_log(tmp_path, lines[63][40:] + ''.join(lines[64:]))
+    offering = poll()['10.10.0.3']
+    assert offering.blocked_writes == 13
+    assert offering.send_stalls == 2
 
 
 def test_bench_polls_this_generator():
     '''bench() polls only the generators that declare they can answer.'''
     assert Bgpdump2Tester.REPORTS_OFFERING is True
+
+
+# --- asking for the IO log class, and what it costs -------------------------
+
+class StubbedIndexInjector(Bgpdump2Tester):
+    '''The injector, with only its two MRT-file lookups stood in for.
+
+    `get_startup_cmd()` reads the MRT file through the container to pick a peer
+    index and its ASN. Everything else it does is string assembly, which is
+    what these tests are about.
+    '''
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.target_ip = '10.10.255.254'
+
+    def get_index_useful_neighbor(self, prefix_count):
+        return 3
+
+    def get_local_as(self, index):
+        return 7018
+
+
+def startup_cmd(tmp_path, **conf):
+    tester = StubbedIndexInjector('mrt-injector0', str(tmp_path), dict(
+        neighbors={'10.10.0.3': {'router-id': '10.10.0.3',
+                                 'local-address': '10.10.0.3',
+                                 'as': 1003, 'count': 10000}},
+        **conf))
+    return tester.get_startup_cmd()
+
+
+def test_the_io_log_class_is_off_unless_the_run_asks_for_it(tmp_path):
+    '''It is evidence that costs the measurement beside it.
+
+    The class logs every BGP message the injector *receives*, and the target
+    re-advertises to each tester what it learns from the others. Those lines
+    arrive in the blaster's event loop while it is still walking, so they
+    lengthen the walk it is timing: measured over three runs each on a
+    2-injector 10,000-prefix run, the injector whose walk overlapped the echo
+    reported 0.01122/0.01128/0.01125s without the flag and
+    0.01763/0.01756/0.01751s with it.
+    '''
+    assert ' -t io ' not in startup_cmd(tmp_path)
+    assert ' -t io ' not in startup_cmd(tmp_path, **{'trace-io': False})
+    assert ' -t io ' in startup_cmd(tmp_path, **{'trace-io': True})
+
+
+def trace_io_warning(capsys, tester_trace_io, testers):
+    from argparse import Namespace
+    import bgperf2
+    bgperf2.warn_if_trace_io_reaches_no_generator(
+        Namespace(tester_trace_io=tester_trace_io), {'testers': testers})
+    return capsys.readouterr().out
+
+
+BGPDUMP2_TESTER = {'mrt_injector': 'bgpdump2', 'trace-io': True}
+
+
+def test_a_flag_that_reaches_a_bgpdump2_injector_says_nothing(capsys):
+    assert trace_io_warning(capsys, True, [BGPDUMP2_TESTER]) == ''
+    # And a run that never asked is not warned at either.
+    assert trace_io_warning(capsys, False, [{'type': 'bird'}]) == ''
+
+
+def test_a_flag_that_reaches_no_generator_is_said_out_loud(capsys):
+    '''Every way the flag can be a no-op ends in the same artifact.
+
+    `trace-io` is written only onto MRT testers and read only by bgpdump2, and
+    a `-f` scenario bypasses the generator that writes it at all. Each of these
+    finishes with `backpressure: available: false` carrying the same reason a
+    genuinely mute generator gives, so without this the operator cannot tell
+    'I asked and it could not answer' from 'nothing was asked'.
+    '''
+    for testers in (
+            [{'type': 'bird', 'name': 'tester'}],            # -g bird
+            [{'mrt_injector': 'gobgp', 'trace-io': True}],   # another injector
+            [{'name': 'from-a-scenario-file'}],              # bench -f
+            None,                                            # no testers key
+    ):
+        assert 'does nothing for this run' in trace_io_warning(
+            capsys, True, testers)
+
+
+def test_the_blaster_still_runs_line_buffered_either_way(tmp_path):
+    '''Redirected stdout is block-buffered and nothing ends this process, so
+    without stdbuf the log stays empty for the whole run.'''
+    for conf in ({}, {'trace-io': True}):
+        assert 'stdbuf -oL -eL /usr/local/sbin/bgpdump2 --blaster' \
+            in startup_cmd(tmp_path, **conf)

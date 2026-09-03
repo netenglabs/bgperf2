@@ -710,6 +710,28 @@ def warn_if_log_dir_is_in_ram(config_dir):
           'disk-backed path.')
 
 
+def warn_if_trace_io_reaches_no_generator(args, conf):
+    '''Say when --tester-trace-io was asked for and nothing acts on it.
+
+    Only bgpdump2 reads `trace-io`, so the flag is a no-op for a BIRD or ExaBGP
+    generator, for the other MRT injectors, and for a `-f` scenario, which
+    bypasses gen_conf() entirely. In every one of those the run finishes with
+    `backpressure: available: false` and the same "no blocked-write counter"
+    reason a genuinely mute generator gives -- so an operator who asked for the
+    evidence and did not get it cannot tell which of the two happened.
+    '''
+    if not getattr(args, 'tester_trace_io', False):
+        return
+    if any(t and t.get('trace-io') and t.get('mrt_injector') == 'bgpdump2'
+           for t in conf.get('testers') or []):
+        return
+    print('WARNING: --tester-trace-io does nothing for this run. Only bgpdump2 '
+          'reports blocked')
+    print('         writes, so backpressure will be recorded as unavailable, '
+          'the same as for a')
+    print('         generator that has no counter at all.')
+
+
 def controller_foreign_cpu(queue, interval=5):
     '''Track CPU used by anything that is not part of the benchmark.
 
@@ -886,6 +908,10 @@ def bench(args):
         with open('{0}/scenario.yaml'.format(config_dir), 'w') as f:
             f.write(conf)
         conf = yaml.safe_load(Template(conf).render())
+
+    # After the scenario is parsed, so this covers a -f run too -- which is one
+    # of the ways the flag reaches nothing.
+    warn_if_trace_io_reaches_no_generator(args, conf)
 
     # A remote target is not a container bgperf2 starts, so it has no image --
     # resolving one would fail a remote run on the default target's image.
@@ -1825,7 +1851,8 @@ def batch(args):
                         for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
                                         'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
                                         'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
-                                        'tester_type', 'license_file', 'version', 'threads']:
+                                        'tester_type', 'license_file', 'version', 'threads',
+                                        'tester_trace_io']:
                             setattr(a, field, t[field]) if field in t else setattr(a, field, None)
 
                         for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
@@ -2118,6 +2145,7 @@ def gen_conf(args):
                 'type': 'mrt',
                 'mrt_injector': mrt_injector,
                 'mrt-index': i,
+                'trace-io': bool(getattr(args, 'tester_trace_io', False)),
                 'neighbors': {
                     router_id: {
                         'as': 1000+i+3,
@@ -2205,6 +2233,15 @@ def create_args_parser(main=True):
                             help='worker threads the target should use. BIRD 3 runs with one '
                                  'worker unless told otherwise, so a 2.x-vs-3.x comparison needs '
                                  'this to mean anything. Ignored by daemons with no such setting')
+
+        parser.add_argument('--tester-trace-io', action='store_true',
+                            help='ask the generators for blocked-write evidence. Only bgpdump2 '
+                                 'has any, behind its IO log class, and that class also logs '
+                                 'every BGP message the injector receives, which inflates both '
+                                 'reported_injection_s (the echo lengthens the walk the generator '
+                                 'is timing) and injection_s (the log outgrows what one poll '
+                                 'reads). Use it to find out whether a generator was blocked, '
+                                 'not to time one, and never compare timings across it')
 
         parser.add_argument('--target-config-file', type=str,
                             help='target BGP daemon\'s configuration file')

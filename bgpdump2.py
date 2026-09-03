@@ -23,6 +23,28 @@ from mrt_tester import MRTTester
 #   octets` -- 9,981 prefixes encoded against 88 bytes actually on the wire.
 #   So prefix counts are queue-side evidence, like BIRD 2.19's, and the octet
 #   count is wire-side.  Read together they say what a single number cannot.
+#
+# Blocked-write evidence is in the log only when the blaster was started with
+# `-t io`, which bgperf does under --tester-trace-io and not otherwise; see
+# Bgpdump2Tester.get_startup_cmd() for what that costs.  Three of that class's
+# lines are read here:
+#
+#   `Full write N bytes buffer to <peer>` -- write() took the whole buffer.
+#   `Partial write N bytes buffer to <peer>` -- it took only part of it, which
+#   is the socket's send buffer refusing the rest.
+#   `Write buffer full` -- an encode pass found fewer than BGP_MAX_MESSAGE_SIZE
+#   bytes free in the 256KB session buffer and could not encode at all.
+#
+# The third is the one that catches a socket that has stopped taking anything:
+# a write() returning EAGAIN is logged nowhere, so a fully blocked session
+# writes no `Partial write` line and shows up only as the encoder stalling
+# behind a buffer that never drains.
+#
+# `Full write` is not evidence of backpressure, but seeing any of the three is
+# what proves the class is enabled -- and therefore that a count of 0 means the
+# generator was never blocked, rather than that nobody asked.  A session that
+# has put a byte on the wire has logged a write line, so the distinction
+# resolves itself as soon as there is anything to be blocked about.
 
 _LOG_LINE = re.compile(
     r'^[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+(?P<message>.*)$')
@@ -39,6 +61,9 @@ _SENT = re.compile(
 _END_OF_RIB = re.compile(
     r'^End-of-RIB, walk time\s+(?P<seconds>\d+\.\d+)s$')
 _WALK_COMPLETE = 'RIB walk complete'
+_WRITE = re.compile(
+    r'^(?P<kind>Full|Partial) write\s+\d+ bytes buffer to\s+\S+$')
+_WRITE_BUFFER_FULL = 'Write buffer full'
 
 
 class BlasterLog:
@@ -66,6 +91,13 @@ class BlasterLog:
         self.ribs = []
         self.counters = {}
         self.walk_complete = False
+        # Blocked-write evidence, present only under `-t io`. `io_traced` is
+        # what separates 'never blocked' from 'never asked': until one of the
+        # class's lines has been seen, a count of 0 says nothing at all.
+        self.io_traced = False
+        self.full_writes = 0
+        self.partial_writes = 0
+        self.write_stalls = 0
 
     def feed(self, text):
         '''Absorb a chunk of log text made of complete lines.
@@ -119,6 +151,29 @@ class BlasterLog:
                 self.ribs[-1]['walk_time_s'] = float(m.group('seconds'))
                 continue
 
+            m = _WRITE.match(message)
+            if m:
+                # These are the only facts here that accumulate rather than
+                # overwrite, so feeding a line twice would overcount where it
+                # is harmless for the rest. BlasterLogReader is what keeps that
+                # from happening: it feeds complete lines only and advances its
+                # offset past exactly what it fed.
+                self.io_traced = True
+                if m.group('kind') == 'Full':
+                    self.full_writes += 1
+                else:
+                    # The socket took part of the buffer and refused the rest.
+                    self.partial_writes += 1
+                continue
+
+            if message == _WRITE_BUFFER_FULL:
+                # An encode pass that could not encode: the session's 256KB
+                # buffer had not drained. This is also where a write() that
+                # returned EAGAIN surfaces, since that is logged nowhere.
+                self.io_traced = True
+                self.write_stalls += 1
+                continue
+
             if message == _WALK_COMPLETE:
                 self.walk_complete = True
         return self
@@ -134,6 +189,10 @@ class BlasterLog:
             'prefixes_sent': self.counters.get('prefixes_sent'),
             'prefixes_withdrawn': self.counters.get('prefixes_withdrawn'),
             'octets_sent': self.counters.get('octets_sent'),
+            'io_traced': self.io_traced,
+            'full_writes': self.full_writes,
+            'partial_writes': self.partial_writes,
+            'write_stalls': self.write_stalls,
         }
 
 
@@ -245,6 +304,12 @@ def tester_offering_from_facts(parsed):
     where a workload that did not load is supposed to show up.
 
     `offered` is queue-side and `octets_on_wire` is not; see the note above.
+
+    `blocked_writes` and `send_stalls` are None unless the log proves the IO
+    log class was on.  Zero would otherwise be indistinguishable from a run
+    that never asked, and that is the one answer blocked-write evidence must
+    not give: it would report a generator as never blocked on the strength of
+    lines the generator was never told to write.
     '''
     ribs = parsed['ribs']
     configured = sum(rib['ipv4_prefixes'] + rib['ipv6_prefixes']
@@ -277,6 +342,9 @@ def tester_offering_from_facts(parsed):
         'updates_sent': parsed['updates_sent'],
         'octets_on_wire': parsed['octets_sent'],
         'walk_time_s': walk_time_s,
+        'blocked_writes': parsed['partial_writes'] if parsed['io_traced']
+                          else None,
+        'send_stalls': parsed['write_stalls'] if parsed['io_traced'] else None,
     }
 
 
@@ -414,9 +482,10 @@ class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
         whatever that MRT peer's table has and `offered >= expected` can stay
         false forever on one that has demonstrably sent everything it holds.
 
-        bgpdump2 exposes no blocked-write counter unless `-t io` is set, which
-        costs a log line per write, so backpressure is left unreadable here and
-        the recorder reports it as unavailable rather than as zero.
+        Blocked-write evidence is present only when the run asked for it with
+        --tester-trace-io; without it these are None and the recorder reports
+        backpressure as unavailable rather than as zero.  See
+        get_startup_cmd() for why that is not the default.
 
         Two things the injector knows that this poll cannot: `octets` is
         counted on a successful write() while `offered` is counted at the
@@ -434,7 +503,9 @@ class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
             configured=observed['configured'],
             send_complete=observed['send_complete'],
             octets_on_wire=observed['octets_on_wire'],
-            reported_send_duration_s=observed['walk_time_s'])}
+            reported_send_duration_s=observed['walk_time_s'],
+            blocked_writes=observed['blocked_writes'],
+            send_stalls=observed['send_stalls'])}
 
     def configure_neighbors(self, target_conf):
         # this doesn't really do anything, but we use it to find the target
@@ -499,11 +570,32 @@ class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
         # bgpdump2.log files at exactly 0 bytes with the blaster still running.
         # The generator was reporting its work all along and none of it was
         # observable.
+        # `-t io` is the only blocked-write evidence bgpdump2 has, and it is
+        # off unless the run asked for it. Without it the log says what was
+        # encoded and nothing about whether the wire took it -- a write()
+        # returning EAGAIN is logged nowhere -- so a session whose socket had
+        # stopped draining reads exactly like one sending freely.
+        #
+        # It is opt-in because the class is not only the write lines: it also
+        # logs one `Read ... message` line per BGP message *received*, and the
+        # target re-advertises to a tester everything it learns from the
+        # others. Those lines land in the blaster's event loop while it is
+        # still walking, so they lengthen the walk it is timing -- and
+        # `reported_injection_s`, the generator's own measurement, is the
+        # number that resolves an injection shorter than a poll. Measured on
+        # this 2-injector 10,000-prefix shape, three runs each: the injector
+        # whose walk overlapped the echo reported 0.01122 / 0.01128 / 0.01125s
+        # without the flag and 0.01763 / 0.01756 / 0.01751s with it, a
+        # reproducible 56% inflation of the measurement, and its log grew from
+        # 947 bytes to 350KB. So a run that wants to know whether the generator
+        # was blocked asks for it and reads a perturbed walk time; a run that
+        # wants the walk time does not.
+        trace = ' -t io' if self.conf.get('trace-io') else ''
         startup = '''#!/bin/bash
 ulimit -n 65536
-stdbuf -oL -eL /usr/local/sbin/bgpdump2 --blaster {} -p {} -a {} /root/mrt_file -T {}  -S {}> {}/{} 2>&1 &
+stdbuf -oL -eL /usr/local/sbin/bgpdump2 --blaster {}{} -p {} -a {} /root/mrt_file -T {}  -S {}> {}/{} 2>&1 &
 
-'''.format(self.target_ip, index,
+'''.format(self.target_ip, trace, index,
             local_as, prefix_count, neighbor['local-address'], self.guest_dir,
             self.LOG_NAME)
         return startup

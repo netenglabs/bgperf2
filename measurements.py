@@ -299,6 +299,14 @@ class TesterOffering:
     beside the controller's polled interval and not a substitute for it -- but
     at MRT playback speeds it is the only evidence that exists, because a walk
     that finishes in a millisecond is over before the first poll looks.
+
+    `tx_pending_bytes` and `pending_prefixes` are queue depths: how much the
+    generator was holding when it was looked at.  `blocked_writes` and
+    `send_stalls` are the other kind of blocked-write evidence, cumulative
+    counts of the times it was held up -- writes the socket took only part of,
+    and passes where the generator could not hand over any more because its own
+    buffer had not drained.  A generator may expose either kind, both, or
+    neither; None means it was not asked or could not say, never zero.
     '''
 
     established: bool
@@ -307,6 +315,8 @@ class TesterOffering:
     configured: Optional[int] = None
     tx_pending_bytes: Optional[int] = None
     pending_prefixes: Optional[int] = None
+    blocked_writes: Optional[int] = None
+    send_stalls: Optional[int] = None
     send_complete: Optional[bool] = None
     octets_on_wire: Optional[int] = None
     reported_send_duration_s: Optional[float] = None
@@ -326,7 +336,8 @@ class TesterOffering:
             object.__setattr__(
                 self, 'reported_send_duration_s', float(value))
         for name in ('expected', 'offered', 'configured',
-                     'tx_pending_bytes', 'pending_prefixes', 'octets_on_wire'):
+                     'tx_pending_bytes', 'pending_prefixes', 'octets_on_wire',
+                     'blocked_writes', 'send_stalls'):
             value = getattr(self, name)
             if value is None and name != 'expected':
                 continue
@@ -413,6 +424,8 @@ class TesterEventRecorder:
         self._last_update = None
         self._max_tx_pending_bytes = None
         self._max_pending_prefixes = None
+        self._max_blocked_writes = None
+        self._max_send_stalls = None
         self._backpressure_readable = False
         self._reported_send_duration_s = None
 
@@ -476,9 +489,10 @@ class TesterEventRecorder:
         '''Blocked-write evidence, or an explicit statement that there is none.
 
         BIRD 3 reports `TX pending: N bytes` per session; BIRD 2.19 has no
-        equivalent field.  A run on 2.x must record that the evidence was
-        unavailable -- reporting 0 would assert the generator was never blocked
-        on a version that cannot tell us either way.
+        equivalent field, and bgpdump2 has none unless the run turned on its IO
+        log class.  A generator that cannot tell us either way must record that
+        the evidence was unavailable -- reporting 0 would assert it was never
+        blocked on the strength of a counter nobody read.
         '''
         if not self._backpressure_readable:
             return {
@@ -486,10 +500,13 @@ class TesterEventRecorder:
                 'reason': 'generator reported no blocked-write counter',
             }
         evidence = {'available': True}
-        if self._max_tx_pending_bytes is not None:
-            evidence['max_tx_pending_bytes'] = self._max_tx_pending_bytes
-        if self._max_pending_prefixes is not None:
-            evidence['max_pending_prefixes'] = self._max_pending_prefixes
+        for key, value in (
+                ('max_tx_pending_bytes', self._max_tx_pending_bytes),
+                ('max_pending_prefixes', self._max_pending_prefixes),
+                ('max_blocked_writes', self._max_blocked_writes),
+                ('max_send_stalls', self._max_send_stalls)):
+            if value is not None:
+                evidence[key] = value
         return evidence
 
     def observe(self, monotonic_s, sessions: Mapping[str, TesterOffering]):
@@ -569,21 +586,27 @@ class TesterEventRecorder:
         self._reported_send_duration_s = max(durations) \
             if len(durations) == len(offerings) else None
 
+        # Any one of these fields is evidence. They come from different parts
+        # of a generator's output, so a capture can carry one and not the rest
+        # -- and reporting 'no evidence' while holding a queue depth is the one
+        # answer this must never give.
+        #
+        # Each is kept as a maximum over sessions as well as over polls: the
+        # depths because the deepest queue is the one worth reporting, and the
+        # cumulative counts because the most-blocked session is. Neither is
+        # summed across sessions, which is what lets a maximum stay honest when
+        # one session could not be read -- it is then a lower bound rather than
+        # a total that silently left a peer out.
         for o in offerings:
-            # Either field is evidence. They come from different parts of the
-            # CLI output, so a capture can carry one and not the other -- and
-            # reporting 'no evidence' while holding a queue depth is the one
-            # answer this must never give.
-            if o.tx_pending_bytes is not None:
+            for name, attr in (('_max_tx_pending_bytes', o.tx_pending_bytes),
+                               ('_max_pending_prefixes', o.pending_prefixes),
+                               ('_max_blocked_writes', o.blocked_writes),
+                               ('_max_send_stalls', o.send_stalls)):
+                if attr is None:
+                    continue
                 self._backpressure_readable = True
-                self._max_tx_pending_bytes = o.tx_pending_bytes \
-                    if self._max_tx_pending_bytes is None \
-                    else max(self._max_tx_pending_bytes, o.tx_pending_bytes)
-            if o.pending_prefixes is not None:
-                self._backpressure_readable = True
-                self._max_pending_prefixes = o.pending_prefixes \
-                    if self._max_pending_prefixes is None \
-                    else max(self._max_pending_prefixes, o.pending_prefixes)
+                seen = getattr(self, name)
+                setattr(self, name, attr if seen is None else max(seen, attr))
 
         if all(o.established for o in offerings) and unique_event(
                 self._events, EventKind.TESTER_SESSION_READY) is None:
@@ -654,11 +677,14 @@ def offering_poll_can_stop(sessions: Mapping[str, TesterOffering]) -> bool:
       never completed.
 
     Nothing after completion is lost by stopping. `offered` is cumulative and
-    the recorder already refuses to move it past completion, and blocked-write
-    evidence is a maximum over polls that cannot grow afterwards: a queue stops
-    filling once the last update has been handed to the session, so the poll
-    that observes completion is the poll that reads the largest queue there
-    will be.
+    the recorder already refuses to move it past completion; a queue depth
+    stops growing once the last update has been handed to the session, so the
+    poll that observes completion is the poll that reads the largest queue
+    there will be; and a cumulative blocked-write count stops with it, because
+    a generator that has reported its send complete has flushed what it
+    encoded. Verified on the log of the one generator that reports these
+    counts: in a backpressured 2 x 500,000-prefix run, both injectors logged
+    every one of their writes before `End-of-RIB` and none after it.
     '''
     if not sessions:
         return False

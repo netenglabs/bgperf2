@@ -1,0 +1,150 @@
+peer_spec_index[1]: register peer 3, asn 7018
+Sep 03 03:41:32.116350 Neighbor 10.10.255.254 state change from idle -> connect
+Sep 03 03:41:32.116542 Connecting to 10.10.255.254
+Sep 03 03:41:32.116550 Socket to 10.10.255.254 is writeable
+Sep 03 03:41:32.116576 Full write 69 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.116579 Neighbor 10.10.255.254 state change from connect -> opensent
+Sep 03 03:41:32.136658 Read open message (1), length 53 from 10.10.255.254
+Sep 03 03:41:32.136666 Neighbor 10.10.255.254 state change from opensent -> openconfirm
+Sep 03 03:41:32.136688 Full write 19 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.136690   Peer AS 1000, holdtime 240s
+Sep 03 03:41:32.136692 Read keepalive message (4), length 19 from 10.10.255.254
+Sep 03 03:41:32.136694 Neighbor 10.10.255.254 state change from openconfirm -> established
+Sep 03 03:41:32.146766 RIB for peer-index 3: AS 7018, ipv4 prefixes 500000, ipv6 prefixes 0, 83067 paths
+Sep 03 03:41:32.146986 Update full, encoded 1023 ipv4 prefixes
+Sep 03 03:41:32.146989 Resuming encoding 20/1043 prefixes
+Sep 03 03:41:32.148578 Update full, encoded 1017 ipv4 prefixes
+Sep 03 03:41:32.148586 Resuming encoding 552/1569 prefixes
+Sep 03 03:41:32.149650 Sent 2553 updates, 25069 prefixes sent, 0 prefixes withdrawn, 88 octets
+Sep 03 03:41:32.149740 Full write 258107 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.156766 Read update message (2), length 23 from 10.10.255.254
+Sep 03 03:41:32.160013 Update full, encoded 1011 ipv4 prefixes
+Sep 03 03:41:32.160021 Resuming encoding 17/1028 prefixes
+Sep 03 03:41:32.161926 Sent 5474 updates, 42450 prefixes sent, 0 prefixes withdrawn, 258195 octets
+Sep 03 03:41:32.162009 Full write 258065 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.173723 Update full, encoded 1012 ipv4 prefixes
+Sep 03 03:41:32.173734 Resuming encoding 20/1032 prefixes
+Sep 03 03:41:32.174504 Update full, encoded 1026 ipv4 prefixes
+Sep 03 03:41:32.174509 Resuming encoding 29/1055 prefixes
+Sep 03 03:41:32.175407 Sent 7530 updates, 72780 prefixes sent, 0 prefixes withdrawn, 516260 octets
+Sep 03 03:41:32.175463 Full write 258300 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.187079 Update full, encoded 1007 ipv4 prefixes
+Sep 03 03:41:32.187089 Resuming encoding 1132/2139 prefixes
+Sep 03 03:41:32.187122 Update full, encoded 1007 ipv4 prefixes
+Sep 03 03:41:32.187123 Resuming encoding 125/2139 prefixes
+Sep 03 03:41:32.187904 Update full, encoded 1008 ipv4 prefixes
+Sep 03 03:41:32.187909 Resuming encoding 1452/2460 prefixes
+Sep 03 03:41:32.187931 Update full, encoded 1008 ipv4 prefixes
+Sep 03 03:41:32.187933 Resuming encoding 444/2460 prefixes
+Sep 03 03:41:32.188111 Update full, encoded 1011 ipv4 prefixes
+Sep 03 03:41:32.188113 Resuming encoding 852/1863 prefixes
+Sep 03 03:41:32.188190 Sent 9729 updates, 101289 prefixes sent, 0 prefixes withdrawn, 774560 octets
+Sep 03 03:41:32.188246 Full write 258077 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.198456 Update full, encoded 1008 ipv4 prefixes
+Sep 03 03:41:32.198465 Resuming encoding 594/1602 prefixes
+Sep 03 03:41:32.199865 Update full, encoded 1007 ipv4 prefixes
+Sep 03 03:41:32.199870 Resuming encoding 1658/2665 prefixes
+Sep 03 03:41:32.199894 Update full, encoded 1007 ipv4 prefixes
+Sep 03 03:41:32.199895 Resuming encoding 651/2665 prefixes
+Sep 03 03:41:32.200423 Update full, encoded 1007 ipv4 prefixes
+Sep 03 03:41:32.200426 Resuming encoding 978/1985 prefixes
+Sep 03 03:41:32.200979 Sent 11970 updates, 128674 prefixes sent, 0 prefixes withdrawn, 1032637 octets
+Sep 03 03:41:32.201018 Full write 258172 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.213128 Sent 14886 updates, 145414 prefixes sent, 0 prefixes withdrawn, 1290809 octets
+Sep 03 03:41:32.213185 Full write 258121 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.224425 Update full, encoded 1011 ipv4 prefixes
+Sep 03 03:41:32.224439 Resuming encoding 550/1561 prefixes
+Sep 03 03:41:32.226670 Sent 17084 updates, 173713 prefixes sent, 0 prefixes withdrawn, 1548930 octets
+Sep 03 03:41:32.226711 Full write 258106 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.238817 Sent 19989 updates, 189843 prefixes sent, 0 prefixes withdrawn, 1807036 octets
+Sep 03 03:41:32.238851 Partial write 64445 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.249308 Sent 20759 updates, 192870 prefixes sent, 0 prefixes withdrawn, 1871481 octets
+Sep 03 03:41:32.249348 Full write 258074 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.261297 Sent 23657 updates, 207801 prefixes sent, 0 prefixes withdrawn, 2129555 octets
+Sep 03 03:41:32.261331 Partial write 132886 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.272212 Sent 25280 updates, 213188 prefixes sent, 0 prefixes withdrawn, 2262441 octets
+Sep 03 03:41:32.272252 Full write 258079 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.284148 Sent 28178 updates, 228214 prefixes sent, 0 prefixes withdrawn, 2520520 octets
+Sep 03 03:41:32.284160 Partial write 2561 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.294249 Sent 28197 updates, 228333 prefixes sent, 0 prefixes withdrawn, 2523081 octets
+Sep 03 03:41:32.304318 Write buffer full
+Sep 03 03:41:32.304359 Full write 258097 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.316310 Sent 31244 updates, 240672 prefixes sent, 0 prefixes withdrawn, 2781178 octets
+Sep 03 03:41:32.316353 Partial write 67703 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.326888 Sent 32009 updates, 244397 prefixes sent, 0 prefixes withdrawn, 2848881 octets
+Sep 03 03:41:32.326925 Full write 258061 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.337960 Update full, encoded 1018 ipv4 prefixes
+Sep 03 03:41:32.337971 Resuming encoding 1734/2752 prefixes
+Sep 03 03:41:32.338007 Update full, encoded 1017 ipv4 prefixes
+Sep 03 03:41:32.338008 Resuming encoding 717/2752 prefixes
+Sep 03 03:41:32.339043 Sent 34675 updates, 263445 prefixes sent, 0 prefixes withdrawn, 3106942 octets
+Sep 03 03:41:32.339069 Partial write 143867 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.350179 Sent 36309 updates, 271361 prefixes sent, 0 prefixes withdrawn, 3250809 octets
+Sep 03 03:41:32.350222 Full write 258087 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.363573 Sent 39384 updates, 283213 prefixes sent, 0 prefixes withdrawn, 3508896 octets
+Sep 03 03:41:32.363619 Full write 258063 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.375413 Update full, encoded 1006 ipv4 prefixes
+Sep 03 03:41:32.375430 Resuming encoding 97/1103 prefixes
+Sep 03 03:41:32.375672 Sent 42196 updates, 299555 prefixes sent, 0 prefixes withdrawn, 3766959 octets
+Sep 03 03:41:32.375698 Partial write 135450 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.386596 Sent 43803 updates, 306520 prefixes sent, 0 prefixes withdrawn, 3902409 octets
+Sep 03 03:41:32.386634 Full write 260204 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.398800 Sent 46519 updates, 324729 prefixes sent, 0 prefixes withdrawn, 4162613 octets
+Sep 03 03:41:32.398820 Partial write 65596 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.409342 Sent 47288 updates, 327853 prefixes sent, 0 prefixes withdrawn, 4228209 octets
+Sep 03 03:41:32.420768 Write buffer full
+Sep 03 03:41:32.420820 Full write 258064 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.432440 Sent 50446 updates, 338189 prefixes sent, 0 prefixes withdrawn, 4486273 octets
+Sep 03 03:41:32.432485 Partial write 198056 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.443701 Sent 52705 updates, 346793 prefixes sent, 0 prefixes withdrawn, 4684329 octets
+Sep 03 03:41:32.443737 Full write 258116 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.455325 Update full, encoded 1005 ipv4 prefixes
+Sep 03 03:41:32.455334 Resuming encoding 1360/2365 prefixes
+Sep 03 03:41:32.455354 Update full, encoded 1005 ipv4 prefixes
+Sep 03 03:41:32.455356 Sent 55625 updates, 359540 prefixes sent, 0 prefixes withdrawn, 4942445 octets
+Sep 03 03:41:32.455368 Partial write 67684 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.465433 Resuming encoding 355/2365 prefixes
+Sep 03 03:41:32.465679 Update full, encoded 1040 ipv4 prefixes
+Sep 03 03:41:32.465682 Resuming encoding 92/1132 prefixes
+Sep 03 03:41:32.465891 Sent 56195 updates, 365625 prefixes sent, 0 prefixes withdrawn, 5010129 octets
+Sep 03 03:41:32.465926 Full write 258080 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.476064 Update full, encoded 1005 ipv4 prefixes
+Sep 03 03:41:32.476081 Resuming encoding 31/1036 prefixes
+Sep 03 03:41:32.477508 Sent 59131 updates, 377224 prefixes sent, 0 prefixes withdrawn, 5268209 octets
+Sep 03 03:41:32.477518 Partial write 2560 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.487596 Sent 59162 updates, 377302 prefixes sent, 0 prefixes withdrawn, 5270769 octets
+Sep 03 03:41:32.487632 Full write 258058 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.499451 Sent 62040 updates, 390090 prefixes sent, 0 prefixes withdrawn, 5528827 octets
+Sep 03 03:41:32.499510 Full write 258114 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.511011 Update full, encoded 1004 ipv4 prefixes
+Sep 03 03:41:32.511035 Resuming encoding 1484/2488 prefixes
+Sep 03 03:41:32.511075 Update full, encoded 1004 ipv4 prefixes
+Sep 03 03:41:32.511078 Resuming encoding 480/2488 prefixes
+Sep 03 03:41:32.511225 Sent 64851 updates, 402806 prefixes sent, 0 prefixes withdrawn, 5786941 octets
+Sep 03 03:41:32.511259 Full write 258053 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.522824 Sent 67638 updates, 414238 prefixes sent, 0 prefixes withdrawn, 6044994 octets
+Sep 03 03:41:32.522865 Full write 258113 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.534304 Sent 70443 updates, 424205 prefixes sent, 0 prefixes withdrawn, 6303107 octets
+Sep 03 03:41:32.534319 Partial write 24614 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.544517 Sent 70714 updates, 424963 prefixes sent, 0 prefixes withdrawn, 6327721 octets
+Sep 03 03:41:32.544551 Full write 258130 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.555946 Sent 73324 updates, 436324 prefixes sent, 0 prefixes withdrawn, 6585851 octets
+Sep 03 03:41:32.555968 Partial write 67670 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.566338 Sent 73997 updates, 438964 prefixes sent, 0 prefixes withdrawn, 6653521 octets
+Sep 03 03:41:32.566376 Full write 258050 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.577580 Sent 76547 updates, 447091 prefixes sent, 0 prefixes withdrawn, 6911571 octets
+Sep 03 03:41:32.577618 Full write 258105 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.589353 Sent 78945 updates, 458956 prefixes sent, 0 prefixes withdrawn, 7169676 octets
+Sep 03 03:41:32.589415 Partial write 215021 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.599975 Update full, encoded 1007 ipv4 prefixes
+Sep 03 03:41:32.599994 Resuming encoding 28/1035 prefixes
+Sep 03 03:41:32.600129 Update full, encoded 1007 ipv4 prefixes
+Sep 03 03:41:32.600131 Resuming encoding 15/1022 prefixes
+Sep 03 03:41:32.601096 Update full, encoded 1007 ipv4 prefixes
+Sep 03 03:41:32.601102 Resuming encoding 226/1233 prefixes
+Sep 03 03:41:32.602051 Sent 80665 updates, 483461 prefixes sent, 0 prefixes withdrawn, 7384697 octets
+Sep 03 03:41:32.602091 Full write 258087 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.614032 RIB walk complete
+Sep 03 03:41:32.614065 Full write 248221 bytes buffer to 10.10.255.254
+Sep 03 03:41:32.614067 Sent 83095 updates, 500000 prefixes sent, 0 prefixes withdrawn, 7891005 octets
+Sep 03 03:41:32.614070 End-of-RIB, walk time 0.467294s

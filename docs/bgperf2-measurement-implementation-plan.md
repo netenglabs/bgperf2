@@ -369,9 +369,12 @@ the expected offered route count.
 
 ### Phase 3: Instrument bgpdump2 MRT playback
 
-Status: in progress. The injector's own evidence is readable, parsed, and
-polled into the run's event stream; per-injector aggregation beyond that, and
-provenance, are still open.
+Status: complete on 2026-09-03. Every injector reports its own readiness, first
+update, last update and completion into the run's event stream; the fleet is
+summarised without letting the fastest injector speak for the rest; bgpdump2
+reports its build identity; and blocked-write evidence is available behind
+`--tester-trace-io`, off by default because asking for it perturbs the
+generator's own walk time.
 
 #### Progress on 2026-09-03: the injector log was empty, and now is not
 
@@ -586,9 +589,8 @@ property of the paths played back, not of the table size. No read failures, no
 tester errors or timeouts, foreign CPU 4%.
 
 Left for the next change sets in this phase: an aggregate across injectors that
-cannot let the fastest speak for the rest (done below); and blocked-write
-evidence (`-t io` enables bgpdump2's `Partial write`/`Full write` lines, at the
-cost of a log line per write).
+cannot let the fastest speak for the rest, and blocked-write evidence -- both
+done below.
 
 
 #### Progress on 2026-09-03: the injector now says which build it is
@@ -705,9 +707,7 @@ first's), and a fleet injection of 1.0s that the run correctly refused to turn
 into a rate. `tester version` reads `2.0.14 (a019184)`. No read failures, no
 tester errors or timeouts, foreign CPU 5%.
 
-The remaining Phase 3 item is blocked-write evidence (`-t io` enables
-bgpdump2's `Partial write`/`Full write` lines, at the cost of a log line per
-write).
+The remaining Phase 3 item is blocked-write evidence, done below.
 
 #### Progress on 2026-09-03: the poll stops asking a generator that has finished
 
@@ -783,6 +783,113 @@ resolution would read a resolved interval that does not exist. The printed line
 was unaffected: it handles a null `injection_s` before it reaches the
 resolution. `_bounding_resolution()` now returns None unless every endpoint is
 present. From the poll-resolution change set, not yet released.
+
+#### Progress on 2026-09-03: blocked writes, and what asking for them costs
+
+The last open Phase 3 item. bgpdump2's IO log class is the only blocked-write
+evidence it has, and it is now readable -- but behind `--tester-trace-io`,
+because turning it on damages the measurement that sits beside it.
+
+Two of the class's lines are backpressure and one is not:
+
+- `Partial write N bytes buffer to <peer>` -- `write()` took part of the
+  session buffer and the socket refused the rest.
+- `Write buffer full` -- an encode pass found fewer than one maximum BGP
+  message free in the 256KB session buffer and could encode nothing. This is
+  also the only place a `write()` that returned `EAGAIN` ever appears:
+  bgpdump2 logs nothing at all for one, so a session whose socket had stopped
+  taking anything writes no `Partial write` line and shows up only here.
+- `Full write N bytes` -- the ordinary case. It is counted only because seeing
+  any of the three proves the class is enabled.
+
+That last point is the design of it. `blocked_writes` and `send_stalls` are
+absent, not zero, until the log itself proves the class was on -- a count of 0
+from a run that never asked would report a generator as never blocked on the
+strength of lines it was never told to write, which is the same failure the
+BIRD 2.19 backpressure case exists to avoid. The evidence becomes available at
+the session's OPEN, which is the first write there is, so the distinction
+resolves itself before there is anything to be blocked about.
+`TesterOffering` gained both fields, and `TesterEventRecorder` keeps each as a
+maximum over sessions as well as polls -- the most-blocked session, never a sum
+across them, which is what lets the number stay an honest lower bound when one
+session could not be read.
+
+**Why it is not the default, measured rather than argued.** `-t io` also logs
+one line per BGP message *received*, and the target re-advertises to each
+tester what it learns from the others. Those lines arrive in the blaster's
+event loop while it is still walking, so they lengthen the walk it is timing --
+and that walk time is published as `reported_injection_s`, the only number that
+says anything at all about an injection shorter than one poll. Three runs each
+of `bench -t bird -g bgpdump2 -n 2 -p 10000`, on the injector whose walk
+overlapped the echo:
+
+| | walk time | its log |
+|---|---|---|
+| without `-t io` | 0.011217s, 0.011280s, 0.011252s | 947 bytes |
+| with `-t io` | 0.017634s, 0.017556s, 0.017508s | 350 KB |
+
+A reproducible 56% inflation with no overlap between the two sets, and 370x the
+log volume -- on a run whose per-injector table is 10,000 prefixes. The
+injector whose whole walk finished before the echo began was unaffected
+(0.00095-0.00103s either way), which is the mechanism confirming itself. So a
+run that wants to know whether the generator was blocked asks for it and reads
+a perturbed walk time; a run that wants the walk time does not.
+
+##### Docker verification
+
+On the 8-core / 30 GB host, `-d /var/tmp/bgperf` with results outside the
+campaign tree.
+
+`bench -t bird -g bgpdump2 -n 1 -p 500000 --mrt-file mrt/rib.20210801.0000
+--tester-trace-io`: converged in 6s with `backpressure` reading `available:
+true, max_blocked_writes: 13, max_send_stalls: 3` in the injector's
+`<prefix>.events.json` section and on its `tester_complete` event -- the first
+run in this project to report positive blocked-write evidence from any
+generator. Injection was still sub-poll (`reported_injection_s` 0.482256s), and
+500,000 prefixes is where a single BIRD session first stops draining a 256KB
+buffer as fast as bgpdump2 fills it.
+
+The same run without the flag: `available: false` with its reason, and the
+2-injector 10,000-prefix shape back to a 0.011306s walk on a 947-byte log.
+
+`bench -t bird -g bgpdump2 -n 2 -p 500000 --mrt-file mrt/rib.20210801.0000
+--tester-trace-io`, the two-injector version: the artifact's counts match the
+logs exactly (22 partial writes and 82 stalls for one injector, 22 and 39 for
+the other), and this run also settled the one invariant the counts touch.
+
+It also exposed the flag's *second* cost, which review of this change set
+caught in the write-up above. `BlasterLogReader.READ_MAX` caps a poll at 4 MB,
+which was sized for the ~1 KB logs an untraced injector writes. Traced, the
+injector that received the other's whole table wrote **22.5 MB before its own
+`End-of-RIB`** -- so the reader needed about six polls to reach the line that
+reports completion, and `tester_complete` was stamped that late: `injection_s`
+5.0s against the generator's own `reported_injection_s` of 1.4996s. The counts
+are unaffected, because they are still exact once the reader catches up; only
+the polled interval is. The cap is left alone here -- changing the reader's
+budget is a decision about the untraced path that everything else depends on,
+and it needs its own verification -- but the field is now documented as not
+comparable across the flag, which is the same conclusion the walk-time
+inflation already reached by a different route: a traced run is for finding out
+whether the generator was blocked, and `reported_injection_s` is what to read
+for how long it sent.
+`offering_poll_can_stop()` ends the poll at completion on the grounds that
+nothing observable can arrive afterwards, which is argued for queue *depths*; a
+cumulative count is a different shape, and bgpdump2 does keep flushing after
+`RIB walk complete`. Checked rather than assumed: both injectors logged every
+one of their writes before `End-of-RIB` and none after it, because the flush at
+End-of-RIB empties the buffer. The docstring now says so instead of reasoning
+only about depths.
+
+The fixture `tests/fixtures/bgpdump2_blaster_io.log` is a real capture from a
+**separate, earlier** repeat of that same single-injector 500,000-prefix shape
+-- one injector precisely because a second one's log is 23 MB of the target's
+echo. 150 lines carrying 28 full writes, 13 partial writes and 2 stalls: the
+partial writes match the verification run above and the stalls do not (2 there,
+3 here), which is what a backpressure count does from repeat to repeat and the
+reason the two are recorded as two runs rather than one. The fixture is a
+workload actually hitting backpressure rather than an invented one; its 41
+write lines sum to exactly its final 7,891,005 `octets`, which is also the
+independent check that no write line follows `End-of-RIB`.
 
 #### Work
 

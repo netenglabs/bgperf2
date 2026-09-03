@@ -376,6 +376,35 @@ set it for both.
 
 `--threads` is ignored by daemons with no such setting.
 
+### Asking whether the generator was blocked
+
+`--tester-trace-io` turns on the generator's own blocked-write reporting. Only bgpdump2 has any:
+it logs `Partial write` when the socket took part of a buffer and refused the rest, and `Write
+buffer full` when an encode pass found no room in its 256KB session buffer — which is also the
+only place a `write()` that returned `EAGAIN` ever appears, since bgpdump2 logs nothing for one.
+The counts reach `<prefix>.events.json` as `max_blocked_writes` and `max_send_stalls` under each
+generator's `backpressure`; without the flag that section says `available: false` with a reason,
+because reporting 0 would claim the generator was never blocked on the strength of lines it was
+never told to write.
+
+**It costs the measurement beside it, so leave it off for timing runs.** bgpdump2's IO log class
+also logs every BGP message the injector *receives*, and the target re-advertises to each tester
+what it learns from the others. Those lines land in the blaster's event loop while it is still
+walking, so they lengthen the walk it is timing — and that walk time is published as
+`reported_injection_s`, the only number that resolves an injection shorter than one poll. Measured
+over three runs each, 2 injectors x 10,000 prefixes: the injector whose walk overlapped the echo
+reported 0.01122 / 0.01128 / 0.01125s without the flag and 0.01763 / 0.01756 / 0.01751s with it,
+and its log grew from 947 bytes to 350 KB. That growth scales with the table, so on a large run
+keep `-d` off tmpfs — a bench directory in RAM is already measured by the `min free mem` column.
+
+It also costs the *polled* injection interval. The log reader consumes at most 4 MB per poll, sized
+for the ~1 KB an untraced injector writes, so a traced injector can write its `End-of-RIB` several
+polls before the controller reads it and `tester_complete` is stamped late. Measured on a traced
+2 x 500,000-prefix run: one injector wrote 22.5 MB before its `End-of-RIB`, and `injection_s` read
+5.0s against the generator's own 1.4996s. **`injection_s` is not comparable across this flag** —
+read `reported_injection_s` for a traced run, and do not put traced and untraced runs in the same
+comparison.
+
 ### When an old version will not build
 
 Build instructions drift: the base distro moves on, dependencies get renamed, configure flags come

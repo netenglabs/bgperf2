@@ -379,6 +379,35 @@ redirected stdout has this trap.
 - **The log's timestamps are never parsed.** They are local wall-clock with no
   year and no zone (`%b %d %H:%M:%S.%06lu`); durations here come from the
   controller's monotonic clock.
+- **Blocked-write evidence is opt-in, because it costs the measurement beside
+  it.** `--tester-trace-io` starts the blaster with `-t io`, whose write lines
+  are the only backpressure bgpdump2 has: `Partial write` (the socket took part
+  of the buffer and refused the rest) and `Write buffer full` (an encode pass
+  found no room in the 256KB session buffer, which is also the only place a
+  `write()` returning `EAGAIN` appears — bgpdump2 logs nothing for one). They
+  reach the artifact as `max_blocked_writes` and `max_send_stalls`. But the
+  same class logs one line per BGP message *received*, and the target
+  re-advertises to each tester what it learns from the others, so those lines
+  arrive in the blaster's event loop while it is still walking and lengthen the
+  walk it is timing. Measured, three runs each on 2 injectors x 10,000
+  prefixes: the injector whose walk overlapped the echo reported 0.01122 /
+  0.01128 / 0.01125s without the flag and 0.01763 / 0.01756 / 0.01751s with it
+  — a 56% inflation of `reported_injection_s`, the one number that resolves a
+  sub-poll injection — and its log grew from 947 bytes to 350KB, which scales
+  with the table and therefore lands in `min free mem` on a default `-d /tmp`.
+  A run that wants to know whether the generator was blocked asks for it and reads a
+  perturbed walk time; a run that wants the walk time does not. **`injection_s`
+  is perturbed too, by a second mechanism**: `BlasterLogReader.READ_MAX` caps a
+  poll at 4 MB, sized for the ~1 KB an untraced injector writes, so a traced
+  injector can log `End-of-RIB` several polls before the reader gets to it and
+  `tester_complete` is stamped late. Measured on a traced 2 x 500,000-prefix
+  run: 22.5 MB written before `End-of-RIB` on one injector, `injection_s` 5.0s
+  against its own reported 1.4996s. The counts stay exact — the reader catches
+  up — so only the interval is affected. Never compare `injection_s` across the
+  flag. **A count of
+  zero is only published when the log proves the class was on**; otherwise the
+  counters are absent, because 0 would say the generator was never blocked on
+  the strength of lines it was never asked to write.
 
 `Bgpdump2Tester` sets `REPORTS_OFFERING`, so `bench()` polls each injector at
 the monitor's own cadence and every one of them contributes its own

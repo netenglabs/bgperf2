@@ -1057,11 +1057,13 @@ controlled post-injection convergence tail.
 
 ### Phase 5: Add repetitions and order control
 
-Status: complete on 2026-09-03, apart from the named variance rule for
-expanding three runs to five, which is a campaign decision rather than
-implementation and belongs to Phase 6. Repetitions, stable cell identity,
-resume, deterministic order control and the per-cell summary statistics all
-landed on 2026-09-03.
+Status: complete on 2026-09-03. Repetitions, stable cell identity, resume,
+deterministic order control, the per-cell summary statistics and the named
+variance rule for expanding three runs to five all landed on 2026-09-03.
+
+An earlier revision of this line deferred the variance rule to Phase 6 as "a
+campaign decision rather than implementation". That was half right, and the
+half it got wrong is the expensive half -- see the last progress note below.
 
 #### Progress on 2026-09-03: a matrix can be run more than once
 
@@ -1402,6 +1404,376 @@ and the summary reported four cells with their CVs and named the failed pass
 under its own cell. No Docker run was needed or made: the change is confined to
 report assembly over rows the batch has already written, covered by the new
 `tests/test_batch_summary.py` (64 tests); 661 total, Docker-free.
+
+#### Progress on 2026-09-03: when three passes are not enough, and who decides
+
+Phase 5's last work item -- "expand from three to five runs only under a named
+variance rule" -- is implemented in `summary.py` as `apply_variance_rule()`.
+The status line above deferred it to Phase 6 as "a campaign decision rather
+than implementation". That was half right and the half it got wrong is the
+expensive half: *which* rule is a campaign decision, but a rule that is not
+named anywhere is not a decision at all. It is whoever reads the CSV, decides
+they do not like a number, and reruns -- which selects for reruns of the
+results somebody found surprising, and turns a benchmark into a search for the
+expected answer. Naming it in code costs nothing and makes the campaign's
+choice an edit to one constant rather than an act of judgement per cell.
+
+The rule is comparative, not a threshold on a coefficient of variation:
+
+> two cells are separated when their medians differ by more than the sum of
+> their standard deviations, floored at the resolution of the metric
+
+There is no CV that means the same thing twice here. A 2% spread is nothing on
+a cell whose targets are 40% apart and fatal on one where they are 0.12% apart
+-- which is what FRR 8.5, 9.1 and 10.0 actually were, finishing a 95s MRT run
+within 0.11s of each other. A cell therefore earns more passes when its own
+spread covers the difference it is being asked to resolve, and not otherwise.
+Run against those three FRR numbers with a realistic 0.2s pass-to-pass spread,
+the rule reports all three as unseparated and asks for five passes; run against
+targets 40% apart it says nothing at all.
+
+Five decisions worth keeping:
+
+- **It is deliberately weaker than a significance test.** This is a scheduling
+  rule with n=3, where a t-test would be arithmetic dressing up three numbers.
+  It is conservative in the direction that costs machine time rather than the
+  one that publishes a ranking the passes do not support.
+- **It reads `elapsed (s)` only.** That is the end-to-end number every graph in
+  `create_batch_graphs()` is keyed on and the one a version comparison is read
+  from. A rule ranging over all thirteen metrics would recommend expansion for
+  every batch ever run, since `min idle%` and `max cpu %` are noisy by nature
+  and nobody ranks a daemon by them.
+- **A cell is compared only within its own (peers, prefixes, filter) group,
+  and against every rival in it.** `create_graph()` draws exactly those groups
+  side by side, so the rule answers a question somebody is going to ask of the
+  picture; a 10-peer cell is not the rival of a 50-peer one. The first version
+  compared against the *nearest* rival by median, on the reasoning that
+  separating a cell from its closest neighbour separates it from all of them --
+  which review showed is true only if every rival has the same dispersion.
+  With bird at 40 +/- 0.01, frr at 41 +/- 0.01 and gobgp at 45 +/- 10, bird
+  cleared its nearest rival by a mile and was published `separated` while being
+  nowhere near gobgp, in a picture that draws all three side by side. The
+  verdict is decided by the **binding** rival instead: the smallest margin
+  between the gap and the combined deviation, which is the closest call in the
+  group and the one a reader would challenge first.
+- **Five is a floor under the recommendation and a ceiling on the expansion,
+  never a cap on what the test already asked for.** A cell still unseparated at
+  five passes is not asking for a sixth -- it is saying those two targets are
+  not distinguishable at this workload, which is a result, and expanding
+  without a limit is how a batch that cannot decide something spends a weekend
+  failing to. But a test declaring `repetitions: 7` told to "rerun with
+  repetitions: 5" would *reduce* its passes and discard observations, so the
+  recommendation is `max(5, declared)`. Reaching the ceiling in passes but not
+  in observations is a third thing again: that shortfall is a failed pass to
+  investigate, not a missing repetition, and rerunning at the same count only
+  repeats it, so it is named rather than turned into advice.
+- **The rule is silent about the results it supports, and says each thing
+  once.** Every verdict but `separated` prints a line -- a cell the rule
+  endorsed needs none, and review later showed that a *refusal* very much does;
+  see the note below. The lines are de-duplicated by unordered pair, since the
+  pair is usually mutual: a two-target group otherwise states one relation
+  twice with identical numbers, and a matrix of 4 peers x 3 prefixes x 2
+  filters x 3 targets would end a multi-hour batch with 72 lines carrying 36
+  facts.
+
+Withheld for a stated reason rather than answered, in the shape `findings.py`
+publishes a verdict -- the policy and the numbers it was applied to sit beside
+it, because a verdict nobody can argue with is a boolean with extra words:
+a single-pass cell (no dispersion), a cell whose column was withheld by the
+unsampled sentinel, a cell no other cell shares axes with, and a cell **no**
+rival of which has a dispersion -- that last one still publishing the gap, so
+the reader is told which pair could not be judged and by how much they differ.
+That last case is deliberately not "the nearest rival has no dispersion":
+review found that a single degraded cell -- two of its three passes failed, so
+it has a median and no deviation -- could be picked as the neighbour of two
+cells that were plainly unseparated and withhold the verdict for both, with
+nothing printed to say the rule had been silenced. Rivals with a dispersion are
+preferred, and the refusal fires only when none has one.
+
+Four of those five decisions are as review left them rather than as they were
+written: the binding rival, the recommendation floor, the shortfall and the
+de-duplicated line all came out of `/code-review`, and each had a reproduction
+attached. The first is the one that mattered -- it published `separated` for a
+cell that was not.
+
+Ten further review rounds, after the host was rebooted mid-change-set, found
+twenty-seven more, every one of them a case where the summary published
+something an operator would act on and the passes did not support. The tenth
+round found no defect in the code, having fuzzed the rule over 50,000 randomly
+shaped groups without an exception, and one sentence of documentation that
+described `combined_stdev` as a sum when it is a floored sum -- which is where
+this change set stops.
+
+The first of them is the one that mattered, and it invalidated the rule
+outright rather than a sentence about it:
+
+- **The metric the rule decides on is quantised, and the rule did not know
+  it.** `elapsed (s)` reaches the row as `stats['elapsed'].seconds` -- whole
+  seconds -- and that is not a formatting choice that could be widened. It is
+  counted off the monitor's poll loop at `MONITOR_POLL_INTERVAL_S`, one sample
+  a second, with an integer number of assurance samples then subtracted. There
+  is no finer number to publish. Passes of one cell therefore land in the same
+  bucket routinely, `stdev` comes out at exactly 0.0, and a combined deviation
+  of zero is cleared by *any* gap at all -- so the rule published `separated`
+  on a difference of one rounding boundary, and published it in silence, since
+  it prints nothing about the results it supports. Worse, the pairs it was
+  written for are inside the quantum: FRR 8.5, 9.1 and 10.0 finished a 95s MRT
+  run 0.11s apart, which at this resolution is the same measurement. As
+  written the rule could not fire `expand` for exactly the comparison it
+  exists to catch, and asserted separation instead. The combined deviation is
+  now floored at `METRIC_RESOLUTION` -- the same rule as
+  `MONITOR_POLL_INTERVAL_S` flooring the published `poll_resolution_s`, and
+  the same reason: a span nothing crossed is not a measurement of zero. Two
+  cells one second apart are `expand`, then `unseparated at the expansion
+  limit`, which is the honest description of three FRR releases this
+  instrument cannot tell apart. `summary.py` cannot import that constant --
+  bgperf2 imports summary, and the Docker-free import property depends on it
+  staying that way -- so `test_stats_contract.py` pins the two against each
+  other. `total time` was considered and rejected as the decision metric: it
+  is a float to two places, but it times the whole run including container
+  startup, so it is finer and less relevant, and part of its dispersion is
+  Docker's.
+
+The rest are in what the rule *says* rather than what it computes, which is
+where they would be: the arithmetic gets re-derived by anyone who doubts it,
+and the sentence built from it does not.
+
+- **`separated` could be published while a nearer rival went unjudged.** The
+  preference for rivals that have a dispersion -- itself a fix from the first
+  round -- excluded the others from the decision entirely, so one rival with a
+  dispersion was enough to earn the verdict while a rival at an *identical*
+  median sat in the same group unjudged. Reproduced with bird `[40, 40, 40]`,
+  a `broken` cell whose single surviving pass read 40.0, and gobgp
+  `[90, 90, 90]`: bird was published `separated` on the strength of gobgp,
+  while `create_graph()` drew it beside a bar it was not distinguishable from
+  at all. This is the nearest-rival defect one path over -- there it was the
+  rival that decided the verdict, here the rival that was skipped. Every
+  verdict now names its unjudgeable rivals in `rivals_unjudged`, and
+  `separated` is withheld when one of them is nearer than the binding rival.
+  Only `separated`: an unseparated verdict is already the conservative answer,
+  and degrading those is exactly how one mostly-failed cell mutes its group,
+  which is what the first round's fix was for.
+- **The de-duplicated line was chosen by matrix position.** The two sides of a
+  mutual pair need not carry the same verdict: at `repetitions: 5` a cell whose
+  passes all succeeded is `unseparated at the expansion limit` while the rival
+  that lost two of them is `expand` with a shortfall. Keeping whichever came
+  first meant that when the fully-observed cell had the lower ordinal, the
+  batch printed *more passes will not decide it* about a pair where one side
+  had produced three of five observations -- and the one thing to act on, the
+  failed passes, was in the JSON and never printed. Swapping the ordinals
+  printed the shortfall, so which advice the operator got depended on where the
+  cell sat in the matrix. The line is now the more actionable of the pair's two
+  verdicts.
+- **A shortfall was printed instead of the rerun count, not beside it.** With
+  `repetitions: 3` and one failed pass, both cells of the pair are `expand` at
+  five, but the only line printed said to investigate the failed pass -- and
+  the pair de-duplication suppressed the rival's line, which was the one
+  carrying the count. The operator's obvious next move is then to fix the pass,
+  rerun at the three they already had, and arrive unseparated again. They are
+  two different things to do about one cell and both are now said. The
+  dictionary had documented a narrower condition than the code applies, which
+  is how the substitution read as deliberate.
+- **The refusal named only its nearest unjudgeable rival.** `rivals_unjudged`
+  was populated on the verdicts that had a binding rival but not on the
+  refusal that fires when *no* rival has a dispersion, so with two broken
+  rivals the second appeared nowhere in the document -- contradicting what
+  this note and the dictionary both say about naming every one of them.
+
+- **A cell whose every pass failed said it had "no dispersion",** which is what
+  one observation looks like. The refusal now quotes the metric's own
+  `withheld` entry for `stdev`, which already tells the four cases apart in one
+  place -- every pass failed, only one observation, the never-sampled sentinel,
+  a non-numeric value. A second vocabulary answering the same question
+  differently is how the distinction was lost, and the documented "four cases"
+  had become three strings.
+- **A cell whose rivals all failed was told it had no rivals.** A rival with no
+  observation has no median, so it dropped out of the comparison and the
+  survivor published `no other cell shares this cell's axes` -- false about the
+  test, and the wrong half of the distinction this module keeps: nothing to
+  compare against is a property of the matrix as written, rivals that produced
+  nothing is a property of the run, and only the second is something to go and
+  fix. That is now a fourth reason of its own.
+- **A withheld separation was as silent as an endorsed one.** Only `expand` and
+  `unseparated at the expansion limit` printed, so a cell demoted to
+  `undecided` by a nearer unjudged rival produced no line at all, and silence
+  meant both *the rule endorsed this ranking* and *the rule could not judge
+  it*. Those are the two things a reader most needs told apart; it is also the
+  complaint the first round's fix was written against, where the verdict was
+  corrected and the printing was not. Refusals that name a rival now print.
+  Making them print surfaced a latent crash on the way: the comparison
+  sentence was built before the branch that returns early, so the refusal
+  reached when no rival has a dispersion -- which has no combined deviation to
+  report -- raised `KeyError` at the end of a batch that had already run for
+  hours.
+- **The de-duplication keyed on the wrong cell for a withheld separation.**
+  That verdict reports a relation against the unjudgeable cell that blocked
+  it, which is not the binding rival its `evidence` names. Keyed on the
+  binding rival, two cells blocked by two *different* unjudged rivals
+  collapsed onto one pair key, and since both rank equally, matrix position
+  decided which of the two refusals was printed at all -- the same defect the
+  ranking above was added to fix, reached one path over. The verdict now
+  records `withheld_by` and the pair is keyed on it.
+- **An equally close unjudgeable rival did not withhold separation.** The test
+  was `<` where the stated intent is *distinguishable from the cells drawn
+  beside it*: a rival at exactly the binding rival's distance contradicts that
+  as completely as a closer one. An equal gap is also the likeliest shape here,
+  since the decision metric is quantised -- which is the finding above, and the
+  reason this one is not the edge case it looks like.
+- **The evidence's `nearest_*` fields did not hold the nearest rival.** They
+  hold whichever rival the branch chose, and the main branch deliberately
+  chooses the smallest *margin*: in the group bird 40, frr 41, gobgp 45 that is
+  gobgp, the cell furthest away, while the refusal branch really does use the
+  nearest. One key name meaning two things is how a reader of
+  `<test>.summary.json` -- the artifact this module exists to make auditable --
+  concludes the rule compared a pair it did not. They are `rival_*` now, with
+  `rival_chosen_by` saying which selection produced them.
+- **A rival that had not run yet was reported as one that produced nothing.**
+  The summary is written before the first cell and rewritten after every one,
+  so for most of a batch a finished cell's rivals are unstarted -- and an
+  interrupted batch leaves exactly that document behind, since the surviving
+  file is the last checkpoint. Publishing *every other cell is without an
+  observation* there sends the operator to investigate a batch that was merely
+  in progress. It is the `failed` against `not run` distinction
+  `summarize_cell()` already keeps at the pass level, collapsed one layer up,
+  and it now has its own reason.
+- **A rival with no observation at all was invisible to the verdict.** The
+  unjudgeable rivals were drawn from the cells that have a median, so one that
+  never ran -- or whose every pass failed -- was filtered out of the *naming*
+  as well as out of the comparison, and appeared nowhere in the verdict:
+  `rivals_considered: 1` could not be told from "one of two". It is the same
+  defect class as the two above, reached through the rival with no median
+  rather than the one with no dispersion, which is the third path into it. It
+  also has to withhold `separated`, not merely be named: a rival with no
+  observation is *less* known than one with a median and no dispersion, and
+  withholding for the second while publishing beside the first would make the
+  rule stricter about the case it knows more about.
+- **`unseparated at the expansion limit` was decided from one cell's passes.**
+  The claim it publishes -- "more passes will not decide it" -- is about the
+  pair, so a fully observed cell published it beside a rival that had produced
+  two of its five passes and whose dispersion cannot support it. The printed
+  line was saved by the ranking, since the rival's `expand` outranks it, but
+  the artifact carried the unsupported verdict, and the artifact is the point.
+  Both cells must now have reached the ceiling.
+- **A rival that failed was reported as one that had not run,** whenever any
+  *other* rival in the group had an unrun pass -- an `any()` over the union,
+  which throws away the distinction in the act of drawing it. The same shape
+  one rival further down, where a single unrun pass described a rival whose
+  other two had failed. The refusal now names each rival with its own state,
+  counted rather than tested for: `frr_c (every pass failed); gobgp (of 3
+  passes, 2 failed, 1 not run)`. The failed one is the only thing in such a
+  group an operator can act on, and it was the one being hidden.
+- **A pair short because of the *rival* was told to rerun at the count it had
+  already run.** `passes_recommended` was always the ceiling, including where
+  this cell was fully observed and only the binding rival was short -- advice
+  that is a no-op, printed with nothing to say why. And the rival's own
+  shortfall is filed under whichever pair *its* verdict binds to, which need
+  not be this one, so the no-op could stand alone. That is the "fix the pass,
+  rerun at the count you already had, come back unseparated again" failure the
+  shortfall was added to prevent, reached through the rival instead of through
+  the cell. Such a verdict now carries `rival_shortfall` and no recommendation.
+- **A raise in the rule destroyed the whole summary document.**
+  `apply_variance_rule()` ran unwrapped inside `summarize_batch()`, so anything
+  it raised took the per-cell statistics with it -- `publish_batch_summary()`
+  catches at the outer level and writes `summary unavailable`. That inverts the
+  rule this repository states for exactly this shape of code, where
+  `write_event_artifact()` wraps `derive_findings()` so the evidence still
+  lands. The rule is a derived opinion about numbers that are already computed
+  and correct, and it now costs only the verdicts: such a document carries
+  `variance_failure`, no cell carries a partial verdict, and the failure is
+  printed, since a batch whose rule raised otherwise looks exactly like one
+  whose every cell was separated. Review's reproduction was a `filter_test`
+  axis holding a list, which `check_batch_test()` does not reject and which
+  makes the group key unhashable -- a document that would have been written
+  before this change, lost at the end of a multi-hour batch.
+- **The "rivals produced nothing" refusal was filtered out of the printing.**
+  The printed lines were selected on carrying `evidence`, and that branch has
+  none -- there is no rival median to take a gap from -- so a group whose rival
+  failed every pass printed nothing at all. Silence is what an endorsed ranking
+  looks like, which is the whole reason refusals print; the test is now for a
+  verdict that identifies a rival rather than for `evidence` specifically.
+- **That failure line then escaped the single-pass guard.** It was appended
+  outside the `repetitions > 1` block that emits the heading, so a
+  `repetitions: 1` batch whose rule raised printed one indented line with
+  nothing naming the test or the summary path -- and every checked-in
+  benchmark config is single-pass. It also broke the contract that a
+  single-pass test prints nothing, for a case where nothing could have been
+  printed anyway: every dispersion in such a test is withheld, so no cell of
+  one can carry a printable verdict.
+- **The call that *describes* the document sat outside the same guard.**
+  `publish_batch_summary()` wraps the summariser for the stated reason -- the
+  rows are already on disk -- and then called `describe_batch_summary()` after
+  the `except`. A raise there aborts `batch()` after the CSV is written and
+  before `create_batch_graphs()` and before every remaining test in the yaml,
+  costing more rows than the summariser ever could. Review declined to file
+  this one, having failed to construct an input that raises; it is fixed
+  anyway, because the invariant is what protects the rows and not the current
+  absence of a way through it. It reports its own line rather than `summary
+  unavailable`, which would be false: the document is on disk and only the
+  description of it failed.
+- **`passes_observed` sat inside a document that also has `observed_passes`.**
+  Near-anagrams, different types -- one a count, one a list of repetition
+  numbers -- one nested inside the other's object. It is `observations` now,
+  matching the cell field its value comes from.
+
+`docs/measurement-dictionary.md` gains the `variance` field and a section
+stating the rule, its four verdicts and the reasons it withholds one, since
+that document is where `CLAUDE.md` says the summary's field list lives.
+
+No Docker run was needed or made: the change is confined to the summary
+document, which is assembled from rows the batch has already written.
+Six of the twenty-seven were doc/code disagreements rather than behaviour, and
+are worth naming as a class: each stated a *narrower or older* rule than the code
+applied -- the shortfall condition, "only `expand` and `unseparated` print",
+and the rule quoted without its resolution floor. A summary nobody can argue
+with is the failure this module was written against, and a document that
+describes a rule the code does not apply is that failure with extra steps.
+
+Two things about the shape of that list are worth keeping.
+
+Rounds after the rule's arithmetic was settled found almost nothing wrong with
+the arithmetic and a great deal wrong with what the rule *said* about it -- the
+field names, the printed lines, the refusal reasons, the documents describing
+them. That is not incidental. The numbers get re-derived by anyone who doubts
+them; the sentence built from them is taken on trust, and a summary nobody can
+argue with is the exact failure this module was written against.
+
+And two defects were each found several times, once per path into them,
+which is the more useful observation of the two.
+
+`separated` was published three times while a rival the rule could not judge
+sat beside the cell in the same bars: through the rival that *decided* the
+verdict (the nearest-rival version), through the rival skipped for having no
+dispersion, and through the rival skipped for having no observation at all.
+The `failed` against `not run` distinction was collapsed three times as well:
+at the pass level it was always kept, but one layer up an `any()` over the
+group let one unstarted rival relabel a failed one, and one layer down a single
+unrun pass relabelled two failed ones. A third variant was a rival whose passes
+all ran but whose metric column was withheld being told it had produced no pass
+at all; it now quotes the metric's own `withheld` entry, which is what the
+cell's own refusal had always done.
+
+Each fix was correct and each left the next path open, because it was written
+against the case rather than against the claim. Two claims are the invariants,
+and they are what a later change should be checked against rather than the
+list above:
+
+- `separated` means *distinguishable from every cell drawn beside it*, so
+  every rival that cannot be judged is a rival that cannot be cleared;
+- a pass that failed and a pass that has not run are never described by one
+  clause, at any level of aggregation -- one is a result to investigate and
+  the other is unfinished work, and only the first is something an operator
+  can act on.
+
+`tests/test_batch_summary.py` gains 19 tests (`TestTheVarianceRule`) and 37
+more (`TestWhatTheRuleWillNotClaim`) pinning the defects above -- including one
+that asserts the printed advice does not change when the pair's ordinals are
+swapped, and one that the endorsements did not start printing when the
+refusals did -- plus one in `test_stats_contract.py` pinning the decision
+metric's resolution against the monitor's poll interval and one in
+`test_controller_threads.py` pinning that a raising describer costs the
+description and not the batch; 728 total, Docker-free.
+
+With this, Phase 5 is complete.
 
 #### Work
 

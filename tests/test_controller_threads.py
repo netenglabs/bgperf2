@@ -230,3 +230,29 @@ def test_a_finished_generator_is_not_polled_for_the_rest_of_the_run(tmp_path):
     # sample is queued before the loop looks at it.
     assert not q.empty(), 'the final poll was dropped rather than reported'
     assert 'tester_offering' in q.get()
+
+
+def test_a_raising_describer_costs_the_description_and_not_the_batch(monkeypatch):
+    '''`publish_batch_summary()` wraps the summariser for the reason
+    `write_event_artifact()` catches its own findings -- the rows are already
+    on disk -- but the call that *describes* the document sat outside that
+    guard. A raise there aborts batch() after the CSV is written and before
+    create_batch_graphs() and every remaining test in the yaml, costing more
+    rows than the summariser ever could.
+
+    It reports its own line rather than `summary unavailable`, which would be
+    false: the document is on disk and only the description failed.
+    '''
+    monkeypatch.setattr(bgperf2, 'summarize_batch',
+                        lambda *a, **k: {'cells': [], 'repetitions': 1})
+    monkeypatch.setattr(bgperf2, 'write_batch_summary', lambda *a, **k: None)
+
+    def explode(*args, **kwargs):
+        raise KeyError('rival_cell')
+    monkeypatch.setattr(bgperf2, 'describe_batch_summary', explode)
+
+    lines = bgperf2.publish_batch_summary('sum.json', 'sum', [], {}, 1)
+    assert len(lines) == 1
+    assert 'summary unavailable' not in lines[0]
+    assert 'describing it raised' in lines[0]
+    assert 'KeyError' in lines[0]

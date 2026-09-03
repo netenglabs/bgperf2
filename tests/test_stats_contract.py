@@ -4,6 +4,7 @@ the failure is silent: the CSV mislabels its columns and the graphs plot the
 wrong series. These tests are the enforcement.
 '''
 import bgperf2
+import summary
 
 
 def header_fields():
@@ -85,3 +86,22 @@ def test_label_overrides_name_but_not_target(bench_args, bench_stats):
     named = dict(zip(header_fields(), row))
     assert named['name'] == 'frr 8'
     assert named['target'] == 'bird'
+
+
+def test_the_variance_rules_resolution_matches_the_monitor_poll_interval():
+    '''`elapsed (s)` is not quantised by choice.
+
+    It reaches the row as `stats['elapsed'].seconds`, counted off the monitor's
+    poll loop with an integer number of assurance samples subtracted, so its
+    resolution is the poll interval. `summary.METRIC_RESOLUTION` cannot import
+    that constant -- bgperf2 imports summary, not the other way round, and the
+    Docker-free import property depends on it staying that way -- so the two
+    are pinned against each other here instead.
+
+    If they drift apart the rule silently goes back to publishing `separated`
+    on a difference of one rounding boundary, which is the one thing it must
+    never do: it prints nothing about the results it supports, so there is no
+    line to notice.
+    '''
+    assert summary.METRIC_RESOLUTION[summary.DECISION_METRIC] == float(
+        bgperf2.MONITOR_POLL_INTERVAL_S)

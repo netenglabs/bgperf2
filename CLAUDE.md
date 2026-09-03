@@ -316,6 +316,40 @@ would be arithmetic nobody could check. `docs/measurement-dictionary.md` has the
 - **The document must stay readable by a strict parser.** `json.dump` runs with `allow_nan=False`
   and a non-finite observation is published as its own repr — a bare `NaN` is rejected by jq and by
   most non-Python parsers.
+- **Whether a cell has earned more passes is a named rule, not a reader's judgement.**
+  `apply_variance_rule()` says two cells are separated when their medians differ by more than the
+  sum of their standard deviations, **floored at the metric's resolution**, applied to `elapsed (s)`
+  alone. That floor is not a detail: `elapsed (s)` is whole seconds counted off the monitor's 1s
+  poll loop, so passes of one cell agree exactly all the time, `stdev` is 0.0, and an unfloored
+  rule clears any gap at all — publishing `separated` on one rounding boundary, in silence, for
+  exactly the sub-second comparisons it exists to catch. `METRIC_RESOLUTION` is pinned against
+  `MONITOR_POLL_INTERVAL_S` by `test_stats_contract.py`, since `summary.py` must not import
+  `bgperf2`. Unnamed, the decision to rerun
+  belongs to whoever read the CSV and disliked it, which reruns the surprising results and turns a
+  benchmark into a search for the expected answer. It is comparative rather than a CV threshold
+  because no CV means the same thing twice: 2% is nothing between targets 40% apart and fatal
+  between ones 0.12% apart, which is what FRR 8.5, 9.1 and 10.0 were over a 95s MRT run. Three
+  details are load-bearing. It is decided against **every** rival sharing the cell's (peers,
+  prefixes, filter) axes and reported against the *binding* one — the smallest margin — since
+  separating a cell from its nearest neighbour separates it from the rest only if every rival has
+  the same dispersion, and `create_graph()` draws the whole group side by side. Rivals that have a
+  dispersion are preferred, so one mostly-failed cell cannot sit between two unseparated ones and
+  silently mute both — but preferred is not ignored. `separated` means *distinguishable from every
+  cell drawn beside it*, so every rival that cannot be judged is a rival that cannot be cleared:
+  each verdict names its unjudgeable rivals, and `separated` alone is withheld when one of them is
+  at least as near as the binding rival, or has no observation at all. That one claim was got wrong
+  three times, once per path into it — the rival that decided the verdict, the rival skipped for
+  having no dispersion, the rival skipped for having no median — because each fix was written
+  against the case instead of against the claim. The companion invariant, collapsed three times the
+  same way: **a pass that failed and a pass that has not run are never described by one clause, at
+  any level of aggregation** — one is a result to investigate, the other unfinished work, and only
+  the first is something an operator can act on. And `EXPANSION_PASSES` (5) is a floor
+  under the recommendation, never a cap: telling a `repetitions: 7` test to rerun at five would
+  discard observations, and a cell with fewer observations than passes is told about its shortfall
+  *beside* that count, never instead of it — fixing the failed pass and rerunning at the count you
+  already had comes back unseparated again. Where a pair's two cells disagree, the printed line is the more
+  actionable verdict, never the lower ordinal: a shortfall to investigate must not lose to "more
+  passes will not decide it" on matrix position alone.
 - The printed block is `elapsed (s)` and `total time` only, and nothing at all for a single-pass
   test; the cell is named by `batch_cell_description()`, since the run name alone is the target and
   two cells of one target differ only in their axes.

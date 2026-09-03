@@ -2327,7 +2327,21 @@ def publish_batch_summary(path, test_name, cells, completed, repetitions,
         write_batch_summary(path, document)
     except Exception as e:
         return ['summary unavailable: {0}: {1}'.format(type(e).__name__, e)]
-    return describe_batch_summary(document, path=path) if describe else []
+    if not describe:
+        return []
+    try:
+        return describe_batch_summary(document, path=path)
+    except Exception as e:
+        # Describing the document is the other half of the same rule, and it
+        # was outside the guard: a raise here aborts batch() after the CSV is
+        # written but before create_batch_graphs() and before every remaining
+        # test in the yaml -- costing the rows this wrapper exists to protect,
+        # and more of them than the summariser ever could.
+        #
+        # Its own line rather than `summary unavailable`, which would be false:
+        # the document is on disk, and only the description of it failed.
+        return ['summary written to {0}, but describing it raised {1}: {2}'.format(
+            path, type(e).__name__, e)]
 
 
 def check_batch_images(targets):

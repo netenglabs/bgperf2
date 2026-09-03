@@ -215,6 +215,7 @@ One entry per matrix cell, in matrix order whatever order the cells ran in.
 | `observed_passes` | list | Which repetitions those were, in the same order as every metric's `values`, so a reader can say which pass produced which number. |
 | `passes` | list of objects | Every pass, in repetition order, with `state` `observed`, `failed` (plus the run's `MSG`), `not run`, or `unreadable`. A failed pass and a pass that has not run are counted apart: one is a result and the other is unfinished work. `unreadable` is a stored row that is not the current header's width — `--resume` onto a progress file written before a column was appended is a supported path, and such a row is one field short. It costs its own pass and nothing else; indexed against this header it would otherwise raise and cost the whole test's document. |
 | `metrics` | object | One entry per column in `summary.METRIC_COLUMNS`, keyed by the CSV column name. |
+| `variance` | object | Whether this cell's passes separate it from the cells drawn beside it, and so whether it has earned more of them. Decided against the *binding* rival, not the nearest — see [The variance rule](#the-variance-rule) below. |
 
 Each metric entry carries `values` (the observations, in pass order), `n`, and
 `mean`, `median`, `min`, `max`, `stdev`, `cv_percent`. `min` and `max` are
@@ -236,6 +237,193 @@ statistic is `null` and the reason is in a `withheld` object beside it:
 | `needs at least two observations` | `stdev` and `cv_percent` over a single pass. A CV of 0 there would say the measurement is perfectly repeatable on the strength of never having been repeated. |
 | `the mean is not positive` | `cv_percent` where the mean is zero, which is the normal shape of `tester errors` and `tester timeouts` in a good run: the spread is real and zero, the ratio to the mean is a division nobody can do. |
 | `never-sampled sentinel` | Any pass reported the value a run writes into that column when it never measured it — `min free mem (GB)` (`min_free` starts above every real value so the first sample can only lower it, and an untouched sentinel reaches the row as ~931,322 GB; `host_evidence()` maps the same sentinel back to `null` for the findings) and `max mem (GB)` (`max_mem` starts at 0 so the first sample can only raise it, and a peak under 0.5 MB is not something a daemon holding a BGP table can produce). The whole column is withheld for that cell rather than the pass being dropped: a cell where one pass of three lost its memory sampler would otherwise publish a ~310,474 GB mean and a 173% coefficient of variation on a 64 GB box, or an 87% one on the target's peak. `min idle%` and `max cpu %` are deliberately not treated this way — the first's sentinel is 100 and the second's rounds to 0 from any peak under 0.5%, both values a real run can report, and for `min idle%` an idle host and an unsampled one are the same finding anyway. |
+
+### The variance rule
+
+Phase 5 asks that a test expand from three passes to five *only under a named
+variance rule*. The naming is the point. Without one, the decision to rerun
+belongs to whoever read the CSV and did not like it, which selects for reruns
+of the results somebody found surprising and quietly turns a benchmark into a
+search for the expected answer. The rule is stated once, in
+`summary.VARIANCE_RULE`, and repeated into every cell's verdict as `policy`:
+
+> two cells are separated when their medians differ by more than the sum of
+> their standard deviations, floored at the resolution of the metric
+
+It is comparative rather than a threshold on a coefficient of variation,
+because no CV means the same thing twice here: a 2% spread is nothing on a cell
+whose targets are 40% apart and fatal on one where they are 0.12% apart — which
+is what FRR 8.5, 9.1 and 10.0 were, finishing a 95s MRT run within 0.11s of
+each other. A cell earns more passes when its own spread covers the difference
+it is being asked to resolve, and not otherwise. It is deliberately weaker than
+a significance test: this is a scheduling rule at n=3, where a t-test would be
+arithmetic dressing up three numbers, and it errs toward spending machine time
+rather than toward publishing a ranking the passes do not support.
+
+The combined deviation is floored at the metric's resolution
+(`summary.METRIC_RESOLUTION`, published as `metric_resolution` in the
+evidence). `elapsed (s)` is whole seconds and not by choice: it is counted off
+the monitor's poll loop at `MONITOR_POLL_INTERVAL_S`, one sample a second, with
+an integer number of assurance samples subtracted, so there is no finer number
+to publish. Passes of one cell therefore land in the same bucket routinely and
+`stdev` comes out at exactly 0.0 — and a combined deviation of zero is cleared
+by any gap at all, so without the floor the rule publishes `separated` on one
+rounding boundary, silently. The pairs it exists for are inside that quantum:
+the three FRR releases 0.11s apart over a 95s run are one measurement at this
+resolution, and the honest verdict is that this instrument cannot tell them
+apart. Same rule as `MONITOR_POLL_INTERVAL_S` flooring the published
+`poll_resolution_s` — a span nothing crossed is not a measurement of zero.
+
+It is applied to `elapsed (s)` only (`summary.DECISION_METRIC`) — the
+end-to-end number every graph in `create_batch_graphs()` is keyed on and the
+one a version comparison is read from. A rule ranging over all thirteen metrics
+would ask for expansion on every batch ever run, since `min idle%` and `max cpu
+%` are noisy by nature and nobody ranks a daemon by them.
+
+A cell is compared only against cells sharing its `(peers, prefixes, filter)`
+axes — `create_graph()` draws exactly those groups side by side, so the rule
+answers a question somebody is going to ask of the picture, and a 10-peer cell
+is not the rival of a 50-peer one — and within that group against **every**
+rival, not the nearest one. Separating a cell from its closest neighbour
+separates it from the rest only if every rival has the same dispersion: with
+bird at 40 ± 0.01, frr at 41 ± 0.01 and gobgp at 45 ± 10, bird clears frr by a
+mile and is nowhere near gobgp. The verdict is decided by the **binding**
+rival, the one with the smallest `margin` (`gap` minus `combined_stdev`) — the
+closest call in the group, and the one a reader would challenge first. That
+rival is what `evidence` describes, and `rivals_considered` says how many had a
+dispersion to be compared against.
+
+The evidence's rival fields are `rival_*`, never `nearest_*`. Only the refusal
+branch picks the nearest rival; this one picks the smallest margin, which in
+the group bird 40, frr 41, gobgp 45 is gobgp — the cell *furthest* away. One
+key name meaning two things in one document is how a reader of
+`<test>.summary.json` concludes the rule compared a pair it did not, so
+`rival_chosen_by` says which of the two selections produced it (`margin` or
+`gap`).
+
+Rivals that have a dispersion are preferred. A cell whose passes mostly failed
+has a median and no deviation, and letting one of those be chosen as the
+neighbour withheld the verdict for two cells that were plainly unseparated,
+printing nothing to say the rule had been silenced.
+
+Preferring them is not the same as ignoring them, and the difference decides a
+`separated` verdict. Clearing every rival that *can* be judged is not clearing
+the group: one rival with a dispersion was once enough to publish `separated`
+while a rival at an identical median sat in the same bars unjudged — the
+nearest-rival defect reached through the cell that was skipped instead of the
+one that decided it. So every verdict names its unjudgeable rivals in
+`rivals_unjudged` — the refusal above included, which names only the nearest
+one in its reason string and would otherwise leave the rest unmentioned
+anywhere, and rivals with no observation at all, which have no median and were
+therefore dropped from the naming as well as from the comparison — and
+`separated` is withheld when one of them is **at least as near**
+as the binding rival, since that is the reading the picture invites and the
+passes cannot support. A rival with no observation at all withholds it too, and
+for a stronger reason: it is *less* known than one with a median and no
+dispersion, so withholding for the second while publishing beside the first
+would make the rule stricter about the case it knows more about. Only
+`separated` is withheld this way: an unseparated verdict is already the
+conservative answer, and degrading those is how a single mostly-failed cell
+mutes its whole group.
+
+| `verdict` | Meaning |
+|---|---|
+| `separated` | The medians differ by more than the combined deviation. The passes support the ranking; nothing is printed. |
+| `expand` | They do not, and the cell has fewer observations than the ceiling. `passes_recommended` names the count to rerun at: `max(summary.EXPANSION_PASSES, the test's declared repetitions)`. Five is a floor under the recommendation, never a cap on it — telling a `repetitions: 7` test to rerun at five would reduce its passes and discard observations. Where the cell produced fewer observations than the passes it was given, `shortfall` says so as well — never instead: a failed pass to investigate and a rerun count are two different things to do about one cell, and printing only the first invites the operator to fix the pass, rerun at the count they already had, and come back unseparated again. Where the cell is fully observed and it is the *binding rival* that is short, there is no count to recommend — `passes_recommended` is absent and `rival_shortfall` names the rival instead, because recommending the count this cell already ran is a no-op printed as advice, and the rival's own shortfall is filed under whichever pair its verdict binds to, which need not be this one. |
+| `unseparated at the expansion limit` | They do not, and **both** cells of the pair have reached the ceiling in observations — both, because the claim is about the pair, and a rival that produced two of its five passes has not spent the passes *more passes will not decide it* assumes. This is a result, not a request for a sixth: those two targets are not distinguishable at this workload, and expanding without a limit is how a batch that cannot decide something spends a weekend failing to. |
+| `undecided` | The rule could not be applied. `reason` says which case it was. |
+
+The `undecided` reasons are kept apart because each is a different thing to do
+about it: this cell has no dispersion; *no* rival has one; a rival at least as
+near has none; a rival has no observation at all, so the group is not fully
+measured; no rival has an observation, in which case each is named with why —
+`frr_c (every pass failed); gobgp (has not run yet)`; or no other cell shares
+this cell's axes. Only the last is a property of the test as written rather than of
+what came back from the passes, and the two were once the same string — a cell
+whose rivals had all failed was told it had no rivals, which is false about the
+matrix and points at the wrong thing to fix. Not-run and produced-nothing are
+kept apart for the same reason one layer down: the summary is written before
+the first cell and rewritten after each one, so for most of a batch a finished
+cell's rivals have simply not run — and an interrupted batch leaves exactly
+that document behind, since the surviving file is the last checkpoint. They are
+kept apart *per rival* and per pass, never as one clause over the group: an
+`any(... not run ...)` reported a rival that ran and failed every pass as a
+batch merely in progress as soon as one other rival was unstarted, and that
+failed rival is the only thing in such a group an operator can act on. The
+second and third still publish
+the gap, so the reader is told which pair could not be judged and by how much
+they differ.
+
+Every `undecided` that names a rival is printed. `separated` is not: the rule
+is silent about the results it supports. Leaving the refusals silent too meant
+silence stood for both *the rule endorsed this ranking* and *the rule could not
+judge it*, which are the two things a reader most needs told apart.
+
+The first quotes the metric's own `withheld` entry for `stdev` rather than
+restating it, so it says *which* of the four ways to arrive without one this
+was: every pass failed, only one produced an observation, one reported the
+never-sampled sentinel, or one reported something non-numeric. A second
+vocabulary here answered the same question differently — a cell whose every
+pass failed read as "this cell has no dispersion", which is exactly what one
+observation looks like, and telling those apart is the whole reason the
+refusals are kept separate.
+
+Every verdict carries `metric`, `policy`, `observations` and, where a rival
+was found, an `evidence` object with both medians, both deviations, the `gap`
+between them, `combined_stdev`, `metric_resolution`, the rival's `rival_cell`
+and `rival_description`, and `rival_chosen_by`.
+
+`combined_stdev` is the two deviations' sum **floored at** `metric_resolution`,
+and for `elapsed (s)` the floor is the normal case rather than an edge one:
+passes landing in the same one-second bucket give both cells `stdev` 0.0, and
+the document then publishes `combined_stdev: 1.0` beside two zeroes. A reader
+auditing the file by adding the two published deviations would otherwise
+conclude the number is wrong, which is the failure this document exists to
+prevent. Every verdict also carries
+`rivals_considered` and, where any could not be judged, `rivals_unjudged` —
+including the refusals, so that `rivals_considered: 1` can be told from "one of
+two". The count is `observations`, which
+mirrors the cell's own field of that name — deliberately not `passes_observed`,
+a near-anagram of the sibling `observed_passes`, which is a *list* of
+repetition numbers. This is the shape `findings.py` publishes a verdict in,
+and for the same reason: a verdict nobody can argue with is a boolean with
+extra words. The document also repeats the rule once at the top level as
+`variance_rule`.
+
+A rule that raises costs the verdicts, not the statistics — the same rule
+`write_event_artifact()` applies to `derive_findings()`, and for the same
+reason: by the time it runs, those statistics are the only record of what the
+passes measured, and `publish_batch_summary()` catches at the outer level, so a
+raise here would lose the whole document at the end of a multi-hour batch. Such
+a document carries `variance_failure` instead of `variance_rule`, no cell
+carries a `variance` — partial verdicts are dropped, since the rule reads each
+cell against its group and a half-judged group is a ranking nobody can argue
+with — and the failure is printed under the repeatability heading, because a batch
+whose rule raised otherwise looks exactly like a batch whose every cell was
+separated. Under the heading and inside the same gate: a single-pass test
+prints nothing at all, and no cell of one can carry a printable verdict anyway,
+since every dispersion in it is withheld.
+
+Every verdict except `separated`, and except a refusal that names no rival at
+all, prints a line, and the lines are de-duplicated by unordered pair. A
+refusal naming no rival — this cell has no dispersion, or nothing shares its
+axes — has no pair, and its cause is already in the cell's own listed passes. The rule is silent about the results it
+supports — a batch that prints a line per cell trains its reader to skip them
+— and the pair is usually mutual, so a two-target group would otherwise state
+one relation twice with identical numbers. The pair is keyed on the cell the
+verdict is actually about, which for a withheld separation is the unjudgeable
+cell that blocked it rather than the binding rival in its `evidence`: keying
+those on the binding rival collapsed two cells blocked by two different rivals
+onto one pair, and one of the two refusals then went unprinted.
+
+Which half of that pair supplies the line is decided by what it asks the
+operator to do, not by which cell has the lower ordinal. The two sides need not
+agree: with `repetitions: 5` a cell whose passes all succeeded is `unseparated
+at the expansion limit` — *more passes will not decide it* — while the rival
+that lost two of them is `expand` carrying a `shortfall`, which is a failed
+pass to go and look at. Printing whichever came first let matrix position
+choose between those, and half the time printed the one that says to do
+nothing.
 
 `describe_batch_summary()` prints one line per cell for a repeated test —
 observations, then `elapsed (s)` and `total time` medians, ranges and CVs, with

@@ -103,6 +103,465 @@ _PLACES = 6
 PRINTED_METRICS = ('elapsed (s)', 'total time')
 
 
+# --- the variance rule ------------------------------------------------------
+#
+# Phase 5 asks that a test go from three passes to five "only under a named
+# variance rule".  The naming is the point: without one, the decision to rerun
+# is taken by whoever looks at the CSV and does not like it, which selects for
+# reruns of the results somebody found surprising and quietly turns a
+# benchmark into a search for the answer they expected.
+#
+# The rule is comparative rather than a threshold on a coefficient of
+# variation, because there is no CV that means the same thing twice here.  A
+# 2% spread is nothing on a cell whose targets are 40% apart and fatal on one
+# where they are 0.1% apart -- FRR 8.5, 9.1 and 10.0 finished a 95s MRT run
+# within 0.11s of each other, which is 0.12%.  So a cell earns more passes when
+# its own spread covers the difference it is being asked to resolve, and not
+# otherwise:
+#
+#     two cells are separated when their medians differ by more than the
+#     sum of their standard deviations
+#
+# Deliberately weaker than a significance test.  It is a scheduling rule with
+# n=3, where a t-test would be arithmetic dressing up three numbers, and it is
+# conservative in the direction that costs machine time rather than the one
+# that publishes a ranking the passes do not support.
+VARIANCE_RULE = ('two cells are separated when their medians differ by more '
+                 'than the sum of their standard deviations, floored at the '
+                 'resolution of the metric')
+
+# The resolution of each metric the rule can decide on, in that metric's own
+# units, and 0 for one that is not quantised.
+#
+# `elapsed (s)` reaches the row as `stats['elapsed'].seconds` -- whole seconds
+# -- and that is not a formatting choice that could be widened.  It is counted
+# off the monitor's poll loop at one sample a second
+# (`bgperf2.MONITOR_POLL_INTERVAL_S`, which `test_stats_contract.py` pins
+# against this), with an integer number of assurance samples then subtracted.
+# There is no finer number to publish.
+#
+# It matters twice, in opposite directions, and the rule is wrong in both
+# without it:
+#
+#   * Passes of one cell land in the same one-second bucket often, which gives
+#     `stdev` exactly 0.0.  A combined deviation of zero is satisfied by *any*
+#     gap, so the batch publishes `separated` on a difference of one rounding
+#     boundary -- and publishes it in silence, since the rule prints nothing
+#     about the results it supports.  A ranking asserted from quantisation
+#     noise, with nothing to argue with, is the worst thing this module can do.
+#   * The pairs the rule was written for are inside the quantum.  FRR 8.5, 9.1
+#     and 10.0 finished a 95s MRT run 0.11s apart; at this resolution they are
+#     the same measurement, and the honest verdict is that this instrument
+#     cannot tell them apart at this workload -- `expand`, and then
+#     `unseparated at the expansion limit`, which is exactly what those three
+#     are.
+#
+# So the combined deviation is floored here: two cells one quantum apart are
+# not separated, whatever their passes agreed on.  Same rule as
+# `MONITOR_POLL_INTERVAL_S` flooring the published `poll_resolution_s`, and the
+# same reason -- a span nothing crossed is not a measurement of zero.
+#
+# `total time` is a float to two places and is *not* the way out of this: it
+# times the whole run, container startup included, so it is finer and less
+# relevant, and its own dispersion is partly Docker's.
+METRIC_RESOLUTION = {'elapsed (s)': 1.0}
+
+# What the rule is applied to.  The end-to-end number every graph in
+# create_batch_graphs() is keyed on, and the one a version comparison is read
+# from; a rule that ranged over all thirteen metrics would recommend expansion
+# for every batch, since `min idle%` and `max cpu %` are noisy by nature and
+# nobody ranks a daemon by them.
+DECISION_METRIC = 'elapsed (s)'
+
+# Five, from the plan, and a ceiling rather than a step: a cell that is still
+# unseparated at five is not asking for a sixth pass.  It is saying those two
+# targets are not distinguishable at this workload, which is a result -- and
+# expanding without a limit is how a batch that cannot decide something spends
+# a weekend failing to.
+#
+# It is a floor under the recommendation, never a cap on it.  A test that
+# already declares more passes than this must not be told to rerun at five:
+# following that advice would *reduce* the configured passes and throw away
+# observations, and the cell that prompted it is the one whose spread matters
+# most.  See `apply_variance_rule()`, which takes the declared count.
+EXPANSION_PASSES = 5
+
+SEPARATED = 'separated'
+EXPAND = 'expand'
+UNSEPARATED_AT_LIMIT = 'unseparated at the expansion limit'
+UNDECIDED = 'undecided'
+
+# Why the rule could not be applied.  Each is a different thing to do about it,
+# which is why they are not one word: nothing to compare against is a property
+# of the test as written, while a missing dispersion is a property of what came
+# back from the passes.
+NOTHING_TO_COMPARE = ('no other cell shares this cell\'s axes, so there is no '
+                      'difference for its spread to cover')
+# Distinct from the above, and it was published as it until review: a rival
+# whose every pass failed has no median, so it drops out of the comparison
+# entirely and the survivor claimed to have no rivals at all.  That is false
+# about the test, and it is the wrong half of the distinction this module keeps
+# -- nothing to compare against is a property of the matrix as written, while
+# rivals that produced nothing is a property of what came back from the run,
+# and only the second is something to go and fix.
+# It names them, one by one, with why each has nothing.  A single verdict over
+# a mixed group cannot be stated in one clause without losing the distinction
+# it is drawing: an `any(... NOT_RUN ...)` over the group reported a rival that
+# ran and failed every pass as a batch still in progress, as soon as one *other*
+# rival was unstarted -- and the failed one is the only thing there an operator
+# can go and fix.
+RIVALS_WITHOUT_OBSERVATIONS = ('no other cell sharing this cell\'s axes has an '
+                               'observation of {0}: {1}')
+# One rival with no observation, where others were measurable. Less known than
+# a rival with a median and no dispersion, not more -- so if that one withholds
+# `separated`, this one has to as well, or the rule is stricter about the case
+# it knows more about.  There is no gap to report with it: no median to take
+# one from.
+UNOBSERVED_RIVAL = ('{0} shares this cell\'s axes and has no observation of '
+                    '{1} ({2}), so the group this cell would be ranked in is '
+                    'not fully measured')
+# The second half is quoted from the metric's own `withheld` entry rather than
+# restated here.  There are four ways to arrive without a dispersion -- every
+# pass failed, only one produced an observation, one reported the never-sampled
+# sentinel, one reported something non-numeric -- and they are already told
+# apart, in one place, by `summarize_metric()`.  A parallel set of strings here
+# would answer the same question differently: a cell whose every pass failed
+# read as "this cell has no dispersion", which is what one observation looks
+# like too, and the difference between them is the whole reason the refusals
+# are kept apart.
+NO_DISPERSION = 'this cell has no dispersion for {0}: {1}'
+NEIGHBOUR_NO_DISPERSION = ('no cell sharing this cell\'s axes has a dispersion '
+                           'for {0} (the nearest is {1}), so no pair can be '
+                           'separated or found unseparated')
+# Clearing every rival that can be judged is not the same as clearing the
+# group.  A rival with a median and no dispersion cannot be separated from or
+# found unseparated -- but it is still drawn in the same bars, so a cell
+# published `separated` while an unjudgeable rival sits *nearer* than the one
+# that decided it makes exactly the claim the reader will take from the
+# picture and cannot support.  This is the nearest-rival defect one path over:
+# there it was the rival that decided the verdict, here it is the rival that
+# was skipped.  It withholds only the `separated` verdict -- an unseparated one
+# is already the conservative answer, and degrading those is how a single
+# mostly-failed cell mutes its whole group.
+NEARER_RIVAL_UNJUDGED = ('this cell clears every rival that has a dispersion '
+                         'for {0}, but {1} is nearer still ({2} away) and has '
+                         'none, so this cell cannot be called distinguishable '
+                         'from the cells drawn beside it')
+
+# A cell can reach the expansion ceiling without ever having been run that many
+# times, because a failed pass produces no observation.  Rerunning at the same
+# count would repeat the failure; the shortfall is the thing to look at.
+SHORTFALL = ('{0} of {1} passes produced an observation, so the shortfall is a '
+             'failed or unrun pass rather than a missing repetition')
+# The same thing about the rival instead.  A cell that has spent all its passes
+# can still be unseparated only because the *other* cell has not, and the
+# recommendation then reduces to the count the test already ran -- advice that
+# is a no-op, printed with nothing to say why.  Worse, the rival's own
+# shortfall is filed under whichever pair *its* verdict binds to, which need
+# not be this one, so following the no-op advice is exactly the "fix the pass,
+# rerun at the count you already had, come back unseparated again" failure the
+# shortfall was added to prevent -- reached through the rival rather than
+# through the cell.
+RIVAL_SHORTFALL = ('{0} produced {1} of {2} passes, so what this pair is short '
+                   'of is that cell\'s failed or unrun passes rather than '
+                   'another repetition of this one')
+
+
+def _unobserved_because(cell, metric):
+    '''Why a rival has no observation: still to come, already failed, or both.
+
+    The same distinction `summarize_cell()` keeps at the pass level, and it
+    decides whether the reader has something to go and fix or a batch that is
+    merely in progress. It is counted rather than tested for, because
+    `NOT_RUN in states` let one unstarted pass describe a rival whose other
+    two had failed as a batch still in progress -- which is the distinction
+    being thrown away in the act of drawing it.
+    '''
+    states = [entry.get('state') for entry in (cell.get('passes') or [])]
+    counted = [(sum(1 for state in states if state == name), label)
+               for name, label in ((FAILED, 'failed'), (NOT_RUN, 'not run'),
+                                   (UNREADABLE, 'unreadable'))]
+    present = [(count, label) for count, label in counted if count]
+    if not present:
+        # Every pass ran and the column is still empty, so the reason is the
+        # metric's, not the passes'. Asserting a pass state here contradicted
+        # `observations: 3` and three `observed` entries two keys away in the
+        # same document; the cell's own refusal already quotes `withheld`, and
+        # this is the same question one rival over.
+        return _dispersion_withheld(cell, metric, 'median')
+    if len(present) == 1:
+        count, label = present[0]
+        if count == len(states):
+            return ('has not run yet' if label == 'not run'
+                    else 'every pass {0}'.format(label))
+    return 'of {0} passes, {1}'.format(
+        len(states), ', '.join('{0} {1}'.format(c, l) for c, l in present))
+
+
+def _comparison_key(cell):
+    """The cells one graph draws side by side, which is what gets compared.
+
+    Peers, prefixes and filter -- every axis of the matrix except the target
+    itself, which is the thing being told apart. `create_graph()` groups its
+    bars exactly this way, so the rule answers a question somebody is actually
+    going to ask of the picture.
+    """
+    identity = cell.get('identity') or {}
+    return (identity.get('peers'), identity.get('prefixes'),
+            identity.get('filter'))
+
+
+def _decision_statistics(cell, metric):
+    stats = (cell.get('metrics') or {}).get(metric) or {}
+    return stats.get('median'), stats.get('stdev')
+
+
+def _dispersion_withheld(cell, metric, statistic='stdev'):
+    """Why this cell has no such statistic, in the words the metric used."""
+    stats = (cell.get('metrics') or {}).get(metric) or {}
+    return ((stats.get('withheld') or {}).get(statistic)
+            or 'no {0} was published'.format(statistic))
+
+
+def apply_variance_rule(cells, metric=DECISION_METRIC,
+                        expansion_passes=EXPANSION_PASSES, repetitions=1):
+    """Say, per cell, whether its passes separate it from the cells beside it.
+
+    Mutates each cell to carry a `variance` section, and returns the cells, in
+    the shape findings.py publishes a verdict: the rule that was applied and
+    the numbers it was applied to, beside the verdict, because a verdict
+    nobody can argue with is a boolean with extra words.
+
+    **Every rival is tested, not just the nearest one.**  The nearest cell by
+    median is the obvious candidate and it is the wrong one: separating a cell
+    from its closest neighbour separates it from the rest of the group only if
+    every rival has the same dispersion.  With bird at 40 +/- 0.01, frr at 41
+    +/- 0.01 and gobgp at 45 +/- 10, bird clears its nearest rival by a mile
+    and is not separated from gobgp at all -- and `create_graph()` draws all
+    three side by side, so a reader takes `separated` to mean "distinguishable
+    from the others here".  The verdict is therefore decided by the *binding*
+    rival: the one with the smallest margin between the gap and the combined
+    deviation, which is the closest call in the group and the one a reader
+    would challenge first.
+
+    `repetitions` is what the test declared, and the recommendation never goes
+    below it: telling a `repetitions: 7` test to rerun at five would reduce its
+    passes and discard observations.
+    """
+    ceiling = max(expansion_passes, repetitions or 1)
+    resolution = METRIC_RESOLUTION.get(metric, 0.0)
+    by_axes = {}
+    for cell in cells:
+        by_axes.setdefault(_comparison_key(cell), []).append(cell)
+
+    for cell in cells:
+        median, stdev = _decision_statistics(cell, metric)
+        observed = cell.get('observations') or 0
+        expected_passes = cell.get('passes_expected') or 0
+        # `observations`, not `passes_observed`: the value comes straight from
+        # `cell['observations']`, and a near-anagram of the sibling
+        # `cell['observed_passes']` -- which is a *list* of repetition numbers
+        # -- sitting nested inside the same document is a trap for anything
+        # reading it, this module included.
+        verdict = {'metric': metric, 'policy': VARIANCE_RULE,
+                   'observations': observed}
+        others = [other for other in by_axes[_comparison_key(cell)]
+                  if other is not cell]
+        # Two filters, not one. A rival with no median cannot be compared at
+        # all; a rival with a median but no dispersion can still be shown to
+        # the reader as a gap, which is why the two are kept apart.
+        comparable = [other for other in others
+                      if _decision_statistics(other, metric)[0] is not None]
+        measurable = [other for other in comparable
+                      if _decision_statistics(other, metric)[1] is not None]
+        # Every rival the rule could not judge, named whatever the verdict
+        # turns out to be -- including the refusal below, which otherwise
+        # named only the nearest one inside its reason string and left the
+        # others unmentioned anywhere. A reader comparing two cells of one
+        # group has to be able to see that the rule looked at fewer rivals
+        # than the graph draws: `rivals_considered: 1` cannot otherwise be
+        # told from "one of two".
+        #
+        # Drawn from `others`, not `comparable`: a rival that produced no
+        # observation at all has no median, so filtering on that dropped it
+        # out of the naming as well as out of the comparison, and it went
+        # unmentioned anywhere in the verdict.
+        unjudged = [other for other in others
+                    if _decision_statistics(other, metric)[1] is None]
+        # The subset with no observation whatsoever, which is less known than a
+        # rival with a median and no dispersion rather than more. Withholding
+        # `separated` for the second while publishing it beside the first would
+        # be incoherent, so both withhold -- this one without a gap to report,
+        # since there is no median to take one from.
+        unobserved = [other for other in others
+                      if _decision_statistics(other, metric)[0] is None]
+
+        # Hoisted above every branch, so no verdict can be the one that names
+        # none of its rivals. `rivals_considered: 1` cannot otherwise be told
+        # from "one of two", and the branch that reports rivals without
+        # observations named nothing at all.
+        verdict['rivals_considered'] = len(measurable)
+        if unjudged:
+            verdict['rivals_unjudged'] = [other['description']
+                                          for other in unjudged]
+
+        def gap_to(other):
+            return abs(_decision_statistics(other, metric)[0] - median)
+
+        def combined_deviation(other):
+            '''The spread the gap has to clear, never below the quantum.
+
+            Passes that agree exactly agree to within one bucket, not to
+            within nothing; see `METRIC_RESOLUTION`.
+            '''
+            return max(stdev + _decision_statistics(other, metric)[1],
+                       resolution)
+
+        def margin_to(other):
+            return gap_to(other) - combined_deviation(other)
+
+        def evidence_for(other, chosen_by):
+            '''The pair the verdict was decided on, and how that rival was
+            picked.
+
+            These keys were `nearest_*` and only one of the two branches
+            picks the nearest rival. The other picks the *binding* one -- the
+            smallest margin, which in the group bird 40, frr 41, gobgp 45 is
+            gobgp, the cell furthest away. A reader of `<test>.summary.json`
+            taking `nearest_cell` literally would conclude the rule had
+            compared a different pair than it did, and this document exists to
+            be argued with.
+            '''
+            rival_median, rival_stdev = _decision_statistics(other, metric)
+            found = {
+                'median': median,
+                'stdev': stdev,
+                'rival_cell': other['cell'],
+                'rival_description': other['description'],
+                'rival_median': rival_median,
+                'rival_stdev': rival_stdev,
+                'rival_chosen_by': chosen_by,
+                'gap': _round(gap_to(other)),
+            }
+            if rival_stdev is not None:
+                # Both published: the floor is part of the verdict, so a
+                # reader who adds the two deviations and gets something
+                # smaller has to be able to see why.
+                found['combined_stdev'] = _round(combined_deviation(other))
+                found['metric_resolution'] = resolution
+                found['margin'] = _round(margin_to(other))
+            return found
+
+        if median is None or stdev is None:
+            verdict['verdict'] = UNDECIDED
+            verdict['reason'] = NO_DISPERSION.format(
+                metric, _dispersion_withheld(cell, metric))
+        elif not others:
+            verdict['verdict'] = UNDECIDED
+            verdict['reason'] = NOTHING_TO_COMPARE
+        elif not comparable:
+            verdict['verdict'] = UNDECIDED
+            # Each rival separately: a rival that has not run yet is not a
+            # rival that produced nothing, and the summary is written before
+            # the first cell and rewritten after every one, so for most of a
+            # batch these are simply unstarted. An interrupted batch leaves
+            # exactly that document behind, since the surviving file is the
+            # last checkpoint.
+            verdict['reason'] = RIVALS_WITHOUT_OBSERVATIONS.format(
+                metric, '; '.join(
+                    '{0} ({1})'.format(other['description'],
+                                       _unobserved_because(other, metric))
+                    for other in others))
+            # This refusal names rivals, so it is one the reader has to see --
+            # a group whose rival failed every pass otherwise printed nothing,
+            # and silence is what an endorsed ranking looks like. It carries no
+            # `evidence`, having no rival median to take a gap from, so
+            # `withheld_by` is what makes it printable and gives the line a
+            # pair to be de-duplicated on.
+            verdict['withheld_by'] = others[0]['cell']
+        elif not measurable:
+            # Only when *no* rival has a dispersion. Picking the nearest first
+            # and then noticing it had none let one degraded cell -- two of
+            # three passes failed -- sit between two cells that were plainly
+            # unseparated and mute the verdict for both, with nothing printed
+            # to say the rule had been silenced.
+            nearest = min(comparable, key=gap_to)
+            verdict['evidence'] = evidence_for(nearest, 'gap')
+            verdict['verdict'] = UNDECIDED
+            verdict['reason'] = NEIGHBOUR_NO_DISPERSION.format(
+                metric, nearest['description'])
+        else:
+            binding = min(measurable, key=margin_to)
+            verdict['evidence'] = evidence_for(binding, 'margin')
+            # Only a rival *nearer* than the one that decided it. A further
+            # unjudgeable rival does not contradict the claim, and withholding
+            # on any unjudgeable rival at all would mute a whole group for one
+            # cell whose passes failed -- which is the thing the `measurable`
+            # preference above exists to prevent.
+            # `<=`, not `<`: a rival sitting exactly as close as the one
+            # that decided the verdict contradicts "distinguishable from the
+            # cells drawn beside it" just as completely as a closer one, and
+            # an equal gap is the likeliest shape of all here, since the
+            # decision metric is quantised.
+            nearer = [other for other in unjudged
+                      if _decision_statistics(other, metric)[0] is not None
+                      and gap_to(other) <= gap_to(binding)]
+            if verdict['evidence']['margin'] > 0 and nearer:
+                closest = min(nearer, key=gap_to)
+                verdict['verdict'] = UNDECIDED
+                verdict['reason'] = NEARER_RIVAL_UNJUDGED.format(
+                    metric, closest['description'], _round(gap_to(closest)))
+                # The relation this verdict reports is against *this* cell,
+                # not against the binding rival in `evidence`. The printed
+                # lines are de-duplicated per pair, so without saying which
+                # cell withheld the verdict, two cells demoted by two
+                # different unjudged rivals collapse onto one pair key and one
+                # of the two refusals is never printed.
+                verdict['withheld_by'] = closest['cell']
+            elif verdict['evidence']['margin'] > 0 and unobserved:
+                blocking = unobserved[0]
+                verdict['verdict'] = UNDECIDED
+                verdict['reason'] = UNOBSERVED_RIVAL.format(
+                    blocking['description'], metric,
+                    _unobserved_because(blocking, metric))
+                verdict['withheld_by'] = blocking['cell']
+            elif verdict['evidence']['margin'] > 0:
+                verdict['verdict'] = SEPARATED
+            elif (observed < ceiling
+                  or (binding.get('observations') or 0) < ceiling):
+                # The rival's observations as well as this cell's. The claim
+                # `unseparated at the expansion limit` makes -- "more passes
+                # will not decide it" -- is about the *pair*, and a rival that
+                # produced two of its five passes has not spent the passes that
+                # claim assumes. Decided from this cell alone, a fully observed
+                # cell published that verdict beside a rival whose dispersion
+                # could not support it.
+                verdict['verdict'] = EXPAND
+                if observed < ceiling:
+                    verdict['passes_recommended'] = ceiling
+                    # A cell can fall short of the ceiling without the test
+                    # ever having asked for fewer passes, because a failed
+                    # pass produces no observation. Rerunning at the same
+                    # count repeats the failure, so the shortfall is named
+                    # rather than buried.
+                    if observed < expected_passes:
+                        verdict['shortfall'] = SHORTFALL.format(
+                            observed, expected_passes)
+                else:
+                    # This cell has spent every pass it was given, so there is
+                    # no count to recommend it -- `ceiling` here is the number
+                    # it already ran. What the pair is short of belongs to the
+                    # rival, and is said rather than left as no-op advice.
+                    verdict['rival_shortfall'] = RIVAL_SHORTFALL.format(
+                        binding['description'],
+                        binding.get('observations') or 0,
+                        binding.get('passes_expected') or 0)
+            else:
+                verdict['verdict'] = UNSEPARATED_AT_LIMIT
+        cell['variance'] = verdict
+    return cells
+
+
 def _is_number(value):
     # A nan or an inf is not an observation.
     return (isinstance(value, (int, float)) and not isinstance(value, bool)
@@ -293,13 +752,41 @@ def summarize_batch(test_name, header, groups, repetitions=1, unavailable=None):
         raise ValueError(
             'the stats header does not carry {0}; summary.py reads the row by '
             'column name and cannot guess'.format(', '.join(missing)))
-    return {
+    cells = [summarize_cell(header, group, unavailable=unavailable)
+             for group in groups]
+    document = {
         'schema': SUMMARY_SCHEMA,
         'test': test_name,
         'repetitions': repetitions,
-        'cells': [summarize_cell(header, group, unavailable=unavailable)
-                  for group in groups],
+        'cells': cells,
     }
+    # A policy that raises costs the verdict, not the evidence -- the same rule
+    # `write_event_artifact()` applies to `derive_findings()`, and for the same
+    # reason: by the time the rule runs, these statistics are the only record
+    # of what the passes measured, and `publish_batch_summary()` catches at the
+    # outer level, so anything raised here loses the whole document at the end
+    # of a multi-hour batch. The rule is a *derived* opinion about numbers that
+    # are already computed and correct.
+    #
+    # After every cell exists, because the rule reads a cell against its
+    # rivals and a cell cannot be judged before they are all summarised.
+    # `repetitions` goes in so the recommendation cannot come back lower than
+    # what the test already asked for.
+    try:
+        apply_variance_rule(cells, repetitions=repetitions)
+        document['variance_rule'] = VARIANCE_RULE
+    except Exception as failure:      # noqa: BLE001 - see above
+        # Partial verdicts are dropped rather than published. The rule reads
+        # each cell against its group, so a run that stopped part way leaves
+        # some cells of one group judged and others not, and nothing in the
+        # document says which -- a ranking that cannot be argued with is the
+        # failure this module exists to avoid.
+        for cell in cells:
+            cell.pop('variance', None)
+        document['variance_failure'] = (
+            'the variance rule raised {0}: {1}'.format(
+                type(failure).__name__, failure))
+    return document
 
 
 def _describe_metric(metric):
@@ -308,6 +795,99 @@ def _describe_metric(metric):
     if metric['cv_percent'] is None:
         return '{0}, CV unavailable'.format(reported)
     return '{0}, CV {1:.2f}%'.format(reported, metric['cv_percent'])
+
+
+# The verdicts that get a printed line. `separated` is not one of them -- the
+# rule is silent about the results it supports -- but a refusal is: silence
+# would otherwise mean both "the rule endorsed this ranking" and "the rule
+# could not judge it", which are the two things a reader most needs told apart.
+# That is the same complaint the `not measurable` branch above was fixed for:
+# there the verdict was corrected and the printing was not.
+PRINTED_VERDICTS = (EXPAND, UNSEPARATED_AT_LIMIT, UNDECIDED)
+
+# How much a verdict asks of the operator, for choosing which half of a
+# mutual pair gets the one printed line. A shortfall is something to go and
+# investigate, `expand` is something to do, "more passes will not decide it"
+# is something to accept, and a refusal names work that has to happen before
+# the question can be asked at all -- so they rank in that order.
+_VARIANCE_RANK = {UNDECIDED: 1, UNSEPARATED_AT_LIMIT: 2, EXPAND: 3}
+
+
+def _variance_rank(cell):
+    if cell is None:
+        return 0
+    variance = cell['variance']
+    return (_VARIANCE_RANK.get(variance['verdict'], 0)
+            + (1 if variance.get('shortfall') else 0))
+
+
+def _variance_pair(cell):
+    """The two cells one printed line is about.
+
+    Usually the cell and its binding rival, and they are usually mutual, which
+    is what the de-duplication is for. A withheld separation is the exception:
+    the relation it reports is against the unjudgeable cell that blocked it,
+    not against the rival in `evidence` that the rule got as far as measuring.
+    Keying those on the binding rival collapsed two cells demoted by two
+    different unjudged rivals onto one pair, and matrix position then decided
+    which of the two refusals was printed at all -- which is the defect the
+    ranking above exists to prevent, reached one path over.
+    """
+    variance = cell['variance']
+    if 'withheld_by' in variance:
+        partner = variance['withheld_by']
+    else:
+        partner = variance['evidence']['rival_cell']
+    return frozenset((cell['cell'], partner))
+
+
+def _describe_variance(cell):
+    """One line about a cell whose passes did not settle it against its rival."""
+    variance = cell['variance']
+    if variance['verdict'] == UNDECIDED:
+        # `evidence` is deliberately not read here. A refusal reached because
+        # no rival has a dispersion carries no combined deviation, so the
+        # comparison sentence below cannot be built for it -- and reading the
+        # key up front, before the branch, made that a `KeyError` at the end of
+        # a batch that had already run for hours.
+        #
+        # It is not phrased as a pair either: the rival in `evidence` is the
+        # one the rule got as far as measuring, which for a withheld
+        # separation is not the cell that withheld it. The reason names that
+        # one.
+        return '  variance rule: no verdict for {0}: {1}.'.format(
+            cell['description'], variance['reason'])
+    evidence = variance['evidence']
+    where = ('{0} is not separated from {1} on {2}: medians {3} and {4} differ '
+             'by {5}, inside a combined deviation of {6}'.format(
+                 cell['description'], evidence['rival_description'],
+                 variance['metric'], evidence['median'],
+                 evidence['rival_median'], evidence['gap'],
+                 evidence['combined_stdev']))
+    if variance['verdict'] == EXPAND:
+        # Both facts, never one instead of the other. A failed pass and a
+        # rerun count are separate things to do about the same cell, and the
+        # shortfall used to replace the count: with `repetitions: 3` and one
+        # failed pass, the only line printed said to investigate the failure,
+        # the pair de-duplication suppressed the rival's line that carried the
+        # count, and the obvious next move -- fix the pass, rerun at three --
+        # comes back unseparated again.
+        if 'passes_recommended' not in variance:
+            # This cell is fully observed and the pair is short because the
+            # rival is. Recommending the count it already ran would be a no-op
+            # printed as advice.
+            return '  variance rule: {0}. {1}.'.format(
+                where, variance['rival_shortfall'][0].upper()
+                + variance['rival_shortfall'][1:])
+        advice = 'Rerun this test with repetitions: {0}.'.format(
+            variance['passes_recommended'])
+        if variance.get('shortfall'):
+            advice += ' {0}.'.format(
+                variance['shortfall'][0].upper() + variance['shortfall'][1:])
+        return '  variance rule: {0}. {1}'.format(where, advice)
+    return ('  variance rule: {0}, over {1} passes. More passes will not '
+            'decide it: these two are not distinguishable at this '
+            'workload.'.format(where, variance['observations']))
 
 
 def describe_batch_summary(document, path=None):
@@ -324,6 +904,19 @@ def describe_batch_summary(document, path=None):
     if repetitions > 1:
         heading = 'repeatability over {0} passes'.format(repetitions)
         lines.append('{0} ({1}):'.format(heading, path) if path else heading + ':')
+        # Under the heading, and inside this gate. Said out loud rather than
+        # left to the artifact, because the rule prints nothing about the
+        # results it supports, so a batch whose rule raised looks exactly like
+        # one whose every cell was separated. But only where a verdict could
+        # have been printed at all: a single-pass test's every dispersion is
+        # withheld, so no cell of one can carry a printable verdict, and
+        # emitting this outside the gate put a lone indented line into the
+        # output of a `repetitions: 1` batch with no heading naming the test
+        # or the summary path -- and every checked-in benchmark config is
+        # single-pass.
+        if document.get('variance_failure'):
+            lines.append('  variance rule: no verdicts -- {0}'.format(
+                document['variance_failure']))
         for cell in cells:
             described = ['{0}: {1} of {2} passes observed'.format(
                 cell['description'], cell['observations'],
@@ -340,6 +933,43 @@ def describe_batch_summary(document, path=None):
                 lines.append('    pass {0}: {1}{2}'.format(
                     entry['repetition'], entry['state'],
                     ' ({0})'.format(entry['message']) if entry.get('message') else ''))
+    # Only the cells the rule reached a verdict about, and only the verdicts
+    # that ask for something. A cell that is separated needs no line: the whole
+    # point of the rule is that it is silent about the results it supports.
+    # One line per unseparated *pair*, not per cell. The verdict is per cell
+    # and the binding rival is usually mutual, so a two-target group otherwise
+    # states the same relation twice with identical numbers -- and a matrix of
+    # 4 peers x 3 prefixes x 2 filters x 3 targets ends a multi-hour batch with
+    # 72 lines that are 36 facts.
+    #
+    # Which of the pair's two verdicts gets that line is decided by what it
+    # asks the operator to do, not by which cell has the lower ordinal. The two
+    # sides need not agree: with `repetitions: 5` a cell whose passes all
+    # succeeded is `unseparated at the expansion limit` -- "more passes will
+    # not decide it" -- while the rival that lost two of them is `expand`
+    # carrying a shortfall, which is a failed pass to go and look at. Taking
+    # the first seen meant matrix position chose between those two pieces of
+    # advice, and printed the one that says to do nothing.
+    chosen, order = {}, []
+    for cell in cells:
+        variance = cell.get('variance') or {}
+        # A refusal that names no rival -- this cell has no dispersion at all,
+        # or nothing shares its axes -- is not printed: it has no pair, and its
+        # cause is already there as the cell's own failed passes. Every other
+        # refusal is, which is the documented contract, so the test is for
+        # something that identifies a rival rather than for `evidence`
+        # specifically: the branch reporting rivals without observations names
+        # them and has no evidence to give.
+        if (variance.get('verdict') not in PRINTED_VERDICTS
+                or not ('evidence' in variance or 'withheld_by' in variance)):
+            continue
+        pair = _variance_pair(cell)
+        if pair not in chosen:
+            order.append(pair)
+        if _variance_rank(cell) > _variance_rank(chosen.get(pair)):
+            chosen[pair] = cell
+    for pair in order:
+        lines.append(_describe_variance(chosen[pair]))
     for cell in cells:
         for column, values in sorted((cell.get('inconsistent') or {}).items()):
             lines.append(

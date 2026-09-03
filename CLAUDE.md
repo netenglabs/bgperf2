@@ -1009,6 +1009,27 @@ release gate first. Never run cells or blocks concurrently. Monitor or resume an
 one next block, review timing evidence, correctness, provenance, contention, and memory, then stop at the reviewed
 block boundary. The local 64 GB host is a hard ceiling; do not schedule a larger-memory workload.
 
+### Unattended execution operator contract
+
+When the user says `continue the unattended execution plan`, follow
+[`docs/unattended-execution-plan.md`](docs/unattended-execution-plan.md). Inspect which migration
+steps are complete, complete exactly one step, verify its exit criterion, record progress in that
+document, then stop and tell the user to use the same prompt again. That plan is infrastructure for
+the other three contracts: it runs no benchmark and changes no measurement semantics.
+
+Two things the plan leaves to whoever adopts it, settled here:
+
+- **The driver's scope is the measurement plan, and it stops at Phase 6.** Phase 6 is the first
+  phase that needs real calibration runs, and those belong on the host the campaign will run on —
+  a 64 GB machine with a different CPU from the 8-core / 30 GB development host. A worker that
+  finds Phase 6 next stops and says so rather than starting a benchmark to see how it goes: rows
+  from two hosts are two experiments, and neither the CSV nor `create_batch_graphs()` refuses to
+  put them side by side. The 30 GB host cannot run the campaign workloads at all — the heaviest
+  baseline row peaked at 25.3 GB target RSS with 14.25 GB free of 60.74.
+- **Unattended work does not reach master.** It commits to `unattended/measurement`, and
+  `/code-review` before every commit stays part of the definition of done — it is the only thing
+  between a bad edit and the branch, and it does not become optional because nobody is watching.
+
 - Container names are fixed strings (`bgperf_<name>_target`, `bgperf_monitor`) declared as
   `CONTAINER_NAME` class attributes; testers use a `CONTAINER_NAME_PREFIX` plus an index.
 - Policy/filter fragments live in `filters/*.conf` and are read verbatim at config-write time.

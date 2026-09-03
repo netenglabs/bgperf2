@@ -1,10 +1,11 @@
 # Unattended Execution Plan
 
-Status: proposed on 2026-09-03, not adopted. No step in the migration sequence
-below has been taken: beads is not installed, no epics or items exist, and the
-continuation prompt at the end of this document is not yet an operator contract
-in `CLAUDE.md`. Nothing here is in effect, and nothing here changes how the
-three existing contracts run today.
+Status: proposed on 2026-09-03; step 0 taken the same day, step 1 in progress.
+The continuation prompt at the end of this document is now an operator contract
+in `CLAUDE.md`, which settles two things this document deliberately left open --
+the driver's scope and where its commits go; see the contract. Steps 2 onward
+are untaken: beads is not installed and no epics or items exist. Nothing here
+changes how the three existing contracts run, or any measurement semantics.
 
 ## Purpose
 
@@ -35,8 +36,13 @@ suites leave `COMPLETE` markers, and git history records every reviewed change
 set.
 
 **The driver.** Something has to invoke the agent again when a change set
-finishes. This is not solved at all. It is the human, typing the continuation
-prompt.
+finishes. When this was written that was unsolved, and it was the human typing
+the continuation prompt. It is no longer: this harness self-paces a `/loop`
+between change sets, which is stage 1 below with no new tooling at all, and its
+`schedule` command drives a fresh-context worker on a cron, which is stage 2
+without the shell loop. What beads still adds is the ready queue those drivers
+read from -- see stage 2, which is where a fresh session's inability to find
+"the first incomplete phase" in 1,383 lines of prose starts to bite.
 
 **Beads addresses only the first problem.** It is a tracker, not a scheduler.
 Adopting it without a driver changes nothing about how unattended the work is.
@@ -253,6 +259,28 @@ is not yet.
 
 **Exit criterion:** a session given that prompt and nothing else finds this
 document and reports which migration step is next.
+
+#### Progress on 2026-09-03: the contract exists, and it names what it will not do
+
+`CLAUDE.md` now carries `continue the unattended execution plan` beside the
+other three contracts, so a fresh session has a route to this document. Two
+decisions were made there rather than here, because they bind the driver and
+this plan is only the mechanism:
+
+- **Scope is the measurement plan, stopping at Phase 6.** Phase 6 is the first
+  phase needing real calibration runs, and the host that will run the campaign
+  is a 64 GB machine with a **different CPU** from the 8-core / 30 GB
+  development host. So the stop is not a convenience -- calibration taken here
+  would describe a machine the campaign never runs on, and nothing downstream
+  refuses to compare rows from two hosts. This is the gate from
+  [Human Decisions](#human-decisions) in the only form available before beads:
+  a sentence in the contract rather than an item a worker is blocked by.
+- **Commits go to `unattended/measurement`, never master.**
+
+Exit criterion met: the prompt is registered and points here. Step 1 (driver,
+supervised) is next, and is a stage-1 `/loop` against the measurement plan --
+whose remaining work is the three-to-five variance rule in Phase 5, then all of
+Phase 5A.
 
 ### Step 1: driver, supervised
 

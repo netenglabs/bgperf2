@@ -369,8 +369,9 @@ the expected offered route count.
 
 ### Phase 3: Instrument bgpdump2 MRT playback
 
-Status: in progress. The injector's own evidence is now readable and parsed;
-nothing is wired into `bench()` yet, and provenance is still `UNKNOWN`.
+Status: in progress. The injector's own evidence is readable, parsed, and
+polled into the run's event stream; per-injector aggregation beyond that, and
+provenance, are still open.
 
 #### Progress on 2026-09-03: the injector log was empty, and now is not
 
@@ -425,9 +426,79 @@ read the failure as an empty capture, so `offering_stats()`'s
 could never fire for the only generator that had one. A run whose polls all
 failed produced the same artifact as a run whose generator never came up.
 
-Left for the next change sets in this phase: polling the log from `bench()` and
-merging per-injector events into `<prefix>.events.json`; aggregating ten
-injectors without letting the fastest speak for the rest; blocked-write evidence
+#### Progress on 2026-09-03: every injector now reports into the event stream
+
+`Bgpdump2Tester` declares `REPORTS_OFFERING`, so the generic `bench()` poll
+covers it: each injector gets its own `TesterEventRecorder`, and its
+`tester_session_ready`/`tester_first_update`/`tester_last_update`/
+`tester_complete` are merged into the one ordered `<prefix>.events.json` under
+its container name, with the derived intervals beside them. No injector speaks
+for another -- there is one producer per container and no aggregate, so a
+missing completion stays visible as that injector's missing completion.
+
+Three things this change set had to get right:
+
+- **No `docker exec` at all.** The blaster's log is bind-mounted, so
+  `BlasterLogReader` reads it from the host. Ten injectors polled once a second
+  through `exec` would put the controller's own cost into the run it is
+  measuring, which is what the BIRD poll's single-exec loop exists to avoid.
+- **The read is incremental**, keeping a byte offset and stopping at the last
+  complete line, for the reason `frr._get_EOR_from_log()` does: bgpdump2 logs a
+  `Sent ...` line per `write()` to the socket, and a write carries whatever the
+  socket would take -- one capture shows an 88-octet write -- so the line count
+  is a property of how the peer drained the session and nothing bounds it in
+  advance. `BlasterLog` accumulates facts across polls rather than reparsing,
+  because `End-of-RIB` belongs to a `RIB for peer-index` line that arrived
+  polls earlier and chunk-at-a-time parsing would drop the walk time it
+  carries.
+- **An unreadable log raises rather than reading as an empty one.** The log is
+  the injector's only account of itself, so failing to read it is 'the
+  generator could not be asked' -- `offering_stats()` records that as
+  `read_failures` in the artifact, which is the distinction a silent empty
+  reading would erase.
+
+The poll names the single session `get_startup_cmd()` actually drives, from the
+same `injected_neighbor()`, and `expected` is the configured `count`, never the
+RIB size the log reports.
+
+##### Docker verification
+
+Run on 2026-09-03 on the 8-core / 30 GB host, `-d /var/tmp/bgperf` with results
+outside the campaign tree: `bench -t bird -g bgpdump2 -n 2 -p 10000 --mrt-file
+mrt/rib.20210801.0000`. Both injectors appear in `<prefix>.events.json` with all
+four tester events, the exact expected 10,000 offered prefixes, `configured`
+matching, `tester_startup_s` 1.33s, and backpressure recorded as
+unavailable-with-a-reason. No read failures, no tester errors or timeouts,
+foreign CPU 4%.
+
+It also showed the measurement's own limit plainly: the walk takes about a
+millisecond, so both injectors had finished before the first poll looked.
+`injection_s` is 0.0 with `offered_in_interval` 0 and no rate, and the run
+prints `injection shorter than one poll` -- the same unresolvable-injection
+shape as BIRD 2.19, refusing to publish an instant injection. The generator's
+own `End-of-RIB, walk time` (0.000995s) is the number that would resolve it,
+and it is parsed but not yet carried into the artifact.
+
+##### Defect to fix next: the published poll resolution is optimistic
+
+Review of this change set found it in Phase 2 code. `Tester.offering_stats()`
+stamps a sample before the read but then waits a full `interval` *after* it, so
+the real cadence is `read + interval` while every event the recorder publishes
+carries `sample_interval_s = 1` as its stated resolution. That field exists
+precisely so an `injection_s` of 0.0 reads as *unresolved at this resolution*
+rather than as instant, so understating it by the read time weakens the one
+number that qualifies the others. It costs nothing for bgpdump2, whose poll is
+a short file read, and grows with peer count for the BIRD tester, whose own
+docstring says a 50-100 peer read "takes long enough to matter". Waiting to a
+deadline instead of sleeping a fixed interval fixes the common case but not a
+read slower than the interval, so the honest version records the cadence that
+was actually achieved -- which is a change to shared timing code and belongs in
+its own change set.
+
+Left for the next change sets in this phase: carrying the injector's own
+`walk_time_s` and wire-side `octets` into the artifact, since at MRT playback
+speeds they are the only evidence a 1s poll cannot supply; an aggregate across
+injectors that cannot let the fastest speak for the rest; blocked-write evidence
 (`-t io` enables bgpdump2's `Partial write`/`Full write` lines, at the cost of a
 log line per write); and bgpdump2 provenance, still `UNKNOWN (no version command
 for Bgpdump2Tester)` although the binary answers `-V` with `Version: 2.0.14`.

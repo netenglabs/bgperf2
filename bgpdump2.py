@@ -1,5 +1,6 @@
 import re
 from base import *
+from measurements import TesterOffering
 from mrt_tester import MRTTester
 
 
@@ -40,89 +41,199 @@ _END_OF_RIB = re.compile(
 _WALK_COMPLETE = 'RIB walk complete'
 
 
-def parse_blaster_log(text):
-    '''Parse one injector's `bgpdump2 --blaster` log into facts.
+class BlasterLog:
+    '''One injector's `bgpdump2 --blaster` log, accumulated a chunk at a time.
 
-    Counts are None when the log has not reported them yet, never 0: an
-    injector that has sent nothing and an injector whose log could not be read
-    must not produce the same measurement.
+    The facts live in the object rather than in one pass over the whole text
+    because bgperf reads this log once a second for the length of a run, and a
+    poll should cost the bytes that were appended since the last one.  Feeding
+    chunks is also the only way the facts stay whole: `End-of-RIB` belongs to
+    the `RIB for peer-index` line that opened the walk, which may have arrived
+    several polls earlier, so parsing each chunk in isolation would drop the
+    walk time it carries.
 
-    Every RIB the session walks gets an entry in `ribs`, in walk order, holding
-    the table it loaded and -- once its End-of-RIB is logged -- the walk time
-    bgpdump2 measured itself.  A line that does not match is skipped rather
-    than guessed at, which is also what makes an incremental reader safe: a
-    half-written final line contributes nothing instead of a wrong number.
+    Counts are absent until the log reports them, never 0: an injector that has
+    sent nothing and an injector whose log could not be read must not produce
+    the same measurement.
     '''
-    state = None
-    peer = None
-    ribs = []
-    counters = {}
-    walk_complete = False
 
-    for raw in text.splitlines():
-        line = _LOG_LINE.match(raw)
-        if not line:
-            # Option parsing prints before logging starts ('peer_spec_index[1]:
-            # register peer 3, asn 7018'), and an incremental read can end
-            # mid-line.
-            continue
-        message = line.group('message').strip()
+    def __init__(self):
+        self.peer = None
+        self.state = None
+        # Every RIB the session walks, in walk order, holding the table it
+        # loaded and -- once its End-of-RIB is logged -- the walk time bgpdump2
+        # measured itself.
+        self.ribs = []
+        self.counters = {}
+        self.walk_complete = False
 
-        m = _STATE_CHANGE.match(message)
-        if m:
-            state = m.group('new')
-            peer = m.group('peer')
-            continue
+    def feed(self, text):
+        '''Absorb a chunk of log text made of complete lines.
 
-        m = _RIB_START.match(message)
-        if m:
-            ribs.append({
-                'peer_index': int(m.group('index')),
-                'peer_as': int(m.group('asn')),
-                'ipv4_prefixes': int(m.group('ipv4')),
-                'ipv6_prefixes': int(m.group('ipv6')),
-                'paths': int(m.group('paths')),
-                'walk_time_s': None,
-            })
-            continue
+        A line that does not match is skipped rather than guessed at, which is
+        also what makes an incremental reader safe: a half-written final line
+        contributes nothing instead of a wrong number.
+        '''
+        for raw in text.splitlines():
+            line = _LOG_LINE.match(raw)
+            if not line:
+                # Option parsing prints before logging starts
+                # ('peer_spec_index[1]: register peer 3, asn 7018'), and an
+                # incremental read can end mid-line.
+                continue
+            message = line.group('message').strip()
 
-        m = _SENT.match(message)
-        if m:
-            counters = {
-                'updates_sent': int(m.group('updates')),
-                'prefixes_sent': int(m.group('prefixes')),
-                'prefixes_withdrawn': int(m.group('withdrawn')),
-                'octets_sent': int(m.group('octets')),
-            }
-            continue
+            m = _STATE_CHANGE.match(message)
+            if m:
+                self.state = m.group('new')
+                self.peer = m.group('peer')
+                continue
 
-        m = _END_OF_RIB.match(message)
-        if m and ribs:
-            # bgpdump2 restarts its walk clock for each RIB, so this belongs to
-            # the RIB that is currently being walked, not to the session.
-            ribs[-1]['walk_time_s'] = float(m.group('seconds'))
-            continue
+            m = _RIB_START.match(message)
+            if m:
+                self.ribs.append({
+                    'peer_index': int(m.group('index')),
+                    'peer_as': int(m.group('asn')),
+                    'ipv4_prefixes': int(m.group('ipv4')),
+                    'ipv6_prefixes': int(m.group('ipv6')),
+                    'paths': int(m.group('paths')),
+                    'walk_time_s': None,
+                })
+                continue
 
-        if message == _WALK_COMPLETE:
-            walk_complete = True
+            m = _SENT.match(message)
+            if m:
+                self.counters = {
+                    'updates_sent': int(m.group('updates')),
+                    'prefixes_sent': int(m.group('prefixes')),
+                    'prefixes_withdrawn': int(m.group('withdrawn')),
+                    'octets_sent': int(m.group('octets')),
+                }
+                continue
 
-    return {
-        'peer': peer,
-        'state': state,
-        'established': state == 'established',
-        'ribs': tuple(ribs),
-        'walk_complete': walk_complete,
-        'updates_sent': counters.get('updates_sent'),
-        'prefixes_sent': counters.get('prefixes_sent'),
-        'prefixes_withdrawn': counters.get('prefixes_withdrawn'),
-        'octets_sent': counters.get('octets_sent'),
-    }
+            m = _END_OF_RIB.match(message)
+            if m and self.ribs:
+                # bgpdump2 restarts its walk clock for each RIB, so this
+                # belongs to the RIB currently being walked, not to the
+                # session.
+                self.ribs[-1]['walk_time_s'] = float(m.group('seconds'))
+                continue
+
+            if message == _WALK_COMPLETE:
+                self.walk_complete = True
+        return self
+
+    def facts(self):
+        return {
+            'peer': self.peer,
+            'state': self.state,
+            'established': self.state == 'established',
+            'ribs': tuple(dict(rib) for rib in self.ribs),
+            'walk_complete': self.walk_complete,
+            'updates_sent': self.counters.get('updates_sent'),
+            'prefixes_sent': self.counters.get('prefixes_sent'),
+            'prefixes_withdrawn': self.counters.get('prefixes_withdrawn'),
+            'octets_sent': self.counters.get('octets_sent'),
+        }
+
+
+def parse_blaster_log(text):
+    '''Parse one injector's whole blaster log into facts.'''
+    return BlasterLog().feed(text).facts()
+
+
+class BlasterLogReader:
+    '''Read one injector's blaster log from the host, incrementally.
+
+    `start.sh` redirects the blaster's stdout into the bind-mounted host
+    directory, so the controller reads this file directly and a poll costs no
+    `docker exec` at all.
+
+    Only what was appended since the last read is consumed, for the reason
+    `frr._get_EOR_from_log()` does the same.  bgpdump2 logs a `Sent ...` line
+    per write() to the socket, and a write carries whatever the socket would
+    take at that moment -- one of the captured runs shows an 88-octet write --
+    so the number of lines is a property of how the peer drained the session,
+    not of the table size, and nothing bounds it in advance.  Re-reading and
+    re-matching the whole file once a second is the exact shape that made the
+    FRR reader the bottleneck it was supposed to be measuring.
+    '''
+
+    READ_BLOCK = 1 << 16
+    # Cap the bytes one poll may consume. This process's own RSS feeds the
+    # recorded min_free column, so a log that ran away must not be pulled into
+    # memory in one go; the remainder is read by the next poll.
+    READ_MAX = 4 << 20
+
+    def __init__(self, path):
+        self.path = path
+        self._pos = 0
+        self._log = BlasterLog()
+        self._log_id = None
+
+    def read(self):
+        '''Consume whatever has been appended, and return the facts so far.
+
+        An unreadable log raises. This file is the only account the injector
+        gives of itself, so failing to read it is 'the generator could not be
+        asked', which `offering_stats()` records as a read failure -- and that
+        has to stay distinct from an injector that was read and had sent
+        nothing.
+        '''
+        st = os.stat(self.path)
+        # A replaced log is identified by inode as well as by size, the way
+        # frr._get_EOR_from_log() does it: a replacement that had already grown
+        # past the saved offset is not smaller, so a size check alone would
+        # seek into the middle of the new file, never see the lines that open
+        # its session, and keep reporting the old log's completion for a
+        # session that no longer exists. What neither check can see is a log
+        # truncated and rewritten to the same size between two polls, which
+        # leaves nothing in stat() to notice.
+        log_id = (st.st_dev, st.st_ino)
+        if st.st_size < self._pos or (self._log_id is not None
+                                      and log_id != self._log_id):
+            # Everything the accumulated facts describe went with the old log,
+            # so they are dropped rather than carried onto a different one: a
+            # stale `RIB walk complete` would otherwise report a completion
+            # this run never made.
+            self._pos = 0
+            self._log = BlasterLog()
+        self._log_id = log_id
+        if st.st_size <= self._pos:
+            return self._log.facts()
+        consumed = 0
+        with open(self.path, 'rb') as f:
+            while consumed < self.READ_MAX:
+                f.seek(self._pos)
+                block = f.read(min(self.READ_BLOCK, self.READ_MAX - consumed))
+                if not block:
+                    break
+                # The blaster may be mid-write, so stop at the last complete
+                # line and resume from the start of the partial one next time.
+                end = block.rfind(b'\n')
+                if end < 0:
+                    if len(block) < self.READ_BLOCK:
+                        break       # trailing partial line; wait for more
+                    # A whole block with no newline in it would otherwise be
+                    # re-read forever.
+                    self._pos += len(block)
+                    consumed += len(block)
+                    continue
+                self._log.feed(block[:end].decode('utf-8', 'replace'))
+                self._pos += end + 1
+                consumed += end + 1
+        return self._log.facts()
 
 
 def tester_offering(text):
-    '''What one bgpdump2 injector says it has offered, from its own log.
+    '''What one bgpdump2 injector says it has offered, from its whole log.'''
+    return tester_offering_from_facts(parse_blaster_log(text))
 
-    `send_complete` is the point of this parser.  bgpdump2 logs `RIB walk
+
+def tester_offering_from_facts(parsed):
+    '''What one bgpdump2 injector says it has offered, from parsed log facts.
+
+    `send_complete` is the point of this summary.  bgpdump2 logs `RIB walk
     complete` when it has walked every RIB it was given, which is positive
     evidence of the send contract being finished -- and it has to be, because
     for MRT playback the count cannot supply it.  `-T` caps the table while the
@@ -135,8 +246,6 @@ def tester_offering(text):
 
     `offered` is queue-side and `octets_on_wire` is not; see the note above.
     '''
-    parsed = parse_blaster_log(text)
-
     ribs = parsed['ribs']
     configured = sum(rib['ipv4_prefixes'] + rib['ipv6_prefixes']
                      for rib in ribs) if ribs else None
@@ -223,9 +332,55 @@ ENTRYPOINT ["/bin/bash"]
 
 class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
     CONTAINER_NAME_PREFIX = 'bgperf_bgpdump2_tester_'
+    # The blaster reports its own work, so bench() can ask this generator what
+    # it put on the wire instead of inferring it from when the monitor happened
+    # to see prefixes.
+    REPORTS_OFFERING = True
+    LOG_NAME = 'bgpdump2.log'
 
     def __init__(self, name, host_dir, conf, image='bgperf/bgpdump2'):
         super(Bgpdump2Tester, self).__init__(name, host_dir, conf, image)
+        self._blaster_log = BlasterLogReader(
+            os.path.join(self.host_dir, self.LOG_NAME))
+
+    def injected_neighbor(self):
+        '''The one session this injector actually drives, as (key, conf).
+
+        bgpdump2 blasts a single MRT peer index at a single neighbour, so
+        get_startup_cmd() takes the first configured neighbour and the poll
+        must name that same one. Reporting a session the container was never
+        told to open would add a peer that can never complete, and the recorder
+        aggregates pessimistically on purpose -- that one key would hold the
+        whole injector short of `tester_complete` for the length of the run.
+        '''
+        return next(iter(self.conf['neighbors'].items()))
+
+    def get_offerings(self):
+        '''What this injector says it has offered, from its own log.
+
+        `expected` is the prefix count the run configured, never the RIB size
+        the log reports: that is the generator's own account of what it loaded
+        and is kept beside it as `configured`, a cross-check that the injector
+        got the workload it was given.
+
+        Completion comes from `send_complete` rather than from the counts, for
+        the reason `tester_offering_from_facts()` describes: `-T` caps the
+        table while the MRT file is read, so an injector ends up holding
+        whatever that MRT peer's table has and `offered >= expected` can stay
+        false forever on one that has demonstrably sent everything it holds.
+
+        bgpdump2 exposes no blocked-write counter unless `-t io` is set, which
+        costs a log line per write, so backpressure is left unreadable here and
+        the recorder reports it as unavailable rather than as zero.
+        '''
+        key, neighbor = self.injected_neighbor()
+        observed = tester_offering_from_facts(self._blaster_log.read())
+        return {key: TesterOffering(
+            established=observed['established'],
+            expected=int(neighbor['count']),
+            offered=observed['offered'],
+            configured=observed['configured'],
+            send_complete=observed['send_complete'])}
 
     def configure_neighbors(self, target_conf):
         # this doesn't really do anything, but we use it to find the target
@@ -275,8 +430,9 @@ class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
 
     def get_startup_cmd(self):
 
-        # just get the first neighbor, we can only handle one neighbor per container
-        neighbor = next(iter(self.conf['neighbors'].values()))
+        # we can only handle one neighbor per container; get_offerings()
+        # polls that same session
+        neighbor = self.injected_neighbor()[1]
         prefix_count = neighbor['count']
         index = self.conf['bgpdump-index'] if 'bgpdump-index' in self.conf else self.get_index_useful_neighbor(prefix_count)
         local_as = self.get_local_as(index) or neighbor['as']
@@ -291,12 +447,12 @@ class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
         # observable.
         startup = '''#!/bin/bash
 ulimit -n 65536
-stdbuf -oL -eL /usr/local/sbin/bgpdump2 --blaster {} -p {} -a {} /root/mrt_file -T {}  -S {}> {}/bgpdump2.log 2>&1 &
+stdbuf -oL -eL /usr/local/sbin/bgpdump2 --blaster {} -p {} -a {} /root/mrt_file -T {}  -S {}> {}/{} 2>&1 &
 
 '''.format(self.target_ip, index,
-            local_as, prefix_count, neighbor['local-address'], self.guest_dir)
+            local_as, prefix_count, neighbor['local-address'], self.guest_dir,
+            self.LOG_NAME)
         return startup
-#> {}/bgpdump2.log 2>&1 
 
     # Both of these take the tester host directories and must match the
     # signature in base.Tester -- bench() calls them on the class as

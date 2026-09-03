@@ -12,7 +12,8 @@ invented fixture gets subtly wrong.
 '''
 import pytest
 
-from bgpdump2 import parse_blaster_log, tester_offering
+from bgpdump2 import (BlasterLogReader, Bgpdump2Tester,
+                      parse_blaster_log, tester_offering)
 from measurements import (
     EventKind,
     EventPhase,
@@ -314,3 +315,178 @@ def test_an_injector_that_never_finishes_has_no_completion(blaster_log):
             send_complete=offering['send_complete'])})
 
     assert unique_event(recorder.events, EventKind.TESTER_COMPLETE) is None
+
+
+# --- reading that log from the host ------------------------------------------
+
+def injector(tmp_path, expected=10000, key='10.10.0.3'):
+    '''A real Bgpdump2Tester whose container is never touched.
+
+    Nothing here is stubbed: the injector's log is a bind-mounted file, so the
+    poll the controller runs during a benchmark is exactly this one -- a read
+    of `<host_dir>/bgpdump2.log`, with no `docker exec` in it at all.
+    '''
+    return Bgpdump2Tester('mrt-injector0', str(tmp_path), {
+        'neighbors': {key: {'router-id': key, 'local-address': key,
+                            'as': 1003, 'count': expected}}})
+
+
+def blaster_log_path(tmp_path):
+    return tmp_path / Bgpdump2Tester.LOG_NAME
+
+
+def write_log(tmp_path, text, mode='a'):
+    with open(blaster_log_path(tmp_path), mode) as f:
+        f.write(text)
+
+
+def test_facts_survive_the_poll_that_delivered_them(blaster_log, tmp_path):
+    '''The walk time belongs to a `RIB for peer-index` line polls earlier.
+
+    Reading only what was appended is what keeps a poll cheap, and parsing each
+    appended chunk on its own would drop exactly this: `End-of-RIB` carries the
+    generator's own measurement of a walk whose opening line is no longer in
+    the text being read.
+    '''
+    reader = BlasterLogReader(str(blaster_log_path(tmp_path)))
+    write_log(tmp_path, blaster_log(lines=9))
+
+    first = reader.read()
+    assert first['established'] is True
+    assert first['ribs'][0]['ipv4_prefixes'] == 10000
+    assert first['ribs'][0]['walk_time_s'] is None
+    assert first['prefixes_sent'] is None
+
+    write_log(tmp_path, ''.join(blaster_log().splitlines(keepends=True)[9:]))
+    second = reader.read()
+
+    assert second['walk_complete'] is True
+    assert second['prefixes_sent'] == 10000
+    assert second['ribs'][0]['walk_time_s'] == 0.011314
+    assert second == parse_blaster_log(blaster_log())
+
+
+def test_a_half_written_line_waits_for_its_newline(blaster_log, tmp_path):
+    '''The blaster is writing while the controller reads.
+
+    A partial line must not be consumed: the offset would move past it and the
+    counters it carries would never be seen at all.
+    '''
+    reader = BlasterLogReader(str(blaster_log_path(tmp_path)))
+    lines = blaster_log().splitlines(keepends=True)
+    write_log(tmp_path, ''.join(lines[:12]) + lines[12][:20])
+
+    assert reader.read()['ribs'][0]['walk_time_s'] is None
+
+    write_log(tmp_path, lines[12][20:])
+
+    assert reader.read()['ribs'][0]['walk_time_s'] == 0.011314
+
+
+def test_a_log_that_cannot_be_read_is_not_a_silent_injector(tmp_path):
+    '''"We could not ask" stays distinct from "it has sent nothing".
+
+    offering_stats() turns the raised error into `tester_offering_error`, which
+    is what puts `read_failures` in the run's artifact. Returning an empty
+    reading instead would make a poll that never worked look like a generator
+    that came up and stayed quiet.
+    '''
+    with pytest.raises(OSError):
+        injector(tmp_path).get_offerings()
+
+
+def test_a_replaced_log_does_not_carry_the_old_one_s_completion(blaster_log,
+                                                                tmp_path):
+    reader = BlasterLogReader(str(blaster_log_path(tmp_path)))
+    write_log(tmp_path, blaster_log())
+    assert reader.read()['walk_complete'] is True
+
+    write_log(tmp_path, blaster_log(lines=9), mode='w')
+    restarted = reader.read()
+
+    assert restarted['walk_complete'] is False
+    assert restarted['prefixes_sent'] is None
+
+
+def test_a_new_log_that_is_not_smaller_is_still_a_new_log(blaster_log,
+                                                          tmp_path):
+    """A restarted injector's log can already be longer than the old offset.
+
+    Size alone cannot see that: the reader would resume in the middle of the
+    new file, never read the lines that open its session, and go on describing
+    the previous log's session with whatever the tail of the new one adds. The
+    inode is what distinguishes them, as it does in frr._get_EOR_from_log().
+
+    The two fixtures are different injectors -- peer-index 4 and peer-index 3 --
+    so a reader that carried the old facts across shows up as a session with
+    two RIBs, which no bgperf injector has.
+    """
+    path = blaster_log_path(tmp_path)
+    reader = BlasterLogReader(str(path))
+    write_log(tmp_path, blaster_log(lines=9))
+    assert [rib['peer_index'] for rib in reader.read()['ribs']] == [4]
+
+    replacement = tmp_path / 'replacement'
+    replacement.write_text(blaster_log('bgpdump2_blaster_one_poll.log'))
+    replacement.replace(path)                 # longer than what was read
+    restarted = reader.read()
+
+    assert [rib['peer_index'] for rib in restarted['ribs']] == [3]
+    assert restarted['prefixes_sent'] == 10000
+    assert restarted['walk_complete'] is True
+
+
+def test_the_poll_names_the_session_the_run_configured(blaster_log, tmp_path):
+    write_log(tmp_path, blaster_log())
+
+    offerings = injector(tmp_path, key='10.10.0.7').get_offerings()
+
+    assert sorted(offerings) == ['10.10.0.7']
+    offering = offerings['10.10.0.7']
+    assert offering.established is True
+    assert offering.offered == 10000
+    assert offering.complete is True
+
+
+def test_an_injector_that_holds_less_than_asked_can_still_finish(blaster_log,
+                                                                 tmp_path):
+    '''`-T` caps the table as the MRT file is read, so an injector ends up with
+    whatever that MRT peer's table has. Judged on counts, one that walked its
+    whole RIB would never complete; its own report decides instead, and the
+    shortfall stays visible as configured against expected.'''
+    write_log(tmp_path, blaster_log())
+
+    offering = injector(tmp_path, expected=25000).get_offerings()['10.10.0.3']
+
+    assert offering.expected == 25000
+    assert offering.configured == 10000
+    assert offering.offered == 10000
+    assert offering.complete is True
+
+
+def test_an_injector_that_has_not_started_is_read_without_inventing_one(
+        tmp_path):
+    write_log(tmp_path, '')
+
+    offering = injector(tmp_path).get_offerings()['10.10.0.3']
+
+    assert offering.established is False
+    assert offering.offered is None
+    assert offering.complete is False
+
+
+def test_blocked_write_evidence_is_absent_rather_than_zero(blaster_log,
+                                                           tmp_path):
+    '''bgpdump2 logs writes only under `-t io`, which costs a line per write.
+    Reporting 0 would assert the injector was never blocked.'''
+    write_log(tmp_path, blaster_log())
+
+    offering = injector(tmp_path).get_offerings()['10.10.0.3']
+
+    assert offering.tx_pending_bytes is None
+    assert offering.pending_prefixes is None
+
+
+def test_bench_polls_this_generator():
+    '''bench() polls only the generators that declare they can answer.'''
+    assert Bgpdump2Tester.REPORTS_OFFERING is True

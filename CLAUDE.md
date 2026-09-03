@@ -314,7 +314,28 @@ redirected stdout has this trap.
   year and no zone (`%b %d %H:%M:%S.%06lu`); durations here come from the
   controller's monotonic clock.
 
-Not wired into `bench()` yet — no bgpdump2 events reach `<prefix>.events.json`.
+`Bgpdump2Tester` sets `REPORTS_OFFERING`, so `bench()` polls each injector at
+the monitor's own cadence and every one of them contributes its own
+`tester_session_ready`/`tester_first_update`/`tester_last_update`/
+`tester_complete` to `<prefix>.events.json`, under its container name. There is
+no aggregate across injectors and deliberately no `docker exec`: the log is
+bind-mounted, so `BlasterLogReader` reads it straight from the host, keeping a
+byte offset, stopping at the last complete line, and keying its restart reset on
+**inode** as well as size — the same rules as the FRR reader, and for the same
+reason: a replaced log that had already grown past the saved offset is not
+smaller, so a size check alone would resume in the middle of a new session and
+go on reporting the old one's completion. A
+`Sent ...` line is logged per `write()` — one real capture shows an 88-octet
+write — so the line count follows how the peer drained the session, not the
+table size, and nothing bounds it in advance.
+
+**A 10,000-prefix walk is over before the first poll.** Verified on a 2-injector
+run: both injectors reported the exact 10,000, `tester_complete` observed, and
+`injection_s` 0.0 with `offered_in_interval` 0 and no rate — the same
+unresolvable-injection shape as BIRD 2.19, said out loud rather than published
+as an instant injection. The generator's own `walk time` (0.000995s there) is
+the number that resolves it, and it is parsed but not yet carried into the
+artifact.
 
 ### Host contention — `contention.py`
 

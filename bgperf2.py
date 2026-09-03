@@ -57,7 +57,8 @@ from bgpdump2 import Bgpdump2, Bgpdump2Tester
 from monitor import Monitor
 from convergence import ConvergenceTracker
 from contention import (describe_contention, foreign_cpu_percent,
-                        is_memory_backed, own_process_tree, sample_processes)
+                        free_space_bytes, is_memory_backed, own_process_tree,
+                        sample_processes)
 from findings import derive_findings, describe_findings, policy_failure
 from measurements import (MonitorEventRecorder, TesterEventRecorder,
                           event_artifact, monitor_metrics,
@@ -740,7 +741,12 @@ def warn_if_log_dir_is_in_ram(config_dir):
             mounts = f.read()
     except OSError:
         return
-    if not is_memory_backed(os.path.abspath(config_dir), mounts):
+    # realpath, not abspath: /var/tmp is a symlink to /tmp on some images,
+    # which is precisely the case this check is kept for, and abspath
+    # normalizes without following symlinks -- so the path handed to
+    # is_memory_backed() would match no tmpfs mount line and the warning would
+    # be silently suppressed on exactly the host that needs it.
+    if not is_memory_backed(os.path.realpath(config_dir), mounts):
         return
     print('WARNING: {0} is on a memory-backed filesystem, so tester and target '
           'logs consume RAM.'.format(config_dir))
@@ -748,6 +754,38 @@ def warn_if_log_dir_is_in_ram(config_dir):
           'lowers the recorded')
     print('         min free mem without the daemon using it. Pass -d/--dir with a '
           'disk-backed path.')
+
+
+# Enough room for the largest log volume this project has measured: a 50-peer
+# 100k-prefix BIRD run writes about 5GB of tester logs even after the log-class
+# fix, and an FRR full-table MRT run puts bgpd.log past 1GB on its own. The
+# floor is not an estimate of a particular run -- the two ends of that range
+# differ by 30x and the estimate would have to know what each generator logs --
+# it is the point below which a routine large cell can fill the filesystem.
+#
+# Which matters more than a failed run: /var/tmp is on the root filesystem on
+# most hosts, so filling it takes Docker, journald and the rest of the machine
+# with it, hours into a batch, and the artifacts of the cells that already
+# finished are what gets lost.
+LOG_SPACE_FLOOR_GB = 10
+
+
+def warn_if_log_dir_is_short_on_space(config_dir):
+    """Warn when the bench directory's filesystem has little room left."""
+    free = free_space_bytes(config_dir)
+    if free is None:
+        return
+    free_gb = free / float(1 << 30)
+    if free_gb >= LOG_SPACE_FLOOR_GB:
+        return
+    print('WARNING: {0} has {1:.1f}GB free, under the {2}GB a large run can '
+          'write.'.format(config_dir, free_gb, LOG_SPACE_FLOOR_GB))
+    print('         Tester and target logs are bind-mounted there: a 50-peer '
+          '100k-prefix BIRD run')
+    print('         writes ~5GB, and a full-table MRT run puts bgpd.log past '
+          '1GB. Pass -d/--dir with')
+    print('         a path on a larger filesystem, or free space before '
+          'starting.')
 
 
 def warn_if_trace_io_reaches_no_generator(args, conf):
@@ -949,6 +987,7 @@ def bench(args):
     # target daemon still running and report it as somebody else's job.
     warn_if_machine_is_busy()
     warn_if_log_dir_is_in_ram(config_dir)
+    warn_if_log_dir_is_short_on_space(config_dir)
 
     bench_start = time.time()
     if args.file:

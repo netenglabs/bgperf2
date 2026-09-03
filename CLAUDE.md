@@ -106,7 +106,8 @@ prefix lists, and monitor `check-points`. It is **Mako-templated** — `gen_mako
 then parses it as YAML. `-f` passes a hand-written scenario instead.
 
 Each container class then translates that scenario into its own native config format and writes it
-to a host directory bind-mounted into the container (`/tmp/<bench-name>/<role>/`). Startup is
+to a host directory bind-mounted into the container (`<--dir>/<bench-name>/<role>/`, so
+`/var/tmp/bgperf2/<role>/` by default). Startup is
 uniform: `exec_startup_cmd()` writes a `start.sh` into that directory and execs it inside the
 container. To debug a target that won't come up, run its `start.sh` by hand and read the output:
 
@@ -585,7 +586,7 @@ redirected stdout has this trap.
   0.01128 / 0.01125s without the flag and 0.01763 / 0.01756 / 0.01751s with it
   — a 56% inflation of `reported_injection_s`, the one number that resolves a
   sub-poll injection — and its log grew from 947 bytes to 350KB, which scales
-  with the table and therefore lands in `min free mem` on a default `-d /tmp`.
+  with the table, and lands in `min free mem` whenever `-d` names a memory-backed path.
   A run that wants to know whether the generator was blocked asks for it and reads a
   perturbed walk time; a run that wants the walk time does not. **`injection_s`
   is perturbed too, by a second mechanism**: `BlasterLogReader.READ_MAX` caps a
@@ -763,6 +764,18 @@ contract and every doc told the operator to pass `-d /var/tmp/bgperf` — so the
 were the ones nobody had thought about, which is the wrong way round.
 `warn_if_log_dir_is_in_ram()` still runs at the start of every run, because `/var/tmp` is tmpfs on
 some systems and `-d` can still name one; `is_memory_backed()` in `contention.py` is the pure part.
+
+Moving off tmpfs traded that for a smaller failure, and `warn_if_log_dir_is_short_on_space()` covers
+it: `/var/tmp` is on the **root** filesystem on most hosts, so a run that fills it takes Docker and
+journald with it, hours into a batch, and what is lost is the finished cells' artifacts rather than
+the current run. The floor is `LOG_SPACE_FLOOR_GB` (10) and is deliberately **not** an estimate of
+the run in front of it: a 50-peer 100k-prefix BIRD run writes ~5GB of tester logs while a full-table
+MRT run puts `bgpd.log` past 1GB, so those two ends differ by 30x and an estimate would have to know
+what each generator logs. `free_space_bytes()` in `contention.py` is the pure part, and two details
+in it decide whether the number means anything: it reads `f_bavail`, not `f_bfree` — the difference
+is the reserve only root may use, and bgperf2 does not run as root — and it measures the nearest
+**existing** ancestor, because `bench()` asks before it creates the directory, on purpose. A warning
+about log volume is worth nothing once the logs are written.
 
 Two things made it that large, and only one is fixed:
 
@@ -956,8 +969,8 @@ validation — `tests/test_static.py` checks the benchmark configs instead.
 
 Commercial NOSes (Junos cRPD, Arista cEOS, SR Linux) are never built. Download them out of band and
 tag them as `crpd:latest` / `ceos:latest` — or as `crpd:<version>` to select them with `--version`
-like any other daemon. These write root-owned files into `/tmp/bgperf2`, which bgperf2 then cannot
-clean up; `sudo rm -rf /tmp/bgperf2` when that happens. Their licenses prohibit publishing results.
+like any other daemon. These write root-owned files into the bench directory (`/var/tmp/bgperf2` by
+default), which bgperf2 then cannot clean up; `sudo rm -rf /var/tmp/bgperf2` when that happens. Their licenses prohibit publishing results.
 
 ## Conventions
 

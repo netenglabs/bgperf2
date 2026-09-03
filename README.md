@@ -161,20 +161,28 @@ a target, add its process names there** or that target reports its own load as
 contention and all of its rows look incomparable. The cEOS and SR Linux entries
 are the main agents, not the complete set.
 
-### Keep the bench directory off tmpfs
+### Where the bench directory lives
 
-`-d/--dir` defaults to `/tmp`, and systemd mounts `/tmp` as tmpfs on many
-distros — so every tester and target log is written into **RAM**. That is not a
-small effect. A 50-peer × 100k-prefix BIRD run wrote **31 GB** of tester logs,
-half the machine's memory, and dragged the recorded `min free mem` from 56 GB
-down to **28.5 GB** on a run whose target daemon used **0.56 GB**. The column
-was measuring log volume, not the daemon; on a smaller box it is an
-out-of-memory failure instead of a misleading number.
+`-d/--dir` defaults to `/var/tmp`, and it holds every tester and target log,
+bind-mounted. It defaulted to `/tmp` for years, which systemd mounts as tmpfs on
+many distros — so those logs were written into **RAM**. That is not a small
+effect. A 50-peer × 100k-prefix BIRD run wrote **31 GB** of tester logs, half
+the machine's memory, and dragged the recorded `min free mem` from 56 GB down to
+**28.5 GB** on a run whose target daemon used **0.56 GB**. The column was
+measuring log volume, not the daemon; on a smaller box it is an out-of-memory
+failure instead of a misleading number.
 
-`bench` warns when it detects this. Pass a disk-backed path:
+`bench` still warns if the directory it is given turns out to be memory-backed,
+because `/var/tmp` is a symlink to `/tmp` on some images and `-d` can name a
+tmpfs path outright.
+
+It also warns when that filesystem has less than 10 GB free. `/var/tmp` is on
+the **root** filesystem on most hosts, and a run that fills it takes Docker and
+journald with it — hours into a batch, losing the artifacts of the cells that
+already finished. Point `-d` at the larger filesystem when there is one:
 
 ```bash
-./bgperf2.py bench -d /var/tmp -t bird ...
+./bgperf2.py bench -d /data/bgperf-work -t bird ...
 ```
 
 The BIRD tester's logging was also `log ... all`, which includes `trace` and
@@ -450,15 +458,15 @@ bgperf2 was originally created to test open source bgp software, so for most con
 and creates a container. For commerical NOSes this doesn't make sense. For those you will need to download
 the container images manually and then use bgperf2.
 
-For most of these images, bgperf2 mounts a local directory (usually in /tmp/bgperf2) to the container. These
+For most of these images, bgperf2 mounts a local directory (usually in /var/tmp/bgperf2) to the container. These
 commerical stacks then write back data as root, and set the privleges so that a regular user cannot delete these
 files and directories.
 
-bgperf2 tries to delete /tmp/bgperf2 before it runs, but it can't with data from these stacks, so you
+bgperf2 tries to delete /var/tmp/bgperf2 before it runs, but it can't with data from these stacks, so you
 might need to remove them yourself. The other option is to run bgperf2 as root \<shrugs\>, that's not a good idea.
 
 ```
-sudo rm -rf /tmp/bpgperf2
+sudo rm -rf /var/tmp/bgperf2
 ```
 
 I have setup multi-threaded support by default in both of these. If you want to do uni-threaded performance
@@ -509,7 +517,7 @@ $ docker tag crpd:21.3R1-S1.1 crpd:latest
 
 Be sure you tag the image or bgperf2 cannot find the image and everything will fail.
 
-bgperf2 mounts the log directory as /tmp/bgperf2/junos/logs, however there are a lot there and most of it
+bgperf2 mounts the log directory as /var/tmp/bgperf2/junos/logs, however there are a lot there and most of it
 is not relevant. To see if your config worked correctly on startup:
 
 ``` bash
@@ -646,7 +654,7 @@ And some graphs. These are some of the important ones
 
 ## Debugging
 
-If you try to change the config, it's a little tricky to debug what's going on since there are so many containers. What bgperf is doing is creating configs and startup scripts in 2 and then it copies those to the containers before launching them. It creates three containers: bgperf_exabgp_tester_tester, bgperf_\<target\>_target, and bgperf2_monitor. If things aren't working, it's probably because the config for the target is not correct. bgperf2 puts all the log output in /tmp/bgperf2/*.log, but what it doesn't do is capture the output of the startup script.
+If you try to change the config, it's a little tricky to debug what's going on since there are so many containers. What bgperf is doing is creating configs and startup scripts in 2 and then it copies those to the containers before launching them. It creates three containers: bgperf_exabgp_tester_tester, bgperf_\<target\>_target, and bgperf2_monitor. If things aren't working, it's probably because the config for the target is not correct. bgperf2 puts all the log output in /var/tmp/bgperf2/*.log, but what it doesn't do is capture the output of the startup script.
 
 If it doesn't seem to be working, try with 1 peer and 1 route (-n1 -p1) and make sure
 that it connecting. If it's just stuck at waiting to connect to the neighbor, then probably the config is wrong and neighbors are not being established between the monitor (gobgp) and the NOS being tested
@@ -661,7 +669,7 @@ to clean up any existing docker containers
 
 ```$ docker kill `docker ps -q`; docker rm `docker ps -aq` ```
 
-The startup script is in /tmp/bgperf/\<target\>/start.sh and gets copied to the target as /root/config/start.sh.
+The startup script is in /var/tmp/bgperf2/\<target\>/start.sh and gets copied to the target as /root/config/start.sh.
 
 In other words, to launch the start.sh and see the output you can run this docker command:
 

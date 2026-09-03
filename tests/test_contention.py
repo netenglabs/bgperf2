@@ -10,12 +10,16 @@ process that finished a heavy job an hour ago still reads high, and -- the case
 that matters -- a long-lived process that starts burning four cores for the 95
 seconds of a run barely moves its average and stays invisible.
 '''
+import importlib
+import os
+
 import pytest
 
 from contention import (
     CONTENTION_PERCENT,
     describe_contention,
     filesystem_type,
+    free_space_bytes,
     foreign_cpu_percent,
     is_memory_backed,
     own_process_tree,
@@ -233,10 +237,12 @@ class TestOwnProcessTree:
 
 
 class TestMemoryBackedLogDir:
-    '''-d/--dir defaults to /tmp, which is tmpfs on many distros, so every
-    tester and target log is written into RAM. A 50-peer 100k-prefix BIRD run
-    put 31GB there and dragged the recorded min_free from 56GB to 28.5GB on a
-    run whose daemon used 0.56GB.
+    '''-d/--dir defaults to /var/tmp now, for this reason: on /tmp, which is
+    tmpfs on many distros, every tester and target log is written into RAM. A
+    50-peer 100k-prefix BIRD run put 31GB there and dragged the recorded
+    min_free from 56GB to 28.5GB on a run whose daemon used 0.56GB. The check
+    stays because /var/tmp is a symlink to /tmp on some images, and -d can
+    name a tmpfs path outright.
     '''
     MOUNTS = (
         '/dev/sda5 / ext4 rw,relatime 0 0\n'
@@ -261,5 +267,94 @@ class TestMemoryBackedLogDir:
         '''/tmpfoo is not inside /tmp.'''
         assert not is_memory_backed('/tmpfoo/bench', self.MOUNTS)
 
+    def test_a_symlinked_bench_dir_is_resolved_before_it_is_judged(
+            self, tmp_path, monkeypatch):
+        """/var/tmp is a symlink to /tmp on some images -- the case this check
+        is kept for now that the default moved. abspath normalizes without
+        following symlinks, so the path handed to is_memory_backed() would
+        match no tmpfs mount line and the warning would be suppressed, in
+        silence, on exactly the host that needs it.
+        """
+        bgperf2 = importlib.import_module('bgperf2')
+        ram = tmp_path / 'ram'
+        ram.mkdir()
+        link = tmp_path / 'var-tmp'
+        link.symlink_to(ram)
+        judged = []
+        monkeypatch.setattr(bgperf2, 'is_memory_backed',
+                            lambda path, mounts: judged.append(path) or False)
+        bgperf2.warn_if_log_dir_is_in_ram(str(link / 'bgperf2'))
+        assert judged == [str(ram / 'bgperf2')]
+
     def test_unparsable_mounts_do_not_raise(self):
         assert filesystem_type('/tmp', 'garbage\n\nshort line\n') is None
+
+
+class FakeStatvfs:
+    """os.statvfs over a set of paths that exist, and nothing else."""
+
+    def __init__(self, known):
+        self.known = known
+        self.asked = []
+
+    def __call__(self, path):
+        self.asked.append(path)
+        if path not in self.known:
+            raise OSError(2, 'No such file or directory', path)
+        f_bavail, f_frsize, f_bfree = self.known[path]
+        return os.statvfs_result(
+            (4096, f_frsize, 100, f_bfree, f_bavail, 0, 0, 0, 0, 255))
+
+
+class TestTheBenchDirectoryHasRoom:
+    """Moving the default off tmpfs traded one failure for a smaller one: the
+    logs no longer come out of RAM, but /var/tmp is on the root filesystem on
+    most hosts, and a large run can fill it.
+    """
+
+    def test_free_space_is_what_this_user_can_write(self):
+        """f_bfree includes the reserve only root may use. bgperf2 does not run
+        as root, so counting it would promise space this process cannot have.
+        """
+        statvfs = FakeStatvfs({'/var/tmp': (1000, 4096, 2000)})
+        assert free_space_bytes('/var/tmp', statvfs) == 1000 * 4096
+
+    def test_the_nearest_existing_ancestor_is_measured(self):
+        """bench() asks before it creates the directory, so the path itself is
+        usually absent -- and its filesystem is the one the run will write to.
+        """
+        statvfs = FakeStatvfs({'/var/tmp': (1000, 4096, 1000)})
+        assert free_space_bytes('/var/tmp/bgperf2', statvfs) == 1000 * 4096
+        assert statvfs.asked == ['/var/tmp/bgperf2', '/var/tmp']
+
+    def test_an_unreadable_root_is_no_measurement_rather_than_zero(self):
+        """A zero here would print a warning about a full disk on every run."""
+        assert free_space_bytes('/var/tmp/bgperf2', FakeStatvfs({})) is None
+
+    def test_a_relative_path_is_still_measured(self):
+        statvfs = FakeStatvfs({os.getcwd(): (5, 4096, 5)})
+        assert free_space_bytes('bench-dir', statvfs) == 5 * 4096
+
+    def test_a_short_filesystem_is_named_with_what_to_do(self, capsys, monkeypatch):
+        bgperf2 = importlib.import_module('bgperf2')
+        monkeypatch.setattr(bgperf2, 'free_space_bytes',
+                            lambda path: int(0.4 * (1 << 30)))
+        bgperf2.warn_if_log_dir_is_short_on_space('/var/tmp/bgperf2')
+        out = capsys.readouterr().out
+        assert '0.4GB free' in out
+        assert '{0}GB'.format(bgperf2.LOG_SPACE_FLOOR_GB) in out
+        assert '-d/--dir' in out
+
+    def test_a_filesystem_with_room_says_nothing(self, capsys, monkeypatch):
+        bgperf2 = importlib.import_module('bgperf2')
+        monkeypatch.setattr(bgperf2, 'free_space_bytes',
+                            lambda path: bgperf2.LOG_SPACE_FLOOR_GB << 30)
+        bgperf2.warn_if_log_dir_is_short_on_space('/var/tmp/bgperf2')
+        assert capsys.readouterr().out == ''
+
+    def test_an_unmeasurable_filesystem_says_nothing(self, capsys, monkeypatch):
+        """Silence, not a warning about a disk nobody could read."""
+        bgperf2 = importlib.import_module('bgperf2')
+        monkeypatch.setattr(bgperf2, 'free_space_bytes', lambda path: None)
+        bgperf2.warn_if_log_dir_is_short_on_space('/var/tmp/bgperf2')
+        assert capsys.readouterr().out == ''

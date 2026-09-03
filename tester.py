@@ -191,7 +191,7 @@ ulimit -n 65536
         not an error, and it dwarfs anything real (10 peers x 900 reflected
         routes = 9000). Excluded like NEXT_HOP already was.
 
-        Takes the tester host directories rather than assuming /tmp/bgperf2, so
+        Takes the tester host directories rather than assuming a fixed path, so
         it still works with -b/--bench-name and -d/--dir.
         '''
         errors = 0

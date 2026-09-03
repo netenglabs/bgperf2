@@ -106,8 +106,9 @@ def filesystem_type(path, mounts_text):
 def is_memory_backed(path, mounts_text):
     '''True if writing to `path` consumes RAM rather than disk.
 
-    -d/--dir defaults to /tmp, which systemd mounts as tmpfs on many distros,
-    and every tester and target log is bind-mounted under it. A 50-peer
+    -d/--dir defaults to /var/tmp for this reason, but /var/tmp is a symlink
+    to /tmp on some images and -d can name a tmpfs path explicitly, so the
+    check stays. Every tester and target log is bind-mounted under it. A 50-peer
     100k-prefix BIRD run wrote 31GB of logs there -- half this machine's
     memory -- which dragged the recorded min_free from 56GB to 28.5GB on a run
     whose target daemon used 0.56GB. That makes a published column a measure of
@@ -115,6 +116,35 @@ def is_memory_backed(path, mounts_text):
     a distorted number.
     '''
     return filesystem_type(path, mounts_text) in MEMORY_BACKED_FILESYSTEMS
+
+
+def free_space_bytes(path, statvfs=os.statvfs):
+    """Bytes an unprivileged writer can still add under `path`, or None.
+
+    Two details, both of which make the difference between a real number and a
+    misleading one:
+
+    The bench directory does not exist when this is asked. bench() checks
+    before it creates the directory, on purpose -- a warning about log volume
+    is worth nothing once the logs are written -- so the nearest existing
+    ancestor is what gets measured, and it is the same filesystem the run will
+    write to.
+
+    f_bavail, not f_bfree. The difference between them is the reserve only
+    root may use, and bgperf2 does not run as root, so f_bfree would promise
+    space this process cannot have.
+    """
+    probe = os.path.abspath(path)
+    while True:
+        try:
+            stats = statvfs(probe)
+        except OSError:
+            parent = os.path.dirname(probe)
+            if parent == probe:
+                return None
+            probe = parent
+            continue
+        return stats.f_bavail * stats.f_frsize
 
 
 def parse_proc_stat(text, skip_kernel_threads=True):

@@ -1,12 +1,13 @@
 # Unattended Execution Plan
 
-Status: proposed on 2026-09-03; steps 0 through 3 taken the same day.
+Status: proposed on 2026-09-03; steps 0 through 4 taken the same day.
 The continuation prompt at the end of this document is now an operator contract
 in `CLAUDE.md`, which settles two things this document deliberately left open --
-the driver's scope and where its commits go; see the contract. Step 4 is next:
-`bd` 1.2.2 is installed and initialized, the three epics exist, and no work
-items do. Nothing here changes how the three existing contracts run, or any
-measurement semantics.
+the driver's scope and where its commits go; see the contract. Step 5 is next:
+`bd` 1.2.2 is installed and initialized, the three epics exist, and the
+measurement plan's phases are seeded, so `bd ready --exclude-type=epic` offers
+the four untaken Phase 5A change sets and nothing else. Nothing here changes how
+the three existing contracts run, or any measurement semantics.
 
 ## Purpose
 
@@ -756,6 +757,106 @@ the release gate created as a dependency chain, each carrying its exit criterion
 from the plan document.
 
 **Exit criterion:** `bd ready --label plan:measurement` returns exactly Phase 4.
+
+#### Progress on 2026-09-03: the phases are seeded, and a parent that waits on its children deadlocks its children
+
+Done, with one deviation from this step's own wording and one bd behaviour that
+had to be found by running it.
+
+**The exit criterion was met in intent and could not be met literally.** It asks
+that `bd ready --label plan:measurement` return exactly Phase 4. It was written
+while Phase 4 was the first incomplete phase; Phases 4 and 5 both landed on
+2026-09-03, between that sentence and this one. What the criterion is for is
+that the queue offer exactly the first incomplete unit of the measurement plan
+and nothing behind or ahead of it, and it does: `bd ready --exclude-type=epic`
+returns the four untaken Phase 5A change sets. Phases 0 through 5 are seeded
+closed (`bgperf2-8gg.1` through `.6`), each with the date its status line in
+[`bgperf2-measurement-implementation-plan.md`](./bgperf2-measurement-implementation-plan.md)
+records. The step's own text -- "Phases 0 through 3 closed as complete" -- is
+left standing above rather than rewritten, because a migration step that is
+quietly edited to match what happened stops being a record of what was planned.
+
+**Phase 5A got its five children now, and that is not seeding in advance.** The
+[granularity rule](#granularity) says a phase gets child items when it turns out
+to need several reviewable change sets, not before. Phase 5A has turned out: its
+own status line says the peer-scaling workload landed and "the remaining five
+work items below are untaken", and its Work list enumerates them. Seeding them
+was also the only way to keep the queue honest. A single Phase 5A item is one
+item that takes five change sets, and this harness's contract is one change set
+per continuation -- so the driver would have claimed it, done one, been unable to
+close it, and found `bd ready` empty next session with four change sets left,
+because `bd ready` excludes `in_progress`. That is the
+[empty-queue trap](#traps) reached without anyone doing anything wrong.
+
+**`--waits-for-gate=all-children` does not gate a plain task.** It was the first
+attempt at hiding the phase item while its children are open -- `bd ready`
+documents excluding "hooked" issues, and `bd create` offers the flag on any
+type. Created with it and left `open`, Phase 5A was offered as ready alongside
+its four children. The flag appears to be molecule machinery; nothing in
+`bd show` reports it either way.
+
+**A parent that depends on its own children makes the whole subtree
+unclaimable.** The second attempt was the obvious one: `bd dep add` Phase 5A on
+each of its five children, so it is blocked until they close and ready
+immediately after. `bd ready --exclude-type=epic` then returned **nothing at
+all** -- not the parent, which was the point, but not the four children either,
+which were ready a moment earlier and had acquired no dependency of their own
+(`bd show` on one lists an empty dependency set and only the two things it
+blocks). `bd blocked` reported each child as "Blocked by 1 open dependencies:
+[bgperf2-8gg.7]", inverting the edge that was actually stored. So bd's
+ready-work semantics propagate a blocked parent down to its children, and the
+tracker reports a plan with five open change sets in it as having no ready work,
+with nothing in the data looking wrong. Both edges are removed.
+
+**The fix is step 3's rule at a second level: Phase 5A is typed `epic`.** The
+driver's query is already `bd ready --exclude-type=epic`, for exactly this --
+[step 3](#progress-on-2026-09-03-three-epics-and-three-things-the-queue-does-not-say-out-loud)
+found that a container is offered as ready work whether or not it has children.
+Typing the phase container the same way as the plan container costs no new rule
+and no new flag, and the queue is correct. That the
+[work model](#epics-and-labels) says one epic per plan is about labels and
+selection; it does not stop bd's own epic/task/subtask hierarchy being used for
+a phase that split.
+
+**Phase 6 is blocked by the last Phase 5A child, not by the Phase 5A epic.**
+This is the same trap once more and it is worth stating separately, because the
+first wiring had it: an epic the driver never claims cannot be the thing that
+unblocks the next phase. Phase 6 depending on `bgperf2-8gg.7` would have left
+the queue empty the moment the last child closed, waiting on an item nothing
+offers and no one is watching. It depends on `bgperf2-8gg.7.5` instead, so
+closing the last child unblocks Phase 6 structurally. The epic is bookkeeping:
+it is closed when its acceptance criterion holds, and if it is forgotten it
+shows as an open epic in `bd list` and blocks nothing.
+
+**`bgperf2-8gg.7.5` depends on the other four, and that ordering is a judgement
+this note is the record of.** The plan document's Work list states no order
+among the five. Four of them add a workload -- path diversity, export fan-out,
+churn bursts, policy reload -- and the fifth asks that ingress, table-selection,
+export and monitor timing stay independent "so parallel work is not collapsed
+into one end-to-end number". There is no parallel work to keep uncollapsed until
+the four exist, so it is wired last. The four are deliberately left unordered and
+all four are offered at once; a single worker picking any of them is fine, and
+inventing a sequence the document does not state would be worse.
+
+**Phase 6 carries the driver's stop, and the release gate carries no checklist.**
+`bgperf2-8gg.8` says in its own body that the unattended driver stops there --
+the operator contract in `CLAUDE.md` puts Phase 6's calibration runs on the
+campaign host, not this one -- so a worker that reaches it stops and says so
+rather than starting a benchmark on the wrong machine. The plan document states
+no one-line exit criterion for Phase 6, so that item's acceptance is its Work
+list; the nine-condition release gate is `bgperf2-8gg.9` and its acceptance
+*points at* the checklist rather than restating it, which is the
+[two-sources-of-truth trap](#traps) in the one place it would have been most
+tempting to copy nine lines.
+
+**This step's output is untracked too.** `git status` is clean after seeding
+fifteen items, for the reason step 2 and step 3 record: the store is
+`.beads/embeddeddolt`, which is ignored, and `.beads/issues.jsonl` does not
+exist. The durable record of the seeding is this note.
+
+Step 5 is next, and its exit criterion -- `bd ready` returns no campaign work
+while the release gate is open -- now has something to hang on: Block 0 of the
+64 GB campaign depends on `bgperf2-8gg.9`.
 
 ### Step 5: seed the 64 GB campaign
 

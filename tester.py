@@ -139,10 +139,15 @@ protocol static {{ ipv4;
         '''
         expected = {p['router-id']: len(p.get('paths', ()))
                     for p in self._peers()}
-        try:
-            output = self.local(self.get_offerings_cmd()).decode('utf-8', 'replace')
-        except Exception:
-            output = ''
+        # A failed exec is raised, not swallowed. offering_stats() catches it
+        # and records `tester_offering_error`, which is the only way the
+        # artifact can say the generator could not be *asked*. Turning it into
+        # an empty capture here reported every peer as not established, so a
+        # run whose polls all failed produced the same artifact as a run whose
+        # generator never came up -- the ambiguity this section exists to
+        # remove -- and made that error path unreachable for the only generator
+        # that uses it.
+        output = self.local(self.get_offerings_cmd()).decode('utf-8', 'replace')
         sessions = split_session_output(output)
 
         offerings = {}

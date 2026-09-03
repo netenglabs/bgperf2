@@ -1,0 +1,12 @@
+peer_spec_index[1]: register peer 3, asn 7018
+Sep 03 00:16:11.054123 Neighbor 10.10.255.254 state change from idle -> connect
+Sep 03 00:16:11.054305 Connecting to 10.10.255.254
+Sep 03 00:16:11.054313 Socket to 10.10.255.254 is writeable
+Sep 03 00:16:11.054338 Neighbor 10.10.255.254 state change from connect -> opensent
+Sep 03 00:16:11.074419 Neighbor 10.10.255.254 state change from opensent -> openconfirm
+Sep 03 00:16:11.074468   Peer AS 1000, holdtime 240s
+Sep 03 00:16:11.074472 Neighbor 10.10.255.254 state change from openconfirm -> established
+Sep 03 00:16:11.084541 RIB for peer-index 3: AS 7018, ipv4 prefixes 10000, ipv6 prefixes 0, 2050 paths
+Sep 03 00:16:11.085507 RIB walk complete
+Sep 03 00:16:11.085581 Sent 2051 updates, 10000 prefixes sent, 0 prefixes withdrawn, 183852 octets
+Sep 03 00:16:11.085585 End-of-RIB, walk time 0.001030s

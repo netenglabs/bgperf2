@@ -261,6 +261,61 @@ call a BIRD 2.19 run tester-limited from it. Wire-side evidence needs BIRD 3's
 `TX pending`, i.e. running the generator on `bgperf/bird:3.3.2`, which the CLI
 cannot select today.
 
+### What a bgpdump2 injector says about itself
+
+`bgpdump2 --blaster` reports its own work to stdout, and `start.sh` redirects
+that to `<host_dir>/bgpdump2.log`, which is bind-mounted — so the controller can
+read it from the host, no `docker exec` per poll.
+
+**It has to run under `stdbuf -oL`.** bgpdump2 logs with `fprintf(stdout)`, and
+stdout to a file is block-buffered; nothing ever ends the process except the
+container being torn down, so the buffer was never flushed. Measured: a
+converged 2-injector run left both `bgpdump2.log` files at **exactly 0 bytes**
+with the blaster still running and its work done. The generator had been
+reporting all along and none of it was observable. A run whose log outgrows one
+buffer is not saved by that either — it is simply always up to a buffer behind,
+which is exactly the tail a poll wants to read. Any generator that logs to a
+redirected stdout has this trap.
+
+`parse_blaster_log()` and `tester_offering()` in `bgpdump2.py` read that log:
+
+- **Prefix counts are encode-side, the octet count is wire-side.** `prefixes
+  sent` and `updates sent` increment as prefixes are encoded into the 256KB
+  session write buffer; `octets` only on a successful `write()` to the socket.
+  One real mid-walk line reads `Sent 2280 updates, 9981 prefixes sent, 0
+  prefixes withdrawn, 88 octets`. Same caveat as BIRD 2.19's counter, with one
+  wire-side number beside it.
+- **`End-of-RIB, walk time` is bgpdump2's own measurement of its walk**, and it
+  resolves what a 1s poll cannot: one injector's whole 10,000-prefix walk took
+  1.03ms. It is encode time bounded by the write buffer, so on a table large
+  enough to fill that buffer it tracks the wire and on a small one it does not.
+  It times *one* RIB — a session given several `-p` indexes logs one per RIB,
+  and summing them would drop the gaps between walks, so the summary publishes
+  it only for a single-RIB session (which is what bgperf configures).
+- **Completion is the injector's own report, not a count.** `-T` caps the table
+  while the MRT file is read, so an injector ends up holding whatever that MRT
+  peer's table has; `offered >= expected` can stay false forever on an injector
+  that has demonstrably sent everything it holds. That is what
+  `TesterOffering.send_complete` is for, and it decides completion in both
+  directions — a generator saying it has *not* finished is not overruled by a
+  count that reached `expected`. `configured` vs `expected` stays the separate
+  cross-check for a workload that did not load.
+- **The completion signal is the `End-of-RIB` line, not `RIB walk complete`.**
+  bgpdump2 logs the marker, then the final `Sent ...` counters, then End-of-RIB
+  — one code path, microseconds apart, but a poll lands between them often
+  enough. Reporting on the marker freezes the counters at their mid-walk value
+  (9,981 of 10,000 in one capture), and in the other capture the marker precedes
+  the first `Sent` line entirely, so completion would carry no count at all.
+  `TesterEventRecorder` refuses that second case anyway: it holds
+  `tester_complete` until an update has been observed, because a completion
+  sorted before `tester_first_update` makes `tester_metrics()` raise out of
+  `finish_bench()` and kills a run that had already converged.
+- **The log's timestamps are never parsed.** They are local wall-clock with no
+  year and no zone (`%b %d %H:%M:%S.%06lu`); durations here come from the
+  controller's monotonic clock.
+
+Not wired into `bench()` yet — no bgpdump2 events reach `<prefix>.events.json`.
+
 ### Host contention — `contention.py`
 
 A benchmark sharing its machine reports numbers that look fine and are not comparable with

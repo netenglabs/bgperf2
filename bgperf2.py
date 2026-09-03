@@ -1419,6 +1419,15 @@ def print_tester_metrics(events, producers):
                   f"(no observed completion for every session)")
             continue
         covered = measured['offered_in_interval']
+        if offered is None:
+            # A generator that reported its own completion on a poll whose
+            # counters were not legible. The interval is real; how much crossed
+            # it is unknown, and it is unknown for a different reason than the
+            # counter reset below.
+            print(f"{producer}: ready after {startup_text}, completed in "
+                  f"{measured['injection_s']:.1f}s, offered count unavailable "
+                  f"(no readable count at completion)")
+            continue
         if covered is None:
             # The counter went backwards: BIRD clears a protocol's route-change
             # stats when it restarts, so a session that flapped reports fewer

@@ -281,6 +281,10 @@ class TesterOffering:
     a cross-check that it got the workload it was given, never the source of
     `expected`.  Deriving `expected` from the generator's own report would make
     a generator that loaded half its config look complete.
+
+    `send_complete` is a generator's own statement that it finished the send
+    contract, for the generators that make one.  None means it does not, and
+    completion is inferred from the counts instead.
     '''
 
     established: bool
@@ -289,10 +293,14 @@ class TesterOffering:
     configured: Optional[int] = None
     tx_pending_bytes: Optional[int] = None
     pending_prefixes: Optional[int] = None
+    send_complete: Optional[bool] = None
 
     def __post_init__(self):
         if not isinstance(self.established, bool):
             raise TypeError('established must be a bool')
+        if self.send_complete is not None \
+                and not isinstance(self.send_complete, bool):
+            raise TypeError('send_complete must be a bool or None')
         for name in ('expected', 'offered', 'configured',
                      'tx_pending_bytes', 'pending_prefixes'):
             value = getattr(self, name)
@@ -310,9 +318,27 @@ class TesterOffering:
         an `expected` of 0 makes any generator 'complete' on its first poll --
         which would emit `tester_complete` before `tester_session_ready` and
         order the lifecycle in a way no consumer can read.
+
+        A generator that reports its own completion decides it, in both
+        directions.  MRT playback is why: the size of the table an injector
+        ends up with is a property of the MRT peer it was pointed at, not of
+        the number the run asked for, so `offered >= expected` can stay false
+        forever on an injector that has demonstrably sent everything it holds.
+        The reverse matters just as much -- a generator that says it has *not*
+        finished is not overruled by a count that happens to have reached
+        `expected`, since its own report is the more direct evidence.
+
+        Reported completion does not require a readable count, so it does not
+        carry the `expected > 0` gate the paragraph above describes.  The
+        ordering that gate protected is enforced where it belongs instead:
+        TesterEventRecorder holds `tester_complete` until an update has been
+        observed.
         '''
-        return (self.established
-                and self.expected > 0
+        if not self.established:
+            return False
+        if self.send_complete is not None:
+            return self.send_complete
+        return (self.expected > 0
                 and self.offered is not None
                 and self.offered >= self.expected)
 
@@ -496,8 +522,20 @@ class TesterEventRecorder:
                 counters=counters, details=self._details())
             self._total_offered = offered
 
-        if all(o.complete for o in offerings) and unique_event(
-                self._events, EventKind.TESTER_COMPLETE) is None:
+        # Completion is held until an update has been observed. A generator that
+        # reports its own completion can say so on a poll where its counters
+        # were not yet legible, and recording that would put `tester_complete`
+        # before the `tester_first_update` a later poll finds -- an inverted
+        # stream that `tester_metrics()` rejects with an EventOrderError, out of
+        # `finish_bench()`, killing a run that had already converged. The
+        # first-update event above is recorded earlier in this same poll, so a
+        # generator whose completion and first legible count arrive together
+        # still completes on that poll.
+        if all(o.complete for o in offerings) \
+                and unique_event(
+                    self._events, EventKind.TESTER_FIRST_UPDATE) is not None \
+                and unique_event(
+                    self._events, EventKind.TESTER_COMPLETE) is None:
             self._add(EventKind.TESTER_COMPLETE, monotonic_s, counters,
                       {'backpressure': self.backpressure})
 

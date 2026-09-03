@@ -369,6 +369,69 @@ the expected offered route count.
 
 ### Phase 3: Instrument bgpdump2 MRT playback
 
+Status: in progress. The injector's own evidence is now readable and parsed;
+nothing is wired into `bench()` yet, and provenance is still `UNKNOWN`.
+
+#### Progress on 2026-09-03: the injector log was empty, and now is not
+
+`bgpdump2 --blaster` logs to stdout, which `start.sh` redirects into the
+bind-mounted `bgpdump2.log`. Redirected stdout is block-buffered and nothing
+ends the process but the container teardown, so **a converged two-injector run
+left both logs at exactly 0 bytes** while the blaster was still running with its
+walk finished. Every fact this phase needs was being written into a buffer no
+one read. `start.sh` now runs the blaster under `stdbuf -oL -eL`; the same run
+then produced complete logs for both injectors.
+
+`bgpdump2.parse_blaster_log()` and `bgpdump2.tester_offering()` read that log,
+covered against the two real captures in `tests/fixtures/bgpdump2_blaster*.log`
+(2 injectors x 10,000 prefixes against a BIRD target). Earlier polls are modelled
+by truncating those captures, including mid-line, since an incremental reader
+meets exactly that.
+
+Four things this settled:
+
+- **Completion is the injector's own report, and it cannot be a count.** `-T`
+  caps the table while the MRT file is read, so an injector holds whatever that
+  MRT peer's table has; `offered >= expected` can stay false forever on an
+  injector that has sent everything it holds. `measurements.TesterOffering`
+  gained `send_complete` for a generator's own statement, and it decides
+  completion in both directions — a generator that says it has not finished is
+  not overruled by a count that reached `expected`. BIRD passes `None` and
+  keeps the count-based rule. The signal is the `End-of-RIB` line rather than
+  the `RIB walk complete` marker that precedes it: the marker is logged before
+  the final `Sent ...` counters, so completing on it carries mid-walk counts,
+  and in one capture it precedes the first `Sent` line entirely. That second
+  case is refused twice over — `TesterEventRecorder` now holds
+  `tester_complete` until an update has been observed, since a completion
+  sorted ahead of `tester_first_update` makes `tester_metrics()` raise out of
+  `finish_bench()` and kill a converged run.
+- **Prefix counts are encode-side; the octet count is wire-side.** `prefixes
+  sent` increments as prefixes are encoded into the 256KB session write buffer,
+  `octets` only on a successful `write()`. A captured mid-walk line reads
+  `Sent 2280 updates, 9981 prefixes sent, 0 prefixes withdrawn, 88 octets`. The
+  BIRD 2.19 queue-side caveat applies to the prefix counts, with one wire-side
+  number beside them.
+- **`End-of-RIB, walk time` is the generator's own playback measurement**, and
+  it resolves what the poll cadence cannot: one injector's entire 10,000-prefix
+  walk took 1.03ms. It times one RIB, so it is published only for a single-RIB
+  session; summing sequential walks would drop the gaps between them.
+- The log's timestamps are local wall-clock with no year or zone, so they are
+  parsed for nothing. Durations stay on the controller's monotonic clock.
+
+Review of this change set also found a Phase 2 defect, fixed here:
+`BIRDTester.get_offerings()` caught every exception from its `docker exec` and
+read the failure as an empty capture, so `offering_stats()`'s
+`tester_offering_error` path — and the artifact's `read_failures` evidence —
+could never fire for the only generator that had one. A run whose polls all
+failed produced the same artifact as a run whose generator never came up.
+
+Left for the next change sets in this phase: polling the log from `bench()` and
+merging per-injector events into `<prefix>.events.json`; aggregating ten
+injectors without letting the fastest speak for the rest; blocked-write evidence
+(`-t io` enables bgpdump2's `Partial write`/`Full write` lines, at the cost of a
+log line per write); and bgpdump2 provenance, still `UNKNOWN (no version command
+for Bgpdump2Tester)` although the binary answers `-V` with `Version: 2.0.14`.
+
 #### Work
 
 - Make every injector report first-update and completion evidence.

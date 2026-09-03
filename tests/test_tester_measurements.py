@@ -698,14 +698,21 @@ def test_a_peer_that_did_not_answer_is_still_polled(tmp_path, fixture_text):
     assert silent.complete is False
 
 
-def test_a_failed_exec_leaves_every_session_unreadable(tmp_path):
+def test_a_failed_exec_is_raised_rather_than_read_as_a_silent_generator(
+        tmp_path):
+    '''"We could not ask" has to stay distinct from "nobody answered".
+
+    offering_stats() records a raised failure as `tester_offering_error`, which
+    is what puts `read_failures` in the artifact. Swallowing it here reported
+    every peer as not established instead, so a run whose polls all failed
+    produced the same artifact as a run whose generator never came up -- and
+    that error path could never fire for the only generator that has one.
+    '''
     tester = StubbedBIRDTester(tmp_path, peers('10.0.0.1', '10.0.0.2'),
                                RuntimeError('container is not running'))
 
-    offerings = tester.get_offerings()
-
-    assert sorted(offerings) == ['10.0.0.1', '10.0.0.2']
-    assert all(o.offered is None for o in offerings.values())
+    with pytest.raises(RuntimeError):
+        tester.get_offerings()
 
 
 def test_expected_comes_from_the_configuration_not_the_generator(tmp_path,

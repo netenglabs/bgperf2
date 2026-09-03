@@ -1,12 +1,12 @@
 # Unattended Execution Plan
 
-Status: proposed on 2026-09-03; steps 0, 1 and 2 taken the same day.
+Status: proposed on 2026-09-03; steps 0 through 3 taken the same day.
 The continuation prompt at the end of this document is now an operator contract
 in `CLAUDE.md`, which settles two things this document deliberately left open --
-the driver's scope and where its commits go; see the contract. Step 3 is next:
-`bd` 1.2.2 is installed and initialized, and no epics or items exist yet.
-Nothing here changes how the three existing contracts run, or any measurement
-semantics.
+the driver's scope and where its commits go; see the contract. Step 4 is next:
+`bd` 1.2.2 is installed and initialized, the three epics exist, and no work
+items do. Nothing here changes how the three existing contracts run, or any
+measurement semantics.
 
 ## Purpose
 
@@ -686,6 +686,68 @@ Step 3 is next.
 Three epics, three labels, no items yet.
 
 **Exit criterion:** `bd list --label plan:measurement` returns the epic.
+
+#### Progress on 2026-09-03: three epics, and three things the queue does not say out loud
+
+Exit criterion met: `bd list --label plan:measurement` returns
+`bgperf2-8gg`. The other two are `bgperf2-iee` (`plan:timing-64gb`) and
+`bgperf2-c4u` (`plan:campaign`). No items yet, as the step says.
+
+Each epic carries a title, an acceptance criterion, the path to its plan
+document and the operator contract prompt that drives it, and says in its own
+body that it holds no reasoning -- which is the
+[two-sources-of-truth trap](#traps) written where a worker reading the item
+will actually hit it, rather than only here.
+
+**A childless epic is ready work, and all three were offered immediately.**
+`bd ready` returned every epic the moment it was created; its documented
+exclusions are "in_progress, blocked, deferred, and hooked", and having open
+children is not among them. That matters to the two steps after this one,
+because both state their exit criteria against `bd ready` and neither would
+have held: step 4 wants *exactly* Phase 4 and would have got Phase 4 plus the
+epic, and step 5 wants no campaign work at all while the release gate is open
+and would have got the campaign epic. The query a driver must use is
+`bd ready --exclude-type=epic` -- `epic` is the example in bd's own help text
+for that flag -- and with it the queue is correctly empty today. Left
+unnoticed, this is the failure mode the plan warns about twice over: a worker
+would have claimed an epic, found no change set inside it, and either invented
+one or reported the queue exhausted.
+
+**The empty-queue message is not evidence about blockers.** With epics
+excluded, `bd ready` prints "No ready work found (all issues have blocking
+dependencies)" -- while nothing in the store has a dependency of any kind. And
+it **exits 0** either way, which is the more consequential half: the stage-2
+loop distinguishes an empty queue from a failure by exit code, and it cannot
+read that distinction off `bd`. `bd ready --json` returning `[]` is the test;
+translating that into the loop's own empty-queue code stays the worker's job,
+exactly as [Stage 2](#stage-2-headless-loop) specifies.
+
+**This step's entire output is untracked.** The epics live in
+`.beads/embeddeddolt`, which is ignored on purpose -- `bd`'s own
+`.beads/.gitignore` is the rule that matches, with the root rule step 2 added
+behind it as the fallback that does not depend on a file `bd` rewrites -- and
+`.beads/issues.jsonl`, the passive export `CLAUDE.md` names, does not exist.
+`git status` is clean after creating three epics. So the ready queue is durable
+across *sessions*, which is what [Stage 2](#stage-2-headless-loop) needs, and
+not across the host, while every plan document it supplements is in git. That
+is a real asymmetry rather than an oversight to fix in passing: tracking the
+export would carry issue state to `origin` on any push of the branch, which is
+a second route to the public remote step 2 closed for `bd dolt push`. It is
+written down here so step 6 decides it rather than discovers it.
+
+**The `2026-baseline` epic exists and has no seeding step, by design.** The
+[work model](#epics-and-labels) asks for one epic per plan and this is the
+third, but the migration sequence seeds only the measurement plan (step 4) and
+the 64 GB campaign (step 5). That is consistent with
+[`2026-bgp-performance-test-plan.md`](./2026-bgp-performance-test-plan.md),
+whose Status section records that campaign as having produced its result and
+retains its remaining phases as historical design context that are not
+scheduled while the local 64 GB server is the only host. The epic says so in
+its acceptance criterion. It is left open rather than closed as complete,
+because "not scheduled" is a statement about the hardware available and
+reopening it is a human's call; closing it would file that decision as done.
+
+Step 4 is next.
 
 ### Step 4: seed the measurement plan
 

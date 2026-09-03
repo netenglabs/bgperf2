@@ -127,3 +127,58 @@ first update to the **slowest** completion, and completion all-or-nothing.
 route when it is handed to the BGP protocol, not when it reaches the wire, so
 the count and the completion fact are trustworthy while the duration is not.
 Do not derive a tester-limited finding from a BIRD 2.19 rate.
+
+## Event artifact: the `findings` section
+
+The same artifact carries a `findings` object
+(`bgperf2/measurement-findings/v1alpha1`), derived by `findings.py` from the
+sections above plus the controller's own host samplers. It answers the one
+question the intervals were added for — what was this run waiting for — and
+most often refuses to answer it. It is not a validity boolean: every finding
+carries the rule it applied and the raw durations it applied it to, so a
+reader can disagree with the policy without re-deriving the numbers.
+
+| Field | Unit/type | Definition and interpretation |
+|---|---|---|
+| `policy_version` | string | The named qualification policy that produced this verdict, versioned separately from the artifact schema. The same durations can be published under a changed policy, and a reader comparing two runs needs to know whether the verdicts were reached the same way. |
+| `limiting_component` | string | `tester`, `target_or_monitor`, `unresolved`, or `inconclusive`. The last two are different statements and are kept apart deliberately: `inconclusive` means the measurement that would decide it was never made (no generator that can be asked, a generator that never completed, a monitor that never reached the check-point), and `unresolved` means the measurements exist and something forbids attributing them (a saturated or shared host, low free memory, blocked writes, or a generator whose completion is counted where the routes were queued rather than sent). |
+| `decided_by` | string | Which finding produced the verdict, or `null` where nothing did. |
+| `reason` | string | That finding's summary, repeated at the top so a verdict is never published without the sentence behind it. |
+| `findings` | list of objects | Everything the policy concluded, including findings it then withheld. A run qualified by a busy host still publishes the `tester_limited` evidence it would otherwise have been attributed by: the verdict is withheld, not the measurement. |
+
+Each entry in `findings` has `finding` (the rule's name), `kind`, `summary`,
+`policy` (the rule in one sentence), `evidence` (the raw durations and counts
+it ruled on), and `limiting_component` — set only on the two findings that
+propose one.
+
+`kind` says what a finding does to the verdict, and the four are resolved in
+this order: `missing_evidence` (the deciding measurement was never made) beats
+`confounder` (it was made and cannot be attributed), which beats `attribution`
+(a proposed component), which beats `qualification` (a narrowing of how an
+interval may be read that does not by itself prevent an attribution some other
+interval supports).
+
+| Finding | Kind | When it fires |
+|---|---|---|
+| `tester_limited` | attribution | The generators were measured sending for longer than the poll that bounds the interval, at a rate this instrument could observe, and the monitor reached the required count within one poll of their completion or before it. It requires that at least `INJECTION_COVERAGE` (half) of the offered table crossed the measured interval, which is what keeps a queue-side counter from being read as a send rate — BIRD 2.19 puts at most about 15% of its table inside that interval, and where the first poll lands decides how much. |
+| `post_injection_tail` | attribution | The run continued past the last generator's completion by more than the polls bounding that interval. The time was spent somewhere between the target and the monitor, and nothing published here separates the two: the monitor is the instrument, so its own polling is inside the number. |
+| `injection_unresolved` | qualification | The fleet injection was no wider than the look that bounds it. Every MRT run has this shape — a 10,000-prefix walk is over in about a millisecond — so it forbids reading the injection as the run's cost and forbids nothing about the tail. |
+| `injection_boundary_unresolved` | confounder | Neither most of the table crossed the measured interval nor did any generator time its own send, so the generator's completion may sit anywhere inside its real sending and the boundary between injection and tail cannot be trusted. This is the BIRD 2.19 case. |
+| `no_dominant_interval` | qualification | Both intervals finished inside what these poll loops can resolve. Neither end can be shown to have held the run up. |
+| `tester_incomplete` | missing_evidence | A generator never reported completion, so the workload was never fully offered and no interval bounded by it can be read. |
+| `missing_timing_evidence` | missing_evidence | No generator in the run could be asked what it offered (ExaBGP and GoBGP playback), or the monitor never reached the required count, which is also every failed run. |
+| `backpressure_observed` | confounder | A generator reported cumulative blocked writes or send stalls. Which end of a blocked write was at fault is not in these numbers, so it withholds an attribution rather than supplying one. BIRD 3's `TX pending` queue depths are deliberately **not** read as backpressure: a session with something queued at the instant it is polled is what a working session looks like, and treating it as backpressure would withhold every BIRD 3 verdict there is. |
+| `host_cpu_saturated` | confounder | Host idle fell to `HOST_IDLE_PERCENT` (5%) or below. `min idle%` is host-wide and includes bgperf2's own load, so it says the machine had nothing spare and not whose work that was — see the CPU attribution boundary in the implementation plan. Per-role, time-aligned CPU would be needed to say more, and no such measurement exists. |
+| `foreign_cpu_contention` | confounder | `max foreign cpu %` reached `contention.CONTENTION_PERCENT` (one core). A run sharing the machine is not comparable with one that did not, and a version ranking read off it would be an artifact of the neighbour. |
+| `low_free_memory` | confounder | Free memory fell below `LOW_FREE_MEMORY_FRACTION` (5%) of the host's total, so the intervals include page pressure. A fraction rather than a constant because the column is also moved by bgperf2's own logging when the bench directory is tmpfs. |
+
+A run whose policy raised still writes its artifact: `write_event_artifact()`
+catches, and publishes `limiting_component: inconclusive` with the exception in
+`reason` and an empty `findings` list. The artifact preserves the evidence and
+this section is an opinion about it, so the opinion must not be able to take
+the evidence with it.
+
+The host evidence comes from `bgperf2.host_evidence()`, which maps the
+controller's sentinels back to "never sampled": the minima start above every
+real value so the first sample can only lower them, and an untouched sentinel
+must not read as an idle host with free memory.

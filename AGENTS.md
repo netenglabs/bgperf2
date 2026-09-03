@@ -133,6 +133,12 @@ parsing must stay incremental and memory-conscious.
   polled `injection_s`, not folded into it — a different clock and the generator's own definition of sending.
   For a bgpdump2 walk that finishes in a millisecond it is the only account of the interval there is. Its
   wire-side companion is `octets_on_wire`; `offered_prefixes` is counted at the encoder.
+- A run's verdict about what limited it lives in the `findings` section of its `.events.json`, derived by
+  `findings.py`. It refuses to attribute far more often than it attributes, and the two refusals differ:
+  `inconclusive` means the deciding measurement was never made, `unresolved` means it was made and a
+  confounder (busy or shared host, low free memory, blocked writes, a queue-side completion) forbids
+  attributing it. A withheld verdict still publishes the evidence it withheld. Do not add a finding that
+  names a component from a single extremum or from two similar durations.
 - The project is effectively IPv4-only today. Changes that appear to add IPv6 support need updates in prefix
   generation, peering, monitor accounting, and MRT playback behavior.
 

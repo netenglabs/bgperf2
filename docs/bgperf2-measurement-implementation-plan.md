@@ -914,7 +914,9 @@ duration/rate, and reproducible bgpdump2 identity.
 
 ### Phase 4: Derive bottleneck findings conservatively
 
-Status: in progress. The interval the findings are about now exists.
+Status: complete on 2026-09-03. A run publishes a named, versioned
+qualification policy beside the intervals it ruled on, and it withholds a
+verdict far more often than it gives one.
 
 #### Progress on 2026-09-03: measure the tail, before classifying it
 
@@ -966,8 +968,65 @@ direction. No Docker run: this is a pure derivation over events two poll loops
 already produce, covered by `tests/test_post_injection_tail.py` against
 recorder-produced streams.
 
-Still to do in this phase: the structured findings themselves, which now have
-an interval to reason about.
+#### Progress on 2026-09-03: the findings, and what they refuse to say
+
+`findings.py` derives a `findings` section into every run's
+`<prefix>.events.json` and prints its verdict as the last line of a run. It is
+pure and Docker-free like `contention.py` and `convergence.py`, and its input
+is the event artifact rather than the event stream, so it cannot reason about a
+duration the artifact did not publish.
+
+The verdict is `limiting_component`, and two of its four values are refusals
+that are deliberately not the same refusal. `inconclusive` means the
+measurement that would decide it was never made -- no generator that can be
+asked, a generator that never completed, a monitor that never reached the
+check-point. `unresolved` means the measurements exist and something forbids
+attributing them. Collapsing the two would hide which one the operator can do
+something about.
+
+Four things this had to get right.
+
+**The coverage rule is what keeps a queue-side counter from becoming a
+verdict.** The dictionary already said not to derive a tester-limited finding
+from a BIRD 2.19 rate, and the policy cannot ask which generator produced a
+number. It asks the numbers instead: at least half the offered table has to
+have crossed the measured interval, or the generator has to have timed its own
+send. BIRD 2.19 puts between 0 and about 15% of its table inside that interval
+depending only on where the first poll landed, so it fails both and the run is
+`unresolved` with `injection_boundary_unresolved` -- including the large
+positive tail such a run has, which would otherwise have been charged to the
+target while the generator was still draining its sessions. An MRT injector
+fails the first test and passes the second, so a 10,000-prefix run whose whole
+walk is over before the first poll can still show a target tail.
+
+**A confounder withholds the verdict, not the evidence.** A tester-limited run
+on a saturated host publishes the `tester_limited` finding and reports
+`unresolved`, naming host saturation as what decided it. Dropping the finding
+would leave nothing to re-read when the run is repeated on a quiet machine,
+and `min idle%` is host-wide and includes bgperf2's own load, so it says the
+machine had nothing spare and not whose work that was -- the CPU attribution
+boundary above, applied.
+
+**Backpressure is an interaction, and only the counts of being blocked
+qualify.** BIRD 3 reports `TX pending` bytes at every poll, and a session with
+something queued at the instant it is looked at is what a working session
+looks like; reading that as backpressure would withhold every BIRD 3 verdict
+there is. Only `max_blocked_writes` and `max_send_stalls` -- cumulative counts
+of writes the socket refused and encode passes that found no room -- are read,
+and they name no component, because which end of a blocked write was at fault
+is not in these numbers.
+
+**An unsampled host minimum is not a measurement.** `min_free` starts at a
+sentinel above every real value so the first sample can only lower it, so a run
+whose memory sampler never fired would otherwise publish a machine with a
+petabyte free. `host_evidence()` maps it back to `None`.
+
+Tester log errors and timeouts are deliberately *not* inputs: `finish_bench()`
+writes the artifact before scanning those logs, on purpose, and a finding is
+worth less than the atomic write of the evidence it would be derived from.
+
+No Docker run: this is a pure derivation over an artifact two poll loops and
+the controller's samplers already produce, covered by `tests/test_findings.py`.
 
 #### Work
 

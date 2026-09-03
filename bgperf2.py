@@ -56,6 +56,7 @@ from monitor import Monitor
 from convergence import ConvergenceTracker
 from contention import (describe_contention, foreign_cpu_percent,
                         is_memory_backed, own_process_tree, sample_processes)
+from findings import derive_findings, describe_findings, policy_failure
 from measurements import (MonitorEventRecorder, TesterEventRecorder,
                           event_artifact, monitor_metrics,
                           tester_fleet_metrics, tester_metrics)
@@ -821,6 +822,12 @@ MONITOR_POLL_INTERVAL_S = 1
 # measurement rather than the difference between two instruments.
 TESTER_POLL_INTERVAL_S = MONITOR_POLL_INTERVAL_S
 
+# The starting value for the free-memory minimum, above any real reading so the
+# first sample can only lower it. An untouched sentinel therefore means the
+# sampler never fired, which host_evidence() reports as "not measured" rather
+# than as a machine with a petabyte free.
+UNSAMPLED_MIN_FREE = 1_000_000_000_000_000
+
 
 def observe_tester_sample(info, recorders, errors):
     '''Feed one polled generator sample to its recorder.
@@ -1189,7 +1196,7 @@ def bench(args):
     output_stats['max_mem'] = 0
     output_stats['first_received_time'] = datetime.timedelta(0)
     output_stats['min_idle'] = 100
-    output_stats['min_free'] = 1_000_000_000_000_000
+    output_stats['min_free'] = UNSAMPLED_MIN_FREE
     output_stats['max_foreign_cpu'] = 0
     # finish_bench() fills these in once the clock has stopped; a run with no
     # testers (a remote target) never gets there, and they are printed and
@@ -1362,9 +1369,47 @@ def write_provenance(args, provenance, prefix):
     return path
 
 
-def write_event_artifact(args, events, prefix, status, testers=None):
-    '''Atomically preserve lifecycle evidence before post-run collection.'''
+def host_evidence(output_stats):
+    '''The run-level evidence that is not an event, for the findings policy.
+
+    These come from the controller's own sampler threads rather than from any
+    container, so they never enter the lifecycle stream -- but a busy or
+    nearly-full machine is exactly the case where the intervals in that stream
+    must not be attributed to a daemon.
+
+    The two minima start at sentinels so the first sample can only lower them,
+    which means an untouched sentinel is "never sampled" and not "the machine
+    was idle". Free memory says so; `min_idle` at 100 is left as it is, since
+    an idle host and an unsampled one lead to the same finding: none.
+    '''
+    free = output_stats.get('min_free')
+    return {
+        'min_idle_percent': output_stats.get('min_idle'),
+        'max_foreign_cpu_percent': output_stats.get('max_foreign_cpu'),
+        'min_free_bytes': None if free == UNSAMPLED_MIN_FREE else free,
+        'total_memory_bytes': output_stats.get('memory'),
+    }
+
+
+def write_event_artifact(args, events, prefix, status, testers=None,
+                         host=None):
+    '''Atomically preserve lifecycle evidence before post-run collection.
+
+    Returns the document it wrote, so the caller can print the findings it
+    derived rather than deriving them a second time from the same events.
+    '''
     doc = event_artifact(events, status, testers=testers)
+    # Derived from the finished document rather than from the events, so the
+    # policy can only ever reason about intervals this artifact published.
+    #
+    # Caught, because this function's job is to preserve the evidence and the
+    # findings are an opinion about it: by the time it runs, this document is
+    # the only record that a converged run happened at all, and losing it to a
+    # verdict that could not be formed would be the wrong half to drop.
+    try:
+        doc['findings'] = derive_findings(doc, host=host)
+    except Exception as e:
+        doc['findings'] = policy_failure(e)
     doc['run'] = {
         'name': run_name(args),
         'peers': args.neighbor_num,
@@ -1378,7 +1423,7 @@ def write_event_artifact(args, events, prefix, status, testers=None):
         f.write('\n')
 
     atomic_write(path, write)
-    return path
+    return doc
 
 
 def finish_bench(args, output_stats, bench_stats, bench_start, target, m, testers=(), fail=False,
@@ -1403,10 +1448,10 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
 
     pre = run_name(args).replace(' ', '_')
     bench_prefix = f"{pre}_{args.tester_type}_{args.prefix_num}_{args.neighbor_num}"
-    write_event_artifact(
+    artifact = write_event_artifact(
         args, lifecycle_events, bench_prefix,
         status='failed' if fail else 'converged',
-        testers=tester_evidence)
+        testers=tester_evidence, host=host_evidence(output_stats))
 
     # Scan the tester logs only after the clock has stopped. These used to run
     # in bench() before bench_stop, so walking every tester log line by line --
@@ -1427,6 +1472,9 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
 
     print_final_stats(args, target_version, output_stats)
     print_tester_metrics(lifecycle_events, tester_evidence)
+    # Last, because it is the one line that reads the rest of them together.
+    for line in describe_findings(artifact['findings']):
+        print(line)
     o_s = create_output_stats(args, target_version, output_stats, fail, provenance)
     print(stats_header())
     print(','.join(map(str, o_s)))

@@ -240,9 +240,11 @@ def test_a_tester_with_no_events_reports_null_intervals_rather_than_absence():
         'startup_resolution_s': None,
         'injection_s': None,
         'injection_resolution_s': None,
+        'reported_injection_s': None,
         'offered_prefixes': None,
         'offered_in_interval': None,
         'offered_rate_pps': None,
+        'octets_on_wire': None,
         'backpressure': {'available': False},
     }
 

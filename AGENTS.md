@@ -124,6 +124,10 @@ parsing must stay incremental and memory-conscious.
   generator's own counters. A BIRD 2.19 offered count is queue-side: the count and the completion fact are
   sound, the injection duration and rate are not. Read `offered_rate_pps` only beside `offered_in_interval`,
   and do not derive a tester-limited verdict from a BIRD 2.19 rate.
+- Where a generator measures its own send, that measurement is published as `reported_injection_s` beside the
+  polled `injection_s`, not folded into it — a different clock and the generator's own definition of sending.
+  For a bgpdump2 walk that finishes in a millisecond it is the only account of the interval there is. Its
+  wire-side companion is `octets_on_wire`; `offered_prefixes` is counted at the encoder.
 - The project is effectively IPv4-only today. Changes that appear to add IPv6 support need updates in prefix
   generation, peering, monitor accounting, and MRT playback behavior.
 

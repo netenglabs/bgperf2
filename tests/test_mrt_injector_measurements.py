@@ -272,6 +272,38 @@ def test_a_polled_injector_produces_the_lifecycle_from_its_log(blaster_log):
     assert metrics['offered_in_interval'] == 19
 
 
+def test_a_walk_shorter_than_a_poll_is_still_accounted_for(blaster_log):
+    '''The measurement's own limit, and the answer to it.
+
+    This injector's entire 10,000-prefix walk took 1.03ms, so the first poll
+    finds a session that is up, its whole table offered and its walk finished:
+    first update and completion land together and the polled interval is 0.0.
+    That is not an instant injection, it is one no poll can resolve -- and the
+    generator's own two numbers are what say anything about it at all.
+    '''
+    recorder = TesterEventRecorder(10.0, producer='mrt-injector1',
+                                   sample_interval_s=1)
+    offering = tester_offering(blaster_log('bgpdump2_blaster_one_poll.log'))
+    recorder.observe(11.0, {'10.10.0.4': TesterOffering(
+        established=offering['established'],
+        expected=10000,
+        offered=offering['offered'],
+        configured=offering['configured'],
+        send_complete=offering['send_complete'],
+        octets_on_wire=offering['octets_on_wire'],
+        reported_send_duration_s=offering['walk_time_s'])})
+
+    origin = LifecycleEvent(EventKind.BENCH_CLOCK_STARTED, 10.0, 'controller',
+                            EventPhase.SETUP)
+    metrics = tester_metrics([origin] + list(recorder.events), 'mrt-injector1')
+
+    assert metrics['injection_s'] == 0.0
+    assert metrics['injection_resolution_s'] == 1.0
+    assert metrics['offered_rate_pps'] is None
+    assert metrics['reported_injection_s'] == 0.001030
+    assert metrics['octets_on_wire'] == 183852
+
+
 def test_completion_is_held_until_an_update_has_been_observed():
     '''A reported completion must not sort before the first update.
 
@@ -446,6 +478,23 @@ def test_the_poll_names_the_session_the_run_configured(blaster_log, tmp_path):
     assert offering.established is True
     assert offering.offered == 10000
     assert offering.complete is True
+
+
+def test_the_poll_carries_the_injectors_own_evidence(blaster_log, tmp_path):
+    '''The two facts the controller cannot observe for itself.
+
+    `octets` is counted on a successful write() while `offered` is counted at
+    the encoder, so the pair says how much of what was encoded had reached the
+    socket. `walk time` is the blaster's own measurement of the walk, which at
+    MRT playback speeds is the only account of an injection that finished
+    before the first poll looked.
+    '''
+    write_log(tmp_path, blaster_log())
+
+    offering = injector(tmp_path).get_offerings()['10.10.0.3']
+
+    assert offering.octets_on_wire == 259226
+    assert offering.reported_send_duration_s == 0.011314
 
 
 def test_an_injector_that_holds_less_than_asked_can_still_finish(blaster_log,

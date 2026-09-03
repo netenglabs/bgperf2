@@ -529,13 +529,67 @@ halves are covered by unit tests -- the loop's achieved cadence in
 `tests/test_controller_threads.py`, the derived resolution in
 `tests/test_tester_measurements.py`.
 
-Left for the next change sets in this phase: carrying the injector's own
-`walk_time_s` and wire-side `octets` into the artifact, since at MRT playback
-speeds they are the only evidence a 1s poll cannot supply; an aggregate across
-injectors that cannot let the fastest speak for the rest; blocked-write evidence
-(`-t io` enables bgpdump2's `Partial write`/`Full write` lines, at the cost of a
-log line per write); and bgpdump2 provenance, still `UNKNOWN (no version command
-for Bgpdump2Tester)` although the binary answers `-V` with `Version: 2.0.14`.
+##### Progress on 2026-09-03: the generator's own two numbers reach the artifact
+
+An injection that finished before the first poll looked was, until this change
+set, published only as the fact that nothing could be said about it. bgpdump2
+had already measured it and said so in its log, and that measurement was parsed
+and then dropped on the floor.
+
+`TesterOffering` gained `reported_send_duration_s` and `octets_on_wire`,
+`Bgpdump2Tester.get_offerings()` fills both from the log it already reads, and
+`tester_metrics()` publishes them as `reported_injection_s` and
+`octets_on_wire`, read from the poll that observed completion.
+
+Four decisions in it:
+
+- **`reported_injection_s` sits beside `injection_s`, never in place of it.**
+  It is a different clock and the generator's own definition of sending —
+  bgpdump2's walk time is encode time bounded by its 256KB write buffer, so on
+  a table large enough to fill that buffer it tracks the wire and on a small
+  one it does not. `print_tester_metrics()` names both bounds in one line:
+  `injection shorter than the 1.0s poll resolution; the generator measured its
+  own send at 0.001017s`.
+- **No rate is derived from it.** Dividing an encode-side count by an
+  encode-side interval yields a send rate the generator never achieved —
+  10,000 prefixes over 1.017ms would publish 9.8M prefixes/s. This is the same
+  trap `offered_in_interval` exists to keep the polled rate out of.
+- **The octet count is read at completion**, which is the poll whose
+  `offered_prefixes` it pairs with: both come off the same line of the
+  generator's counters, one encode-side and one wire-side. The real captures
+  show why the pair is worth having — a mid-walk line reads 9,981 prefixes
+  encoded against 88 octets written.
+- **Neither is published from only some of a container's sessions.** Octets are
+  summed under the same all-or-nothing rule as the prefix counts, because a
+  total covering only the sessions that answered reads as a small transfer
+  rather than as a partial reading. Durations are not summed at all — sessions
+  send at the same time — so the longest is taken, matching how this recorder
+  aggregates everything else, and it stays a lower bound on the container's
+  whole send span. Review of this change set caught that rule holding within
+  one poll but not across polls: the duration is held on the recorder so the
+  completion event can carry it, and a value that merely persisted from an
+  earlier, fully legible look would be published against a poll that could not
+  read it. It is now rebuilt every poll, cleared included, so one event never
+  carries two polls' evidence.
+
+###### Docker verification
+
+Run on 2026-09-03 on the 8-core / 30 GB host, `-d /var/tmp/bgperf` with results
+outside the campaign tree: `bench -t bird -g bgpdump2 -n 2 -p 10000 --mrt-file
+mrt/rib.20210801.0000`. Converged in 3s. Both injectors carry
+`reported_injection_s` (0.001017s and 0.011280s) and `octets_on_wire` (183,852
+and 259,226) in `<prefix>.events.json`, on both the `tester_complete` event and
+the derived `testers` section, with `injection_s` still an honest 0.0 at a
+1.0001s achieved poll resolution. The two byte counts differ by 41% for
+identical prefix counts, which is the point of a wire-side number: it is a
+property of the paths played back, not of the table size. No read failures, no
+tester errors or timeouts, foreign CPU 4%.
+
+Left for the next change sets in this phase: an aggregate across injectors that
+cannot let the fastest speak for the rest; blocked-write evidence (`-t io`
+enables bgpdump2's `Partial write`/`Full write` lines, at the cost of a log line
+per write); and bgpdump2 provenance, still `UNKNOWN (no version command for
+Bgpdump2Tester)` although the binary answers `-V` with `Version: 2.0.14`.
 
 #### Work
 

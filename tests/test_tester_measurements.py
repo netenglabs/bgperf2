@@ -429,6 +429,103 @@ def test_reported_blocked_writes_are_kept_at_their_maximum():
                               'max_pending_prefixes': 7}
 
 
+# --- what the generator says about itself -------------------------------------
+
+def test_a_generator_that_measures_its_own_send_publishes_it_beside_the_polled_one():
+    """A self-measured send is evidence a poll cannot supply, not a better
+    version of the polled interval: a different clock and the generator's own
+    definition of sending. Both are published, and neither replaces the
+    other."""
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    r.observe(1.0, {'a': offering(offered=100, octets_on_wire=2600,
+                                  reported_send_duration_s=0.001030)})
+
+    m = metrics(r)
+    assert m['reported_injection_s'] == 0.001030
+    assert m['octets_on_wire'] == 2600
+    # The whole table was already offered when the instrument first looked, so
+    # the polled interval is 0.0 and says only 'inside one look'. That is the
+    # case the generator's own number exists to resolve.
+    assert m['injection_s'] == 0.0
+    assert m['offered_rate_pps'] is None
+
+
+def test_the_generators_own_duration_is_the_slowest_session_not_their_sum():
+    """Two sessions send at the same time, so their durations do not add. The
+    longest is the pessimistic answer, matching how everything else here
+    aggregates -- and it stays a lower bound on the container's whole send
+    span, since sessions that started apart span more than the longer one."""
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    r.observe(1.0, {'a': offering(offered=100, reported_send_duration_s=0.25),
+                    'b': offering(offered=100, reported_send_duration_s=1.5)})
+
+    assert metrics(r)['reported_injection_s'] == 1.5
+
+
+def test_a_send_duration_from_only_some_sessions_is_not_published():
+    """One session's walk is not the container's send. Publishing the only
+    number that was legible would report the fastest peer's duration as the
+    generator's, which is the failure this class aggregates to avoid."""
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    r.observe(1.0, {'a': offering(offered=100, reported_send_duration_s=0.25),
+                    'b': offering(offered=100)})
+
+    assert metrics(r)['reported_injection_s'] is None
+
+
+def test_a_send_duration_is_not_carried_over_from_an_earlier_poll():
+    '''Found in review. The completion event says what was true at the poll
+    that saw completion, so its evidence has to come from that poll. A
+    duration held on the recorder from an earlier, fully legible look would be
+    published against a poll that could not read it -- one event carrying two
+    polls' evidence, and the rule above ("not from only some sessions") broken
+    across time instead of within one look.'''
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    # Both sessions report, but completion is held: no update seen yet.
+    r.observe(1.0, {'a': offering(offered=None, reported_send_duration_s=0.25),
+                    'b': offering(offered=None, reported_send_duration_s=1.5)})
+    # Now they complete, with only one session's duration legible.
+    r.observe(2.0, {'a': offering(offered=100, reported_send_duration_s=0.25),
+                    'b': offering(offered=100)})
+
+    assert EventKind.TESTER_COMPLETE in kinds(r)
+    assert metrics(r)['reported_injection_s'] is None
+
+
+def test_wire_side_octets_are_summed_only_when_every_session_answered():
+    """Same rule as the prefix counts, for the same reason: a total covering
+    only the sessions that answered reads as a small transfer rather than as a
+    partial reading, and nothing downstream could tell those apart."""
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    r.observe(1.0, {'a': offering(offered=100, octets_on_wire=2600),
+                    'b': offering(offered=100, octets_on_wire=1400)})
+    assert metrics(r)['octets_on_wire'] == 4000
+
+    partial = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    partial.observe(1.0, {'a': offering(offered=100, octets_on_wire=2600),
+                          'b': offering(offered=100)})
+    assert metrics(partial)['octets_on_wire'] is None
+
+
+def test_the_generators_own_evidence_is_read_at_completion():
+    """Both numbers are read from the poll that saw completion -- the octets
+    are the count that pairs with `offered_prefixes`, off the same line of the
+    generator's counters. Without a completion there is nothing to pair them
+    with, and neither is published."""
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    r.observe(1.0, {'a': offering(offered=40, octets_on_wire=1000,
+                                  reported_send_duration_s=0.5)})
+
+    m = metrics(r)
+    assert EventKind.TESTER_COMPLETE not in kinds(r)
+    assert m['reported_injection_s'] is None
+    assert m['octets_on_wire'] is None
+
+    r.observe(2.0, {'a': offering(offered=100, octets_on_wire=2600,
+                                  reported_send_duration_s=0.5)})
+    assert metrics(r)['octets_on_wire'] == 2600
+
+
 # --- rejected input ----------------------------------------------------------
 
 def test_samples_must_move_forward():
@@ -460,6 +557,20 @@ def test_counts_must_be_non_negative_integers():
         TesterOffering(established=True, expected=1, offered=-5)
     with pytest.raises(TypeError):
         TesterOffering(established='yes', expected=1)
+    with pytest.raises(ValueError):
+        TesterOffering(established=True, expected=1, octets_on_wire=-1)
+
+
+def test_a_self_measured_send_duration_must_be_a_non_negative_number():
+    '''The only field here that is not a count. A negative or non-finite one
+    is a parse that went wrong, and it would be published as a measurement.'''
+    for bad in (-0.5, float('nan'), float('inf'), '1.0', True):
+        with pytest.raises((ValueError, TypeError)):
+            TesterOffering(established=True, expected=1,
+                           reported_send_duration_s=bad)
+    assert TesterOffering(established=True, expected=1,
+                          reported_send_duration_s=0).reported_send_duration_s \
+        == 0.0
 
 
 # --- defects found in review -------------------------------------------------

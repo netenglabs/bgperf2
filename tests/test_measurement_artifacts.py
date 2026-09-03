@@ -263,3 +263,27 @@ def test_an_unresolved_injection_names_the_resolution_it_could_not_resolve(capsy
 
     printed = capsys.readouterr().out
     assert 'injection shorter than the 2.4s poll resolution' in printed
+    # Nothing measured its own send here, so nothing is claimed about one.
+    assert 'measured its own send' not in printed
+
+
+def test_an_unresolved_injection_still_names_what_the_generator_measured(capsys):
+    '''The bgpdump2 shape: a walk that finished before the first poll looked.
+
+    The polled interval can say only 'inside one look'. The injector's own
+    walk time is the only account of it there is, so it is named beside that
+    bound rather than folded into it -- it is a different clock and the
+    generator's own definition of sending.
+    '''
+    recorder = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    recorder.observe(1.0, {'p1': TesterOffering(
+        established=True, expected=100, offered=100, send_complete=True,
+        octets_on_wire=2600, reported_send_duration_s=0.001030)})
+    origin = LifecycleEvent(EventKind.BENCH_CLOCK_STARTED, 0.0, 'controller',
+                            EventPhase.SETUP)
+
+    bgperf2.print_tester_metrics([origin] + list(recorder.events), ['tester'])
+
+    printed = capsys.readouterr().out
+    assert 'injection shorter than the 1.0s poll resolution' in printed
+    assert 'measured its own send at 0.001030s' in printed

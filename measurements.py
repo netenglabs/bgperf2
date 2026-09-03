@@ -285,6 +285,20 @@ class TesterOffering:
     `send_complete` is a generator's own statement that it finished the send
     contract, for the generators that make one.  None means it does not, and
     completion is inferred from the counts instead.
+
+    `octets_on_wire` is the cumulative bytes the generator says a successful
+    write() put on the socket.  It is the one wire-side number these polls
+    carry: `offered` is counted where a route is handed to the session's write
+    buffer, so on a generator whose encoder outruns its socket the two diverge,
+    and a real bgpdump2 capture shows exactly that -- 9,981 prefixes encoded
+    against 88 octets written.  Reported beside `offered`, never instead of it.
+
+    `reported_send_duration_s` is the generator's own measurement of how long
+    its send took, for the generators that make one.  It is on the generator's
+    clock and bounded by its own definition of sending, so it is evidence
+    beside the controller's polled interval and not a substitute for it -- but
+    at MRT playback speeds it is the only evidence that exists, because a walk
+    that finishes in a millisecond is over before the first poll looks.
     '''
 
     established: bool
@@ -294,6 +308,8 @@ class TesterOffering:
     tx_pending_bytes: Optional[int] = None
     pending_prefixes: Optional[int] = None
     send_complete: Optional[bool] = None
+    octets_on_wire: Optional[int] = None
+    reported_send_duration_s: Optional[float] = None
 
     def __post_init__(self):
         if not isinstance(self.established, bool):
@@ -301,8 +317,16 @@ class TesterOffering:
         if self.send_complete is not None \
                 and not isinstance(self.send_complete, bool):
             raise TypeError('send_complete must be a bool or None')
+        if self.reported_send_duration_s is not None:
+            value = self.reported_send_duration_s
+            if not isinstance(value, (int, float)) or isinstance(value, bool) \
+                    or not math.isfinite(value) or value < 0:
+                raise ValueError(
+                    'reported_send_duration_s must be a non-negative number')
+            object.__setattr__(
+                self, 'reported_send_duration_s', float(value))
         for name in ('expected', 'offered', 'configured',
-                     'tx_pending_bytes', 'pending_prefixes'):
+                     'tx_pending_bytes', 'pending_prefixes', 'octets_on_wire'):
             value = getattr(self, name)
             if value is None and name != 'expected':
                 continue
@@ -390,6 +414,7 @@ class TesterEventRecorder:
         self._max_tx_pending_bytes = None
         self._max_pending_prefixes = None
         self._backpressure_readable = False
+        self._reported_send_duration_s = None
 
     def _resolution_for(self, monotonic_s):
         '''How coarsely this poll can place an event in time.
@@ -518,6 +543,31 @@ class TesterEventRecorder:
         loaded = [o.configured for o in offerings if o.configured is not None]
         if len(loaded) == len(offerings):
             counters['configured_prefixes'] = sum(loaded)
+        # Wire-side bytes, summed under the same rule as the prefix counts and
+        # for the same reason: a total covering only the sessions that answered
+        # would read as a small transfer rather than as a partial reading.
+        written = [o.octets_on_wire for o in offerings
+                   if o.octets_on_wire is not None]
+        if len(written) == len(offerings):
+            counters['octets_on_wire'] = sum(written)
+        # A generator's own send duration is per session, so the sessions are
+        # not summed -- that would add up intervals that ran at the same time.
+        # The longest is taken, matching how this class aggregates everything
+        # else: the container is done when its slowest session is. It stays a
+        # lower bound on the container's whole send span, since two sessions
+        # that started at different moments span more than the longer of them.
+        #
+        # Rebuilt every poll, cleared included. The counters above are rebuilt
+        # by construction because they live in this poll's `counters` dict;
+        # this one is held on the recorder so that the completion event can
+        # carry it, and a value that merely persisted would be published
+        # against a poll that could not read it -- mixing two polls' evidence
+        # into the one event whose whole job is to say what was true when the
+        # generator finished.
+        durations = [o.reported_send_duration_s for o in offerings
+                     if o.reported_send_duration_s is not None]
+        self._reported_send_duration_s = max(durations) \
+            if len(durations) == len(offerings) else None
 
         for o in offerings:
             # Either field is evidence. They come from different parts of the
@@ -571,8 +621,11 @@ class TesterEventRecorder:
                     self._events, EventKind.TESTER_FIRST_UPDATE) is not None \
                 and unique_event(
                     self._events, EventKind.TESTER_COMPLETE) is None:
-            self._add(EventKind.TESTER_COMPLETE, monotonic_s, counters,
-                      {'backpressure': self.backpressure})
+            details = {'backpressure': self.backpressure}
+            if self._reported_send_duration_s is not None:
+                details['reported_send_duration_s'] = \
+                    self._reported_send_duration_s
+            self._add(EventKind.TESTER_COMPLETE, monotonic_s, counters, details)
 
 
 def tester_metrics(events: Iterable[LifecycleEvent], producer: str):
@@ -642,14 +695,38 @@ def tester_metrics(events: Iterable[LifecycleEvent], producer: str):
     # 1s-resolved injection with a 30s bound, which overstates the uncertainty
     # as badly as the nominal cadence understated it.
     ready = unique_event(events, EventKind.TESTER_SESSION_READY, producer)
+
+    # The generator's own two numbers, both read at completion.
+    #
+    # `reported_injection_s` is not a better `injection_s`, it is a different
+    # measurement: a different clock, and the generator's own definition of
+    # sending -- bgpdump2's walk time is encode time bounded by its write
+    # buffer, so it tracks the wire only on a table large enough to fill that
+    # buffer. It is published because at MRT playback speeds it is the only
+    # evidence there is: a 10,000-prefix walk takes about a millisecond, which
+    # is over before the first poll looks, and `injection_s` can then say no
+    # more than 'shorter than one look'. No rate is derived from it here for
+    # the same reason the polled rate is published beside
+    # `offered_in_interval` -- dividing an encode-side count by an encode-side
+    # interval yields a send rate the generator never achieved.
+    #
+    # `octets_on_wire` is the count at the poll that saw completion, which is
+    # the one that pairs with `offered_prefixes`: both come from the same line
+    # of the generator's own counters, one encode-side and one wire-side.
+    reported_injection_s = complete.details.get('reported_send_duration_s') \
+        if complete else None
+    octets = complete.counters.get('octets_on_wire') if complete else None
+
     return {
         'tester_startup_s': startup_s,
         'startup_resolution_s': _poll_resolution(ready),
         'injection_s': injection_s,
         'injection_resolution_s': _bounding_resolution(first, complete),
+        'reported_injection_s': reported_injection_s,
         'offered_prefixes': offered,
         'offered_in_interval': offered_in_interval,
         'offered_rate_pps': rate,
+        'octets_on_wire': octets,
     }
 
 

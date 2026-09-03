@@ -1420,6 +1420,14 @@ def print_tester_metrics(events, producers):
             print(f"{producer}: ready after {startup_text}, injection unmeasured "
                   f"(no observed completion for every session)")
             continue
+        # The generator's own measurement of its send, where it makes one. It
+        # is named beside every polled interval rather than folded into one,
+        # because it is not the same measurement: a different clock, and the
+        # generator's own definition of sending. On an MRT walk that finishes
+        # in a millisecond it is the only number either side can offer.
+        reported = measured['reported_injection_s']
+        own = '' if reported is None \
+            else f"; the generator measured its own send at {reported:.6f}s"
         covered = measured['offered_in_interval']
         if offered is None:
             # A generator that reported its own completion on a poll whose
@@ -1428,7 +1436,7 @@ def print_tester_metrics(events, producers):
             # counter reset below.
             print(f"{producer}: ready after {startup_text}, completed in "
                   f"{measured['injection_s']:.1f}s, offered count unavailable "
-                  f"(no readable count at completion)")
+                  f"(no readable count at completion){own}")
             continue
         if covered is None:
             # The counter went backwards: BIRD clears a protocol's route-change
@@ -1439,7 +1447,7 @@ def print_tester_metrics(events, producers):
             # injection as an instant one.
             print(f"{producer}: ready after {startup_text}, offered {offered} "
                   f"prefixes over {measured['injection_s']:.1f}s, rate "
-                  f"unavailable (the generator's counter was reset mid-run)")
+                  f"unavailable (the generator's counter was reset mid-run){own}")
             continue
         rate = measured['offered_rate_pps']
         if rate is None:
@@ -1455,14 +1463,14 @@ def print_tester_metrics(events, producers):
             bound = 'one poll' if resolution is None \
                 else f"the {resolution:.1f}s poll resolution"
             print(f"{producer}: ready after {startup_text}, offered {offered} "
-                  f"prefixes, injection shorter than {bound}")
+                  f"prefixes, injection shorter than {bound}{own}")
             continue
         # The rate covers only the part of the table that arrived inside the
         # measured interval; printing that share keeps a tail slope from being
         # read as the generator's send rate.
         print(f"{producer}: ready after {startup_text}, offered {offered} "
               f"prefixes, {covered} of them in the measured "
-              f"{measured['injection_s']:.1f}s ({rate:.0f} prefixes/s)")
+              f"{measured['injection_s']:.1f}s ({rate:.0f} prefixes/s){own}")
 
 
 def print_final_stats(args, target_version, stats):

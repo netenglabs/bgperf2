@@ -372,6 +372,13 @@ class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
         bgpdump2 exposes no blocked-write counter unless `-t io` is set, which
         costs a log line per write, so backpressure is left unreadable here and
         the recorder reports it as unavailable rather than as zero.
+
+        Two things the injector knows that this poll cannot: `octets` is
+        counted on a successful write() while `offered` is counted at the
+        encoder, so the pair says how much of what was encoded had reached the
+        socket; and `walk time` is the blaster's own measurement of the walk,
+        which is the only evidence of an injection that finished before the
+        first poll -- a 10,000-prefix walk takes about a millisecond.
         '''
         key, neighbor = self.injected_neighbor()
         observed = tester_offering_from_facts(self._blaster_log.read())
@@ -380,7 +387,9 @@ class Bgpdump2Tester(Tester, Bgpdump2, MRTTester):
             expected=int(neighbor['count']),
             offered=observed['offered'],
             configured=observed['configured'],
-            send_complete=observed['send_complete'])}
+            send_complete=observed['send_complete'],
+            octets_on_wire=observed['octets_on_wire'],
+            reported_send_duration_s=observed['walk_time_s'])}
 
     def configure_neighbors(self, target_conf):
         # this doesn't really do anything, but we use it to find the target

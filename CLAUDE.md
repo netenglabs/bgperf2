@@ -302,14 +302,22 @@ redirected stdout has this trap.
   session write buffer; `octets` only on a successful `write()` to the socket.
   One real mid-walk line reads `Sent 2280 updates, 9981 prefixes sent, 0
   prefixes withdrawn, 88 octets`. Same caveat as BIRD 2.19's counter, with one
-  wire-side number beside it.
+  wire-side number beside it. It reaches the artifact as `octets_on_wire`, read
+  at the poll that saw completion so it pairs with the `offered_prefixes` off
+  the same line of counters. Two injectors sending the same 10,000 prefixes
+  from different MRT peers wrote 183,852 and 259,226 octets — the byte count is
+  a property of the paths played back, not of the prefix count.
 - **`End-of-RIB, walk time` is bgpdump2's own measurement of its walk**, and it
   resolves what a 1s poll cannot: one injector's whole 10,000-prefix walk took
   1.03ms. It is encode time bounded by the write buffer, so on a table large
   enough to fill that buffer it tracks the wire and on a small one it does not.
   It times *one* RIB — a session given several `-p` indexes logs one per RIB,
   and summing them would drop the gaps between walks, so the summary publishes
-  it only for a single-RIB session (which is what bgperf configures).
+  it only for a single-RIB session (which is what bgperf configures). It is
+  published as `reported_injection_s`, **beside** the polled `injection_s` and
+  never folded into it: different clock, and the generator's own definition of
+  sending. No rate is derived from it either — dividing an encode-side count by
+  an encode-side interval gives a send rate the generator never achieved.
 - **Completion is the injector's own report, not a count.** `-T` caps the table
   while the MRT file is read, so an injector ends up holding whatever that MRT
   peer's table has; `offered >= expected` can stay false forever on an injector
@@ -351,9 +359,13 @@ table size, and nothing bounds it in advance.
 run: both injectors reported the exact 10,000, `tester_complete` observed, and
 `injection_s` 0.0 with `offered_in_interval` 0 and no rate — the same
 unresolvable-injection shape as BIRD 2.19, said out loud rather than published
-as an instant injection. The generator's own `walk time` (0.000995s there) is
-the number that resolves it, and it is parsed but not yet carried into the
-artifact.
+as an instant injection. What says anything at all about that interval is the
+generator's own two numbers, carried into the artifact from the poll that saw
+completion: `reported_injection_s` (0.001017s and 0.011280s for the two
+injectors of a later verification) and the wire-side `octets_on_wire`. The
+printed line names both bounds rather than choosing between them — `injection
+shorter than the 1.0s poll resolution; the generator measured its own send at
+0.001017s`.
 
 ### Host contention — `contention.py`
 

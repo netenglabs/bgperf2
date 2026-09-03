@@ -122,3 +122,67 @@ def test_a_tester_poll_stops_when_its_own_container_is_done(tmp_path):
         time.sleep(0.01)
     assert threading.active_count() == before, 'tester poll outlived its container'
     bgperf2.controller_stop.set()
+
+
+class SlowReadTester(FakeTester):
+    '''A tester whose read costs real time, the way a real exec does.'''
+
+    CONTAINER_NAME_PREFIX = 'slow_tester_'
+    READ_S = 0.12
+
+    def get_offerings(self):
+        time.sleep(self.READ_S)
+        return super().get_offerings()
+
+
+def poll_gaps(tester, interval, samples, timeout=10):
+    '''Run the poll loop until `samples` samples land, and return their gaps.'''
+    bgperf2.controller_stop.clear()
+    q = queue.Queue()
+    stamps = []
+    tester.offering_stats(q, bgperf2.controller_stop, interval=interval)
+    deadline = time.time() + timeout
+    try:
+        while len(stamps) < samples and time.time() < deadline:
+            try:
+                stamps.append(q.get(timeout=0.05)['monotonic_s'])
+            except queue.Empty:
+                pass
+    finally:
+        bgperf2.controller_stop.set()
+    assert len(stamps) == samples, 'tester poll produced too few samples'
+    return [b - a for a, b in zip(stamps, stamps[1:])]
+
+
+def test_the_poll_waits_to_a_deadline_rather_than_after_the_read(tmp_path):
+    '''Sleeping a whole interval after the read makes the cadence read+interval.
+
+    Every event the recorder publishes carries the resolution of its poll, and
+    that is what qualifies an injection of 0.0s as unresolved rather than
+    instant -- so a cadence wider than the one asked for must not be spent
+    silently on the read.
+    '''
+    tester = SlowReadTester('1', str(tmp_path), {}, 'bgperf/bird')
+    interval = 0.2
+
+    gaps = poll_gaps(tester, interval, samples=3)
+
+    # Sleeping after the read would put every gap at ~0.32s.
+    assert min(gaps) < interval + SlowReadTester.READ_S / 2
+
+
+def test_a_read_that_overruns_the_interval_still_waits(tmp_path):
+    '''The loop must not become the contention the run would then report.
+
+    Chasing the deadline when the read is slower than the interval would poll
+    back-to-back and leave the controller inside a container continuously. The
+    achieved cadence is recorded instead -- see TesterEventRecorder, which
+    derives each event's resolution from the sample timestamps.
+    '''
+    tester = SlowReadTester('2', str(tmp_path), {}, 'bgperf/bird')
+    interval = 0.05
+
+    gaps = poll_gaps(tester, interval, samples=3)
+
+    # Polling back-to-back would put every gap at the read time alone.
+    assert min(gaps) > SlowReadTester.READ_S + interval / 2

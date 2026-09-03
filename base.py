@@ -756,7 +756,24 @@ class Tester(Container):
                                'tester_offering': sessions,
                                'monotonic_s': sampled_at,
                                'time': datetime.datetime.now()})
-                if stop.wait(interval):
+                # Wait to a deadline measured from the sample, not a fixed
+                # interval piled on top of the read. The read is the expensive
+                # half -- one exec running a birdc per peer -- so sleeping a
+                # whole `interval` after it makes the achieved cadence
+                # `read + interval` while every event still claims the nominal
+                # one, and that claim is exactly what qualifies an injection of
+                # 0.0s as unresolved rather than instant.
+                #
+                # A read that overruns the interval keeps the full sleep
+                # instead of polling back-to-back: chasing the deadline there
+                # would put the controller in a container continuously, which
+                # is the contention the run would then report as someone
+                # else's. It is recorded rather than hidden -- the recorder
+                # derives each event's resolution from the sample timestamps,
+                # so a cadence this loop could not keep is published as the
+                # cadence it did keep.
+                remaining = sampled_at + interval - time.monotonic()
+                if stop.wait(remaining if remaining > 0 else interval):
                     return
 
         t = Thread(target=poll)

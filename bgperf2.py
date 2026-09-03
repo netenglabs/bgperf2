@@ -784,8 +784,10 @@ def monitor_sample_monotonic_s(info, fallback_clock=None):
 
 
 # The generators are polled at the monitor's cadence so the two sides of a run
-# are read at the same resolution. Every derived tester interval is quantised by
-# it, which is why it is recorded on each event rather than assumed.
+# are read at the same resolution. This is the cadence asked for, and so the
+# floor of the resolution rather than the resolution itself: a poll costs a read
+# before it waits. Every derived tester interval is quantised by the gap the
+# loop actually achieved, which each event carries instead of assuming this.
 TESTER_POLL_INTERVAL_S = 1
 
 
@@ -1441,11 +1443,19 @@ def print_tester_metrics(events, producers):
             continue
         rate = measured['offered_rate_pps']
         if rate is None:
-            # The whole table was already offered when the instrument first
-            # looked. That is not an instant injection, it is one this poll
-            # cadence cannot resolve, and it must not read as a duration.
+            # There was no interval to divide by: the whole table was already
+            # offered when the instrument first looked, so first update and
+            # completion landed on the same poll. That is not an instant
+            # injection, it is one this poll cadence cannot resolve, and it
+            # must not read as a duration. Name the resolution the loop
+            # actually achieved rather than the cadence it was asked for --
+            # the read costs time before the wait, so 'one poll' is wider than
+            # the interval, and understating it overstates what is known.
+            resolution = measured['injection_resolution_s']
+            bound = 'one poll' if resolution is None \
+                else f"the {resolution:.1f}s poll resolution"
             print(f"{producer}: ready after {startup_text}, offered {offered} "
-                  f"prefixes, injection shorter than one poll")
+                  f"prefixes, injection shorter than {bound}")
             continue
         # The rate covers only the part of the table that arrived inside the
         # measured interval; printing that share keeps a tail slope from being

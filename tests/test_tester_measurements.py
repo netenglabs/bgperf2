@@ -305,6 +305,105 @@ def test_every_tester_event_records_the_poll_resolution():
     assert all(e.details['sample_interval_s'] == 0.5 for e in r.events)
 
 
+def test_a_first_poll_is_only_as_sharp_as_the_time_since_the_clock_started():
+    '''Everything the generator did before the instrument arrived is invisible.
+
+    bgpdump2's whole 10,000-prefix walk takes about a millisecond, so its
+    first_update and complete land on the same first poll. What bounds that is
+    not the cadence -- there has been no previous poll -- it is the whole
+    interval since the run's clock started.
+    '''
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    r.observe(4.0, {'a': offering(offered=100)})
+
+    assert all(e.details['poll_resolution_s'] == 4.0 for e in r.events)
+    m = metrics(r)
+    assert m['startup_resolution_s'] == 4.0
+    assert m['injection_resolution_s'] == 4.0
+
+
+def test_the_resolution_is_the_gap_achieved_not_the_cadence_asked_for():
+    '''A poll costs a read before it waits, so the real cadence is wider.
+
+    Publishing the nominal interval understates the resolution by the cost of
+    the read -- the one direction that matters, since this number is what says
+    a 0.0s injection is unresolved rather than instant.
+    '''
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    r.observe(1.0, {'a': offering(established=False, offered=0)})
+    r.observe(2.6, {'a': offering(offered=100)})
+
+    by_kind = {e.kind: e for e in r.events}
+    assert by_kind[EventKind.TESTER_SESSION_READY] \
+        .details['poll_resolution_s'] == pytest.approx(1.6)
+    assert by_kind[EventKind.TESTER_COMPLETE] \
+        .details['poll_resolution_s'] == pytest.approx(1.6)
+    # The nominal cadence is still recorded beside it: it is what the loop was
+    # asked for, and the gap is what it managed.
+    assert by_kind[EventKind.TESTER_COMPLETE].details['sample_interval_s'] == 1.0
+
+
+def test_a_gap_shorter_than_the_requested_cadence_does_not_sharpen_it():
+    '''The requested interval is a floor on the resolution, never beaten.
+
+    The loop stamps a sample, reads, and only then waits, so it cannot look
+    twice inside one interval. A synthetic stream that appears to is reported
+    at the cadence asked for rather than at a sharpness no real poll has.
+    '''
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    r.observe(5.0, {'a': offering(offered=10)})
+    r.observe(5.1, {'a': offering(offered=100)})
+
+    complete = [e for e in r.events
+                if e.kind == EventKind.TESTER_COMPLETE][0]
+    assert complete.details['poll_resolution_s'] == 1.0
+
+
+def test_the_published_resolution_is_the_coarsest_bounding_poll():
+    '''An interval is only as sharp as the wider of the two polls bounding it.'''
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    r.observe(1.0, {'a': offering(established=False, offered=0)})
+    r.observe(2.0, {'a': offering(offered=10)})
+    r.observe(5.5, {'a': offering(offered=100)})
+
+    assert metrics(r)['injection_resolution_s'] == pytest.approx(3.5)
+
+
+def test_a_late_first_poll_does_not_widen_the_injection_bound():
+    '''Each interval is qualified by the polls that bound it, not by the worst.
+
+    The bench clock starts before the testers are launched, so the first poll
+    is many seconds after the origin and `tester_session_ready` carries all of
+    it. That is the honest bound on `tester_startup_s` and says nothing about
+    an injection two ordinary polls later -- the usual BIRD shape, where the
+    sessions are up before the first export is counted.
+    '''
+    r = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    r.observe(30.0, {'a': offering(offered=0)})
+    r.observe(31.0, {'a': offering(offered=0)})
+    r.observe(32.0, {'a': offering(offered=100)})
+
+    m = metrics(r)
+    assert m['startup_resolution_s'] == 30.0
+    assert m['injection_resolution_s'] == 1.0
+
+
+def test_a_hand_built_stream_carries_no_resolution_rather_than_a_default():
+    '''Events not produced by a recorder state nothing about how they were seen.'''
+    events = [
+        LifecycleEvent(EventKind.BENCH_CLOCK_STARTED, 0.0, 'controller',
+                       EventPhase.SETUP),
+        LifecycleEvent(EventKind.TESTER_FIRST_UPDATE, 1.0, 'tester',
+                       EventPhase.INJECTION, counters={'offered_prefixes': 1}),
+        LifecycleEvent(EventKind.TESTER_COMPLETE, 3.0, 'tester',
+                       EventPhase.INJECTION, counters={'offered_prefixes': 9}),
+    ]
+
+    m = tester_metrics(events, 'tester')
+    assert m['injection_resolution_s'] is None
+    assert m['startup_resolution_s'] is None
+
+
 # --- backpressure ------------------------------------------------------------
 
 def test_a_generator_with_no_counter_records_unavailable_not_zero():

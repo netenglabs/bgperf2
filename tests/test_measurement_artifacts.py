@@ -244,3 +244,22 @@ def test_a_counter_reset_is_not_reported_as_a_sub_poll_injection(capsys):
     assert 'counter was reset' in printed
     assert 'shorter than one poll' not in printed
     assert '42.0s' in printed
+
+
+def test_an_unresolved_injection_names_the_resolution_it_could_not_resolve(capsys):
+    '''"Shorter than one poll" is only true of the poll that was achieved.
+
+    The loop reads before it waits, so the gap between looks is wider than the
+    cadence asked for. Naming the number the run actually managed is the whole
+    point of recording it.
+    '''
+    recorder = TesterEventRecorder(0.0, 'tester', sample_interval_s=1.0)
+    recorder.observe(2.4, {'p1': TesterOffering(established=True, expected=100,
+                                                offered=100)})
+    origin = LifecycleEvent(EventKind.BENCH_CLOCK_STARTED, 0.0, 'controller',
+                            EventPhase.SETUP)
+
+    bgperf2.print_tester_metrics([origin] + list(recorder.events), ['tester'])
+
+    printed = capsys.readouterr().out
+    assert 'injection shorter than the 2.4s poll resolution' in printed

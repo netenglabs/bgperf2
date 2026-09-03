@@ -479,21 +479,55 @@ shape as BIRD 2.19, refusing to publish an instant injection. The generator's
 own `End-of-RIB, walk time` (0.000995s) is the number that would resolve it,
 and it is parsed but not yet carried into the artifact.
 
-##### Defect to fix next: the published poll resolution is optimistic
+##### Progress on 2026-09-03: the published poll resolution is now the achieved one
 
-Review of this change set found it in Phase 2 code. `Tester.offering_stats()`
-stamps a sample before the read but then waits a full `interval` *after* it, so
-the real cadence is `read + interval` while every event the recorder publishes
-carries `sample_interval_s = 1` as its stated resolution. That field exists
-precisely so an `injection_s` of 0.0 reads as *unresolved at this resolution*
-rather than as instant, so understating it by the read time weakens the one
-number that qualifies the others. It costs nothing for bgpdump2, whose poll is
-a short file read, and grows with peer count for the BIRD tester, whose own
-docstring says a 50-100 peer read "takes long enough to matter". Waiting to a
-deadline instead of sleeping a fixed interval fixes the common case but not a
-read slower than the interval, so the honest version records the cadence that
-was actually achieved -- which is a change to shared timing code and belongs in
-its own change set.
+Found by review of the change set above, in Phase 2 code.
+`Tester.offering_stats()` stamped a sample before the read but then waited a
+full `interval` *after* it, so the cadence achieved was `read + interval` while
+every event the recorder published carried `sample_interval_s = 1` as its stated
+resolution. That field exists precisely so an `injection_s` of 0.0 reads as
+*unresolved at this resolution* rather than as instant, so understating it by
+the read time weakened the one number that qualifies the others.
+
+Both halves are fixed:
+
+- **The poll waits to a deadline measured from the sample**, not a fixed
+  interval piled on top of the read. A read that overruns the interval keeps
+  the full wait rather than polling back-to-back: chasing the deadline there
+  would leave the controller inside a container continuously, which is the
+  contention the run would then report as someone else's.
+- **The resolution is derived from the sample timestamps rather than assumed.**
+  `TesterEventRecorder` already tracked them, so no new plumbing was needed: an
+  event is dated to the poll that saw it, and its timestamp is known only to
+  within the gap since the previous look. Every event now carries
+  `poll_resolution_s` beside the nominal `sample_interval_s`, and
+  `tester_metrics()` publishes `startup_resolution_s` and
+  `injection_resolution_s` from the polls that bound each of those intervals.
+  `print_tester_metrics()` names the injection one: `injection shorter than the
+  2.4s poll resolution`, not `shorter than one poll`.
+- **One resolution cannot bound two intervals**, which review of this change
+  set caught before it was committed. A first version published a single
+  number, the worst across all three endpoints. But `tester_session_ready` is
+  routinely found on the very first poll, and that poll's resolution is the
+  whole interval since the clock started -- the origin is stamped before the
+  testers are launched. On the ordinary BIRD shape (sessions up with `Export
+  updates accepted` still 0, first update and completion two polls later) that
+  published `injection shorter than the 30.0s poll resolution` for an injection
+  bracketed by two polls 1.0s apart, overstating the uncertainty exactly as
+  badly as the nominal cadence understated it.
+
+Two properties are deliberate. **On the first poll the gap is measured from the
+bench clock origin**, because everything the generator did before the instrument
+arrived is invisible -- which is exactly the bgpdump2 case, where a 1ms walk
+puts `tester_first_update` and `tester_complete` on the same first poll. And the
+requested cadence is a **floor**: the loop stamps, reads, then waits, so it
+cannot look twice inside one interval, and a stream that appears to is reported
+at the cadence asked for rather than at a sharpness no real poll has.
+
+No Docker run was needed: the change is to the controller's own timing, and both
+halves are covered by unit tests -- the loop's achieved cadence in
+`tests/test_controller_threads.py`, the derived resolution in
+`tests/test_tester_measurements.py`.
 
 Left for the next change sets in this phase: carrying the injector's own
 `walk_time_s` and wire-side `octets` into the artifact, since at MRT playback

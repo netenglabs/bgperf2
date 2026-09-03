@@ -373,24 +373,55 @@ class TesterEventRecorder:
                 or not math.isfinite(bench_started_s):
             raise ValueError('bench_started_s must be a finite number')
         self.producer = producer
-        # Every derived tester interval is quantised by the poll cadence, so
-        # each event carries it: an injection that measures 0.0s at a 1s poll
-        # is not an instant injection, it is an unresolved one.
+        # The cadence the poll loop was *asked* for. Every derived tester
+        # interval is quantised by how often the generator is actually looked
+        # at, so each event carries a resolution: an injection that measures
+        # 0.0s at a 1s poll is not an instant injection, it is an unresolved
+        # one. This value is only the floor of that resolution -- see
+        # _resolution_for(), which reports the gap the loop achieved.
         self.sample_interval_s = sample_interval_s
         self._origin_s = float(bench_started_s)
         self._events = []
         self._sessions = None
         self._last_sample_s = None
+        self._poll_resolution_s = None
         self._total_offered = 0
         self._last_update = None
         self._max_tx_pending_bytes = None
         self._max_pending_prefixes = None
         self._backpressure_readable = False
 
+    def _resolution_for(self, monotonic_s):
+        '''How coarsely this poll can place an event in time.
+
+        An event is dated to the poll that saw it, so its timestamp is known
+        only to within the gap since the previous look -- and on the first
+        poll, to within everything that happened since the clock started,
+        which is where a generator whose entire walk finished before the
+        instrument arrived shows up honestly rather than as an instant one.
+
+        The requested cadence is a floor on that gap, never the answer. The
+        poll loop stamps a sample, reads the generator, and only then waits,
+        so the cadence it achieves is `read + wait` and publishing the nominal
+        interval understates the resolution by the cost of the read -- which
+        for a 50-100 peer BIRD tester is not small. Understating it is the one
+        direction that matters: these are the numbers that qualify an interval
+        as unresolved instead of instant, so a poll reports the coarser of the
+        interval asked for and the gap it actually achieved.
+        '''
+        since = self._origin_s if self._last_sample_s is None \
+            else self._last_sample_s
+        gap = monotonic_s - since
+        if self.sample_interval_s is None:
+            return gap
+        return max(gap, self.sample_interval_s)
+
     def _details(self, extra=None):
         details = {}
         if self.sample_interval_s is not None:
             details['sample_interval_s'] = self.sample_interval_s
+        if self._poll_resolution_s is not None:
+            details['poll_resolution_s'] = self._poll_resolution_s
         if extra:
             details.update(extra)
         return details
@@ -465,6 +496,10 @@ class TesterEventRecorder:
             raise MeasurementEventError(
                 'tester sessions changed between polls: expected {0}'.format(
                     sorted(self._sessions)))
+        # Computed before _last_sample_s moves, and before any event is added,
+        # so every event this poll produces carries the resolution of the poll
+        # that produced it.
+        self._poll_resolution_s = self._resolution_for(monotonic_s)
         self._last_sample_s = monotonic_s
 
         offerings = list(sessions.values())
@@ -598,13 +633,48 @@ def tester_metrics(events: Iterable[LifecycleEvent], producer: str):
             if injection_s:
                 rate = offered_in_interval / injection_s
 
+    # Each interval gets the resolution of the polls that bound *it*. One
+    # shared number cannot do this job: `tester_session_ready` is routinely
+    # found on the very first poll, whose resolution is the whole interval
+    # since the clock started -- the origin is stamped before the testers are
+    # even launched -- while first update and completion are bounded by two
+    # ordinary 1s polls later on. Folding them together would qualify a
+    # 1s-resolved injection with a 30s bound, which overstates the uncertainty
+    # as badly as the nominal cadence understated it.
+    ready = unique_event(events, EventKind.TESTER_SESSION_READY, producer)
     return {
         'tester_startup_s': startup_s,
+        'startup_resolution_s': _poll_resolution(ready),
         'injection_s': injection_s,
+        'injection_resolution_s': _bounding_resolution(first, complete),
         'offered_prefixes': offered,
         'offered_in_interval': offered_in_interval,
         'offered_rate_pps': rate,
     }
+
+
+def _poll_resolution(event):
+    '''How wide the look was that placed this event in time, if it says.
+
+    None for an event not produced by a poll loop, which is the case for a
+    stream assembled by hand rather than by a recorder.
+    '''
+    if event is None:
+        return None
+    return event.details.get('poll_resolution_s')
+
+
+def _bounding_resolution(*events):
+    '''The coarser of the two looks bounding an interval.
+
+    An interval is the distance between two polls, so it is only as sharp as
+    the wider of them: an `injection_s` of 0.0 says the generator finished
+    somewhere inside one look, and this says how wide that look was. Taking
+    the worst rather than an average keeps the qualification conservative --
+    the direction that reports less certainty than there is, never more.
+    '''
+    seen = [r for r in (_poll_resolution(e) for e in events) if r is not None]
+    return max(seen) if seen else None
 
 
 def monitor_metrics(events: Iterable[LifecycleEvent]):

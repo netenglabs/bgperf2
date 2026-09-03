@@ -214,9 +214,9 @@ what was appended, and:
 
 ### Asking the generator what it sent — tester offering polls
 
-`bench()` polls every tester whose class sets `REPORTS_OFFERING` (today only
-`BIRDTester`) at the monitor's own 1s cadence, so the two sides of a run are
-read at the same resolution. `Tester.offering_stats()` is the sampler;
+`bench()` polls every tester whose class sets `REPORTS_OFFERING` (`BIRDTester`
+and `Bgpdump2Tester`) at the monitor's own 1s cadence, so the two sides of a run
+are read at the same resolution. `Tester.offering_stats()` is the sampler;
 `get_offerings()` returns one `measurements.TesterOffering` per configured peer,
 and `measurements.TesterEventRecorder` turns those polls into
 `tester_session_ready`/`tester_first_update`/`tester_last_update`/
@@ -226,8 +226,26 @@ legacy `testers (s)` CSV column is untouched: it is elapsed minus
 time-to-first-prefix, a property of the target and monitor, and the two must not
 be read as versions of the same measurement.
 
-Four things this depends on:
+Five things this depends on:
 
+- **The published resolution is the gap the loop achieved, not the one it asked
+  for.** A poll stamps a sample, reads the generator, and only then waits, so
+  sleeping a fixed interval after the read makes the real cadence
+  `read + interval`. It waits to a deadline measured from the sample instead —
+  except when the read itself overruns the interval, where it keeps the full
+  wait rather than polling back-to-back and putting the controller inside a
+  container continuously. Either way the recorder derives each event's
+  `poll_resolution_s` from the sample timestamps (from the bench clock origin
+  on the first poll, since everything before the instrument arrived is
+  invisible), floored at the requested cadence, which the loop cannot beat.
+  That number is what makes an `injection_s` of 0.0 read as *unresolved at this
+  resolution* rather than as an instant injection, so understating it by the
+  cost of the read overstates what the run knows. **Each interval is qualified
+  by the polls that bound it** — `startup_resolution_s` and
+  `injection_resolution_s`, never one shared number: sessions are usually up on
+  the first poll, whose resolution is the whole interval since the origin, and
+  folding that into the injection bound would call a 1s-resolved injection
+  30s-unresolved.
 - **One `docker exec` per poll, not one per peer.** A BIRD tester runs a
   separate `bird` per neighbour on its own control socket, so a bare `birdc`
   reaches no daemon at all and each socket must be named. They are read in a

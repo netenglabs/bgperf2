@@ -220,6 +220,56 @@ run the matrix unfiltered.
   have to move and an in-flight batch from an older build still resumes instead of costing the
   operator every completed cell.
 
+### Order
+
+A test may also declare `order: shuffle` (default `matrix`) and, optionally, `seed: <int>`. A test
+key outside `BATCH_TEST_KEYS` + `BATCH_TEST_OPTIONAL_KEYS` is rejected: `seeds: 7` under
+`order: shuffle` would otherwise draw a fresh permutation every invocation while looking pinned,
+and a misspelt `repetitions` runs one pass of a matrix someone asked three of. Matrix
+order runs every cell of one target next to every other cell of that target, so anything that
+drifts over a batch — a thermal ramp, a filling page cache, a neighbour's job that starts an hour
+in — lands on the axes as a pattern and comes back out as a difference between the daemons.
+Shuffling does not remove that drift; it stops it lining up with one axis.
+
+- **The permutation is inside a pass, never across one.** A repetition stays a block for the
+  reason above, so dealing the passes together would take that back. Each pass draws its own
+  permutation — one permutation reused for all three applies the same position bias three times
+  and the repetitions cannot average it out.
+- **The order is a digest of the seed and the cell id, not `random.shuffle`.** The point of
+  recording a seed is that the sequence can be rebuilt later, and a Mersenne Twister draw is a
+  property of the interpreter as much as of the seed. `tests/test_batch_order.py` pins one seed's
+  order so changing the keying scheme has to be deliberate.
+- **The seed is recorded in the progress file before the first cell runs**, and `--resume` uses
+  the recorded one. A seed written only on a cell's completion would be missing from exactly the
+  batches that died early, and a resumed batch drawing a fresh permutation has run two orders,
+  neither of which is the one it recorded. Only a *drawn* seed is recovered that way — a seed the
+  config states is left alone, since editing it by hand is an instruction to re-sequence. An
+  omitted seed is drawn rather than defaulted to a constant: one shared default is itself a
+  permutation nobody chose. A `seed` under `order: matrix` is rejected rather than ignored.
+- **Execution order is not report order.** `batch_report_rows()` emits the CSV and the graphs in
+  matrix order whatever order the cells ran in, because `create_graph()` keys the x axis off the
+  row names it sees and appends one bar height per row, pairing the two positionally — that only
+  holds while each (peers, prefixes, filter) group arrives with its targets in the same order. A
+  shuffled batch reporting in execution order would produce bars under the wrong labels, or a
+  length mismatch, at the end of a batch that has already run for hours.
+- Identity is untouched by the order: `ordinal` stays a cell's place in the matrix, so `--resume`
+  matches its completed cells whichever way either pass ran.
+- **A superseded sequence stays in the file.** The progress document is rewritten whole on every
+  checkpoint, so a sequence dropped when the config is edited mid-batch leaves the record
+  describing an order that some of its own completed rows did not run in. It moves to
+  `previous_seeds` instead, and only when rows exist to describe. That covers a matrix pass
+  resumed as a shuffle, not just a changed seed — a file naming no order at all was written before
+  ordering existed, and is read as matrix, because that was the only order there was.
+
+**Two targets in one test may not share a run name.** A run name is label, else target plus
+version — nothing else — so entries differing only in `threads`, `mrt_file` or `image` are one
+name, and that is the stem `bench_output_prefix()` builds every artifact from, the `name` column
+of the CSV, and the x label `create_graph()` pairs bar heights against. `check_batch_run_names()`
+refuses them before the first container and says to add a `label`; `expand_target_versions()`
+already does the same thing along the version axis by labelling each version. This is also why
+two identical target entries are refused rather than treated as two observations — that is what
+`repetitions` is for, and it names its passes.
+
 Note the container work directory (`<--dir>/<bench-name>`) is wiped at the start of every cell, so
 raw daemon and tester logs only ever survive for the run in progress — that is true across cells
 already, and repetitions do not change it. The published artifacts are the durable record.

@@ -354,3 +354,20 @@ class TestCheckBatchTest:
         with pytest.raises(SystemExit):
             bgperf2.batch(Namespace(batch_config=str(config), results_dir=str(tmp_path)))
         assert ran == []
+
+
+class TestUnknownTestKeys:
+    '''A key nothing reads fails silently, and the sequencing ones fail worst:
+    `seeds: 7` under `order: shuffle` draws a fresh permutation every run while
+    looking pinned, and a misspelt `repetitions` runs one pass of a matrix
+    someone asked three of.
+    '''
+
+    @pytest.mark.parametrize('key', ['seeds', 'Order', 'repetition'])
+    def test_an_unrecognised_key_is_named(self, key):
+        with pytest.raises(SystemExit) as e:
+            bgperf2.check_batch_test(a_test(**{key: 3}))
+        assert key in str(e.value) and 'reps' in str(e.value)
+
+    def test_the_keys_a_test_may_carry_are_accepted(self):
+        bgperf2.check_batch_test(a_test(repetitions=2, order='shuffle', seed=7))

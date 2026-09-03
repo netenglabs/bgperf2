@@ -16,8 +16,10 @@
 # limitations under the License.
 
 import argparse
+import hashlib
 import json
 import os
+import random
 import sys
 import threading
 import yaml
@@ -1935,6 +1937,12 @@ def batch_repetitions(test):
 # Everything `batch()` needs from a test before it can expand or run it.
 BATCH_TEST_KEYS = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
 
+# ... and everything else it will read. A key outside both is a typo, and the
+# ones that matter here fail silently: `seeds: 7` under `order: shuffle` draws
+# a fresh permutation on every invocation while looking pinned, and
+# `repetitions` misspelt runs one pass of a matrix someone asked three of.
+BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed')
+
 
 def check_batch_test(test):
     '''Reject a test that cannot be expanded, before any container starts.
@@ -1951,10 +1959,55 @@ def check_batch_test(test):
         sys.exit("test '{0}': missing required {1}: {2}".format(
             test.get('name', '<unnamed>'),
             'key' if len(missing) == 1 else 'keys', ', '.join(missing)))
+    known = set(BATCH_TEST_KEYS) | set(BATCH_TEST_OPTIONAL_KEYS)
+    unknown = sorted(key for key in test if key not in known)
+    if unknown:
+        sys.exit("test '{0}': unrecognised {1}: {2}. Known keys: {3}".format(
+            test['name'], 'key' if len(unknown) == 1 else 'keys',
+            ', '.join(map(str, unknown)), ', '.join(sorted(known))))
     for key in ('neighbors', 'prefixes', 'filter_test', 'targets'):
         if not isinstance(test[key], list) or not test[key]:
             sys.exit("test '{0}': {1} must be a non-empty list, got {2!r}".format(
                 test['name'], key, test[key]))
+
+
+def target_run_name(target):
+    """What `run_name()` will call a run of this target entry.
+
+    A batch target is not a bench Namespace, and the name has to be known
+    before any run starts, so the same three fields are handed to the one
+    function that decides it rather than to a second copy of its rules.
+    """
+    return run_name(argparse.Namespace(
+        target=target['name'], label=target.get('label'),
+        version=target.get('version')))
+
+
+def check_batch_run_names(test, targets):
+    """Reject two targets in one test that would run under the same name.
+
+    A run name is only label, target and version, so two entries differing in
+    anything else -- `threads: 1` against `threads: 4`, one MRT file against
+    another, a stock image against a rebuilt one -- are one name. Everything
+    downstream is keyed by it: `bench_output_prefix()` builds the stem for
+    `<prefix>.events.json`, `<prefix>.versions.json` and the per-run PNGs, so
+    the second cell replaces the first's evidence; the CSV grows rows nothing
+    can tell apart; and `create_graph()` pairs one x tick with two bar heights
+    and raises a shape mismatch at the end of a batch that has already run for
+    hours. `expand_target_versions()` already guards the version axis this way,
+    by labelling each version; this is the same failure reached along any other
+    field, and the fix is the same one -- give one of them a `label`.
+    """
+    seen = {}
+    for target in targets:
+        name = target_run_name(target)
+        if name in seen:
+            sys.exit(
+                "test '{0}': two targets would both run as '{1}': {2!r} and "
+                '{3!r}. Give one of them a distinct `label`: a run name is what '
+                'names its artifacts, its CSV row and its bar.'.format(
+                    test.get('name'), name, seen[name], target))
+        seen[name] = target
 
 
 def expand_batch_cells(test, targets):
@@ -2000,6 +2053,117 @@ def expand_batch_cells(test, targets):
     return cells
 
 
+# How a test may sequence its cells. `matrix` is the enumeration order
+# `expand_batch_cells()` produces; `shuffle` permutes it from a recorded seed.
+BATCH_ORDERS = ('matrix', 'shuffle')
+
+
+def batch_order(test):
+    """How a test wants its cells sequenced, and the seed that fixes it.
+
+    Matrix order runs every cell of one target next to every other cell of that
+    target, so anything that drifts over a batch -- an ambient thermal ramp, a
+    page cache filling, a neighbour's job starting an hour in -- lands on the
+    axes in a pattern rather than as noise, and comes back out as a difference
+    between the daemons. Permuting the order does not remove that drift, it
+    stops it lining up with any one axis.
+
+    Validated here, with the rest of the config, because it decides the order of
+    hours of work: an unrecognised `order` that quietly ran the matrix would
+    make a batch that looks like it randomised and did not.
+
+    A seed under `order: matrix` is rejected rather than ignored, since a config
+    that names a seed is asking to be permuted. An omitted seed is generated,
+    not fixed at a constant: a default seed shared by every batch is one
+    permutation, and a permutation nobody chose is exactly the pattern this
+    exists to break. It is recorded in the progress file, so the sequence stays
+    reproducible after the fact and a resumed batch keeps the order it planned.
+    """
+    order = test.get('order', 'matrix')
+    if order not in BATCH_ORDERS:
+        sys.exit("test '{0}': order must be one of {1}, got {2!r}".format(
+            test.get('name'), ', '.join(BATCH_ORDERS), order))
+    seed = test.get('seed')
+    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int)):
+        sys.exit("test '{0}': seed must be an integer, got {1!r}".format(
+            test.get('name'), seed))
+    if order == 'matrix':
+        if seed is not None:
+            sys.exit("test '{0}': seed applies to order: shuffle, and this test "
+                     'runs in matrix order'.format(test.get('name')))
+        return order, None
+    if seed is None:
+        seed = random.SystemRandom().getrandbits(32)
+    return order, seed
+
+
+def describe_batch_sequence(order, seed):
+    """One phrase for a sequence, so the planned one and a superseded one read
+    the same way. Matrix order has no seed to name."""
+    if order == 'matrix' or seed is None:
+        return order
+    return '{0} seed {1}'.format(order, seed)
+
+
+def batch_shuffle_key(seed, test_name, cell):
+    """Where one cell sorts under one seed.
+
+    A digest of the seed and the cell's own identity, rather than
+    `random.shuffle` on a seeded PRNG: the point of recording a seed is that
+    the sequence can be reconstructed later, and a Mersenne Twister draw is a
+    property of the interpreter that produced it as much as of the seed. A
+    digest is fixed by the two strings alone.
+    """
+    material = '{0}:{1}'.format(seed, batch_cell_id(test_name, cell))
+    return hashlib.sha256(material.encode('utf-8')).hexdigest()
+
+
+def order_batch_cells(test_name, cells, order, seed):
+    """Sequence one test's cells for execution, without moving what any of them is.
+
+    Permutation happens inside a repetition, never across one. A repetition is
+    a block on purpose -- an interrupted batch then holds one observation of
+    everything rather than every observation of the first few cells -- and
+    dealing the passes together would take that back. Each pass draws its own
+    permutation, because the digest is keyed by the cell id and that carries the
+    repetition: one permutation reused for every pass would apply the same
+    position bias three times and the repetitions could not average it out.
+
+    Identity is untouched. `ordinal` stays a cell's place in the matrix and the
+    cell id says nothing about when it ran, so a resumed batch matches its
+    completed cells whatever order either pass ran in.
+    """
+    if order != 'shuffle':
+        return list(cells)
+    blocks = {}
+    for cell in cells:
+        blocks.setdefault(cell['repetition'], []).append(cell)
+    sequenced = []
+    for block in blocks.values():
+        sequenced.extend(sorted(
+            block, key=lambda cell: batch_shuffle_key(seed, test_name, cell)))
+    return sequenced
+
+
+def batch_report_rows(test_name, cells, completed):
+    """The rows of a test, in matrix order, whatever order they ran in.
+
+    Execution order is a property of the run; matrix order is what the CSV and
+    the graphs are read in. `create_graph()` needs the second one: it keys the x
+    axis off the row names it sees and appends one bar height per row, pairing
+    the two positionally, which only holds while each (peers, prefixes, filter)
+    group arrives with its targets in the same order. A shuffled batch that
+    reported in execution order would hand it bars under the wrong labels, or a
+    length mismatch, at the end of a batch that has already run for hours.
+    """
+    rows = []
+    for cell in cells:
+        cell_id = batch_cell_id(test_name, cell)
+        if cell_id in completed:
+            rows.append(completed[cell_id])
+    return rows
+
+
 def check_batch_images(targets):
     '''Fail before the first run if any image in the batch is missing.
 
@@ -2043,28 +2207,65 @@ def batch(args):
     # 1 and 2 had run, which is the multi-hour wait this is meant to prevent.
     expanded = []
     for test in batch_config['tests']:
+        # Before anything reads the test, including `test['targets']` itself:
+        # `check_batch_test()` exists so a missing or mistyped axis is named
+        # rather than arriving as a bare KeyError, and every read that comes
+        # first is a way to get that KeyError anyway.
+        check_batch_test(test)
         targets = expand_target_versions(test['targets'])
-        expanded.append((test, targets, expand_batch_cells(test, targets)))
+        check_batch_run_names(test, targets)
+        order, seed = batch_order(test)
+        expanded.append((test, targets, expand_batch_cells(test, targets), order, seed))
     # One entry per target, not per cell: a repeated matrix asks about the same
     # images every pass, and reporting a missing image once per repetition
     # buries the list this exists to print.
-    check_batch_images([t for _, targets, _ in expanded for t in targets])
+    check_batch_images([t for _, targets, _, _, _ in expanded for t in targets])
 
-    for test, _targets, cells in expanded:
+    for test, _targets, cells, order, seed in expanded:
         repetitions = batch_repetitions(test)
         progress_path = results_path(args.results_dir, f"{test['name']}.progress.json")
         resume = getattr(args, 'resume', False)
-        completed = load_batch_progress(progress_path) if resume else {}
+        document = load_batch_progress_document(progress_path) if resume else {'cells': {}}
+        completed = document['cells']
         if not resume and os.path.exists(progress_path):
             os.unlink(progress_path)
-        results = []
-        for cell in cells:
+        # A progress file written before ordering existed names no order, and
+        # there was only one to have run in: reading it as matrix is what makes
+        # the comparison below honest rather than vacuous.
+        recorded = {'order': document.get('order') or 'matrix',
+                    'seed': document.get('seed')}
+        superseded = list(document.get('previous_seeds') or [])
+        if (resume and test.get('seed') is None
+                and recorded['order'] == order and recorded['seed'] is not None):
+            # Recover the drawn seed rather than dealing the remaining cells
+            # again: an interrupted run resumed under a fresh permutation has
+            # run two orders, and neither of them is the one it recorded. A
+            # seed the config states is left alone -- changing it by hand is an
+            # instruction to re-sequence, not a resume to be corrected.
+            seed = recorded['seed']
+        elif (resume and completed
+                and (recorded['order'], recorded['seed']) != (order, seed)):
+            # The cells already on disk ran under the recorded sequence. The
+            # document is rewritten from scratch on every checkpoint, so a
+            # superseded seed that is simply dropped leaves the file describing
+            # an order that some of its own rows did not run in.
+            superseded.append(recorded)
+            print('order: {0} completed cell(s) ran under {1}; keeping that as '
+                  'a superseded sequence'.format(
+                      len(completed), describe_batch_sequence(**recorded)))
+        if order != 'matrix':
+            print('order: {0} (recorded in {1})'.format(
+                describe_batch_sequence(order, seed), progress_path))
+        # Written before the first cell so the seed survives a batch that dies
+        # in it, and so --resume finds the sequence rather than drawing another.
+        write_batch_progress(progress_path, completed, order=order, seed=seed,
+                             previous_seeds=superseded)
+        for cell in order_batch_cells(test['name'], cells, order, seed):
             t = cell['target']
             cell_id = batch_cell_id(test['name'], cell)
             if cell_id in completed:
                 print("resume: skipping completed cell: {0}".format(
                     batch_cell_description(cell, repetitions)))
-                results.append(completed[cell_id])
                 continue
 
             a = argparse.Namespace(**vars(args))
@@ -2095,21 +2296,21 @@ def batch(args):
 
             for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
                 setattr(a, field, t[field]) if field in t else setattr(a, field, 0)
-            stat = bench(a)
-            results.append(stat)
-            completed[cell_id] = stat
+            completed[cell_id] = bench(a)
 
             # Checkpoint both files atomically after every cell. If the process
             # dies later, --resume can skip every cell whose result made it to
             # disk -- including a repetition interrupted part way through, since
             # a cell's identity does not depend on how many of its siblings ran.
-            write_batch_progress(progress_path, completed)
-            write_batch_csv(
-                results_path(args.results_dir, f"{test['name']}.csv"), results)
+            write_batch_progress(progress_path, completed, order=order, seed=seed,
+                                 previous_seeds=superseded)
+            write_batch_csv(results_path(args.results_dir, f"{test['name']}.csv"),
+                            batch_report_rows(test['name'], cells, completed))
 
         # A crash after the progress checkpoint but before its matching CSV
         # replacement can leave the CSV one cell behind. Rebuild it even when
         # resume skipped every cell.
+        results = batch_report_rows(test['name'], cells, completed)
         write_batch_csv(results_path(args.results_dir, f"{test['name']}.csv"), results)
 
         print()
@@ -2167,15 +2368,24 @@ def batch_cell_description(cell, repetitions=1):
 BATCH_PROGRESS_SCHEMA_VERSION = 1
 
 
-def load_batch_progress(path):
+def load_batch_progress_document(path):
+    """The whole progress file: the completed cells, and how they were sequenced.
+
+    The sequencing keys are optional, so a file written before ordering existed
+    still loads at the same schema version and resumes as it always did.
+    """
     if not os.path.exists(path):
-        return {}
+        return {'cells': {}}
     with open(path, 'r') as f:
         document = json.load(f)
     if (document.get('schema_version') != BATCH_PROGRESS_SCHEMA_VERSION
             or not isinstance(document.get('cells'), dict)):
         raise ValueError('unsupported or malformed batch progress file: {0}'.format(path))
-    return document['cells']
+    return document
+
+
+def load_batch_progress(path):
+    return load_batch_progress_document(path)['cells']
 
 
 def atomic_write(path, write):
@@ -2191,10 +2401,24 @@ def atomic_write(path, write):
             os.unlink(temp_path)
 
 
-def write_batch_progress(path, completed):
+def write_batch_progress(path, completed, order=None, seed=None, previous_seeds=None):
+    document = {'schema_version': BATCH_PROGRESS_SCHEMA_VERSION, 'cells': completed}
+    if order is not None:
+        document['order'] = order
+    if previous_seeds:
+        # Sequences some of these rows ran under before the config was edited.
+        # Kept because the file is rewritten whole on every checkpoint, so
+        # anything not carried forward is gone.
+        document['previous_seeds'] = previous_seeds
+    if seed is not None:
+        # The one durable record of the sequence a batch ran in. It is written
+        # before the first cell, not after it: a seed that only appeared once a
+        # cell had finished would be missing from exactly the runs that died
+        # early, and a resumed batch would draw a new one.
+        document['seed'] = seed
+
     def write(f):
-        json.dump({'schema_version': BATCH_PROGRESS_SCHEMA_VERSION, 'cells': completed}, f,
-                  indent=2, sort_keys=True)
+        json.dump(document, f, indent=2, sort_keys=True)
         f.write('\n')
     atomic_write(path, write)
 

@@ -231,8 +231,16 @@ class TestReviewFixes:
         assert 'first-result' in csv_text
         assert 'second-result' in csv_text
 
-    def test_batch_resume_keeps_duplicate_cells_distinct(
+    def test_two_targets_that_would_run_under_one_name_are_refused(
             self, fake_img_exists, tmp_path, monkeypatch):
+        """Two indistinguishable entries are not two observations.
+
+        They share a run name, so they share the stem every artifact is built
+        from: the second replaces the first's events.json, versions.json and
+        PNGs, the CSV grows two rows nothing can tell apart, and create_graph()
+        pairs one x tick with two bar heights. A second observation of one cell
+        is what `repetitions` is for, and it names its passes.
+        """
         import yaml
         config = tmp_path / 'duplicates.yaml'
         config.write_text(yaml.safe_dump({'tests': [{
@@ -243,19 +251,15 @@ class TestReviewFixes:
             'targets': [{'name': 'bird'}, {'name': 'bird'}],
         }]}))
         fake_img_exists(lambda name: True)
-        monkeypatch.setattr(bgperf2, 'create_batch_graphs', lambda *a, **k: None)
 
         calls = []
-        monkeypatch.setattr(
-            bgperf2, 'bench', lambda a: calls.append(a.target) or ['result'])
-        args = Namespace(batch_config=str(config), results_dir=str(tmp_path), resume=True)
+        monkeypatch.setattr(bgperf2, 'bench', lambda a: calls.append(a.target) or ['r'])
+        with pytest.raises(SystemExit) as e:
+            bgperf2.batch(Namespace(
+                batch_config=str(config), results_dir=str(tmp_path), resume=True))
 
-        bgperf2.batch(args)
-        assert calls == ['bird', 'bird']
-
-        calls.clear()
-        bgperf2.batch(args)
-        assert calls == []
+        assert "'bird'" in str(e.value) and 'label' in str(e.value)
+        assert calls == [], 'refused before the first container'
 
 
 class TestBuildImageKwargs:

@@ -100,7 +100,10 @@ def test_benchmark_configs_expand():
     A missing axis used to reach `expand_batch_cells()` as a bare KeyError --
     `benchmarks/big-tests.yaml` had no `filter_test` on any of its three tests
     -- and a `repetitions: 0` runs nothing while `repetitions: "3"` runs once.
-    All of them are discovered when the batch starts, which may be hours away.
+    An `order` the sequencer does not recognise is the same class of typo: it
+    would name a permutation the batch never made, and two targets sharing a
+    run name overwrite each other's artifacts and break the graphs. All of them are discovered
+    when the batch starts, which may be hours away.
     '''
     yaml = pytest.importorskip('yaml')
     import bgperf2
@@ -112,6 +115,9 @@ def test_benchmark_configs_expand():
             try:
                 bgperf2.check_batch_test(test)
                 bgperf2.batch_repetitions(test)
+                bgperf2.batch_order(test)
+                bgperf2.check_batch_run_names(
+                    test, bgperf2.expand_target_versions(test['targets']))
             except SystemExit as e:
                 pytest.fail(f"{config.name}: {e}")
             checked += 1

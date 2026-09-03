@@ -1057,8 +1057,9 @@ controlled post-injection convergence tail.
 
 ### Phase 5: Add repetitions and order control
 
-Status: in progress. Repetitions, stable cell identity and resume landed on
-2026-09-03; deterministic order control and the summary statistics have not.
+Status: in progress. Repetitions, stable cell identity, resume and
+deterministic order control landed on 2026-09-03; the summary statistics have
+not.
 
 #### Progress on 2026-09-03: a matrix can be run more than once
 
@@ -1132,6 +1133,112 @@ introduced. No Docker run was needed or made: the change is confined to batch
 expansion, run naming and the progress file, all of which the unit suite
 covers (`tests/test_batch_repetitions.py` plus `TestBenchOutputPrefix` in
 `tests/test_measurement_artifacts.py`; 562 total, Docker-free).
+
+#### Progress on 2026-09-03: a matrix can be run in an order nothing chose
+
+A test may declare `order: shuffle` and, optionally, `seed: <int>`. Matrix
+order runs every cell of one target next to every other cell of that target, so
+anything that drifts over the hours a batch takes -- an ambient thermal ramp, a
+page cache filling, a neighbour's job that starts an hour in -- lands on the
+axes in a pattern rather than as noise, and leaves as a difference between the
+daemons. Permuting does not remove the drift; it stops it lining up with one
+axis. The default is unchanged, so no existing benchmark config runs
+differently.
+
+Six decisions worth keeping:
+
+- **The permutation is inside a pass, never across one.** A repetition is a
+  block on purpose -- an interrupted batch then holds one observation of
+  everything rather than every observation of the first few cells -- and
+  dealing the three passes together would take that back. Each pass draws its
+  own permutation, because the digest is keyed by a cell id that carries the
+  repetition: one permutation reused for every pass applies the same position
+  bias three times, and the repetitions cannot average out what they all share.
+- **The order is a digest of the seed and the cell id, not a seeded PRNG
+  draw.** The entire point of recording a seed is that the sequence can be
+  reconstructed after the fact, and a `random.shuffle` result is a property of
+  the interpreter that produced it as much as of the seed.
+  `tests/test_batch_order.py` pins one seed's order outright, so changing the
+  keying scheme costs a deliberate edit rather than silently invalidating every
+  recorded seed.
+- **The seed is written to the progress file before the first cell runs.** A
+  seed recorded only once a cell completed would be missing from exactly the
+  batches that died early -- the ones whose order someone will want to
+  reconstruct -- and `--resume`, which `scripts/run_2026_suite.sh` passes by
+  default, would draw a fresh permutation and finish in an order that is
+  neither the recorded one nor a single one. Only a drawn seed is recovered
+  that way: a seed the config states wins, because editing it by hand is an
+  instruction to re-sequence rather than a resume to be corrected.
+- **An omitted seed is drawn, not defaulted to a constant.** A constant shared
+  by every batch is one permutation, applied identically everywhere: exactly
+  the fixed pattern this exists to break. A `seed` under `order: matrix` is
+  rejected rather than ignored, since a config naming a seed is asking to be
+  permuted.
+- **Execution order is not report order.** `create_graph()` keys the x axis off
+  the row names it sees and appends one bar height per row, pairing the two
+  positionally -- which holds only while each (peers, prefixes, filter) group
+  arrives with its targets in the same order, as matrix order guarantees and a
+  shuffle does not. `batch_report_rows()` therefore rebuilds the CSV and the
+  graph input in matrix order from the completed-cell map, whatever order the
+  cells ran in. Reporting in execution order would have put bars under the
+  wrong labels, or raised a length mismatch, at the end of a batch that had
+  already run for hours. The row order also no longer depends on whether a run
+  was resumed.
+- **Identity does not move with the order.** `ordinal` stays a cell's place in
+  the matrix and the cell id says nothing about when it ran, which is what the
+  previous change set built it for; resume matches its completed cells
+  whichever way either pass was sequenced. `BATCH_PROGRESS_SCHEMA_VERSION` did
+  not have to move either: `order` and `seed` are optional keys, so a progress
+  file written before this change still loads and resumes.
+
+Review of this change set found three defects, fixed here:
+
+- **`check_batch_test()` was unreachable for the key it named first.**
+  `batch()` read `test['targets']` to expand versions before validating
+  anything, so a test with no `targets` -- or with `targets: bird` rather than
+  a list -- still died as a bare `KeyError`, naming neither the test nor the
+  key, which is the failure that check was added to remove. The new
+  `batch_order()` sat ahead of it too, so a bad `order` in a test without a
+  `name` reported `test 'None': ...`. Validation now runs first in the loop.
+- **Two targets in one test could share a run name.** A run name is label, else
+  target plus version; two entries differing only in `threads`, `mrt_file` or
+  `image` -- the first of which is exactly the BIRD 2-vs-3 comparison Phase 5A
+  calls for -- produce one name, and therefore one artifact stem, two
+  indistinguishable CSV rows, and a `create_graph()` shape mismatch at the end
+  of a batch that has already run for hours. `check_batch_run_names()` refuses
+  them up front and says to add a `label`, the same remedy
+  `expand_target_versions()` already applies along the version axis. Identical
+  duplicate entries are refused for the same reason: a second observation of
+  one cell is what `repetitions` is for, and it names its passes.
+- **A superseded seed was dropped.** The progress document is rebuilt on every
+  checkpoint, so editing the seed mid-batch and resuming left the file
+  describing an order that its own completed rows did not run in. The old
+  sequence moves to `previous_seeds`, and only when there are rows for it to
+  describe.
+
+A second review pass found two more, also fixed here:
+
+- **The superseded-sequence guard never fired for a sequence with no seed.**
+  Keying it on a recorded seed meant a matrix pass interrupted, then resumed
+  under `order: shuffle`, rewrote the file as shuffle seed X with no
+  `previous_seeds` -- the document then claiming rows that ran in matrix order
+  had run under a permutation, which is exactly the state it exists to
+  prevent. It compares the whole sequence now, and a file naming no order is
+  read as matrix, since before this change there was no other order to have
+  run in.
+- **Nothing rejected a test key the batch does not read.** `seeds: 7` beside
+  `order: shuffle` passed every check and drew a fresh permutation on each
+  non-resume invocation while looking pinned; a misspelt `repetitions` runs one
+  pass of a matrix someone asked three of. `check_batch_test()` now rejects any
+  key outside the required and optional sets -- the same failure the value
+  checks exist to prevent, reached one character earlier.
+
+Still open in this phase: the median / min / max / dispersion /
+coefficient-of-variation summary, and the named variance rule for expanding
+three runs to five. No Docker run was needed or made -- the change is confined
+to batch sequencing, the progress file and report assembly, covered by the new
+`tests/test_batch_order.py` (29 tests) plus the extended
+`test_benchmark_configs_expand`; 595 total, Docker-free.
 
 #### Work
 

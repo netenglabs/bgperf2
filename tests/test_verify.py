@@ -138,6 +138,13 @@ class TestProbeUsesTheClassBenchUses:
     def test_daemons_declare_the_binary_under_test(self, name):
         assert bgperf2.TARGET_CLASSES[name].DAEMON_BINARY
 
+    def test_the_mrt_injector_declares_its_binary(self):
+        '''The generator's build has to survive the same hygiene check as a
+        target's. An instrumented blaster sends more slowly than a clean one,
+        and the run would publish that as the target's convergence time.
+        '''
+        assert bgperf2.TESTER_CLASSES['bgpdump2'].DAEMON_BINARY
+
     @pytest.mark.parametrize('name', ['exabgp', 'exabgp_mrtparse', 'bgpdump2'])
     def test_tester_only_images_are_probed_as_testers(self, name):
         '''These have no TARGET_CLASSES entry, so without TESTER_CLASSES they

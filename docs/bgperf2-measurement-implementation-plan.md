@@ -586,10 +586,75 @@ property of the paths played back, not of the table size. No read failures, no
 tester errors or timeouts, foreign CPU 4%.
 
 Left for the next change sets in this phase: an aggregate across injectors that
-cannot let the fastest speak for the rest; blocked-write evidence (`-t io`
+cannot let the fastest speak for the rest; and blocked-write evidence (`-t io`
 enables bgpdump2's `Partial write`/`Full write` lines, at the cost of a log line
-per write); and bgpdump2 provenance, still `UNKNOWN (no version command for
-Bgpdump2Tester)` although the binary answers `-V` with `Version: 2.0.14`.
+per write).
+
+Also open, raised by review of the provenance change set and belonging to the
+Phase 2 poll loop rather than to bgpdump2: **`Tester.offering_stats()` does not
+stop once every session has reported `tester_complete`.** It keeps polling until
+convergence. That costs nothing for bgpdump2, whose poll is a host-side file
+read, but a BIRD poll is a `docker exec` running one `birdc` per configured
+peer, so a 50-100 peer run keeps spawning that many short-lived processes a
+second for the whole run with nothing left to learn from them. `birdc` is in
+`contention.BGPERF_PROCESSES`, so this is load the `max foreign cpu %` column
+deliberately cannot see -- the instrument's own overhead being the one thing
+invisible in the column whose whole meaning is "0 means the machine was yours".
+Stopping the loop when all sessions are complete removes nearly all of it.
+
+#### Progress on 2026-09-03: the injector now says which build it is
+
+`Bgpdump2` gained a version command, so the `tester version` column and the
+`.versions.json` manifest record `2.0.14 (a019184)` instead of `UNKNOWN (no
+version command for Bgpdump2Tester)`.
+
+The version alone would not have been identity. bgpdump2 reports `Version:
+2.0.14` and has for every master commit this project has built, so two images
+compiled months apart are indistinguishable by it -- the gcov trap one layer up,
+where a cached image keeps an older build and nothing in the results shows it.
+The commit is what separates them.
+
+Three decisions in it:
+
+- **The commit is read from the running container, not baked into the recipe.**
+  The image still carries the clone it compiled at `/root/bgpdump2`, so a
+  version command can ask it. Adding a build-time label would have been the
+  obvious move and the wrong one: `prepare` skips a tag that already exists, so
+  a recipe change is absent from every image already built -- exactly the
+  failure this is meant to close. Reading the clone identifies the images that
+  exist today, including the one this host has been benching with.
+- **A missing clone is reported, not omitted.** An image whose clone was pruned
+  reports `2.0.14 (commit unknown)`; dropping the parenthesis would leave a
+  string that looks pinned and is not.
+- **No banner means no version.** The command is two commands in one shell, so a
+  missing binary still produces the second half's output. The parser matches the
+  banner and raises `VersionUnavailable` otherwise, rather than recording
+  whatever came back -- the failure that put the word `exec` in the published
+  baseline as a BIRD version.
+
+`Bgpdump2.DAEMON_BINARY` is set in the same change set, so `verify` runs its
+gcov check on the generator too. An instrumented blaster sends more slowly than
+a clean one, and a run would publish that as the target's convergence time --
+the same defect that made every FRR result incomparable, on the other side of
+the wire.
+
+##### Docker verification
+
+`verify -t bgpdump2` on the 8-core / 30 GB host: `tester version: 2.0.14
+(a019184)`, `tester instrumentation: clean`, exit 0. The image predates this
+change set, which is the point -- its identity was recoverable without a
+rebuild.
+
+A real run confirmed it reaches the results, since `verify` probes a throwaway
+container rather than a busy injector: `bench -t bird -g bgpdump2 -n 2 -p 10000
+--mrt-file mrt/rib.20210801.0000`, `-d /var/tmp/bgperf` with results outside the
+campaign tree. Converged in 3s; the CSV row's `tester version` and the
+`.versions.json` testers entry both read `2.0.14 (a019184)` against
+`bgperf/bgpdump2:latest`, in place of the `UNKNOWN` every earlier MRT run
+recorded. No tester errors or timeouts, foreign CPU 4%.
+
+Still open for the exabgp pair, which implements no version command at all and
+is unpinned at both layers.
 
 #### Work
 

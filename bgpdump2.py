@@ -287,9 +287,54 @@ class Bgpdump2(Container):
     CONTAINER_NAME = 'bgperf_bgpdump2_target'
     IMAGE_REPO = 'bgperf/bgpdump2'
     DEFAULT_REF = 'master'
+    # The generator's own binary, so `verify` runs the same build-hygiene
+    # checks on it as on a target. An instrumented blaster is not a neutral
+    # instrument: it would send more slowly than a clean one, and the run would
+    # publish that as the target's convergence time.
+    DAEMON_BINARY = '/usr/local/sbin/bgpdump2'
+
+    # bgpdump2 reports `Version: 2.0.14`, and has done for every master commit
+    # this project has built. Alone that is not identity: two images compiled
+    # months apart from master are indistinguishable by it, which is the same
+    # shape as the gcov trap -- a cached image keeping an old build with
+    # nothing in the results to show it. The build's commit is the fact that
+    # separates them, and the image still carries the clone it compiled, so it
+    # can be read from a container that is already running rather than baked in
+    # at build time. That matters: `prepare` skips a tag that exists, so
+    # anything added to the recipe is missing from every image already built.
+    VERSION_CLONE = '/root/bgpdump2'
 
     def __init__(self, host_dir, conf, image='bgperf/bgpdump2'):
         super(Bgpdump2, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
+
+    def get_version_cmd(self):
+        # One exec for both facts. git's stderr is dropped rather than shown:
+        # a pruned clone is a weaker identity, not a broken image, and its
+        # message would otherwise have to be told apart from the version banner.
+        return ['sh', '-c',
+                '{0} -V; echo "commit: $(git -C {1} rev-parse --short HEAD '
+                '2>/dev/null)"'.format(self.DAEMON_BINARY, self.VERSION_CLONE)]
+
+    def exec_version_cmd(self):
+        '''`2.0.14 (a019184)`, or an explicit note when the commit is gone.
+
+        Matched against the banner rather than taken by position, for the
+        reason every parser here is: a fixed word applied to an error message
+        produces a plausible-looking value, and one of those reached the
+        published baseline as a BIRD version. No banner means no version, so
+        this raises instead of reporting the commit on its own.
+        '''
+        ret = (super().exec_version_cmd() or '').strip()
+        m = re.search(r'^Version:\s*(\S+)', ret, re.M)
+        if not m:
+            raise VersionUnavailable(
+                'unexpected output from `{0}`: {1!r}'.format(
+                    self.get_version_cmd(), ret))
+        commit = re.search(r'^commit:\s*([0-9a-f]{7,40})\s*$', ret, re.M)
+        # Said out loud rather than left off: 2.0.14 with no commit beside it
+        # looks like a precise version and is not one.
+        return '{0} ({1})'.format(
+            m.group(1), commit.group(1) if commit else 'commit unknown')
 
 
     @classmethod

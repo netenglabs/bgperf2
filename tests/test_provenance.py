@@ -151,6 +151,11 @@ class TestVersionParsers:
          'Copyright 1996-2005 Kunihiro Ishiguro, et al.',
          'FRRouting 10.7.0-my-manual-build'),
         ('openbgp.OpenBGP', 'OpenBGPD 8.8', '8.8'),
+        # Captured from bgperf/bgpdump2:latest. The commit is not decoration:
+        # bgpdump2 has reported 2.0.14 for every master build this project has
+        # made, so the version on its own cannot tell two images apart.
+        ('bgpdump2.Bgpdump2Tester', 'Version: 2.0.14\ncommit: a019184\n',
+         '2.0.14 (a019184)'),
     ])
     def test_good_output_parses(self, monkeypatch, cls_name, good, expected):
         mod, name = cls_name.split('.')
@@ -173,6 +178,14 @@ class TestVersionParsers:
         ('rustybgp.RustyBGPTarget', 'exec failed'),
         ('openbgp.OpenBGP', "exec: '/usr/local/sbin/bgpctl': no such file"),
         ('openbgp.OpenBGP', ''),
+        # The version command is two commands in one shell, so a missing binary
+        # still produces the second half's output. A parser reading the first
+        # line, or accepting whatever it got, would record 'commit:' as a
+        # bgpdump2 version.
+        ('bgpdump2.Bgpdump2Tester',
+         "sh: 1: /usr/local/sbin/bgpdump2: not found\ncommit: a019184"),
+        ('bgpdump2.Bgpdump2Tester', 'commit:'),
+        ('bgpdump2.Bgpdump2Tester', ''),
     ])
     def test_unrecognized_output_raises(self, monkeypatch, cls_name, bad):
         mod, name = cls_name.split('.')
@@ -194,6 +207,8 @@ class TestVersionParsers:
          'such file or directory'),
         ('openbgp.OpenBGP', "exec: '/usr/local/sbin/bgpctl': no such file",
          '/usr/local/sbin/bgpctl'),
+        ('bgpdump2.Bgpdump2Tester',
+         "sh: 1: /usr/local/sbin/bgpdump2: not found", 'bgpdump2: not found'),
     ])
     def test_the_rejected_output_survives_into_the_message(self, monkeypatch,
                                                            cls_name, bad,
@@ -233,6 +248,43 @@ class TestVersionParsers:
         mod, name = cls_name.split('.')
         cls = getattr(__import__(mod), name)
         assert self._parse(monkeypatch, cls, output) == expected
+
+    @pytest.mark.parametrize('commit,expected', [
+        ('a019184', '2.0.14 (a019184)'),
+        ('0123456789abcdef0123456789abcdef01234567',
+         '2.0.14 (0123456789abcdef0123456789abcdef01234567)'),
+    ])
+    def test_the_bgpdump2_build_is_named_beside_its_version(self, monkeypatch,
+                                                            commit, expected):
+        '''bgpdump2 is built from master and its banner never moves, so the
+        commit is the only thing that separates two images. Recording the
+        version alone would repeat the gcov trap one layer up: a cached image
+        carrying an older build, with nothing in the results to show it.
+        '''
+        import bgpdump2
+        assert self._parse(monkeypatch, bgpdump2.Bgpdump2Tester,
+                           'Version: 2.0.14\ncommit: {0}\n'.format(commit)) \
+            == expected
+
+    def test_a_bgpdump2_image_with_no_clone_says_so(self, monkeypatch):
+        '''The commit is read from the clone the image still carries, so an
+        image built without one -- or with it pruned -- has to report a version
+        it cannot pin rather than one that looks pinned.
+        '''
+        import bgpdump2
+        parsed = self._parse(monkeypatch, bgpdump2.Bgpdump2Tester,
+                             'Version: 2.0.14\ncommit:\n')
+        assert parsed == '2.0.14 (commit unknown)'
+
+    def test_bgpdump2_is_parsed_through_the_class_bench_builds(self):
+        '''Bgpdump2Tester's MRO is Tester -> Bgpdump2 -> MRTTester ->
+        Container, and only the middle one defines a version parser. This is
+        the shape that hid the rustybgp bug, where the parser was correct on
+        the base class and wrong through the class bench instantiates.
+        '''
+        import bgpdump2
+        assert bgpdump2.Bgpdump2Tester.exec_version_cmd \
+            is bgpdump2.Bgpdump2.exec_version_cmd
 
     def test_a_rejecting_parser_becomes_an_explicit_unknown(self, monkeypatch):
         '''The raise has to surface as UNKNOWN in the results, not a crash.'''

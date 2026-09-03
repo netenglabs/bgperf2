@@ -577,9 +577,21 @@ mixing a freshly built version with a cached one silently compares the two kinds
 `prepare -f -t exabgp -t exabgp_mrtparse -t bgpdump2`.** Their recipes changed — the exabgp pair moved
 off archived Debian buster onto bookworm, and bgpdump2 gained the `autoreconf` its link needs — and
 `prepare` skips a tag that already exists, so a cached image keeps the old base image with nothing
-looking wrong. Neither daemon implements a version command, so the `tester version` column records
-`UNKNOWN` either way and the manifest cannot tell the two builds apart. Same trap as the gcov one
-above.
+looking wrong. ExaBGP still implements no version command, so for the exabgp pair the `tester
+version` column records `UNKNOWN` either way and the manifest cannot tell the two builds apart —
+same trap as the gcov one above.
+
+**bgpdump2 does report itself**, and reports the commit it was compiled from: `2.0.14 (a019184)`.
+The version half alone would not be identity — upstream has said `Version: 2.0.14` for every master
+commit this project has built, so two images made months apart are indistinguishable by it, which
+is the gcov trap one layer up. The commit is read at probe time from the clone the image still
+carries at `/root/bgpdump2` (`Bgpdump2.VERSION_CLONE`), deliberately rather than baked into the
+recipe at build time: `prepare` skips an existing tag, so anything added to the Dockerfile is
+missing from every image already built, whereas reading the clone identifies the images you have
+now. An image whose clone was pruned reports `2.0.14 (commit unknown)` — said out loud, because
+`2.0.14` on its own looks pinned and is not. `Bgpdump2.DAEMON_BINARY` is set too, so `verify` runs
+the gcov check on the generator: an instrumented blaster sends more slowly than a clean one, and
+the run would publish that as the target's convergence time.
 
 That rebuild left the exabgp pair **unpinned at both layers**, which is a known open issue rather
 than a settled decision. `FROM python:3-bookworm` floats to whatever Python major is current

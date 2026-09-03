@@ -154,6 +154,65 @@ def duration_s(events: Iterable[LifecycleEvent], start_kind: EventKind,
     return end.monotonic_s - start.monotonic_s
 
 
+def signed_duration_s(events: Iterable[LifecycleEvent], start_kind: EventKind,
+                      end_kind: EventKind, start_producer: Optional[str] = None,
+                      end_producer: Optional[str] = None) -> Optional[float]:
+    '''Calculate a monotonic interval that is allowed to run backwards.
+
+    `duration_s()` refuses an inverted interval, and should: a monitor that
+    reached its first prefix before the clock started is a wiring fault, not a
+    negative duration. But an interval spanning two producers can legitimately
+    close before it opens -- the target can reach the required route count
+    while a generator is still finishing -- and there the sign is the finding.
+    Clamping it at zero would report an overlap as an instant tail.
+
+    Use this only where the contract says what a negative value means. Every
+    interval owned by one producer stays with `duration_s()`.
+    '''
+    events = tuple(events)
+    start = unique_event(events, start_kind, start_producer)
+    end = unique_event(events, end_kind, end_producer)
+    if start is None or end is None:
+        return None
+    return end.monotonic_s - start.monotonic_s
+
+
+def _resolution_for_poll(monotonic_s, since_s, sample_interval_s):
+    '''How coarsely one poll of a loop can place an event in time.
+
+    An event is dated to the poll that saw it, so its timestamp is known only
+    to within the gap since the previous look -- and on the first poll, to
+    within everything that happened since the clock started, which is where
+    work that finished before the instrument arrived shows up honestly rather
+    than as an instant.
+
+    The requested cadence is a floor on that gap, never the answer. Both poll
+    loops here stamp a sample, read a container, and only then wait, so the
+    cadence achieved is `read + wait` and publishing the nominal interval
+    understates the resolution by the cost of the read -- which for a 50-100
+    peer BIRD tester, or a `gobgp neighbor -j` exec, is not small.
+    Understating it is the one direction that matters: these are the numbers
+    that qualify an interval as unresolved instead of instant, so a poll
+    reports the coarser of the interval asked for and the gap it achieved.
+    '''
+    gap = monotonic_s - since_s
+    if sample_interval_s is None:
+        return gap
+    return max(gap, sample_interval_s)
+
+
+def _validated_interval(sample_interval_s):
+    '''Accept a positive finite poll cadence, or no declared cadence at all.'''
+    if sample_interval_s is None:
+        return None
+    if not isinstance(sample_interval_s, (int, float)) \
+            or isinstance(sample_interval_s, bool) \
+            or not math.isfinite(sample_interval_s) \
+            or sample_interval_s <= 0:
+        raise ValueError('sample_interval_s must be a positive number')
+    return float(sample_interval_s)
+
+
 class MonitorEventRecorder:
     '''Translate monitor samples into the typed lifecycle vocabulary.
 
@@ -162,10 +221,19 @@ class MonitorEventRecorder:
     samples without knowing anything about Docker or daemon adapters.
     '''
 
-    def __init__(self, bench_started_s, producer='monitor'):
+    def __init__(self, bench_started_s, producer='monitor',
+                 sample_interval_s=None):
         if not isinstance(producer, str) or not producer.strip():
             raise ValueError('producer must be a non-empty string')
         self.producer = producer
+        # The cadence the monitor loop was asked for, and so only the floor of
+        # the resolution it achieves -- it execs `gobgp neighbor -j` and only
+        # then waits. Every monitor-owned interval is quantised by how often
+        # the instrument actually looked, so each event carries that gap: a
+        # `first_prefix_s` of 0.0s at a 1s poll is not an instant first
+        # prefix, it is one the monitor could not resolve.
+        self.sample_interval_s = _validated_interval(sample_interval_s)
+        self._origin_s = float(bench_started_s)
         self._events = [LifecycleEvent(
             EventKind.BENCH_CLOCK_STARTED,
             bench_started_s,
@@ -173,9 +241,18 @@ class MonitorEventRecorder:
             EventPhase.SETUP,
         )]
         self._last_sample_s = None
+        self._poll_resolution_s = None
         self._last_accepted = 0
         self._last_change = None
         self._confirmed = False
+
+    def _details(self):
+        details = {}
+        if self.sample_interval_s is not None:
+            details['sample_interval_s'] = self.sample_interval_s
+        if self._poll_resolution_s is not None:
+            details['poll_resolution_s'] = self._poll_resolution_s
+        return details
 
     @property
     def events(self):
@@ -211,9 +288,15 @@ class MonitorEventRecorder:
             raise EventOrderError('monitor sample precedes bench_clock_started')
         if self._last_sample_s is not None and monotonic_s < self._last_sample_s:
             raise EventOrderError('monitor samples are not monotonic')
+        self._poll_resolution_s = _resolution_for_poll(
+            monotonic_s,
+            self._origin_s if self._last_sample_s is None
+            else self._last_sample_s,
+            self.sample_interval_s)
         self._last_sample_s = monotonic_s
 
         counters = {'accepted_prefixes': accepted_prefixes}
+        details = self._details()
         if accepted_prefixes > 0 and unique_event(
                 self._events, EventKind.MONITOR_FIRST_PREFIX) is None:
             self._events.append(LifecycleEvent(
@@ -222,6 +305,7 @@ class MonitorEventRecorder:
                 self.producer,
                 EventPhase.CONVERGENCE,
                 counters=counters,
+                details=details,
             ))
 
         if required_reached and unique_event(
@@ -232,6 +316,7 @@ class MonitorEventRecorder:
                 self.producer,
                 EventPhase.CONVERGENCE,
                 counters=counters,
+                details=details,
             ))
 
         if accepted_prefixes != self._last_accepted:
@@ -241,6 +326,7 @@ class MonitorEventRecorder:
                 self.producer,
                 EventPhase.CONVERGENCE,
                 counters=counters,
+                details=details,
             )
         self._last_accepted = accepted_prefixes
 
@@ -256,12 +342,17 @@ class MonitorEventRecorder:
         if monotonic_s < self._last_sample_s:
             raise EventOrderError(
                 'convergence confirmation precedes the last monitor sample')
+        # Carries the last sample's resolution, not a gap measured to the
+        # confirmation stamp. Assurance is a verdict on that sample rather
+        # than a fresh look at the monitor, so what bounds it in time is how
+        # wide the look was that supplied the count it ruled on.
         self._events.append(LifecycleEvent(
             EventKind.CONVERGENCE_CONFIRMED,
             monotonic_s,
             self.producer,
             EventPhase.ASSURANCE,
             counters={'accepted_prefixes': self._last_accepted},
+            details=self._details(),
         ))
         self._confirmed = True
 
@@ -396,13 +487,7 @@ class TesterEventRecorder:
     def __init__(self, bench_started_s, producer, sample_interval_s=None):
         if not isinstance(producer, str) or not producer.strip():
             raise ValueError('producer must be a non-empty string')
-        if sample_interval_s is not None:
-            if not isinstance(sample_interval_s, (int, float)) \
-                    or isinstance(sample_interval_s, bool) \
-                    or not math.isfinite(sample_interval_s) \
-                    or sample_interval_s <= 0:
-                raise ValueError('sample_interval_s must be a positive number')
-            sample_interval_s = float(sample_interval_s)
+        sample_interval_s = _validated_interval(sample_interval_s)
         if not isinstance(bench_started_s, (int, float)) \
                 or isinstance(bench_started_s, bool) \
                 or not math.isfinite(bench_started_s):
@@ -432,27 +517,15 @@ class TesterEventRecorder:
     def _resolution_for(self, monotonic_s):
         '''How coarsely this poll can place an event in time.
 
-        An event is dated to the poll that saw it, so its timestamp is known
-        only to within the gap since the previous look -- and on the first
-        poll, to within everything that happened since the clock started,
-        which is where a generator whose entire walk finished before the
-        instrument arrived shows up honestly rather than as an instant one.
-
-        The requested cadence is a floor on that gap, never the answer. The
-        poll loop stamps a sample, reads the generator, and only then waits,
-        so the cadence it achieves is `read + wait` and publishing the nominal
-        interval understates the resolution by the cost of the read -- which
-        for a 50-100 peer BIRD tester is not small. Understating it is the one
-        direction that matters: these are the numbers that qualify an interval
-        as unresolved instead of instant, so a poll reports the coarser of the
-        interval asked for and the gap it actually achieved.
+        A generator whose entire walk finished before the instrument arrived
+        shows up in the first poll's resolution -- everything since the clock
+        started -- rather than as an instant injection.
         '''
-        since = self._origin_s if self._last_sample_s is None \
-            else self._last_sample_s
-        gap = monotonic_s - since
-        if self.sample_interval_s is None:
-            return gap
-        return max(gap, self.sample_interval_s)
+        return _resolution_for_poll(
+            monotonic_s,
+            self._origin_s if self._last_sample_s is None
+            else self._last_sample_s,
+            self.sample_interval_s)
 
     def _details(self, extra=None):
         details = {}
@@ -791,11 +864,37 @@ def tester_metrics(events: Iterable[LifecycleEvent], producer: str):
         if complete else None
     octets = complete.counters.get('octets_on_wire') if complete else None
 
+    # What the run spent after this generator had handed over its whole
+    # workload -- the question the legacy `testers (s)` column was read as
+    # answering and never could, since that column starts at the monitor's
+    # first prefix and knows nothing about the generator at all.
+    #
+    # It is signed, and a negative value is a result rather than an error: the
+    # monitor reaches the configured check-point before the generator reports
+    # completion whenever the check-point sits below the full table, or when
+    # the generator is still flushing sessions the check-point did not need.
+    # That is an overlap, and it is the shape a run has when the target was
+    # never the thing being waited for. Clamping it at zero would publish that
+    # run as one with an instant tail.
+    #
+    # Null when either end is missing, which covers a failed run (no required
+    # count was ever reached) and a generator that never completed. Measuring
+    # from `tester_last_update` instead would answer a different question --
+    # the last update *observed*, not the end of the workload -- and it would
+    # answer it for exactly the runs where the generator is under suspicion.
+    required = unique_event(events, EventKind.MONITOR_REQUIRED_REACHED)
+    tail_s = signed_duration_s(
+        events, EventKind.TESTER_COMPLETE, EventKind.MONITOR_REQUIRED_REACHED,
+        start_producer=producer)
+
     return {
         'tester_startup_s': startup_s,
         'startup_resolution_s': _poll_resolution(ready),
         'injection_s': injection_s,
         'injection_resolution_s': _bounding_resolution(first, complete),
+        'post_injection_tail_s': tail_s,
+        'post_injection_tail_resolution_s': _bounding_resolution(
+            complete, required),
         'reported_injection_s': reported_injection_s,
         'offered_prefixes': offered,
         'offered_in_interval': offered_in_interval,
@@ -903,6 +1002,7 @@ def tester_fleet_metrics(events: Iterable[LifecycleEvent], producers):
     complete_s = None
     injection_s = None
     injection_resolution_s = None
+    end = None
     if not incomplete:
         start = min(first.values(), key=lambda e: e.monotonic_s)
         end = max(done.values(), key=lambda e: e.monotonic_s)
@@ -917,6 +1017,19 @@ def tester_fleet_metrics(events: Iterable[LifecycleEvent], producers):
         # The fleet interval is bounded by two polls belonging to two different
         # generators, and it is only as sharp as the wider of them.
         injection_resolution_s = _bounding_resolution(start, end)
+
+    # Measured from the *slowest* generator's completion, for the same reason
+    # the fleet's injection ends there: the workload is not delivered until
+    # the last of them has finished, and a tail measured from the first would
+    # charge the target with time it spent waiting on another injector. All
+    # or nothing with the rest of the fleet -- one generator that never
+    # completed leaves it null rather than bounded by the ones that did.
+    required = unique_event(events, EventKind.MONITOR_REQUIRED_REACHED)
+    post_injection_tail_s = None
+    post_injection_tail_resolution_s = None
+    if end is not None and required is not None:
+        post_injection_tail_s = required.monotonic_s - end.monotonic_s
+        post_injection_tail_resolution_s = _bounding_resolution(end, required)
 
     startup_s = None
     startup_resolution_s = None
@@ -960,6 +1073,8 @@ def tester_fleet_metrics(events: Iterable[LifecycleEvent], producers):
         'complete_s': complete_s,
         'injection_s': injection_s,
         'injection_resolution_s': injection_resolution_s,
+        'post_injection_tail_s': post_injection_tail_s,
+        'post_injection_tail_resolution_s': post_injection_tail_resolution_s,
         'reported_injection_s': reported_injection_s,
         'offered_prefixes': offered,
         'offered_in_interval': in_interval,
@@ -971,6 +1086,14 @@ def tester_fleet_metrics(events: Iterable[LifecycleEvent], producers):
 def monitor_metrics(events: Iterable[LifecycleEvent]):
     '''Derive the monitor-owned intervals from their named endpoints.'''
     events = tuple(events)
+    # Each interval carries the resolution of the polls that bound it, on the
+    # same rule the generators already use. The two that start at the clock
+    # origin are bounded by one poll only -- the origin is stamped by the
+    # controller, not looked up -- while assurance runs between two monitor
+    # samples and is only as sharp as the wider of them.
+    first_prefix = unique_event(events, EventKind.MONITOR_FIRST_PREFIX)
+    required = unique_event(events, EventKind.MONITOR_REQUIRED_REACHED)
+    confirmed = unique_event(events, EventKind.CONVERGENCE_CONFIRMED)
     return {
         'first_prefix_s': duration_s(
             events,
@@ -978,17 +1101,20 @@ def monitor_metrics(events: Iterable[LifecycleEvent]):
             EventKind.MONITOR_FIRST_PREFIX,
             start_producer='controller',
         ),
+        'first_prefix_resolution_s': _poll_resolution(first_prefix),
         'convergence_s': duration_s(
             events,
             EventKind.BENCH_CLOCK_STARTED,
             EventKind.MONITOR_REQUIRED_REACHED,
             start_producer='controller',
         ),
+        'convergence_resolution_s': _poll_resolution(required),
         'assurance_s': duration_s(
             events,
             EventKind.MONITOR_REQUIRED_REACHED,
             EventKind.CONVERGENCE_CONFIRMED,
         ),
+        'assurance_resolution_s': _bounding_resolution(required, confirmed),
     }
 
 

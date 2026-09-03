@@ -914,6 +914,61 @@ duration/rate, and reproducible bgpdump2 identity.
 
 ### Phase 4: Derive bottleneck findings conservatively
 
+Status: in progress. The interval the findings are about now exists.
+
+#### Progress on 2026-09-03: measure the tail, before classifying it
+
+The exit criterion is to tell a controlled tester limitation apart from a
+controlled post-injection convergence tail, and the run had no measurement of
+that tail to classify. Phase 2 left `post_injection_tail_s` out deliberately:
+it is the one interval that spans two producers, and the contract allows it to
+be negative. That is now published per generator and for the fleet, beside a
+resolution, and printed in one line at the end of a run.
+
+Three things it had to get right.
+
+**The sign is the finding, so nothing clamps it.** A negative tail means the
+monitor reached the configured check-point while the generator was still
+finishing. That is not a fault and not rare: the check-point sits below the
+full table by design (99% for synthetic and bgpdump2 runs), and a generator
+goes on flushing sessions the check-point did not need. It is the shape of a
+run in which the target was never the thing being waited for. Clamping at zero
+would give that run the same number as one that converged the instant its
+generators finished -- the two conclusions Phase 4 exists to separate.
+`signed_duration_s()` is therefore a separate helper: `duration_s()` still
+refuses an inverted interval, because within one producer that is a wiring
+fault rather than a measurement.
+
+**It is measured from completion, never from `tester_last_update`.** The last
+update is the last increase *observed*, not the end of the workload. A tail
+derived from it would be available for exactly the runs where the generator is
+under suspicion -- a stalled injector -- and it would look entirely ordinary.
+A generator that never completed has no tail, and the fleet tail is
+all-or-nothing with the rest of that section: it starts at the *slowest*
+generator's completion, since one measured from the first would charge the
+target with time it spent waiting for another injector.
+
+**The monitor now publishes the resolution of its own polls**, because the
+tail is the only interval bounded by two different instruments and it is only
+as sharp as the wider of them. `Monitor.stats()` execs `gobgp neighbor -j` and
+only then sleeps 1s, so its achieved cadence is `read + 1s` -- the same trap
+the tester loop had, and the reason `MonitorEventRecorder` takes the requested
+cadence as a floor and stamps the gap it achieved. `first_prefix_s`,
+`convergence_s` and `assurance_s` are now qualified the same way, which they
+were not before: a `first_prefix_s` of 0.0s on a fast run is a poll that could
+not resolve it, not an instant first prefix. Assurance carries the resolution
+of the sample its verdict ruled on rather than a gap to the moment the verdict
+was stamped, since it is a decision about a sample and not a fresh look.
+
+A tail whose magnitude is under that resolution is reported in words --
+`shorter than the 1.0s poll resolution` -- rather than as a duration, in either
+direction. No Docker run: this is a pure derivation over events two poll loops
+already produce, covered by `tests/test_post_injection_tail.py` against
+recorder-produced streams.
+
+Still to do in this phase: the structured findings themselves, which now have
+an interval to reason about.
+
 #### Work
 
 - Add structured findings rather than a permanent validity boolean.

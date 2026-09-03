@@ -124,6 +124,11 @@ parsing must stay incremental and memory-conscious.
   generator's own counters. A BIRD 2.19 offered count is queue-side: the count and the completion fact are
   sound, the injection duration and rate are not. Read `offered_rate_pps` only beside `offered_in_interval`,
   and do not derive a tester-limited verdict from a BIRD 2.19 rate.
+- `post_injection_tail_s` is the interval from the last generator finishing to the monitor reaching the
+  required count — the second half of an injection-bound verdict, and signed on purpose. A negative value
+  means the monitor reached the check-point while a generator was still finishing, which is ordinary and must
+  not be clamped to zero. Both ends come from 1s poll loops, so a magnitude at or under
+  `post_injection_tail_resolution_s` says the two events shared a look, not that the tail was short.
 - Where a generator measures its own send, that measurement is published as `reported_injection_s` beside the
   polled `injection_s`, not folded into it — a different clock and the generator's own definition of sending.
   For a bgpdump2 walk that finishes in a millisecond it is the only account of the interval there is. Its

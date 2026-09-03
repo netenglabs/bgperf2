@@ -17,6 +17,7 @@ from measurements import (
     event_artifact,
     monitor_metrics,
     ordered_events,
+    signed_duration_s,
     unique_event,
 )
 
@@ -163,12 +164,63 @@ def test_monitor_queue_samples_become_named_events_and_metrics():
     ]
     assert monitor_metrics(recorder.events) == {
         'first_prefix_s': 2,
+        # No declared cadence, so each resolution is the raw gap the loop
+        # achieved: the first prefix was found one second after the previous
+        # look, and the confirmation four after the required count.
+        'first_prefix_resolution_s': 1,
         'convergence_s': 3,
+        'convergence_resolution_s': 1,
         'assurance_s': 5,
+        'assurance_resolution_s': 4,
     }
     last_change = unique_event(recorder.events, EventKind.MONITOR_LAST_CHANGE)
     assert last_change.monotonic_s == 104
     assert last_change.counters == {'accepted_prefixes': 1000}
+
+
+def test_a_monitor_event_carries_the_gap_the_loop_achieved():
+    """The monitor loop execs `gobgp neighbor -j` and only then waits, so the
+    cadence it asks for is a floor on the gap it achieves. Publishing the
+    nominal 1s would understate how coarsely a sample places an event, which
+    is the direction that overstates what the run knows."""
+    recorder = MonitorEventRecorder(100, producer='bgperf_monitor',
+                                    sample_interval_s=1.0)
+
+    # The first look covers everything since the clock started -- the origin
+    # is stamped before the monitor is even asked.
+    recorder.observe(103.4, accepted_prefixes=10)
+    recorder.observe(104.8, accepted_prefixes=100, required_reached=True)
+    # A sample that arrived early still reports the cadence asked for: the
+    # floor is the resolution the loop cannot beat.
+    recorder.observe(105.2, accepted_prefixes=100, required_reached=True)
+    recorder.confirm_convergence()
+
+    measured = monitor_metrics(recorder.events)
+    assert measured['first_prefix_resolution_s'] == pytest.approx(3.4)
+    assert measured['convergence_resolution_s'] == pytest.approx(1.4)
+    assert measured['assurance_resolution_s'] == pytest.approx(1.4)
+    first = unique_event(recorder.events, EventKind.MONITOR_FIRST_PREFIX)
+    assert first.details['sample_interval_s'] == 1.0
+
+
+def test_a_signed_interval_is_the_only_one_allowed_to_run_backwards():
+    """`duration_s` refuses an inverted interval because for a single producer
+    that is a wiring fault. Across producers it is a measurement: the monitor
+    can reach the required count while a generator is still finishing."""
+    events = [
+        LifecycleEvent(EventKind.MONITOR_REQUIRED_REACHED, 12.0, 'monitor',
+                       EventPhase.CONVERGENCE),
+        LifecycleEvent(EventKind.TESTER_COMPLETE, 20.0, 'tester0',
+                       EventPhase.INJECTION),
+    ]
+
+    assert signed_duration_s(events, EventKind.TESTER_COMPLETE,
+                             EventKind.MONITOR_REQUIRED_REACHED) == -8.0
+    with pytest.raises(EventOrderError):
+        duration_s(events, EventKind.TESTER_COMPLETE,
+                   EventKind.MONITOR_REQUIRED_REACHED)
+    assert signed_duration_s(events[:1], EventKind.TESTER_COMPLETE,
+                             EventKind.MONITOR_REQUIRED_REACHED) is None
 
 
 def test_failure_before_first_prefix_keeps_metrics_unavailable():
@@ -181,8 +233,11 @@ def test_failure_before_first_prefix_keeps_metrics_unavailable():
         'bench_clock_started']
     assert artifact['measurements'] == {
         'first_prefix_s': None,
+        'first_prefix_resolution_s': None,
         'convergence_s': None,
+        'convergence_resolution_s': None,
         'assurance_s': None,
+        'assurance_resolution_s': None,
     }
 
 
@@ -240,6 +295,8 @@ def test_a_tester_with_no_events_reports_null_intervals_rather_than_absence():
         'startup_resolution_s': None,
         'injection_s': None,
         'injection_resolution_s': None,
+        'post_injection_tail_s': None,
+        'post_injection_tail_resolution_s': None,
         'reported_injection_s': None,
         'offered_prefixes': None,
         'offered_in_interval': None,

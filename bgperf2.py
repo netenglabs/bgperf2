@@ -806,12 +806,20 @@ def monitor_sample_monotonic_s(info, fallback_clock=None):
     return (fallback_clock or time.monotonic)()
 
 
-# The generators are polled at the monitor's cadence so the two sides of a run
-# are read at the same resolution. This is the cadence asked for, and so the
-# floor of the resolution rather than the resolution itself: a poll costs a read
-# before it waits. Every derived tester interval is quantised by the gap the
-# loop actually achieved, which each event carries instead of assuming this.
-TESTER_POLL_INTERVAL_S = 1
+# The cadence `Monitor.stats()` is asked for between two `gobgp neighbor -j`
+# execs -- passed into that loop, not merely asserted about it, so the floor
+# published with every monitor-owned resolution cannot drift away from the
+# sleep the loop actually takes. It is the cadence asked for, and so the floor of the resolution
+# rather than the resolution itself: a poll costs a read before it waits.
+# Every derived interval is quantised by the gap the loop actually achieved,
+# which each event carries instead of assuming this.
+MONITOR_POLL_INTERVAL_S = 1
+
+# The generators are polled at the monitor's own cadence, so the two sides of
+# a run are read at the same resolution -- which is what makes the interval
+# between a generator's completion and the monitor's required count a
+# measurement rather than the difference between two instruments.
+TESTER_POLL_INTERVAL_S = MONITOR_POLL_INTERVAL_S
 
 
 def observe_tester_sample(info, recorders, errors):
@@ -1125,7 +1133,9 @@ def bench(args):
         time.sleep(10)
 
     bench_clock_started_s = time.monotonic()
-    lifecycle = MonitorEventRecorder(bench_clock_started_s, producer=m.name)
+    lifecycle = MonitorEventRecorder(
+        bench_clock_started_s, producer=m.name,
+        sample_interval_s=MONITOR_POLL_INTERVAL_S)
 
     q = Queue()
 
@@ -1134,7 +1144,7 @@ def bench(args):
     # would exit immediately on a flag the last run left set.
     controller_stop.clear()
 
-    m.stats(q)
+    m.stats(q, interval=MONITOR_POLL_INTERVAL_S)
     controller_idle_percent(q)
     controller_memory_free(q)
     controller_foreign_cpu(q)
@@ -1510,6 +1520,49 @@ def print_tester_metrics(events, producers):
               f"{measured['injection_s']:.1f}s ({rate:.0f} prefixes/s){own}")
     if len(producers) > 1:
         print_tester_fleet_metrics(events, producers)
+    if producers:
+        print_post_injection_tail(events, producers)
+
+
+def print_post_injection_tail(events, producers):
+    '''Report what the run spent after the whole workload had been offered.
+
+    Printed once for the run rather than once per generator, and taken from
+    the fleet, because the tail only starts when the *last* generator has
+    finished: a per-generator tail on a ten-injector run is nine numbers that
+    include waiting for another injector.
+
+    Said in words rather than published as a bare signed number, because the
+    two ends of it come from two 1s poll loops. A tail no larger than that
+    resolution is not a short tail -- each end could have happened anywhere
+    inside its own look, so the interval is not distinguishable from zero --
+    and a negative one is not a fault, it is the ordinary shape of a run whose
+    check-point was reached while the generators were still finishing.
+    '''
+    fleet = tester_fleet_metrics(events, producers)
+    tail = fleet['post_injection_tail_s']
+    resolution = fleet['post_injection_tail_resolution_s']
+    if tail is None:
+        # Named for what `incomplete_testers` actually means -- a generator
+        # with no *bounded, completed* injection, which is a missing first
+        # update as well as a missing completion. Saying "no completion" for
+        # a generator that reported one and was never seen to offer anything
+        # would name the wrong end.
+        reason = 'a generator has no completed injection' \
+            if fleet['incomplete_testers'] \
+            else 'the monitor never reached the required count'
+        print(f"post-injection tail unmeasured ({reason})")
+    elif resolution is not None and abs(tail) <= resolution:
+        print(f"post-injection tail not resolved at the {resolution:.1f}s poll "
+              f"resolution (the last generator finished and the monitor "
+              f"reached the required count within one look of each other)")
+    elif tail < 0:
+        print(f"post-injection tail: none, the monitor reached the required "
+              f"count {-tail:.1f}s before the last generator finished "
+              f"(injection and convergence overlapped)")
+    else:
+        print(f"post-injection tail: {tail:.1f}s from the last generator "
+              f"finishing to the required count")
 
 
 def print_tester_fleet_metrics(events, producers):

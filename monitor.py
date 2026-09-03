@@ -86,13 +86,33 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
 
             n = n+1
 
-    def stats(self, queue):
+    def stats(self, queue, interval=1):
+        '''Poll the monitor's accepted count into the run's stats queue.
+
+        `interval` is the cadence asked for between two `gobgp neighbor -j`
+        execs, and only the floor of the resolution achieved: a poll reads
+        before it waits. It is a parameter rather than a literal because the
+        controller publishes it as the floor of every monitor-owned interval's
+        resolution -- a hardcoded sleep here and a constant there would drift
+        apart silently, and the resolution is what says whether an interval
+        was resolved at all.
+        '''
         self.stop_monitoring = False
         def stats():
             cps = self.config['monitor']['check-points'] if 'check-points' in self.config['monitor'] else []
             while True:
                 if self.stop_monitoring:
                     return
+                # Stamped before the exec, not after, for the reason the
+                # tester poll loop gives: `gobgp neighbor -j` is a docker
+                # exec, and dating the sample to when the read *finished*
+                # would push every monitor event later by a whole read. That
+                # end of `post_injection_tail_s` would then be late while the
+                # generator's end is early, biasing the one interval that
+                # spans both instruments -- and the sign of that interval is
+                # the finding. Before the read is a lower bound on when the
+                # count was true.
+                sampled_at = time.monotonic()
                 try:
                     info = json.loads(self.local('gobgp neighbor -j').decode('utf-8'))[0]
                 except Exception as e:
@@ -110,9 +130,9 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
                 # but durations are calculated from this monotonic observation
                 # time at the queue boundary.
                 info['time'] = datetime.datetime.now()
-                info['monotonic_s'] = time.monotonic()
+                info['monotonic_s'] = sampled_at
                 queue.put(info)
-                time.sleep(1)
+                time.sleep(interval)
 
         t = Thread(target=stats)
         t.daemon = True

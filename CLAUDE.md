@@ -239,6 +239,41 @@ send at the same time. It is a summary of the sections, never a replacement:
 the fleet says whether the load was delivered, the sections say which generator
 was slow.
 
+**`post_injection_tail_s` is signed, and nothing clamps it.** It runs from a
+generator's completion (the **slowest** one, for the fleet) to
+`monitor_required_reached`, and it is the only published interval that spans
+two producers — which is why `measurements.signed_duration_s()` exists beside
+`duration_s()`, which still refuses an inverted interval because within one
+producer that is a wiring fault. A negative tail means the monitor reached the
+check-point while the generator was still finishing, which is ordinary: the
+check-point is 99% of the table, and a generator goes on flushing sessions it
+did not need. Clamping at zero would give that run the same number as one that
+converged the instant its generators finished — the two conclusions this
+measurement exists to separate. It is never measured from `tester_last_update`
+instead: that is the last increase *observed*, not the end of the workload, so
+it would supply a plausible tail for exactly the stalled-injector runs that
+have none. The printed line reports a magnitude at or under
+`post_injection_tail_resolution_s` in words rather than as a duration.
+
+**The monitor stamps its own poll resolution too**, for the same reason the
+generators do and because the tail is bounded by one poll from each loop.
+`Monitor.stats()` execs `gobgp neighbor -j` and only then sleeps 1s, so its
+achieved cadence is `read + 1s`; `MonitorEventRecorder` takes
+`MONITOR_POLL_INTERVAL_S` as a floor and publishes the gap it achieved — the
+constant is *passed into* that loop rather than asserted about it, so the
+published floor cannot drift away from the sleep the loop takes. **Both poll
+loops stamp the sample before the read**, never after: the monitor's read is a
+`docker exec` too, and dating its sample to when the read finished while the
+generator dates its own to before would bias `post_injection_tail_s` positive
+by a read from each instrument — on the one interval whose *sign* is the
+finding. That
+qualifies `first_prefix_s`, `convergence_s` and `assurance_s` as well, which
+were previously published bare — a `first_prefix_s` of 0.0s is a poll that
+could not resolve it, not an instant first prefix. `convergence_confirmed`
+carries the resolution of the sample its verdict ruled on, not a gap to the
+moment it was stamped: assurance is a decision about a sample, not a fresh
+look.
+
 **A span nothing crossed is not a rate of zero**, at either level. Each MRT
 injector's sub-millisecond walk is over before its own first poll, so a fleet
 span bounded by two injectors completing at different polls contains none of

@@ -199,10 +199,24 @@ finished sending routes.
 Consequently, a `testers (s)` value close to `elapsed (s)` cannot establish
 that a run was injection-bound. That conclusion requires an explicit tester
 completion event and comparison of injection time with the post-injection
-convergence tail. The measurement implementation and 64 GB validation plans
+convergence tail, both of which are in `<prefix>.events.json` rather than the
+CSV. `post_injection_tail_s` is the second of those: the interval from the
+last generator finishing to the monitor reaching the required count, printed
+at the end of a run and published per generator and for the fleet.
+
+It is **signed**, and a negative value is an ordinary result rather than a
+fault — the monitor reaches the check-point (99% of the configured table)
+while the generators are still finishing, which is what a run looks like when
+the target was never the thing being waited for. Both ends come from 1s poll
+loops, so a tail whose magnitude is at or under
+`post_injection_tail_resolution_s` says the two events landed within one look
+of each other, in either direction, and says nothing about which side was
+slower.
+
+The measurement implementation and 64 GB validation plans
 ([implementation](docs/bgperf2-measurement-implementation-plan.md),
-[validation](docs/2026-64gb-timing-validation-plan.md)) add that evidence
-before drawing new bottleneck or fine version-ranking conclusions.
+[validation](docs/2026-64gb-timing-validation-plan.md)) add the remaining
+evidence before drawing new bottleneck or fine version-ranking conclusions.
 
 ### IPv4 only
 

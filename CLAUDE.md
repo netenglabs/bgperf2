@@ -222,6 +222,46 @@ sets is a target key, so a test key one level too deep is the natural slip and f
 `prefix_scope: total` under a target runs that target at `neighbors x prefixes`, converges, and
 writes rows that read as a peer sweep.
 
+`--path-diversity D` (batch: `path_diversity: D`, a *test* key) is the other half of
+that separation: it deals the peers into groups of `D` and gives each group one shared prefix
+block, so the fleet offers `n * p` paths for `(n / D) * p` distinct prefixes and the target
+actually has to select a best path. Without it every route the target learns is the only path it
+holds for that prefix, so a run measures reception and re-advertisement and publishes it as
+convergence -- and best-path selection is one of the three things BIRD 3's worker threads exist to
+parallelise.
+
+- **The monitor's check-point counts distinct prefixes, not offered paths** (`groups * p`), since
+  the monitor reads what the target *re-advertises* and that is one best path per prefix.
+  `path_diversity_groups()` is the only place that arithmetic lives, because the block a neighbour
+  is given in `gen_conf()` and the check-point are far apart and must agree: too high never
+  converges, too low reports CONVERGED on a fraction of the table. Per-neighbour `count` stays `p`
+  -- a peer still offers `p` and the target still accepts all of them, since BGP holds the losers.
+- **The default renders the scenario it always did.** `gen_paths()` takes an optional `block` and
+  the caller omits it at diversity 1 (verified byte-identical); the cell id omits the key at the
+  default too, so an in-flight batch from an older build still resumes.
+- **The block is keyed on the count of configured neighbours, not the loop index**, which skips the
+  target's and monitor's addresses.
+- **Refused, at all four entry points, for**: an MRT generator (no paths are synthesised there),
+  `-f`/a scenario target (the file states its own paths), a diversity above the peer count, and an
+  inexact division -- the remainder group would announce a block with fewer competing paths than
+  the rest. `check_batch_test()` checks every peer count on the axis, not the first.
+- **`--prefix-scope total` and `--path-diversity` are refused together**, deliberately: "the whole
+  table" then has two readings differing by exactly `D` (paths offered vs. distinct prefixes held),
+  and the reading would decide the `prefixes per peer` column, the cell identity and every artifact
+  name. Choosing one is its own change set.
+- **It is in the artifact stem (`pd<D>`) and in `run.path_diversity`, not in the CSV.** Nothing
+  else in `bench_output_prefix()` carries it -- a disjoint run and a competing one have the same
+  peer and per-peer prefix counts -- so two tests differing only in it would overwrite each other's
+  artifacts, which is the `filter_test` failure. A `-f` run records `null`: provenance never
+  guesses about a workload bgperf2 did not build. **Both `run` blocks carry it** --
+  `write_provenance()` and `write_event_artifact()` -- because the events artifact is what
+  `findings.py` reads, and stating `peers` and `prefixes_per_peer` alone describes a table five
+  times the one the target held, uncorrectably. Same rule as `repetition`.
+- **A refusal names the fault, not the nearest rule it trips.** The scope cross-check tests against
+  `PREFIX_SCOPES`, so a typo'd `prefix_scope: totl` beside a diversity gets `unknown prefix scope`
+  from the function that owns that diagnosis, rather than being blamed on the combination -- which
+  sends the operator to remove the diversity and meet the same typo again.
+
 `--threads N` sets worker threads on the target (`conf['target']['threads']`). Only BIRD reads it
 so far: **BIRD 3 runs one worker unless the config says otherwise**, so benching 3.x against 2.x
 without it measures nothing (verified: 3.3.2 gives 2 OS threads by default, 5 with `threads 4`;

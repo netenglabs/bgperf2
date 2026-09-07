@@ -178,6 +178,15 @@ def bench_output_prefix(args):
     filter_test = getattr(args, 'filter_test', None)
     if filter_test:
         parts.append(str(filter_test).replace(' ', '_'))
+    # Path diversity is the other dimension a batch can hold constant per test
+    # while two tests in one config differ along it, and nothing else in this
+    # stem carries it -- the peer count and the per-peer prefix count are the
+    # same for a disjoint run and a run whose peers compete. Appended only when
+    # it is not the default, so an existing run keeps the name it has always
+    # had.
+    diversity = getattr(args, 'path_diversity', None) or DEFAULT_PATH_DIVERSITY
+    if diversity != DEFAULT_PATH_DIVERSITY:
+        parts.append('pd{0}'.format(diversity))
     return '_'.join(parts)
 
 
@@ -315,15 +324,170 @@ def _divisors_near(prefix_num, neighbor_num):
     return [n for n in (below, above) if n]
 
 
+# How many peers announce each block of prefixes. 1 is what bgperf has always
+# generated: every peer takes its own block off the shared iterator, so the
+# peers are disjoint and the table is `n * p`. Above 1 the peers are grouped and
+# every peer in a group announces the *same* block, so the target holds that
+# many competing paths for each of those prefixes and has to select between
+# them -- which is the work `n * p` disjoint prefixes never asks it to do.
+DEFAULT_PATH_DIVERSITY = 1
+
+
+def path_diversity_groups(neighbor_num, diversity):
+    """How many distinct prefix blocks a fleet of this shape announces.
+
+    The one place this arithmetic lives, because two things a hundred lines
+    apart have to agree about it: the block `gen_conf()` gives each neighbour,
+    and the monitor's check-point. The monitor counts what the target
+    *re-advertises*, which is one best path per prefix -- so the check-point is
+    the number of distinct prefixes, `groups * p`, and not the number offered,
+    `n * p`. Wrong in one direction it is a run that can never converge and
+    polls until `STUCK_SAMPLES`; wrong in the other it reports CONVERGED on a
+    fraction of the table, which is the failure with no symptom.
+
+    It refuses an inexact division rather than truncating it. Every operator
+    path reaches `resolve_path_diversity()` first and gets a message naming
+    peer counts that work, so a raise here is a rule that was applied nowhere
+    -- and the alternative is a fleet whose last group announces a block with
+    fewer competing paths than the rest, silently.
+    """
+    if not _is_positive_count(diversity) or neighbor_num % diversity:
+        raise ValueError(
+            'path diversity {0!r} does not divide {1!r} peers into equal '
+            'groups'.format(diversity, neighbor_num))
+    return neighbor_num // diversity
+
+
+def _diversity_divisors_near(neighbor_num, diversity):
+    """Group sizes closest to the one asked for that divide this fleet.
+
+    Both ends are usable here and neither needs the bounding
+    `_divisors_near()` applies to peer counts: 1 is the disjoint workload
+    bgperf has always run and `neighbor_num` itself is every peer announcing
+    one shared block, so both are answers rather than degenerate advice. The
+    search is over the divisors of a peer count rather than of a full-table
+    RIB, so it is cheap enough to enumerate whole.
+    """
+    divisors = [d for d in range(1, neighbor_num + 1) if neighbor_num % d == 0]
+    below = max((d for d in divisors if d < diversity), default=None)
+    above = min((d for d in divisors if d > diversity), default=None)
+    return [d for d in (below, above) if d]
+
+
+def resolve_path_diversity(diversity, neighbor_num, tester_type=None,
+                           prefix_scope=None):
+    """How many peers announce each prefix block, checked before any container.
+
+    `gen_conf()` has only ever generated disjoint prefixes, so every peer under
+    test announces routes nobody else has and the target never runs a best-path
+    selection between competing paths. That is not what a router does with a
+    full table: the same prefix arrives from several neighbours and the work is
+    choosing between them, holding the losers, and re-running the choice when
+    one is withdrawn. A benchmark that never presents a second path for a
+    prefix measures reception and re-advertisement and calls it convergence.
+
+    Above 1 the peers are dealt into groups of `diversity` and each group
+    announces one shared block, so the fleet offers `n * p` paths for
+    `(n / diversity) * p` distinct prefixes.
+
+    Four things are refused rather than interpreted, and each is silent if it
+    is not:
+
+    - **An MRT generator**, where `gen_conf()` synthesises no paths at all --
+      the diversity of an MRT run is whatever the file holds -- and the monitor
+      check-point comes straight from `-p`. Accepting it would print a
+      diversity into the manifest of a run that had none.
+    - **`--prefix-scope total`**, because `the whole table` then has two
+      readings that differ by exactly this number: the paths offered, and the
+      distinct prefixes the target ends up holding. Both are defensible and
+      neither is written down, so the combination is refused rather than
+      guessed at -- the reading would reach the `prefixes per peer` column, the
+      cell identity and every artifact name.
+    - **More diversity than there are peers**, which cannot be honoured at all.
+    - **An inexact division**, for the same reason `resolve_prefix_scope()`
+      refuses one: the remainder group announces a block with fewer competing
+      paths than the rest, so `diversity` is a number true of none of the
+      table, and the monitor's check-point stops being `groups * p`.
+
+    Returns the diversity itself. `path_diversity_groups()` turns it into the
+    block count, which is the number the monitor and the accounting care about.
+    """
+    if diversity is None:
+        return DEFAULT_PATH_DIVERSITY
+    if not _is_positive_count(diversity):
+        raise ValueError(
+            '--path-diversity must be a whole number of 1 or more, got '
+            '{0!r}'.format(diversity))
+    if diversity == DEFAULT_PATH_DIVERSITY:
+        # The workload bgperf has always run, and the default every existing
+        # command line and batch config carries implicitly. None of the
+        # refusals below may fire on it or they refuse runs that predate this
+        # flag entirely.
+        return DEFAULT_PATH_DIVERSITY
+    if tester_type in MRT_TESTER_TYPES:
+        raise ValueError(
+            "--path-diversity does not apply to the '{0}' tester: it plays "
+            'back an MRT file, so its paths are whatever that file holds and '
+            'none of them are generated here'.format(tester_type))
+    # A *recognised* scope that is not the default. An unrecognised one is a
+    # typo, and blaming the combination for it sends the operator to remove the
+    # diversity -- after which the same `prefix_scope: totl` produces the
+    # "unknown prefix scope" it should have produced first time. A refusal has
+    # to name the fault, not the nearest rule it happens to trip.
+    if prefix_scope in PREFIX_SCOPES and prefix_scope != 'per-peer':
+        raise ValueError(
+            '--path-diversity {0} and --prefix-scope {1} are not defined '
+            'together: under path diversity a fleet offers n * p paths for '
+            '(n / {0}) * p distinct prefixes, so `the whole table` has two '
+            'readings that differ by {0} and neither is written down. State '
+            'the per-peer count under the default per-peer scope '
+            'instead'.format(diversity, prefix_scope))
+    if not _is_positive_count(neighbor_num):
+        raise ValueError(
+            '--path-diversity needs a whole number of peers to group, got '
+            '{0!r}'.format(neighbor_num))
+    if diversity > neighbor_num:
+        raise ValueError(
+            '--path-diversity {0} asks {0} peers to announce each block and '
+            'there are {1}'.format(diversity, neighbor_num))
+    if neighbor_num % diversity:
+        # There is always advice: `diversity` is at least 2 here and 1 divides
+        # every peer count, so the downward end is never empty.
+        groups = _diversity_divisors_near(neighbor_num, diversity)
+        raise ValueError(
+            '--path-diversity {0} does not divide {1} peers into equal groups '
+            '({2} left over). The remainder group would announce a block with '
+            'fewer competing paths than the rest, so {0} paths per prefix '
+            'would be true of none of the table; use {3} instead, or a peer '
+            'count that {0} divides'.format(
+                diversity, neighbor_num, neighbor_num % diversity,
+                ' or '.join(str(d) for d in groups)))
+    return diversity
+
+
 def gen_mako_macro():
+    # `block` is what makes several peers announce competing paths for the same
+    # prefixes: called without one, every call takes the next `num` addresses
+    # off the shared iterator and the peers are disjoint, which is what bgperf
+    # has always generated. Called with one, the first peer of a group cuts the
+    # block and the rest of the group is handed the same list, so a group's
+    # prefixes are identical and different groups stay disjoint. The argument
+    # is omitted entirely at the default diversity, so what an existing run
+    # *renders* is byte-identical to what it has always rendered -- only this
+    # preamble differs, and nothing reads it but Mako.
     return '''<%
     import netaddr
     from itertools import islice
 
     it = netaddr.iter_iprange('100.0.0.0','160.0.0.0')
+    blocks = {}
 
-    def gen_paths(num):
-        return list('{0}/32'.format(ip) for ip in islice(it, num))
+    def gen_paths(num, block=None):
+        if block is None:
+            return list('{0}/32'.format(ip) for ip in islice(it, num))
+        if block not in blocks:
+            blocks[block] = list('{0}/32'.format(ip) for ip in islice(it, num))
+        return blocks[block]
 %>
 '''
 
@@ -1127,6 +1291,24 @@ def bench(args):
                 sys.exit('{0} must be a whole number of 1 or more, got '
                          '{1!r}'.format(flag, value))
         check_generator_matches_workload(args)
+        # Before the scope, so a run asking for both is told they are not
+        # defined together rather than being told the arithmetic of a
+        # combination that is refused anyway.
+        try:
+            args.path_diversity = resolve_path_diversity(
+                getattr(args, 'path_diversity', None), args.neighbor_num,
+                getattr(args, 'tester_type', None),
+                getattr(args, 'prefix_scope', None))
+        except ValueError as e:
+            sys.exit(str(e))
+    if args.file and (getattr(args, 'path_diversity', None)
+                      or DEFAULT_PATH_DIVERSITY) != DEFAULT_PATH_DIVERSITY:
+        # Same rule as the scope beside it, and above the teardown for the same
+        # reason: a scenario file states each neighbour's paths, so grouping
+        # them here would do nothing at all, and doing nothing quietly is worse
+        # than the silence about `-n` and `-p` it joins.
+        sys.exit('--path-diversity has nothing to group under -f: a scenario '
+                 "file states each neighbour's paths itself")
     if args.file and getattr(args, 'prefix_scope', None) not in (None, 'per-peer'):
         # `-n`/`-p` are already ignored under `-f`, and this would be too --
         # but the whole point of the flag is that the number means something
@@ -1611,6 +1793,13 @@ def write_provenance(args, provenance, prefix):
         'peers': args.neighbor_num,
         'prefixes_per_peer': args.prefix_num,
         'tester_type': getattr(args, 'tester_type', None),
+        # How many peers announced each prefix block, and only where bgperf2
+        # is what decided that: under `-f` the scenario file states each
+        # neighbour's paths, so a 1 here would be an assertion about a
+        # workload bgperf2 did not build. Provenance never guesses.
+        'path_diversity': (None if getattr(args, 'file', None) else
+                           getattr(args, 'path_diversity', None)
+                           or DEFAULT_PATH_DIVERSITY),
         # Which pass over the matrix this row came from, or None for a batch
         # that made one pass. The name carries it too, but a summary over
         # repetitions should not have to parse a label to group them.
@@ -1670,6 +1859,16 @@ def write_event_artifact(args, events, prefix, status, testers=None,
         'peers': args.neighbor_num,
         'prefixes_per_peer': args.prefix_num,
         'tester_type': getattr(args, 'tester_type', None),
+        # Without this the document says `peers: 10, prefixes_per_peer: 1000`
+        # for a run whose target held 2,000 distinct prefixes and whose monitor
+        # required 1,980, and nothing in it can correct the reader: the only
+        # other carrier is the `pd5` in the filename. Same rule as
+        # `repetition` -- an artifact carries the dimension so a summary does
+        # not have to parse a stem to recover it. `None` under `-f` for the
+        # reason `write_provenance()` records `None` there.
+        'path_diversity': (None if getattr(args, 'file', None) else
+                           getattr(args, 'path_diversity', None)
+                           or DEFAULT_PATH_DIVERSITY),
         'repetition': getattr(args, 'repetition', None),
         'filter_test': getattr(args, 'filter_test', None),
     }
@@ -2192,7 +2391,8 @@ BATCH_TEST_KEYS = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
 # ones that matter here fail silently: `seeds: 7` under `order: shuffle` draws
 # a fresh permutation on every invocation while looking pinned, and
 # `repetitions` misspelt runs one pass of a matrix someone asked three of.
-BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope')
+BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope',
+                            'path_diversity')
 
 
 # Keys that mean something on a *test* and nothing on a target. There is no
@@ -2207,7 +2407,8 @@ BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope')
 # instead of 100,000 at 50 peers -- converges, and writes rows and bars that
 # read as a peer sweep.
 BATCH_TEST_ONLY_KEYS = ('prefix_scope', 'repetitions', 'order', 'seed',
-                        'neighbors', 'prefixes', 'filter_test')
+                        'neighbors', 'prefixes', 'filter_test',
+                        'path_diversity')
 
 # Target keys whose absence means something other than `None`. `batch()`
 # otherwise gives every unset field `None`, and `gen_conf()` routes anything
@@ -2398,21 +2599,34 @@ def check_batch_test(test):
                     'is' if len(misplaced) == 1 else 'are',
                     'is' if len(misplaced) == 1 else 'are',
                     'it' if len(misplaced) == 1 else 'them'))
+    # Both workload knobs below are meaningless against a target that names a
+    # scenario file, and for the same reason: the file states what each
+    # neighbour offers, so neither would change what runs.
+    scenarios = [t.get('label') or t['name'] for t in test['targets']
+                 if t.get('file')]
     scope = test.get('prefix_scope')
-    if scope not in (None, 'per-peer'):
+    if scope not in (None, 'per-peer') and scenarios:
         # `bench()` refuses this, and its refusal is unreachable from here:
         # `batch()` pins `prefix_scope: per-peer` on the synthesized args
         # because the division has already happened. So a scenario target under
         # `total` would divide `prefixes`, record the divided count in the cell
         # id, the `prefixes per peer` column and every artifact name, and then
         # run whatever workload the file describes.
-        scenarios = [t.get('label') or t['name'] for t in test['targets']
-                     if t.get('file')]
-        if scenarios:
-            sys.exit(
-                "test '{0}': prefix_scope has nothing to divide for {1}, which "
-                'name a scenario file: the file states each neighbour\'s '
-                'prefixes itself'.format(test['name'], ', '.join(scenarios)))
+        sys.exit(
+            "test '{0}': prefix_scope has nothing to divide for {1}, which "
+            'name a scenario file: the file states each neighbour\'s '
+            'prefixes itself'.format(test['name'], ', '.join(scenarios)))
+    diversity = test.get('path_diversity')
+    if diversity not in (None, DEFAULT_PATH_DIVERSITY) and scenarios:
+        # And `bench()`'s own refusal is unreachable from here too, for a
+        # different reason: `batch()` synthesizes the args itself, so a
+        # scenario target reaches `bench()` with `-f` set and the value still
+        # on it, and nothing between here and the run would say the grouping
+        # was ignored.
+        sys.exit(
+            "test '{0}': path_diversity has nothing to group for {1}, which "
+            'name a scenario file: the file states each neighbour\'s paths '
+            'itself'.format(test['name'], ', '.join(scenarios)))
     mrt = sorted({batch_target_field(t, 'tester_type') for t in test['targets']
                   if batch_target_field(t, 'tester_type') in MRT_TESTER_TYPES})
     # The other half of the same guard. `gen_conf()` ends an MRT run with no
@@ -2433,6 +2647,17 @@ def check_batch_test(test):
             'of the batch with it'.format(
                 test['name'], ', '.join(fileless),
                 'names' if len(fileless) == 1 else 'name'))
+    # Every peer count on the axis, for the same reason the scope is checked
+    # against every combination below: a matrix is where a division that works
+    # for one entry and not the next is easy to write -- `neighbors: [10, 25,
+    # 50]` divides by 5 three times and by 4 not at all -- and finding that out
+    # at cell three is hours lost.
+    for neighbors in test['neighbors']:
+        try:
+            resolve_path_diversity(diversity, neighbors,
+                                   mrt[0] if mrt else None, scope)
+        except ValueError as e:
+            sys.exit("test '{0}': {1}".format(test['name'], e))
     for neighbors in test['neighbors']:
         for prefixes in test['prefixes']:
             try:
@@ -2506,6 +2731,11 @@ def expand_batch_cells(test, targets):
     check_batch_test(test)
     repetitions = batch_repetitions(test)
     scope = test.get('prefix_scope')
+    # Carried on the cell rather than read from the test at run time, because
+    # the cell is what `--resume` matches on: a test whose `path_diversity` is
+    # edited between runs describes a different workload, and a cell id that
+    # did not say so would reuse rows measured against the old one.
+    diversity = test.get('path_diversity') or DEFAULT_PATH_DIVERSITY
     cells = []
     for repetition in range(1, repetitions + 1):
         ordinal = 0
@@ -2526,6 +2756,7 @@ def expand_batch_cells(test, targets):
                             # already refused an inexact division.
                             'prefixes': resolve_prefix_scope(scope, n, p),
                             'filter': filter_test,
+                            'path_diversity': diversity,
                             'target': t,
                         })
                         ordinal += 1
@@ -2874,6 +3105,11 @@ def batch(args):
             # the CSV row and the artifact names all have to be the per-peer
             # count. Passing the scope through as well would divide twice.
             a.prefix_scope = 'per-peer'
+            # From the cell, not from the test: the cell is what the id, the
+            # row and the artifact names were built from, and reading the test
+            # again here would let a config edited mid-batch run a cell under a
+            # diversity its own id does not record.
+            a.path_diversity = cell.get('path_diversity') or DEFAULT_PATH_DIVERSITY
             a.filter_test = cell['filter'] if cell['filter'] != 'None' else None
             # None for a single-pass test, so its rows, graphs and event
             # artifacts keep the names they have always had; set for every pass
@@ -2964,6 +3200,14 @@ def batch_cell_id(test_name, cell):
     }
     if cell['repetition'] is not None:
         identity['repetition'] = cell['repetition']
+    # Omitted at the default for the same reason `repetition` is omitted for a
+    # single-pass test: a disjoint cell's id keeps exactly the shape it had
+    # before this flag existed, so an in-flight batch written by an older build
+    # resumes instead of costing the operator every completed cell, and
+    # `BATCH_PROGRESS_SCHEMA_VERSION` does not have to move.
+    diversity = cell.get('path_diversity') or DEFAULT_PATH_DIVERSITY
+    if diversity != DEFAULT_PATH_DIVERSITY:
+        identity['path_diversity'] = diversity
     return json.dumps(identity, sort_keys=True, separators=(',', ':'), default=str)
 
 
@@ -2975,6 +3219,11 @@ def batch_cell_description(cell, repetitions=1):
         target_name = '{0} {1}'.format(target_name, version)
     described = '{0}, peers={1}, prefixes={2}, filter={3}'.format(
         target_name, cell['neighbors'], cell['prefixes'], cell['filter'])
+    diversity = cell.get('path_diversity') or DEFAULT_PATH_DIVERSITY
+    if diversity != DEFAULT_PATH_DIVERSITY:
+        # Named only when it is not the disjoint workload, so every existing
+        # printed line and every summary description is unchanged.
+        described = '{0}, paths per prefix={1}'.format(described, diversity)
     if repetitions > 1:
         described = '{0}, repetition {1}/{2}'.format(
             described, cell['repetition'], repetitions)
@@ -3096,6 +3345,11 @@ def gen_conf(args):
     community_list = args.community_list_num
     ext_community_list = args.ext_community_list_num
     tester_type = args.tester_type
+    # Validated at every entry point rather than here, exactly as
+    # `prefix_scope` is: this reads what was asked for and
+    # `path_diversity_groups()` refuses to do the arithmetic if it is not a
+    # number the fleet can be dealt into.
+    diversity = getattr(args, 'path_diversity', None) or DEFAULT_PATH_DIVERSITY
 
 
     local_address_prefix = netaddr.IPNetwork(args.local_address_prefix)
@@ -3147,7 +3401,12 @@ def gen_conf(args):
         'as': 1001,
         'router-id': str(monitor_router_id),
         'local-address': str(monitor_local_address),
-        'check-points': [prefix * neighbor_num],
+        # What the target re-advertises, which is one best path per distinct
+        # prefix -- `groups * p`, not the `n * p` paths the fleet offers. At
+        # the default diversity there is one group per peer and this is the
+        # `n * p` it has always been.
+        'check-points': [prefix * path_diversity_groups(neighbor_num,
+                                                        diversity)],
     }
 
     mrt_injector = None
@@ -3223,7 +3482,16 @@ def gen_conf(args):
             'as': 1000 + i,
             'router-id': router_id,
             'local-address': router_id,
-            'paths': '${{gen_paths({0})}}'.format(prefix),
+            # Keyed on the count of configured neighbours rather than on
+            # `i`, which skips the target's and monitor's addresses: an
+            # off-by-one there would put one group's peers either side of a
+            # block boundary and quietly change how many competing paths each
+            # prefix gets. The one-argument form at the default diversity
+            # renders exactly the scenario body it always has.
+            'paths': ('${{gen_paths({0})}}'.format(prefix)
+                      if diversity == DEFAULT_PATH_DIVERSITY
+                      else '${{gen_paths({0}, {1})}}'.format(
+                          prefix, configured_neighbors_cnt // diversity)),
             'count': prefix,
             'check-points': prefix,
             'filter': {
@@ -3316,6 +3584,13 @@ def config(args):
                 flag, value))
     check_generator_matches_workload(args)
     try:
+        args.path_diversity = resolve_path_diversity(
+            getattr(args, 'path_diversity', None), args.neighbor_num,
+            getattr(args, 'tester_type', None),
+            getattr(args, 'prefix_scope', None))
+    except ValueError as e:
+        sys.exit(str(e))
+    try:
         args.prefix_num = resolve_prefix_scope(
             getattr(args, 'prefix_scope', None), args.neighbor_num,
             args.prefix_num, getattr(args, 'tester_type', None))
@@ -3397,6 +3672,21 @@ def create_args_parser(main=True):
                                  'Must divide exactly, and does not apply to '
                                  'the MRT testers, where -p is already the '
                                  'whole table')
+        parser.add_argument('--path-diversity', type=int,
+                            default=DEFAULT_PATH_DIVERSITY,
+                            help='how many peers announce each block of '
+                                 'prefixes. 1 (the default, and what bgperf '
+                                 'has always generated) gives every peer its '
+                                 'own block, so the peers are disjoint and the '
+                                 'target never selects between competing '
+                                 'paths. Above 1 the peers are dealt into '
+                                 'groups of that size and each group announces '
+                                 'one shared block, so the fleet offers '
+                                 'peers x prefixes paths for '
+                                 '(peers / diversity) x prefixes distinct '
+                                 'prefixes. Must divide the peer count '
+                                 'exactly, and does not apply to the MRT '
+                                 'testers or under --prefix-scope total')
         parser.add_argument('--threads', type=int,
                             help='worker threads the target should use. BIRD 3 runs with one '
                                  'worker unless told otherwise, so a 2.x-vs-3.x comparison needs '

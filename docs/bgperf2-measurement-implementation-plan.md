@@ -1801,8 +1801,116 @@ resume safely, and produce auditable summary statistics.
 
 ### Phase 5A: Add BIRD architecture workload controls
 
-Status: in progress. The peer-scaling workload landed on 2026-09-03; the
-remaining five work items below are untaken.
+Status: in progress. The peer-scaling workload landed on 2026-09-03 and path
+diversity on 2026-09-07; the remaining four work items below are untaken.
+
+#### Progress on 2026-09-07: the target can be made to choose between paths
+
+`--path-diversity D` (batch: `path_diversity: D` on a test) deals the peers
+into groups of `D` and gives each group one shared block of prefixes, so the
+fleet offers `n * p` paths for `(n / D) * p` distinct prefixes.
+
+The gap it closes is that **the target has never had to select a best path**.
+`gen_conf()` gives every neighbour its own `gen_paths(p)` off a single shared
+iterator, so every route it learns is the only path it holds for that prefix.
+That is not what a router does with a full table: the same prefix arrives from
+several neighbours and the work is choosing between them, holding the losers,
+and re-running the choice when one is withdrawn. A benchmark that never
+presents a second path for a prefix measures reception and re-advertisement and
+publishes it as convergence -- and best-path selection is one of the three
+responsibilities BIRD 3's worker threads exist to parallelise, so it is
+precisely the work a BIRD 2-vs-3 comparison has so far not asked for.
+
+Four decisions worth keeping:
+
+- **The monitor's check-point counts distinct prefixes, not offered paths.**
+  It reads what the target *re-advertises*, which is one best path per prefix,
+  so it is `groups * p` and not the `n * p` the fleet sends. The two differ by
+  exactly the diversity, and the failure is asymmetric: too high is a run that
+  can never converge and polls to `STUCK_SAMPLES`, too low is a run that
+  reports CONVERGED on a fraction of the table with nothing in the row saying
+  so. `path_diversity_groups()` is the one place that arithmetic lives, because
+  the block a neighbour is given and the check-point are a hundred lines apart
+  and have to agree. The per-neighbour `count` and `check-points` are
+  deliberately unchanged at `p`: a peer under diversity still offers `p`, and
+  the target still *accepts* all of them, since BGP holds the losing paths too.
+- **The default renders exactly the scenario it always did.** `gen_paths()`
+  gained an optional `block` argument and the caller omits it entirely at
+  diversity 1, so every existing run's rendered scenario is byte-identical
+  (verified) and only the Mako preamble, which nothing but Mako reads, differs.
+  The same rule runs through the batch path: the cell id omits the key at the
+  default, exactly as `repetition` does for a single-pass test, so an in-flight
+  batch written by an older build still resumes and
+  `BATCH_PROGRESS_SCHEMA_VERSION` did not have to move.
+- **The block is keyed on the count of configured neighbours, not the loop
+  index.** That loop skips the target's and monitor's addresses, so keying on
+  `i` would put one group's peers either side of a block boundary and quietly
+  change how many competing paths some prefixes get -- a workload nobody asked
+  for, in a run whose manifest states the one they did.
+- **It is refused rather than interpreted in four places**, and each is silent
+  if it is not: an MRT generator (no paths are synthesised there at all, and the
+  check-point comes straight from `-p`), a scenario target or `-f` run (the file
+  states each neighbour's paths, so the grouping would do nothing), a diversity
+  larger than the peer count, and an inexact division -- whose remainder group
+  would announce a block with fewer competing paths than the rest, making `D
+  paths per prefix` true of none of the table. Every one of those is checked at
+  all four entry points (`bench`, `bench -f`, `config`, `batch`), which is the
+  shape this change set got wrong fifteen times last round; `check_batch_test()`
+  checks every peer count on the `neighbors` axis rather than the first, for the
+  same reason the scope checks the whole grid.
+
+**`--prefix-scope total` and `--path-diversity` are refused together, and that
+is a deferred decision rather than a limitation.** Under diversity, "the whole
+table" has two readings that differ by exactly `D` -- the paths the fleet
+offers, and the distinct prefixes the target ends up holding -- and both are
+defensible. The reading would not stay in the flag: it decides the
+`prefixes per peer` column, the cell identity, and every artifact name, which is
+the same "fourth dimension in all three" the scope note above refuses. Choosing
+one is a separate change set with its own tests over `check_batch_test()` and
+`expand_batch_cells()`, and refusing costs a message before the first container
+while guessing costs a matrix.
+
+**The diversity is in the artifact stem and in the manifest, and it is not a CSV
+column.** Nothing else in `bench_output_prefix()` carries it -- a disjoint run
+and a run whose peers compete have the same peer count and the same per-peer
+prefix count -- so two tests in one batch config differing only in
+`path_diversity` would otherwise write every per-run artifact over each other,
+the failure `filter_test` had. It is a test-level key rather than a matrix axis
+for now, so it does not need a column; making it an axis is the same
+three-place change the scope note describes. `run.path_diversity` records it,
+and records `null` for a `-f` run: the file states each neighbour's paths, so a
+1 there would be an assertion about a workload bgperf2 did not build.
+
+Two things review found, both the same shape as ones this phase has already
+recorded:
+
+- **The events artifact carried the dimension in its filename and not in its
+  body.** `write_provenance()` records `run.path_diversity` and
+  `write_event_artifact()` did not, so `<prefix>.events.json` -- the durable
+  per-run evidence, and the document `findings.py` reasons over -- stated
+  `peers: 10, prefixes_per_peer: 1000` for a run whose target held 2,000
+  distinct prefixes against a `required` of 1,980, with nothing in the document
+  able to correct the reader. The stem's `pd5` was the only carrier. That is
+  exactly the rule already written down for `repetition`: an artifact carries
+  the dimension so a summary does not have to parse a label to recover it, and
+  the two `run` blocks are far enough apart that adding it to one and not the
+  other is the natural slip.
+- **A refusal named the nearest rule it tripped rather than the fault.** The
+  scope cross-check read `prefix_scope not in (None, 'per-peer')`, which fires
+  on a *typo* as readily as on `total`: `prefix_scope: totl` beside a
+  `path_diversity` was reported as the combination being undefined, naming the
+  misspelling as though it were a real scope. The operator removes the
+  diversity, and only then gets the `unknown prefix scope 'totl'` that was the
+  actual fault. It tests against `PREFIX_SCOPES` now, so an unrecognised scope
+  falls through to the function whose job is to diagnose it.
+
+No Docker run was needed or made: the change is confined to scenario generation
+and matrix expansion, both pure and covered by the new
+`tests/test_path_diversity.py` (61 tests); 875 total, Docker-free. What Docker
+would add here is the one thing the pure layer cannot check -- that a daemon
+handed three paths for a prefix re-advertises one, so the monitor's
+`groups * p` check-point is reachable -- and that belongs with the phase's
+"small Docker checks for each topology" rather than with this change set.
 
 #### Progress on 2026-09-03: peers can move without the table moving with them
 

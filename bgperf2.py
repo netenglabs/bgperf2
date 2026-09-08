@@ -30,7 +30,7 @@ import datetime
 from collections import defaultdict
 from pathlib import Path
 from argparse import ArgumentParser, REMAINDER
-from itertools import chain, islice
+from itertools import chain, islice, product
 from requests.exceptions import ConnectionError
 from pyroute2 import IPRoute
 from socket import AF_INET
@@ -56,13 +56,17 @@ from mrt_tester import GoBGPMRTTester, ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
 from monitor import Monitor, Receiver
 from convergence import ConvergenceTracker
+from churn import (ChurnBurstTracker, ChurnConfigurationError,
+                   DEFAULT_CHURN_BURSTS, DEFAULT_CHURN_PREFIXES,
+                   churn_operation_counts)
 from contention import (describe_contention, foreign_cpu_percent,
                         free_space_bytes, is_memory_backed, own_process_tree,
                         sample_processes)
 from findings import derive_findings, describe_findings, policy_failure
-from measurements import (MonitorEventRecorder, TesterEventRecorder,
-                          event_artifact, monitor_metrics,
-                          tester_fleet_metrics, tester_metrics)
+from measurements import (ChurnEventRecorder, MonitorEventRecorder,
+                          TesterEventRecorder, event_artifact,
+                          monitor_metrics, tester_fleet_metrics,
+                          tester_metrics)
 from settings import dckr
 from summary import describe_batch_summary, summarize_batch
 from queue import Queue
@@ -193,6 +197,17 @@ def bench_output_prefix(args):
     receivers = getattr(args, 'receivers', None) or DEFAULT_RECEIVERS
     if receivers != DEFAULT_RECEIVERS:
         parts.append('rx{0}'.format(receivers))
+    # And the churn workload, on the same rule: two tests in one batch config
+    # differing only in how much of the table they withdraw, or in how many
+    # times, are the same peers and the same per-peer prefix count everywhere
+    # else in this stem. The burst count is part of it because a longer
+    # sequence is a different run, not more of the same one -- the artifact
+    # holds one entry per burst.
+    churn_prefixes = getattr(args, 'churn_prefixes', None) or DEFAULT_CHURN_PREFIXES
+    if churn_prefixes != DEFAULT_CHURN_PREFIXES:
+        parts.append('ch{0}x{1}'.format(
+            churn_prefixes,
+            getattr(args, 'churn_bursts', None) or DEFAULT_CHURN_BURSTS))
     return '_'.join(parts)
 
 
@@ -588,6 +603,155 @@ def describe_export_fanout_cost(receivers):
             'in the published `min free mem` column, where a low value becomes '
             'the low_free_memory confounder and withholds the '
             'verdict'.format(receivers, '' if receivers == 1 else 's'))
+
+
+def resolve_churn(churn_prefixes, churn_bursts, neighbor_num, prefix_num,
+                  tester_type=None, filter_test=None):
+    """The validated churn workload, checked before any container starts.
+
+    Every run bgperf2 has published measures a table arriving at a daemon that
+    has never seen it, and a router spends almost none of its life doing that.
+    A churn burst withdraws a bounded block of each peer's prefixes and puts it
+    back, so the target has to remove routes from a loaded table, re-run
+    best-path selection for every prefix that had a competing path, and
+    withdraw and re-advertise on every export session -- the work BIRD 3's
+    worker threads exist to parallelise, and the work nothing here has been
+    able to ask for.
+
+    Four things are refused rather than interpreted, and each is silent if it
+    is not:
+
+    - **A burst count with no block to churn.** `--churn-bursts 5` on its own
+      reads as a run that will do five bursts and does none: nothing is
+      withdrawn, the sequence never starts, and the stem and the manifest would
+      record a churn workload the run did not have.
+    - **A block larger than what a peer announces.** `split_churn_paths()`
+      would have nothing to leave in the stable protocol past the whole list,
+      and the arithmetic is against the *per-peer* count, so this is checked
+      after `--prefix-scope total` has been divided out.
+    - **Any generator but the synthetic BIRD one.** The block is switched with
+      that generator's own `birdc disable`/`enable` on a static protocol
+      bgperf2 wrote. An MRT injector plays a file back once and has no such
+      handle; ExaBGP's config here is equally static. Accepting it would start
+      a sequence whose withdrawals no generator performs, and the only symptom
+      would be a stall five minutes in that reads as a stuck target.
+    - **A policy filter.** A burst completes when the monitor's count has
+      fallen by the whole distinct block, and a policy that drops part of that
+      block means the target never held it -- so the count cannot fall that
+      far, the burst stalls, and a correctly filtered run is published as a
+      failed one. Defining churn under a filter means deciding what fraction of
+      a filtered block a burst is entitled to expect, which is its own change
+      set with its own tests.
+
+    Returns `(per-peer churn prefixes, bursts)`. Zero prefixes is no churn at
+    all, and every existing command line and batch config carries it.
+    """
+    if churn_bursts is None:
+        churn_bursts = DEFAULT_CHURN_BURSTS
+    if churn_prefixes in (None, DEFAULT_CHURN_PREFIXES):
+        if churn_bursts != DEFAULT_CHURN_BURSTS:
+            raise ValueError(
+                '--churn-bursts {0} has nothing to churn: a burst withdraws '
+                'and re-announces a block of prefixes, so set '
+                '--churn-prefixes as well'.format(churn_bursts))
+        return DEFAULT_CHURN_PREFIXES, DEFAULT_CHURN_BURSTS
+    if not _is_positive_count(churn_prefixes):
+        raise ValueError(
+            '--churn-prefixes must be a whole number of 1 or more, got '
+            '{0!r}'.format(churn_prefixes))
+    if not _is_positive_count(churn_bursts):
+        raise ValueError(
+            '--churn-bursts must be a whole number of 1 or more, got '
+            '{0!r}'.format(churn_bursts))
+    if tester_type != 'bird':
+        raise ValueError(
+            "--churn-prefixes does not apply to the {0!r} tester: a burst is "
+            "issued with the generator's own `birdc disable`/`enable` on a "
+            'static protocol bgperf2 wrote, and only the synthetic bird '
+            'generator has one. Use -g bird'.format(tester_type))
+    if filter_test:
+        raise ValueError(
+            '--churn-prefixes and --filter_test {0} are not defined together: '
+            "a burst completes when the monitor's count has fallen by the "
+            'whole churn block, and a policy that drops part of that block '
+            'makes that count unreachable -- so the burst would stall and a '
+            'filtered run would be published as a failed one'.format(
+                filter_test))
+    if not _is_positive_count(prefix_num):
+        raise ValueError(
+            '--churn-prefixes needs a whole number of prefixes per peer to '
+            'take a block from, got {0!r}'.format(prefix_num))
+    if churn_prefixes > prefix_num:
+        raise ValueError(
+            '--churn-prefixes {0} is larger than the {1} prefix(es) each peer '
+            'announces'.format(churn_prefixes, prefix_num))
+    if not _is_positive_count(neighbor_num):
+        raise ValueError(
+            '--churn-prefixes needs a whole number of peers to churn, got '
+            '{0!r}'.format(neighbor_num))
+    return churn_prefixes, churn_bursts
+
+
+def churn_flags_set(churn_prefixes, churn_bursts):
+    """Which churn flags this run states, for the paths that refuse them all.
+
+    One function because the refusals that key on "did the operator ask for
+    churn" have to see *both* flags. `resolve_churn()` is only reached where a
+    scenario is generated, so a path that refuses churn by looking at the block
+    alone lets the burst count through in silence -- and a flag that does
+    nothing quietly is the failure `--receivers`, `--path-diversity` and
+    `--prefix-scope` all have explicit refusals for.
+    """
+    stated = []
+    if (churn_prefixes or DEFAULT_CHURN_PREFIXES) != DEFAULT_CHURN_PREFIXES:
+        stated.append('--churn-prefixes')
+    if (churn_bursts or DEFAULT_CHURN_BURSTS) != DEFAULT_CHURN_BURSTS:
+        stated.append('--churn-bursts')
+    return stated
+
+
+def unrun_churn_evidence(args, status):
+    """The churn section of a run that asked for bursts and issued none.
+
+    A run that never converged never reaches the sequence, and an artifact with
+    `run.churn_prefixes: 4` and no `churn` section at all reads as a run that
+    asked for no churn -- which is the ambiguity `event_artifact()` publishes
+    the section from evidence alone to remove.
+
+    Derived here rather than at the one call site that needs it today. That
+    call site is inside `bench()`'s monitor loop, which no Docker-free test can
+    drive, so a fix written there is one an unrelated edit can undo with the
+    suite still green -- which is exactly how it was written first, and review
+    caught it by deleting the argument and watching 1,067 tests pass.
+    `write_event_artifact()` is the single place every run's document is built,
+    so a path that forgets to say why no burst ran cannot exist.
+    """
+    if not (getattr(args, 'churn_prefixes', None) or DEFAULT_CHURN_PREFIXES):
+        return None
+    return {'sequence_complete': False,
+            'incomplete_reason': (
+                'the run did not converge, so no churn burst was issued'
+                if status == 'failed' else 'no churn burst was issued')}
+
+
+def describe_churn_workload(churn_prefixes, churn_bursts, neighbor_num,
+                            groups):
+    """What the bursts will do, said out loud before the run starts.
+
+    The two operation counts differ by exactly the path diversity, and a reader
+    who sees only one of them mis-sizes the workload by that factor. Printed
+    rather than left to the artifact because the artifact is written at the end
+    -- and a run that stalls in its third burst is one an operator wants to be
+    able to recognise while it is happening.
+    """
+    if not churn_prefixes:
+        return None
+    counts = churn_operation_counts(neighbor_num, churn_prefixes, groups)
+    return ('churn: {0} burst(s), each withdrawing and re-announcing {1} '
+            'path(s) across {2} peer(s) for {3} distinct prefix(es) the '
+            'monitor can see'.format(
+                churn_bursts, counts['offered_withdrawals'], neighbor_num,
+                counts['distinct_withdrawals']))
 
 
 def gen_mako_macro():
@@ -1439,6 +1603,20 @@ def bench(args):
         # refusals beside it.
         sys.exit('--receivers has nothing to add under -f: a scenario file '
                  'states the sessions the target has itself')
+    churn_flags = churn_flags_set(getattr(args, 'churn_prefixes', None),
+                                  getattr(args, 'churn_bursts', None))
+    if args.file and churn_flags:
+        # A scenario file states what each peer announces, and the churn block
+        # is cut out of what bgperf2 generated -- there is nothing here to take
+        # it from. Above the teardown like the refusals beside it. Both flags,
+        # not just the block: `resolve_churn()` runs only for a generated
+        # scenario, so `-f --churn-bursts 5` otherwise ran an ordinary run,
+        # withdrew nothing and recorded `churn_bursts: null` in both manifests
+        # -- the operator's flag gone without a word.
+        sys.exit('{0} {1} nothing to withdraw under -f: a scenario file states '
+                 "each neighbour's prefixes itself".format(
+                     ' and '.join(churn_flags),
+                     'have' if len(churn_flags) > 1 else 'has'))
     if args.file and (getattr(args, 'path_diversity', None)
                       or DEFAULT_PATH_DIVERSITY) != DEFAULT_PATH_DIVERSITY:
         # Same rule as the scope beside it, and above the teardown for the same
@@ -1461,6 +1639,31 @@ def bench(args):
                 args.prefix_num, getattr(args, 'tester_type', None))
         except ValueError as e:
             sys.exit(str(e))
+        # After the scope, because the block is taken out of each peer's own
+        # list and `--prefix-scope total` is what decides how long that list
+        # is: `-n 10 -p 1000 --prefix-scope total` gives every peer 100
+        # prefixes, so a churn block of 500 is larger than what a peer
+        # announces even though it is a fifth of the table.
+        try:
+            args.churn_prefixes, args.churn_bursts = resolve_churn(
+                getattr(args, 'churn_prefixes', None),
+                getattr(args, 'churn_bursts', None),
+                args.neighbor_num, args.prefix_num,
+                getattr(args, 'tester_type', None),
+                getattr(args, 'filter_test', None))
+        except ValueError as e:
+            sys.exit(str(e))
+        if args.churn_prefixes and args.repeat:
+            # `-r/--repeat` reuses the tester *containers* and builds no tester
+            # objects at all, so there is nothing to issue a burst through and
+            # nothing rewrites the generator config the churn protocol lives
+            # in. Accepted, the run would name its artifacts `ch<N>x<B>`,
+            # record the workload in both manifests, and withdraw nothing --
+            # the shape `--receivers` was found in one round earlier.
+            sys.exit('--churn-prefixes cannot be used with -r/--repeat: '
+                     'repeat reuses the generator containers as they are, so '
+                     'the churn block is neither written into their config '
+                     'nor reachable to withdraw')
 
     if not args.file:
         # After every guard that reads only the command line, and still before
@@ -1521,6 +1724,20 @@ def bench(args):
     fanout_cost = describe_export_fanout_cost(len(conf.get('receivers') or []))
     if fanout_cost:
         print(fanout_cost)
+
+    churn_prefixes = getattr(args, 'churn_prefixes', None) or DEFAULT_CHURN_PREFIXES
+    churn_bursts = getattr(args, 'churn_bursts', None) or DEFAULT_CHURN_BURSTS
+    churn_groups = None
+    if churn_prefixes:
+        # The block count the monitor's side of a burst is measured against,
+        # from the one function that owns that arithmetic -- the same one
+        # `gen_conf()` used for the check-point, so the two cannot disagree
+        # about how many distinct prefixes a group's peers share.
+        churn_groups = path_diversity_groups(
+            args.neighbor_num,
+            getattr(args, 'path_diversity', None) or DEFAULT_PATH_DIVERSITY)
+        print(describe_churn_workload(churn_prefixes, churn_bursts,
+                                      args.neighbor_num, churn_groups))
 
     # A remote target is not a container bgperf2 starts, so it has no image --
     # resolving one would fail a remote run on the default target's image.
@@ -1935,12 +2152,31 @@ def bench(args):
                 output_stats['elapsed'] = datetime.timedelta(
                     seconds=int(output_stats['elapsed'].seconds) - assurance + 1)
                 bench_stats = bench_stats[0:len(bench_stats)-assurance]
+                # The second workload, run against the table this run has just
+                # been measured delivering. It is after every column of the row
+                # has been settled on purpose: `elapsed (s)` is the delivery,
+                # and a burst's cost belongs in the artifact where it can be
+                # read per burst rather than folded into a peak.
+                churn_events, churn_evidence = churn_phase(
+                    args, q, m, testers, sample_monotonic_s, int(recved),
+                    churn_prefixes, churn_bursts, churn_groups)
+                if churn_evidence and not churn_evidence['sequence_complete']:
+                    # Into the row's MSG column without setting its FAILED
+                    # flag. The run converged and that measurement stands; what
+                    # did not happen is the churn, and a CSV that said nothing
+                    # about it would be a batch of churn cells whose rows all
+                    # look ordinary. `summary.py` reads MSG only for a row
+                    # marked failed, so no summary is affected.
+                    output_stats['fail_msg'] = churn_evidence[
+                        'incomplete_reason'] or 'churn did not complete'
                 return finish_bench(
                     args, output_stats, bench_stats, bench_start, target, m,
-                    testers, lifecycle_events=lifecycle.events,
+                    testers,
+                    lifecycle_events=list(lifecycle.events) + list(churn_events),
                     tester_lifecycles=tester_lifecycles,
                     tester_observation_errors=tester_observation_errors,
-                    tester_read_failures=tester_read_failures)
+                    tester_read_failures=tester_read_failures,
+                    churn_evidence=churn_evidence)
 
             if elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
                 # The same stem the final graphs use. Built from args.target
@@ -2004,6 +2240,17 @@ def write_provenance(args, provenance, prefix):
                            or DEFAULT_PATH_DIVERSITY),
         'receivers': (None if getattr(args, 'file', None) else
                       getattr(args, 'receivers', None) or DEFAULT_RECEIVERS),
+        # What the run withdrew and put back after it converged, and how many
+        # times. `None` under `-f` for the reason the two above are: the
+        # scenario file states what each peer announces, and churn is refused
+        # there, so a 0 would be an assertion about a workload bgperf2 did not
+        # build.
+        'churn_prefixes': (None if getattr(args, 'file', None) else
+                           getattr(args, 'churn_prefixes', None)
+                           or DEFAULT_CHURN_PREFIXES),
+        'churn_bursts': (None if getattr(args, 'file', None) else
+                         getattr(args, 'churn_bursts', None)
+                         or DEFAULT_CHURN_BURSTS),
         # Which pass over the matrix this row came from, or None for a batch
         # that made one pass. The name carries it too, but a summary over
         # repetitions should not have to parse a label to group them.
@@ -2040,13 +2287,17 @@ def host_evidence(output_stats):
 
 
 def write_event_artifact(args, events, prefix, status, testers=None,
-                         host=None):
+                         host=None, churn=None):
     '''Atomically preserve lifecycle evidence before post-run collection.
 
     Returns the document it wrote, so the caller can print the findings it
     derived rather than deriving them a second time from the same events.
     '''
-    doc = event_artifact(events, status, testers=testers)
+    # A run that asked for churn and ran none still says so. The fallback is
+    # taken only where the caller supplied nothing, so a sequence that was
+    # driven -- complete or not -- always wins.
+    doc = event_artifact(events, status, testers=testers,
+                         churn=churn or unrun_churn_evidence(args, status))
     # Derived from the finished document rather than from the events, so the
     # policy can only ever reason about intervals this artifact published.
     #
@@ -2075,6 +2326,16 @@ def write_event_artifact(args, events, prefix, status, testers=None,
                            or DEFAULT_PATH_DIVERSITY),
         'receivers': (None if getattr(args, 'file', None) else
                       getattr(args, 'receivers', None) or DEFAULT_RECEIVERS),
+        # Both `run` blocks carry it, for the reason recorded for
+        # `path_diversity` and `repetition`: this document is what
+        # `findings.py` reads and what a summary groups by, and the only other
+        # carrier is the `ch4x2` in the filename.
+        'churn_prefixes': (None if getattr(args, 'file', None) else
+                           getattr(args, 'churn_prefixes', None)
+                           or DEFAULT_CHURN_PREFIXES),
+        'churn_bursts': (None if getattr(args, 'file', None) else
+                         getattr(args, 'churn_bursts', None)
+                         or DEFAULT_CHURN_BURSTS),
         'repetition': getattr(args, 'repetition', None),
         'filter_test': getattr(args, 'filter_test', None),
     }
@@ -2090,7 +2351,8 @@ def write_event_artifact(args, events, prefix, status, testers=None,
 
 def finish_bench(args, output_stats, bench_stats, bench_start, target, m, testers=(), fail=False,
                  lifecycle_events=(), tester_lifecycles=None,
-                 tester_observation_errors=None, tester_read_failures=None):
+                 tester_observation_errors=None, tester_read_failures=None,
+                 churn_evidence=None):
 
     bench_stop = time.time()
     output_stats['total_time'] = bench_stop - bench_start
@@ -2112,7 +2374,8 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
     artifact = write_event_artifact(
         args, lifecycle_events, bench_prefix,
         status='failed' if fail else 'converged',
-        testers=tester_evidence, host=host_evidence(output_stats))
+        testers=tester_evidence, host=host_evidence(output_stats),
+        churn=churn_evidence)
 
     # Scan the tester logs only after the clock has stopped. These used to run
     # in bench() before bench_stop, so walking every tester log line by line --
@@ -2133,6 +2396,8 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
 
     print_final_stats(args, target_version, output_stats)
     print_tester_metrics(lifecycle_events, tester_evidence)
+    for line in describe_churn_metrics(artifact.get('churn')):
+        print(line)
     # Last, because it is the one line that reads the rest of them together.
     for line in describe_findings(artifact['findings']):
         print(line)
@@ -2147,6 +2412,216 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
     write_provenance(args, provenance, bench_prefix)
     return o_s
 
+
+
+# How many problem sessions a churn failure message names before it stops.
+# The message reaches the CSV's MSG column, which is one unquoted field in a
+# `','.join()`ed row, and a 50-peer fleet that all failed the same way would
+# otherwise put fifty replies in it. The count is always stated, so the
+# truncation cannot make a wide failure look narrow.
+CHURN_FAILURES_NAMED = 3
+
+
+def issue_churn_command(generators, action):
+    """Tell every generator to switch its churn block, and report who did not.
+
+    Returns None when every session carried the command out, and a message
+    naming the ones that did not otherwise. A burst nobody performed has no
+    symptom at all except the monitor's count not moving, which arrives
+    `CHURN_STALL_SAMPLES` later as a stall and reads as a stuck target -- so
+    the reply is checked rather than assumed, and checked at the moment the
+    command was issued.
+    """
+    problems = []
+    for generator in generators:
+        try:
+            failures = generator.churn(action)
+        except Exception as e:
+            # The exec itself failed. Not raised: the run has already converged
+            # and its measurement is on disk-bound evidence that a lost churn
+            # sequence should not take with it.
+            problems.append('{0}: {1!r}'.format(generator.name, e))
+            continue
+        for session in sorted(failures):
+            problems.append('{0} {1}: {2}'.format(
+                generator.name, session, ' '.join(failures[session].split())))
+    if not problems:
+        return None
+    named = problems[:CHURN_FAILURES_NAMED]
+    if len(problems) > len(named):
+        named.append('and {0} more'.format(len(problems) - len(named)))
+    return 'churn {0} was not carried out by {1} session(s): {2}'.format(
+        action, len(problems), '; '.join(named))
+
+
+def run_churn_bursts(q, monitor_name, recorder, tracker, generators):
+    """Drive the burst sequence off the monitor's own samples.
+
+    This runs *after* convergence has been confirmed and deliberately updates
+    none of `output_stats`. The published row describes the initial delivery of
+    the table -- `elapsed (s)`, `max cpu %`, `max mem (GB)`, `min free mem
+    (GB)` -- and folding a churn burst's peak into those columns would make a
+    churn run's row mean something different from every other row in the same
+    CSV while looking identical. What the bursts cost is in the artifact, per
+    burst.
+
+    Returns `(events, evidence)`. The evidence is what the controller knows and
+    the event stream cannot show: whether the sequence ran to the end, and why
+    not.
+    """
+    reason = None
+    while True:
+        info = q.get()
+        # Every other producer is still filling this queue -- the target's
+        # stats, the host samplers, any generator poll that has not stopped --
+        # and they are drained and dropped rather than accumulated: see above
+        # for why none of them may move the row.
+        if info.get('who') != monitor_name:
+            continue
+        sample_monotonic_s = monitor_sample_monotonic_s(info)
+        state = info['afi_safis'][0]['state']
+        accepted = int(state['accepted'] if 'accepted' in state else 0)
+        recorder.observe(sample_monotonic_s, accepted)
+        step = tracker.update(accepted)
+
+        # What this sample closed is recorded before what it opens, so the
+        # events sort the way the sequence ran even when both land on one
+        # timestamp.
+        if step.completed == ChurnBurstTracker.WITHDRAW_PHASE:
+            recorder.note_withdraw_complete(step.burst)
+        elif step.completed == ChurnBurstTracker.REANNOUNCE_PHASE:
+            recorder.note_burst_complete(step.burst)
+            print('churn burst {0}/{1}: table restored at {2} prefixes'.format(
+                step.burst, tracker.bursts, accepted))
+
+        if step.action == ChurnBurstTracker.WITHDRAW:
+            recorder.note_burst_started(step.burst)
+            print('churn burst {0}/{1}: withdrawing {2} distinct prefix(es) '
+                  'from {3}'.format(step.burst, tracker.bursts,
+                                    tracker.distinct_withdrawals, accepted))
+            reason = issue_churn_command(generators, 'disable')
+        elif step.action == ChurnBurstTracker.REANNOUNCE:
+            print('churn burst {0}/{1}: withdrawal observed at {2} prefixes, '
+                  're-announcing'.format(step.burst, tracker.bursts, accepted))
+            reason = issue_churn_command(generators, 'enable')
+        elif step.action == ChurnBurstTracker.FAILED:
+            reason = step.reason
+        if reason or step.action in (ChurnBurstTracker.DONE,
+                                     ChurnBurstTracker.FAILED):
+            break
+
+    complete = reason is None and tracker.completed_bursts == tracker.bursts
+    return recorder.events, {
+        'sequence_complete': complete,
+        'incomplete_reason': reason,
+    }
+
+
+def churn_phase(args, q, monitor, testers, since_s, converged_count,
+                churn_prefixes, churn_bursts, groups):
+    """Set up and run the burst sequence, or say why it could not run.
+
+    Returns `((), None)` for a run that asked for no churn, so a document
+    produced by every command line that predates this flag is unchanged.
+
+    A sequence that cannot be *driven* -- no generator that can be asked, a
+    block the monitor could never see go away -- is reported in the same shape
+    as one that stalled rather than raised. By the time this runs the target
+    has already converged and that measurement is the thing being preserved;
+    losing it to a churn workload that could not start would be the wrong half
+    to drop.
+    """
+    if not churn_prefixes:
+        return (), None
+    counts = churn_operation_counts(args.neighbor_num, churn_prefixes, groups)
+    recorder = ChurnEventRecorder(
+        since_s, producer=monitor.name,
+        sample_interval_s=MONITOR_POLL_INTERVAL_S,
+        requested_bursts=churn_bursts,
+        offered_withdrawals=counts['offered_withdrawals'],
+        distinct_withdrawals=counts['distinct_withdrawals'])
+    generators = [t for t in testers if getattr(t, 'SUPPORTS_CHURN', False)]
+    if not generators:
+        # Refused at all four entry points for every generator that cannot
+        # churn, so this is unreachable from a checked path -- and it is here
+        # because the alternative is a sequence that issues nothing, waits
+        # CHURN_STALL_SAMPLES, and reports a stuck target.
+        return (), {'sequence_complete': False,
+                    'incomplete_reason': 'no generator in this run can churn'}
+    try:
+        tracker = ChurnBurstTracker(churn_bursts, converged_count,
+                                    counts['distinct_withdrawals'])
+    except ChurnConfigurationError as e:
+        # The only rule that cannot be checked before the run: the converged
+        # count is not known until the table has been delivered, so a run that
+        # accepted fewer prefixes than it offered can reach a block the flag
+        # guards passed.
+        return (), {'sequence_complete': False, 'incomplete_reason': str(e)}
+    return run_churn_bursts(q, monitor.name, recorder, tracker, generators)
+
+
+def churn_interval_phrase(seconds, resolution):
+    """One churn interval, or the poll resolution that could not resolve it.
+
+    Both halves of a burst are bounded below by one poll *by construction*: the
+    withdrawal is issued just after a sample and the soonest it can be seen is
+    the next one. So an interval of exactly one poll is an upper bound and not
+    a duration -- the block went away somewhere inside that look -- and
+    printing it as `1.0s` would publish the monitor's cadence as the daemon's
+    reaction time, on a run where a faster daemon would print the same number.
+    That is the rule `print_tester_metrics()` applies to a sub-poll injection,
+    reached from the other side.
+
+    The phrase carries its own preposition, since the two readings do not take
+    the same one.
+    """
+    if seconds is None:
+        return '(unmeasured)'
+    if resolution is not None and seconds <= resolution:
+        return 'within the {0:.1f}s poll resolution'.format(resolution)
+    return 'in {0:.1f}s'.format(seconds)
+
+
+def describe_churn_metrics(churn):
+    """Report each burst's two intervals, and any burst that did not finish."""
+    if not churn:
+        return []
+    requested = churn.get('requested_bursts')
+    lines = []
+    for burst in churn.get('bursts') or []:
+        position = '{0}'.format(burst['burst']) if requested is None \
+            else '{0}/{1}'.format(burst['burst'], requested)
+        if not burst['complete']:
+            # The withdrawal may still have been measured -- a burst can stall
+            # in its reannouncement -- so it is reported rather than dropped.
+            lines.append(
+                'churn burst {0}: withdrawal {1}, not completed'.format(
+                    position,
+                    churn_interval_phrase(burst['withdraw_s'],
+                                          burst['withdraw_resolution_s'])))
+            continue
+        lines.append(
+            'churn burst {0}: withdrew {1} distinct prefix(es) {2}, '
+            're-announced {3}'.format(
+                position, churn.get('distinct_withdrawals'),
+                churn_interval_phrase(burst['withdraw_s'],
+                                      burst['withdraw_resolution_s']),
+                churn_interval_phrase(burst['reannounce_s'],
+                                      burst['reannounce_resolution_s'])))
+    if churn.get('sequence_complete') is False:
+        # Said whether or not a burst line above already looks wrong: the run
+        # is published as converged -- it did converge -- so this is the only
+        # place the printed output says the second workload did not run.
+        reason = churn.get('incomplete_reason') or 'no reason recorded'
+        if requested is None:
+            # No burst ever started, so the event stream carries no count and
+            # this section is evidence alone. Reading the count anyway prints
+            # `0 of None burst(s)`.
+            lines.append('churn: no burst was issued; {0}'.format(reason))
+        else:
+            lines.append('churn: {0} of {1} burst(s) completed; {2}'.format(
+                churn.get('completed_bursts'), requested, reason))
+    return lines
 
 
 def print_tester_metrics(events, producers):
@@ -2365,6 +2840,24 @@ def stats_header():
     return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date, cores, Mem (GB), tester errors, tester timeouts, failed, MSG, filters, max foreign cpu %, target image, tester version, monitor version")
 
 
+def row_message(value):
+    '''A free-text cell the CSV can carry, or an empty one.
+
+    Rows are `','.join()`ed with no quoting, so a comma in a message is extra
+    fields: every column after `MSG` -- `filters`, `max foreign cpu %` and all
+    three provenance columns -- shifts for every reader of that row, and
+    `summary.py` scores it `unreadable`. `Container.version_string()` already
+    rewrites commas for exactly this reason and this is the same rule; it
+    matters here because a churn failure quotes birdc's own reply, and the two
+    replies a run can produce -- `syntax error, unexpected CF_SYM_UNDEFINED,
+    expecting CF_SYM_KNOWN` and the repr of an exec exception -- both contain
+    commas. Newlines are folded for the same reason.
+    '''
+    if not value:
+        return ''
+    return ' '.join(str(value).replace(',', ';').split())
+
+
 def row_gb(value):
     '''Bytes as the CSV's GB column carries them.
 
@@ -2425,7 +2918,7 @@ def create_output_stats(args, target_version, stats, fail=False, provenance=None
     out.extend(['-s' if args.single_table else '', d, str(stats['cores']), mem_human(stats['memory'])])
     out.extend([stats['tester_errors'],stats['tester_timeouts']])
     out.extend(['FAILED']) if fail else out.extend([''])
-    out.extend([stats['fail_msg']]) if 'fail_msg' in stats else out.extend([''])
+    out.extend([row_message(stats.get('fail_msg'))])
     out.extend([args.filter_test]) if 'filter_test' in args  and args.filter_test else out.extend([''])
     # Worst competition seen from outside the benchmark, as a percentage of one
     # core. Anything much above 0 means this row's timings cannot be compared
@@ -2598,7 +3091,8 @@ BATCH_TEST_KEYS = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
 # a fresh permutation on every invocation while looking pinned, and
 # `repetitions` misspelt runs one pass of a matrix someone asked three of.
 BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope',
-                            'path_diversity', 'receivers')
+                            'path_diversity', 'receivers', 'churn_prefixes',
+                            'churn_bursts')
 
 
 # Keys that mean something on a *test* and nothing on a target. There is no
@@ -2614,7 +3108,8 @@ BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope',
 # read as a peer sweep.
 BATCH_TEST_ONLY_KEYS = ('prefix_scope', 'repetitions', 'order', 'seed',
                         'neighbors', 'prefixes', 'filter_test',
-                        'path_diversity', 'receivers')
+                        'path_diversity', 'receivers', 'churn_prefixes',
+                        'churn_bursts')
 
 # Target keys whose absence means something other than `None`. `batch()`
 # otherwise gives every unset field `None`, and `gen_conf()` routes anything
@@ -2881,6 +3376,71 @@ def check_batch_test(test):
                                      mrt[0] if mrt else None)
             except ValueError as e:
                 sys.exit("test '{0}': {1}".format(test['name'], e))
+    churn_prefixes = test.get('churn_prefixes')
+    churn_bursts = test.get('churn_bursts')
+    churn_flags = churn_flags_set(churn_prefixes, churn_bursts)
+    # Scenario targets are excluded here, so a test whose targets all name a
+    # file leaves this empty and the product below checks nothing -- which is
+    # correct only because the refusal after it rejects either churn flag for
+    # exactly that test.
+    generators = sorted({batch_target_field(t, 'tester_type')
+                         for t in test['targets'] if not t.get('file')})
+    # `'None'` is how a filter axis spells no filter, which `batch()`
+    # translates the same way.
+    filters = sorted({None if f in (None, 'None') else f
+                      for f in test['filter_test']}, key=str)
+    # Every generator, filter and axis combination, for the reason the scope is
+    # checked against the whole grid: a churn block that fits one `prefixes`
+    # entry and not the next is easy to write, and finding that out at cell
+    # three is hours lost.
+    #
+    # Above the two refusals below so that a refusal names the fault rather
+    # than the nearest rule it trips -- the rule `resolve_path_diversity()`
+    # already follows for a typo'd scope. `churn_bursts: 3` with no block
+    # beside a `repeat` target is a burst count with nothing to churn, and
+    # being told to remove the repeat sends the operator back to the same
+    # fault.
+    for generator, filter_test, neighbors, prefixes in product(
+            generators, filters, test['neighbors'], test['prefixes']):
+        try:
+            resolve_churn(churn_prefixes, churn_bursts, neighbors,
+                          resolve_prefix_scope(scope, neighbors, prefixes),
+                          generator, filter_test)
+        except ValueError as e:
+            sys.exit("test '{0}': {1}".format(test['name'], e))
+    if churn_flags and scenarios:
+        # `bench()`'s own `-f` refusal is reachable from here -- `batch()`
+        # passes the churn straight through to a scenario target -- but it
+        # would fire mid-batch, after that cell had torn down the previous
+        # one's containers. The rule is the same one: the file states what each
+        # peer announces, so there is nothing here to cut a block out of.
+        sys.exit(
+            "test '{0}': {1} {2} nothing to withdraw for {3}, which name a "
+            "scenario file: the file states each neighbour's prefixes "
+            'itself'.format(
+                test['name'],
+                ' and '.join(f.lstrip('-').replace('-', '_')
+                             for f in churn_flags),
+                'have' if len(churn_flags) > 1 else 'has',
+                ', '.join(scenarios)))
+    repeated = [t.get('label') or t['name'] for t in test['targets']
+                if t.get('repeat')]
+    if churn_flags and repeated:
+        # `-r` builds no tester objects, so there is nothing to issue a burst
+        # through and nothing rewrites the generator config the churn protocol
+        # lives in. On the CLI that is one wrong run; here it is every cell of
+        # a matrix naming a churn workload in its artifacts and withdrawing
+        # nothing.
+        sys.exit(
+            "test '{0}': {1} cannot be used with repeat, which {2} {3} set: "
+            'repeat reuses the generator containers as they are, so the churn '
+            'block is neither written into their config nor reachable to '
+            'withdraw'.format(
+                test['name'],
+                ' and '.join(f.lstrip('-').replace('-', '_')
+                             for f in churn_flags),
+                ', '.join(repeated),
+                'has' if len(repeated) == 1 else 'have'))
 
 
 def target_run_name(target):
@@ -2955,6 +3515,11 @@ def expand_batch_cells(test, targets):
     # Carried on the cell for the same reason: it changes what the run does,
     # so it has to change what `--resume` thinks the cell is.
     receivers = test.get('receivers') or DEFAULT_RECEIVERS
+    # And the churn workload, for the same reason: raising a test from one
+    # burst to three, or widening the block, is a different run rather than
+    # more of the same one.
+    churn_prefixes = test.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
+    churn_bursts = test.get('churn_bursts') or DEFAULT_CHURN_BURSTS
     cells = []
     for repetition in range(1, repetitions + 1):
         ordinal = 0
@@ -2977,6 +3542,8 @@ def expand_batch_cells(test, targets):
                             'filter': filter_test,
                             'path_diversity': diversity,
                             'receivers': receivers,
+                            'churn_prefixes': churn_prefixes,
+                            'churn_bursts': churn_bursts,
                             'target': t,
                         })
                         ordinal += 1
@@ -3331,6 +3898,10 @@ def batch(args):
             # diversity its own id does not record.
             a.path_diversity = cell.get('path_diversity') or DEFAULT_PATH_DIVERSITY
             a.receivers = cell.get('receivers') or DEFAULT_RECEIVERS
+            # From the cell for the same reason the two above are: the cell is
+            # what the id, the row and the artifact names were built from.
+            a.churn_prefixes = cell.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
+            a.churn_bursts = cell.get('churn_bursts') or DEFAULT_CHURN_BURSTS
             a.filter_test = cell['filter'] if cell['filter'] != 'None' else None
             # None for a single-pass test, so its rows, graphs and event
             # artifacts keep the names they have always had; set for every pass
@@ -3432,6 +4003,14 @@ def batch_cell_id(test_name, cell):
     receivers = cell.get('receivers') or DEFAULT_RECEIVERS
     if receivers != DEFAULT_RECEIVERS:
         identity['receivers'] = receivers
+    # Both keys or neither, and only away from the default: a burst count with
+    # no block is not a workload, so recording one on a cell that churns
+    # nothing would put a key in the id that says nothing about what ran.
+    churn_prefixes = cell.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
+    if churn_prefixes != DEFAULT_CHURN_PREFIXES:
+        identity['churn_prefixes'] = churn_prefixes
+        identity['churn_bursts'] = (cell.get('churn_bursts')
+                                    or DEFAULT_CHURN_BURSTS)
     return json.dumps(identity, sort_keys=True, separators=(',', ':'), default=str)
 
 
@@ -3451,6 +4030,11 @@ def batch_cell_description(cell, repetitions=1):
     receivers = cell.get('receivers') or DEFAULT_RECEIVERS
     if receivers != DEFAULT_RECEIVERS:
         described = '{0}, receivers={1}'.format(described, receivers)
+    churn_prefixes = cell.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
+    if churn_prefixes != DEFAULT_CHURN_PREFIXES:
+        described = '{0}, churn={1}x{2}'.format(
+            described, churn_prefixes,
+            cell.get('churn_bursts') or DEFAULT_CHURN_BURSTS)
     if repetitions > 1:
         described = '{0}, repetition {1}/{2}'.format(
             described, cell['repetition'], repetitions)
@@ -3578,6 +4162,11 @@ def gen_conf(args):
     # number the fleet can be dealt into.
     diversity = getattr(args, 'path_diversity', None) or DEFAULT_PATH_DIVERSITY
     receivers = getattr(args, 'receivers', None) or DEFAULT_RECEIVERS
+    # Validated at every entry point too, for the same reason: this reads what
+    # was asked for, and `split_churn_paths()` refuses to cut a block it cannot
+    # take out of a peer's list.
+    churn_prefixes = (getattr(args, 'churn_prefixes', None)
+                      or DEFAULT_CHURN_PREFIXES)
 
 
     local_address_prefix = netaddr.IPNetwork(args.local_address_prefix)
@@ -3736,6 +4325,14 @@ def gen_conf(args):
                 args.filter_type: assignment,
             },
         }
+        # Written only when a burst was asked for, so a scenario generated
+        # without churn is byte-identical to the one this has always produced.
+        # It is per-neighbour rather than global because the split is made from
+        # each peer's own path list: under `--path-diversity` a group shares
+        # one list, so the same tail is churned by every peer in it and the
+        # target loses the prefix rather than falling back to a surviving path.
+        if churn_prefixes:
+            neighbors[router_id]['churn-prefixes'] = churn_prefixes
         configured_neighbors_cnt += 1
 
     # Export fan-out: sessions the target advertises its table to and which
@@ -3865,6 +4462,18 @@ def config(args):
             args.prefix_num, getattr(args, 'tester_type', None))
     except ValueError as e:
         sys.exit(str(e))
+    # After the scope for the reason `bench()` puts it there: the block is
+    # taken out of each peer's own list, and the scope decides how long that
+    # list is.
+    try:
+        args.churn_prefixes, args.churn_bursts = resolve_churn(
+            getattr(args, 'churn_prefixes', None),
+            getattr(args, 'churn_bursts', None),
+            args.neighbor_num, args.prefix_num,
+            getattr(args, 'tester_type', None),
+            getattr(args, 'filter_test', None))
+    except ValueError as e:
+        sys.exit(str(e))
     conf = gen_conf(args)
 
     with open(args.output, 'w') as f:
@@ -3965,6 +4574,27 @@ def create_args_parser(main=True):
                                  'prefixes. Must divide the peer count '
                                  'exactly, and does not apply to the MRT '
                                  'testers or under --prefix-scope total')
+        parser.add_argument('--churn-prefixes', type=int,
+                            default=DEFAULT_CHURN_PREFIXES,
+                            help='how many of each peer\'s prefixes to '
+                                 'withdraw and re-announce once the table has '
+                                 'converged. 0 (the default, and every run '
+                                 'bgperf has made) means the run ends at '
+                                 'convergence, so nothing here has ever '
+                                 'measured a loaded table changing. The block '
+                                 'is the tail of each peer\'s own prefixes, so '
+                                 'peers sharing a block under --path-diversity '
+                                 'withdraw the same prefixes and the target '
+                                 'loses them rather than falling back. Only '
+                                 'the bird generator can do this, and not '
+                                 'under -r/--repeat or a policy filter')
+        parser.add_argument('--churn-bursts', type=int,
+                            default=DEFAULT_CHURN_BURSTS,
+                            help='how many withdraw/re-announce cycles to run. '
+                                 'Each is measured in two halves -- how long '
+                                 'the block takes to go away and how long it '
+                                 'takes to come back -- and needs '
+                                 '--churn-prefixes to have anything to churn')
         parser.add_argument('--threads', type=int,
                             help='worker threads the target should use. BIRD 3 runs with one '
                                  'worker unless told otherwise, so a 2.x-vs-3.x comparison needs '

@@ -724,6 +724,24 @@ class Tester(Container):
     # the monitor, which would measure the target and call it the tester.
     REPORTS_OFFERING = False
 
+    # Set by a generator that can be told to withdraw and re-announce a bounded
+    # block of what it offers, which is what a churn burst is. Only the
+    # synthetic BIRD generator can: it is configured from prefixes bgperf2
+    # generated, so a block of them can be put in a protocol of its own and
+    # switched off. An MRT injector plays a file back once and has no such
+    # handle, which is why churn is refused for one at every entry point rather
+    # than discovered here.
+    SUPPORTS_CHURN = False
+
+    def churn(self, action):
+        '''Withdraw or re-announce this generator's churn block.
+
+        Returns the sessions whose reply did not say the command was carried
+        out, so a burst that was never issued fails the sequence immediately
+        instead of being found as a stall five minutes later.
+        '''
+        raise NotImplementedError()
+
     def __init__(self, name, host_dir, conf, image):
         Container.__init__(self, self.CONTAINER_NAME_PREFIX + name, image, host_dir, self.GUEST_DIR, conf)
 

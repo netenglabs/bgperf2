@@ -326,6 +326,97 @@ thing BIRD 3's worker threads exist to parallelise.
   guards the one path that is handed one, so `receivers: 3` written into a scenario file is refused
   by name instead of reaching `enumerate()` as a bare `TypeError`.
 
+`--churn-prefixes C` and `--churn-bursts B` (batch: `churn_prefixes` / `churn_bursts`, *test* keys)
+are the fourth workload control: once the run has converged, the last `C` prefixes of every peer's
+own list are withdrawn and re-announced, `B` times. Every run this tool has published measures a
+table arriving at a daemon that has never seen it, and a router spends almost none of its life
+doing that -- it spends it holding a table while parts of it move, which is removing routes from a
+loaded table, re-running best-path selection for every prefix that had a competing path, and
+withdrawing and re-advertising on every export session.
+
+- **A burst is switched, not reconfigured.** The block goes into a `protocol static churn` of its
+  own in each peer's generator config and a burst is `birdc -s <sock> disable churn` / `enable
+  churn`, one `docker exec` for the whole fleet. A `configure` would re-read the whole file --
+  several hundred thousand static routes on a real run -- so the interval measured would be BIRD
+  parsing its own config rather than the target reacting to a withdrawal. Verified on
+  `bgperf/bird:2.19.2` and `:3.3.2`: both answer exactly `churn: disabled` / `churn: enabled`, and
+  `churn: already disabled` for a protocol in that state, which is **not** success -- the sequence
+  alternates, so reaching a `disable` on an already-disabled protocol means the previous `enable`
+  was lost.
+- **The block is the tail of each peer's own list.** A sampled block would need a seed, and a seed
+  is a fourth dimension in the cell identity, the stem and the manifest -- what `--prefix-scope`
+  and `--path-diversity` both refuse to become. Taking the tail also keeps the block *shared* under
+  `--path-diversity`: peers in a group are handed the same list, so they churn the same prefixes
+  and the target loses the prefix rather than falling back to a surviving path. That is why the
+  monitor-visible count is `groups * C` and not `n * C`; `churn_operation_counts()` publishes both,
+  because reporting only the second understates a diversity-5 fleet's work fivefold.
+- **The two halves of a burst are timed separately.** Dropping routes and re-selecting/re-exporting
+  them are different mechanisms and the second is one of the three BIRD 3 parallelises, so one
+  end-to-end number would hide what the workload exists to expose. `burst_s` *is* their sum -- the
+  withdrawal's end and the re-announcement's start are one event -- and is published so a reader
+  need not add two rounded numbers, never as a third measurement.
+- **An interval of one poll is an upper bound, not a duration.** Both halves are bounded below by
+  one poll by construction -- the command is issued just after a sample and the soonest it can be
+  seen is the next. The printed line says `within the 1.0s poll resolution` for that case, on the
+  same rule `print_tester_metrics()` applies to a sub-poll injection, reached from the other side.
+- **A burst nobody performed is caught when it is issued.** `churn_failures()` checks every
+  session's reply against the sessions asked about (not against the sections that came back), so a
+  lost withdrawal is named immediately instead of arriving `CHURN_STALL_SAMPLES` later as a stall
+  that reads as a stuck target.
+- **A collapsed count is not a withdrawal.** Completion is `accepted <= converged - groups * C`,
+  and a post-convergence sample of 0 -- a session that flapped, a target that restarted -- satisfies
+  that for every block there is. Read as a withdrawal it would stamp the burst complete, issue the
+  re-announcement against a table that never lost the block, and publish the session re-learning the
+  whole table as `reannounce_s`. A count more than `CHURN_COLLAPSE_FRACTION` of the converged count
+  below the floor fails the sequence by name instead, in either phase and between bursts --
+  `ConvergenceTracker`'s `DROP_FRACTION` rule on the other side of convergence. The message names
+  the phase, and distinguishes a collapse before the first burst from one between bursts, for the
+  reason the stall message names its phase: the three send the reader to different logs.
+- **A run that asked for churn and issued none still says so**, and that fallback lives in
+  `write_event_artifact()` rather than at the `FAILED` branch that needs it. That branch is inside
+  `bench()`'s monitor loop, which no Docker-free test can drive, so a fix written there passed the
+  whole suite when review deleted it again. Anything that builds a run's document gets the
+  fallback; a caller that supplies real evidence always wins.
+- **`MSG` is rewritten through `row_message()`** -- commas to `;`, whitespace folded -- because a
+  churn failure quotes birdc's own reply and `syntax error, unexpected CF_SYM_UNDEFINED, expecting
+  CF_SYM_KNOWN` is two extra CSV fields, shifting `filters`, `max foreign cpu %` and all three
+  provenance columns. Same rule as `Container.version_string()`. **`name` and `filters` are still
+  unguarded**, which is pre-existing: a comma in a batch `label` shifts the row the same way, and
+  the fix there is a guard in `check_batch_run_names()` rather than a rewrite, since a label also
+  names every artifact the run writes.
+- **The withdrawal target is exact, and a target that never held part of the block stalls rather
+  than being tolerated.** Completion is `accepted <= converged - groups * C`, so a target holding
+  fewer prefixes than the fleet offered -- the reason the monitor check-point carries a 0.99 factor
+  in the first place -- can leave that count unreachable if any of the missing prefixes fall in the
+  tail. The stall message names the count it held and the count it wanted, which is diagnosable; a
+  tolerance would have to be a number nobody measured, and it would let a burst that only half
+  landed be published as complete.
+- **The published row describes the delivery, not the churn.** `elapsed (s)` is settled before the
+  first burst, and the churn loop drains every other producer's queue messages without acting on
+  them, so `max cpu %`, `max mem (GB)` and `min free mem (GB)` do not move with a burst's peak.
+  `total time` *does* include churn, since it is wall clock. What a burst cost is in
+  `<prefix>.events.json`'s `churn` section, per burst.
+- **A sequence that did not complete leaves the run converged and says so in `MSG`.** The
+  convergence measurement is real and marking the row FAILED would corrupt `elapsed (s)`, which is
+  computed on the CONVERGED path; but a batch of churn cells whose rows all read as ordinary would
+  say nothing about the second workload. `summary.py` reads `MSG` only for a row marked failed, so
+  no summary changes.
+- **Refused, at all four entry points, for**: any generator but synthetic `bird` (the handle is
+  BIRD's own `birdc`), `-f`/a scenario target, `-r/--repeat` (which builds no tester objects at
+  all, so nothing would issue the burst and nothing rewrites the generator config the churn
+  protocol lives in -- the `--receivers` shape one round earlier), a block larger than the per-peer
+  count *after* `--prefix-scope total` has divided, a burst count with no block, and
+  `--filter_test` (a policy that drops part of the block makes the burst's completion count
+  unreachable, so a correctly filtered run would be published as a stalled one -- a deferred
+  definition, like `total` under `--path-diversity`). `check_batch_test()` checks every
+  (generator, filter, peers, prefixes) combination, not the first.
+- **One rule cannot be checked before the run**: the converged count is not known until the table
+  is delivered, so a run that accepted fewer prefixes than it offered can reach a block the flag
+  guards passed. `ChurnBurstTracker` refuses it there and the sequence is reported incomplete
+  rather than raising -- by then the convergence measurement is the thing being preserved.
+- Stem gets `ch<C>x<B>`, both `run` blocks record both numbers, `-f` records `null`. Not a CSV
+  column, for the reason `--path-diversity` is not.
+
 `--threads N` sets worker threads on the target (`conf['target']['threads']`). Only BIRD reads it
 so far: **BIRD 3 runs one worker unless the config says otherwise**, so benching 3.x against 2.x
 without it measures nothing (verified: 3.3.2 gives 2 OS threads by default, 5 with `threads 4`;
@@ -427,8 +518,8 @@ Shuffling does not remove that drift; it stops it lining up with one axis.
 ### Summarising the passes — `summary.py`
 
 A batch writes `<test>.summary.json` beside its CSV: one entry per matrix cell, with the
-distribution of that cell's passes. Pure and Docker-free like `contention.py`, `convergence.py`
-and `findings.py`, and it reads the stats row **by column name** — that row is positional for
+distribution of that cell's passes. Pure and Docker-free like `contention.py`, `convergence.py`,
+`churn.py` and `findings.py`, and it reads the stats row **by column name** — that row is positional for
 `create_batch_graphs()` and has drifted by a column once already, so a summary keyed on index 12
 would be arithmetic nobody could check. `docs/measurement-dictionary.md` has the field list.
 
@@ -829,7 +920,7 @@ shorter than the 1.0s poll resolution; the generator measured its own send at
 The intervals above exist to answer one question, and `findings.py` is the only
 thing allowed to answer it. It derives a `findings` section into every
 `<prefix>.events.json` and prints its verdict as the last line of a run. Pure
-and Docker-free like `contention.py` and `convergence.py`, and it reads the
+and Docker-free like `contention.py`, `convergence.py` and `churn.py`, and it reads the
 *artifact* rather than the event stream, so it cannot reason about a duration
 the artifact did not publish.
 

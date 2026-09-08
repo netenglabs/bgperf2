@@ -194,6 +194,50 @@ def split_session_output(text):
     return sections
 
 
+# What a churn burst is made of on the generator side: one static protocol
+# holding the block that goes away and comes back, switched with birdc's own
+# `disable`/`enable`. Reconfiguring the daemon would do it too, but that
+# re-reads the whole config -- including the several hundred thousand static
+# routes a real run holds -- so the interval measured would be BIRD parsing its
+# own file rather than the target reacting to a withdrawal.
+CHURN_PROTOCOL = 'churn'
+
+# birdc answers `disable <proto>` with exactly `<proto>: disabled` and `enable`
+# with `<proto>: enabled` -- verified on the 2.19.2 and 3.3.2 images this
+# project builds. Anything else is a command that did not run: a protocol name
+# it does not know answers `syntax error, unexpected CF_SYM_UNDEFINED`, and a
+# protocol already in the requested state answers `<proto>: already disabled`,
+# which is not success either -- the sequence alternates, so reaching a
+# `disable` on an already-disabled protocol means the previous `enable` was
+# lost, and treating it as success would measure a burst that did not happen.
+def churn_reply_ok(text, action, protocol=CHURN_PROTOCOL):
+    '''Whether one session\'s reply says the churn command was carried out.'''
+    wanted = '{0}: {1}d'.format(protocol, action)
+    return any(line.strip() == wanted for line in text.splitlines())
+
+
+def churn_failures(text, sessions, action, protocol=CHURN_PROTOCOL):
+    '''Sessions whose reply did not report the churn command carried out.
+
+    Keyed by the sessions the caller asked about rather than by the sections
+    that came back, on the same rule `get_offerings()` uses: a peer whose
+    socket did not answer at all has to stay distinct from one that answered,
+    or the peers that did reply would satisfy "the burst was issued" on their
+    own. That matters more here than for a poll -- a missed withdrawal is a
+    burst nothing withdrew, and its only other symptom is a stall five minutes
+    later that reads as a stuck target.
+    '''
+    parsed = split_session_output(text)
+    failures = {}
+    for key in sessions:
+        section = parsed.get(key)
+        if section is None:
+            failures[key] = 'no reply'
+        elif not churn_reply_ok(section, action, protocol):
+            failures[key] = section.strip() or 'empty reply'
+    return failures
+
+
 def tester_offering(text, channel='ipv4'):
     '''What a BIRD load generator has offered its peer, from its own CLI.
 

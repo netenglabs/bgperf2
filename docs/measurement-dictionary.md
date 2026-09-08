@@ -17,12 +17,12 @@ named monotonic phase intervals live in each run's `.events.json` artifact.
 | `required` | prefixes | Configured monitor accepted-prefix checkpoint. Reaching it shortens the stability-assurance window; stable completion may still be reported below it when target-neighbor completion evidence is available. It is 99% of the configured synthetic total, 99% of the scanned MRT prefix count for bgpdump2, or 93% of that MRT count for GoBGP playback. The synthetic total is the number of **distinct** prefixes, not the number of paths offered: the monitor counts what the target re-advertises, which is one best path per prefix, so it is `(peers / path diversity) x prefixes per peer`. |
 | `received` | prefixes | GoBGP monitor accepted-prefix count in the sample that completed or failed the run. Unaffected by `--receivers`: export fan-out adds sessions the target advertises the same table to, and they announce nothing, so neither this nor `required` moves with the receiver count. The fan-out is recorded as `run.receivers` in both `<prefix>.events.json` and `<prefix>.versions.json` and appears in the artifact stem as `rx<N>`; it is not a CSV column, and a run whose sessions came from a scenario file (`-f`) records `null`. Receivers run the same `bgperf/gobgp` image as the monitor, so the `monitor version` column describes their build too. |
 | `monitor (s)` | seconds | Time spent waiting for the monitor's BGP session with the target to become established, before the measured sampling loop starts. |
-| `elapsed (s)` | seconds | Monitor-observed convergence boundary in whole seconds from the tester launch origin. The controller estimates the boundary by subtracting the trailing stability-assurance samples from the final monitor sample. It is not necessarily a literal full-table time or the whole-run time. |
+| `elapsed (s)` | seconds | Monitor-observed convergence boundary in whole seconds from the tester launch origin. The controller estimates the boundary by subtracting the trailing stability-assurance samples from the final monitor sample. It is not necessarily a literal full-table time or the whole-run time. Unaffected by `--churn-prefixes`: churn bursts run after this boundary has been settled, and what they cost is in the artifact's `churn` section. |
 | `prefix received (s)` | seconds | Whole seconds from tester launch origin to the first monitor sample with a nonzero accepted-prefix count. Zero also represents a run that never observed a prefix, so failure state must be checked. |
 | `testers (s)` | seconds | Legacy post-first-prefix interval: `elapsed (s) - prefix received (s)`. Despite its name, it does not measure tester duration or tester completion and cannot establish an injection bottleneck. |
-| `total time` | seconds | Wall-clock seconds from the start of benchmark setup through convergence/failure handling up to the stop point in `finish_bench()`. Post-stop log scanning, graphing, and artifact writing are excluded. |
-| `max cpu %` | percent | Maximum sampled CPU use of the target container, rounded to an integer. Values may exceed 100% on multicore hosts. |
-| `max mem (GB)` | GiB | Maximum sampled target-container memory use, divided by 1024^3 and rounded to three decimal places. The historical `GB` label is retained for compatibility. |
+| `total time` | seconds | Wall-clock seconds from the start of benchmark setup through convergence/failure handling up to the stop point in `finish_bench()`. Post-stop log scanning, graphing, and artifact writing are excluded. **Churn is inside it**: the bursts run before that stop point, so a `--churn-prefixes` run's `total time` is not comparable with a run that did not churn. The artifact stem carries `ch<C>x<B>` so the two are at least distinguishable by name. |
+| `max cpu %` | percent | Maximum sampled CPU use of the target container, rounded to an integer. Values may exceed 100% on multicore hosts. Covers the delivery of the table only: samples taken during churn bursts are drained and dropped, so a burst's peak does not enter this column and make a churn run's row mean something different while looking identical. |
+| `max mem (GB)` | GiB | Maximum sampled target-container memory use, divided by 1024^3 and rounded to three decimal places. The historical `GB` label is retained for compatibility. Covers the delivery of the table only, like `max cpu %`. |
 | `min idle%` | percent | Minimum sampled host-wide idle CPU percentage, rounded to an integer. It includes bgperf2's own workload and is not a foreign-contention measure. |
 | `min free mem (GB)` | GiB | Minimum sampled host available memory, divided by 1024^3 and rounded to three decimal places. The historical `GB` label is retained for compatibility. It is host-wide and includes bgperf2's own containers, so `--receivers N` is in it: each receiver is a full GoBGP holding its own copy of the table on the same host. A fan-out large enough relative to the table can therefore drive this column low enough for `findings.py` to raise the `low_free_memory` confounder and withhold `limiting_component` — on memory the run consumed by design. `bench` prints the mechanism when a run asks for receivers; it does not estimate the size, because what a GoBGP holds per route depends on the paths. |
 | `flags` | string | `-s` when single-table mode was selected; otherwise empty. |
@@ -32,7 +32,7 @@ named monotonic phase intervals live in each run's `.events.json` artifact.
 | `tester errors` | count | Tester log lines classified as errors after convergence timing stops. Known benign BIRD messages are excluded by the tester parser. |
 | `tester timeouts` | count | Tester log lines classified as timeouts after convergence timing stops. |
 | `failed` | string | `FAILED` when convergence tracking declares failure; otherwise empty. |
-| `MSG` | string | Convergence failure explanation when available; otherwise empty. |
+| `MSG` | string | Convergence failure explanation when available; otherwise empty. Also carries a churn sequence that did not complete, with `failed` left blank: the run converged and that measurement stands, but a batch of churn cells whose rows all read as ordinary would say nothing about the second workload. `summary.py` reads this column only for a row marked failed, so no summary is affected. |
 | `filters` | string | Requested filter/policy test identifier; otherwise empty. |
 | `max foreign cpu %` | percent of one core | Maximum sampled CPU attributed to non-bgperf2 processes above the controller's baseline, rounded to an integer. Use it to qualify contention; it is not host utilization. |
 | `target image` | string | Normalized container image reference used by the target. |
@@ -127,6 +127,54 @@ first update to the **slowest** completion, and completion all-or-nothing.
 route when it is handed to the BGP protocol, not when it reaches the wire, so
 the count and the completion fact are trustworthy while the duration is not.
 Do not derive a tester-limited finding from a BIRD 2.19 rate.
+
+## Event artifact: the `churn` section
+
+Present only on a run that asked for `--churn-prefixes` (batch:
+`churn_prefixes` on a test) or that asked and could not run the sequence.
+Everything else about a churn run is a normal run: the CSV row, `elapsed (s)`,
+`max cpu %`, `max mem (GB)` and `min free mem (GB)` all describe the *initial
+delivery* of the table and are settled before the first burst is issued. What
+the bursts cost is here, per burst, and nowhere else.
+
+A burst withdraws the last `churn_prefixes` of every peer's own list and puts
+them back. Two counts describe it and they differ by exactly the path
+diversity: the fleet performs `peers x churn_prefixes` withdrawals, and the
+monitor — which reads what the target *re-advertises*, one best path per prefix
+— sees `groups x churn_prefixes` prefixes go away. Under the default diversity
+those are the same number.
+
+| Field | Unit/type | Definition and interpretation |
+|---|---|---|
+| `requested_bursts` | count | How many withdraw/re-announce cycles the run asked for, read from the events rather than from the caller. `null` when no burst ever started. |
+| `completed_bursts` | count | How many of them got the table back to its converged count. |
+| `offered_withdrawals` | prefixes | The withdrawals one burst performs across the fleet: `peers x churn_prefixes`. This is the size of the workload. |
+| `distinct_withdrawals` | prefixes | The prefixes one burst removes from what the monitor can see: `groups x churn_prefixes`. This is what a burst's completion is decided on. |
+| `sequence_complete` | boolean | Whether every requested burst ran to the end. `false` also puts the reason in the row's `MSG` column, with the `failed` flag left blank — the run converged, and that measurement stands. |
+| `incomplete_reason` | string or null | Why not: a session that did not carry the command out, an exec that raised, or a phase that stopped moving for `CHURN_STALL_SAMPLES` polls. |
+| `bursts[].burst` | count | 1-based position in the sequence. |
+| `bursts[].complete` | boolean | Whether this burst got the table back. A burst that started and did not finish keeps its partial intervals rather than being dropped. |
+| `bursts[].withdraw_s` | seconds | From the sample the withdrawal was issued on to the sample where the whole distinct block had gone. |
+| `bursts[].reannounce_s` | seconds | From that sample to the one where the count was back at its converged value. Reported separately from the withdrawal on purpose: dropping routes and re-selecting/re-exporting them are different mechanisms, and the second is one of the three BIRD 3's worker threads exist to parallelise. |
+| `bursts[].burst_s` | seconds | Start to completion, and exactly the sum of the two above — the withdrawal's end and the re-announcement's start are one event, so the three intervals share two endpoints. Published so a reader does not have to add two rounded numbers, not as a third measurement. |
+| `bursts[].*_resolution_s` | seconds | How coarsely each interval is placed, from the polls that bound it. |
+
+**An interval of one poll is an upper bound, not a duration.** Both halves of a
+burst are bounded below by one poll by construction: the command is issued just
+after a sample and the soonest it can be seen is the next one. So
+`withdraw_s == withdraw_resolution_s` means the block went away somewhere
+inside one look, and reading it as the daemon's reaction time publishes the
+monitor's cadence instead — a faster daemon would produce the same number. The
+printed line says `within the 1.0s poll resolution` for exactly this case.
+
+**A churn run is refused rather than interpreted** for an MRT or ExaBGP
+generator (the block is switched with the BIRD generator's own `birdc
+disable`/`enable` on a static protocol bgperf2 wrote), for `-f`/a scenario
+target, for `-r/--repeat` (which builds no tester objects, so nothing would
+issue the burst and nothing rewrites the generator config), and alongside
+`--filter_test` (a policy that drops part of the block makes the burst's
+completion count unreachable, so a correctly filtered run would be published as
+a stalled one).
 
 ## Event artifact: the `findings` section
 

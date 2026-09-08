@@ -15,7 +15,9 @@
 
 from base import Tester
 from exabgp import ExaBGP
-from bird import BIRD, SESSION_MARKER, split_session_output, tester_offering
+from bird import (BIRD, CHURN_PROTOCOL, SESSION_MARKER, churn_failures,
+                  split_session_output, tester_offering)
+from churn import split_churn_paths
 from measurements import TesterOffering
 from  settings import dckr
 from subprocess import check_output, Popen, PIPE
@@ -66,6 +68,10 @@ class BIRDTester(Tester, BIRD):
 
     CONTAINER_NAME_PREFIX = 'bgperf_bird_tester_'
     REPORTS_OFFERING = True
+    # The only generator that can churn: its table is prefixes bgperf2
+    # generated, so a bounded block of them can be given a protocol of its own
+    # and switched off and on again with birdc.
+    SUPPORTS_CHURN = True
 
     def __init__(self, name, host_dir, conf, image='bgperf/bird'):
         super(BIRDTester, self).__init__('bgperf_bird_' + name, host_dir, conf, image)
@@ -102,10 +108,69 @@ neighbor {0} as {1};
 protocol static {{ ipv4;
 '''.format(target_conf['local-address'], target_conf['as'],
                p['router-id'], local_address, p['as'], self.guest_dir, self.dev)
+                # The churn block is the tail of this peer's own list, and it
+                # goes into a protocol of its own so a burst can withdraw and
+                # re-announce exactly it. At the default -- no churn -- the
+                # split returns every path and nothing, so this writes the
+                # single unnamed static protocol it always wrote and an
+                # existing run's generator config is byte-identical.
+                stable, churning = split_churn_paths(
+                    p['paths'], p.get('churn-prefixes'))
                 f.write(config)
-                for path in p['paths']:
+                for path in stable:
                     f.write('      route {0} via {1};\n'.format(path, local_address))
                 f.write('}')
+                if churning:
+                    f.write('\nprotocol static {0} {{ ipv4;\n'.format(
+                        CHURN_PROTOCOL))
+                    for path in churning:
+                        f.write('      route {0} via {1};\n'.format(
+                            path, local_address))
+                    f.write('}')
+
+    def _churn_peers(self):
+        '''The peers this generator was given a churn block for.
+
+        A peer with no block has no `churn` protocol, so asking birdc to
+        disable one answers `syntax error` -- which `churn_failures()` reports,
+        correctly, as a burst that was not issued. Skipping them here is what
+        keeps that from happening on a run where churn was never asked for.
+        '''
+        return [p for p in self._peers() if p.get('churn-prefixes')]
+
+    def churn_command(self, action):
+        '''One shell command that switches every peer's churn block.
+
+        One `docker exec` for the whole fleet, for the reason
+        `get_offerings_cmd()` uses one: an exec is ~50ms, and at 50 peers a
+        burst issued peer by peer would take seconds to reach the last of them
+        -- so the fleet would withdraw in a staircase and the interval measured
+        would be that staircase rather than the target's reaction to it.
+        '''
+        parts = []
+        for p in self._churn_peers():
+            key = p['router-id']
+            parts.append("echo '{0}{1}'".format(SESSION_MARKER, key))
+            # `|| true` so one dead socket does not abort the loop and cost the
+            # peers that would have answered. The reply is what decides
+            # success, not the exit status, which this discards.
+            parts.append("birdc -s {0}/{1}.ctl '{2} {3}' 2>&1 || true".format(
+                self.guest_dir, key, action, CHURN_PROTOCOL))
+        return ['sh', '-c', '; '.join(parts)]
+
+    def churn(self, action):
+        '''Issue one churn command to every peer, and report who did not do it.
+
+        A failed exec is raised rather than swallowed, like `get_offerings()`:
+        a burst nobody performed has no symptom except the monitor's count not
+        moving, which arrives as a stall minutes later and reads as a stuck
+        target.
+        '''
+        peers = self._churn_peers()
+        if not peers:
+            return {}
+        output = self.local(self.churn_command(action)).decode('utf-8', 'replace')
+        return churn_failures(output, [p['router-id'] for p in peers], action)
 
     def _peers(self):
         return list(self.conf.get('neighbors', {}).values())

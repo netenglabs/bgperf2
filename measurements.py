@@ -26,6 +26,9 @@ class EventKind(str, Enum):
     MONITOR_REQUIRED_REACHED = 'monitor_required_reached'
     MONITOR_LAST_CHANGE = 'monitor_last_change'
     CONVERGENCE_CONFIRMED = 'convergence_confirmed'
+    CHURN_BURST_STARTED = 'churn_burst_started'
+    CHURN_WITHDRAW_COMPLETE = 'churn_withdraw_complete'
+    CHURN_BURST_COMPLETE = 'churn_burst_complete'
 
 
 class EventPhase(str, Enum):
@@ -33,6 +36,12 @@ class EventPhase(str, Enum):
     INJECTION = 'injection'
     CONVERGENCE = 'convergence'
     ASSURANCE = 'assurance'
+    # Everything after the table has been delivered and confirmed. A churn
+    # burst is a second workload run against a converged target, so its events
+    # must not share a phase with the initial delivery -- a reader grouping by
+    # phase would otherwise find two `injection` intervals in one document and
+    # no way to tell which one the row's `elapsed (s)` came from.
+    CHURN = 'churn'
 
 
 EVENT_PHASE = {
@@ -45,6 +54,9 @@ EVENT_PHASE = {
     EventKind.MONITOR_REQUIRED_REACHED: EventPhase.CONVERGENCE,
     EventKind.MONITOR_LAST_CHANGE: EventPhase.CONVERGENCE,
     EventKind.CONVERGENCE_CONFIRMED: EventPhase.ASSURANCE,
+    EventKind.CHURN_BURST_STARTED: EventPhase.CHURN,
+    EventKind.CHURN_WITHDRAW_COMPLETE: EventPhase.CHURN,
+    EventKind.CHURN_BURST_COMPLETE: EventPhase.CHURN,
 }
 
 
@@ -1118,7 +1130,229 @@ def monitor_metrics(events: Iterable[LifecycleEvent]):
     }
 
 
-def event_artifact(events: Iterable[LifecycleEvent], status, testers=None):
+class ChurnEventRecorder:
+    """Translate a churn burst sequence into the typed lifecycle vocabulary.
+
+    The monitor is the instrument for churn exactly as it is for the initial
+    table -- what a burst costs is what the target takes to withdraw the block
+    from its export sessions and to put it back -- so these events are stamped
+    at monitor samples and carry that loop's resolution.
+
+    It is a recorder of its own rather than more state on
+    `MonitorEventRecorder` for two reasons. That recorder refuses samples after
+    convergence is confirmed, which is the rule that keeps the published
+    `elapsed (s)` from drifting once the table is delivered, and a churn burst
+    is a second workload that must not move `monitor_last_change` or any
+    interval derived from it. And its clock origin is different: the first
+    churn sample is one poll after convergence, not one poll after the bench
+    clock started, so measuring its resolution from the run origin would
+    publish the whole convergence time as the resolution of the first burst.
+    """
+
+    def __init__(self, since_s, producer='monitor', sample_interval_s=None,
+                 requested_bursts=1, offered_withdrawals=0,
+                 distinct_withdrawals=0):
+        if not isinstance(producer, str) or not producer.strip():
+            raise ValueError('producer must be a non-empty string')
+        for name, value in (('requested_bursts', requested_bursts),
+                            ('offered_withdrawals', offered_withdrawals),
+                            ('distinct_withdrawals', distinct_withdrawals)):
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(
+                    '{0} must be a non-negative integer'.format(name))
+        self.producer = producer
+        self.sample_interval_s = _validated_interval(sample_interval_s)
+        self._since_s = float(since_s)
+        self._counts = {
+            'requested_bursts': requested_bursts,
+            'offered_withdrawals': offered_withdrawals,
+            'distinct_withdrawals': distinct_withdrawals,
+        }
+        self._events = []
+        self._last_sample_s = None
+        self._last_accepted = None
+        self._poll_resolution_s = None
+        self._open_burst = None
+        self._withdrawn_burst = None
+
+    def _details(self):
+        details = {}
+        if self.sample_interval_s is not None:
+            details['sample_interval_s'] = self.sample_interval_s
+        if self._poll_resolution_s is not None:
+            details['poll_resolution_s'] = self._poll_resolution_s
+        return details
+
+    @property
+    def events(self):
+        """Return the recorded facts in deterministic monotonic order."""
+        return ordered_events(self._events)
+
+    def observe(self, monotonic_s, accepted_prefixes):
+        """Record one post-convergence monitor sample.
+
+        This produces no event on its own. It is what dates the events the
+        caller then records: every burst transition is a decision about a
+        sample, so it is stamped at that sample and carries the gap since the
+        previous look, on the same rule the rest of this module uses.
+        """
+        if not isinstance(monotonic_s, (int, float)) \
+                or isinstance(monotonic_s, bool) \
+                or not math.isfinite(monotonic_s):
+            raise ValueError('monotonic_s must be a finite number')
+        monotonic_s = float(monotonic_s)
+        if not isinstance(accepted_prefixes, int) \
+                or isinstance(accepted_prefixes, bool) \
+                or accepted_prefixes < 0:
+            raise ValueError('accepted_prefixes must be a non-negative integer')
+        if monotonic_s < self._since_s:
+            raise EventOrderError('churn sample precedes convergence')
+        if self._last_sample_s is not None and monotonic_s < self._last_sample_s:
+            raise EventOrderError('churn samples are not monotonic')
+        self._poll_resolution_s = _resolution_for_poll(
+            monotonic_s,
+            self._since_s if self._last_sample_s is None else self._last_sample_s,
+            self.sample_interval_s)
+        self._last_sample_s = monotonic_s
+        self._last_accepted = accepted_prefixes
+
+    def _add(self, kind, burst):
+        if self._last_sample_s is None:
+            raise MeasurementEventError(
+                'cannot record {0} before a churn sample'.format(kind.value))
+        if not isinstance(burst, int) or isinstance(burst, bool) or burst < 1:
+            raise ValueError('burst must be a whole number of 1 or more')
+        counters = dict(self._counts)
+        counters['burst'] = burst
+        counters['accepted_prefixes'] = self._last_accepted
+        self._events.append(LifecycleEvent(
+            kind, self._last_sample_s, self.producer, EventPhase.CHURN,
+            counters=counters, details=self._details()))
+
+    def note_burst_started(self, burst):
+        """Record that this sample opened a burst, before the withdrawal is issued.
+
+        Stamped ahead of the `docker exec` that carries the withdrawal to the
+        generator rather than after it, for the reason both poll loops stamp a
+        sample before their read: the exec is the expensive half, and dating
+        the start to when it returned would take that cost out of the
+        withdrawal interval the burst exists to measure. It is a lower bound on
+        when the block began to go away, which is the honest end to be sure of.
+        """
+        if self._open_burst is not None:
+            raise MeasurementEventError(
+                'churn burst {0} is still open'.format(self._open_burst))
+        self._add(EventKind.CHURN_BURST_STARTED, burst)
+        self._open_burst = burst
+
+    def note_withdraw_complete(self, burst):
+        """Record the sample on which the whole churn block had gone away."""
+        if self._open_burst != burst:
+            raise MeasurementEventError(
+                'churn burst {0!r} did not start'.format(burst))
+        if self._withdrawn_burst == burst:
+            raise DuplicateEventError(
+                'churn burst {0} already withdrew'.format(burst))
+        self._add(EventKind.CHURN_WITHDRAW_COMPLETE, burst)
+        self._withdrawn_burst = burst
+
+    def note_burst_complete(self, burst):
+        """Record the sample on which the table was back to its converged count."""
+        if self._open_burst != burst:
+            raise MeasurementEventError(
+                'churn burst {0!r} did not start'.format(burst))
+        if self._withdrawn_burst != burst:
+            raise MeasurementEventError(
+                'churn burst {0} completed without withdrawing'.format(burst))
+        self._add(EventKind.CHURN_BURST_COMPLETE, burst)
+        self._open_burst = None
+
+
+def _burst_event(events, kind, burst):
+    """One churn event of a kind for one burst, or None."""
+    matches = [event for event in events
+               if event.kind == kind and event.counters.get('burst') == burst]
+    if len(matches) > 1:
+        raise DuplicateEventError(
+            'multiple {0} events for churn burst {1}'.format(kind.value, burst))
+    return matches[0] if matches else None
+
+
+def _burst_interval(start, end):
+    """The interval between two churn events, refusing an inverted one.
+
+    `duration_s()` cannot be used here: it identifies its endpoints by kind and
+    producer, and every burst in a sequence shares both. Both endpoints belong
+    to the same producer, so an inversion is a wiring fault rather than a
+    finding -- the same rule `duration_s()` applies, for the same reason.
+    """
+    if start is None or end is None:
+        return None
+    if end.monotonic_s < start.monotonic_s:
+        raise EventOrderError(
+            '{0} at {1} precedes {2} at {3}'.format(
+                end.kind.value, end.monotonic_s,
+                start.kind.value, start.monotonic_s))
+    return end.monotonic_s - start.monotonic_s
+
+
+def churn_metrics(events: Iterable[LifecycleEvent]):
+    """Derive each burst's withdrawal and reannouncement from its own events.
+
+    The two halves are what the section is for. A burst timed end to end
+    cannot say whether a daemon was slow to drop the routes or slow to
+    re-select and re-export them, and those are different mechanisms -- the
+    second is one of the three BIRD 3's worker threads exist to parallelise --
+    so a single number would hide exactly what the workload was added to
+    expose. `burst_s` **is** their sum: the withdrawal's end and the
+    re-announcement's start are one event, so the three share two endpoints.
+    It is published so a reader does not have to add two rounded numbers, and
+    never as a third measurement.
+
+    A burst that started and did not finish keeps its partial intervals and is
+    reported `complete: false`, rather than being dropped. A sequence that was
+    cut short has to be legible as a sequence that was cut short -- a document
+    holding one burst of three with nothing saying three were asked for reads
+    as a run that asked for one.
+    """
+    events = [event for event in ordered_events(events)
+              if event.phase == EventPhase.CHURN]
+    started = [event for event in events
+               if event.kind == EventKind.CHURN_BURST_STARTED]
+    counts = dict(started[0].counters) if started else {}
+    bursts = []
+    for event in started:
+        burst = event.counters.get('burst')
+        withdrew = _burst_event(events, EventKind.CHURN_WITHDRAW_COMPLETE, burst)
+        completed = _burst_event(events, EventKind.CHURN_BURST_COMPLETE, burst)
+        bursts.append({
+            'burst': burst,
+            'complete': completed is not None,
+            'withdraw_s': _burst_interval(event, withdrew),
+            'withdraw_resolution_s': _bounding_resolution(event, withdrew),
+            'reannounce_s': _burst_interval(withdrew, completed),
+            'reannounce_resolution_s': _bounding_resolution(withdrew, completed),
+            'burst_s': _burst_interval(event, completed),
+            'burst_resolution_s': _bounding_resolution(event, completed),
+        })
+    return {
+        # What the run asked for, from the events themselves rather than from
+        # the caller: a document whose requested count came from somewhere the
+        # event stream cannot corroborate could claim a sequence that was never
+        # driven.
+        'requested_bursts': counts.get('requested_bursts'),
+        'completed_bursts': sum(1 for b in bursts if b['complete']),
+        # One burst's operation counts. They differ by exactly the path
+        # diversity, and both are needed: the first is the work the fleet did,
+        # the second is what the instrument could see.
+        'offered_withdrawals': counts.get('offered_withdrawals'),
+        'distinct_withdrawals': counts.get('distinct_withdrawals'),
+        'bursts': bursts,
+    }
+
+
+def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
+                   churn=None):
     '''Build the stable JSON-compatible event artifact document.
 
     `testers` maps a generator's producer name to whatever evidence it holds
@@ -1149,7 +1383,35 @@ def event_artifact(events: Iterable[LifecycleEvent], status, testers=None):
         # the one with a null interval, which is exactly the thing a reader
         # skims past.
         artifact['tester_fleet'] = tester_fleet_metrics(events, testers)
+    # Present whenever a churn sequence was driven *or* could not be, and
+    # absent otherwise, so a run with no churn keeps exactly the document it
+    # has always produced. Evidence alone is enough: a sequence refused before
+    # its first burst -- a churn block larger than the converged table -- has
+    # nothing in the event stream, and a document with no churn section at all
+    # would read as a run that never asked for any.
+    if churn or any(event.phase == EventPhase.CHURN for event in events):
+        artifact['churn'] = _churn_section(events, churn)
     return artifact
+
+
+def _churn_section(events, evidence):
+    '''The derived burst intervals, plus what the controller alone knows.
+
+    The evidence is caller-supplied -- whether the sequence ran to the end and
+    why not -- and is refused where it would land on a derived name, for the
+    reason `_tester_section()` refuses the same thing: a caller that could
+    overwrite a measured interval with a value the events do not support
+    defeats the point of deriving them.
+    '''
+    measured = churn_metrics(events)
+    evidence = dict(evidence or {})
+    collisions = sorted(set(evidence) & set(measured))
+    if collisions:
+        raise MeasurementEventError(
+            'churn evidence would overwrite derived {0}'.format(
+                ', '.join(collisions)))
+    measured.update(evidence)
+    return measured
 
 
 def _tester_section(events, producer, evidence):

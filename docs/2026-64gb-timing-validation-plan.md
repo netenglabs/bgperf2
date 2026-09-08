@@ -188,6 +188,67 @@ The campaign must distinguish:
 - correctness failure;
 - missing measurement evidence.
 
+## Block Progress
+
+One line per block, moved when the block is accepted. `results/` is gitignored,
+so this is the durable record of what was run and what it showed; the artifacts
+themselves live under the run root and do not survive a fresh clone.
+
+### Block 0: preflight and timing smoke -- **accepted 2026-09-08**
+
+Ran at bgperf2 `0a334c0` on the campaign host, work directory
+`/data/bgperf-work`, into `results/2026/2026-timing-validation/`.
+
+- `doctor`: Docker 29.1.3, every image the 14 target configurations need is
+  built (bird 2.19.2/3.3.2/default, frr_c 8.5/9.1/10.0/10.7/default, openbgp
+  8.8/9.2/default, rustybgp 2026-02/default).
+- `verify`: **19 images checked, all ok**, every daemon binary reported clean of
+  gcov instrumentation. This is the check the unit suite cannot do and the one
+  that would otherwise let an instrumented FRR into the matrix.
+- Pinned MRT `mrt/rib.20260808.0000` (1,347,678,857 bytes) read by bgpdump2
+  itself: maximum per-peer count **1,076,872**, consistent with the ~1.05M
+  full-table peers Blocks 5-7 will replay.
+- Synthetic smoke (4 peers x 10,000, BIRD 2.19.2, BIRD generator): converged,
+  received 40,000 against a required 39,600, `elapsed (s)` 3.
+- MRT smoke (2 bgpdump2 injectors x 10,000, BIRD 2.19.2): converged, received
+  10,037 against a required 9,900 -- the union of two overlapping MRT peer
+  tables is its own number, which is why an MRT row's offered count is evidence
+  and not a target.
+- Both rows **qualified** against the Acceptance Rules: three-role plus tool
+  provenance, ordered and complete event streams, all generators complete,
+  no tester error or timeout, peak foreign CPU 2%, min free memory 97% of the
+  host.
+
+What the two smokes show about the instrument, which is what this block is
+for:
+
+- **Both generators reported their own completion, and neither could time its
+  own send at this size.** The BIRD generator offered all 40,000 prefixes by
+  its first poll (`offered_in_interval` 0 of 40,000) -- the documented
+  queue-side counter -- and the injectors' walks took 0.000844s and 0.011182s
+  against a 1.0s poll. Both runs are therefore `unresolved`, by
+  `injection_boundary_unresolved` and `injection_unresolved` respectively.
+  **That is the expected verdict for these shapes and not a defect**: a run
+  here that named a component would be the finding to investigate.
+- **The signed post-injection tail did both jobs.** The synthetic run's was
+  +1.006s against a 1.033s bound (inside the resolution, so no attribution);
+  the MRT run's was **-0.257s** -- the monitor reached the required count
+  before the slowest injector finished, which is ordinary at 99% of the table
+  and is exactly the reading a clamp at zero would have destroyed.
+- **The two injectors wrote 143,421 and 314,133 octets for the same 10,000
+  prefixes**, confirming that the wire-side count is a property of the paths
+  replayed rather than of the prefix count.
+- The manifest records host memory (61.44 GiB), CPU (AMD EPYC 9R14, 16
+  threads), kernel, Docker version, 19 image **IDs**, the bgperf2 revision and
+  both schema versions, and the MRT input's size. Order seed and repetition ID
+  have nothing to record here -- neither smoke declares repetitions or a
+  shuffle -- and arrive with Blocks 2-7, whose configs are snapshotted under
+  `metadata/configs/`.
+
+### Blocks 1-11
+
+Not started. Each block's configs and procedure are its own change set.
+
 ## Execution Blocks
 
 The follow-up runner should expose `next` behavior and durable `COMPLETE`

@@ -1,6 +1,19 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding agents working in this repository. `AGENTS.md` is a **symlink
+to this file**, so Codex and anything else that looks for that name reads exactly this — there is no
+second, shorter copy to keep aligned.
+
+It used to be a separate hand-written summary, and that failed the way a second copy of anything
+fails: silently. By the time it was noticed it carried five absolute paths to a machine this
+repository is not checked out on (including the `git -C <path>` rule, so an agent obeying it ran git
+against a directory that does not exist), two duplicated Beads blocks from a `bd setup` that appends
+rather than replaces, and no mention at all of the last seven change sets — every workload control,
+repetitions, order control and `summary.py`. None of that looked wrong from inside the file. A
+document that is confidently out of date is worse than no document, because it is followed.
+
+So: do not recreate a condensed agent file. If this one is too long for some harness, shorten *this*
+one.
 
 
 ## rules
@@ -1357,6 +1370,18 @@ state, resume unfinished work, and complete exactly one smallest reviewable chan
 phase. Run proportionate tests and any phase-required Docker verification, review the full diff, then stop and tell
 the user to use the same prompt again. Do not start follow-up benchmarking before the release gate passes.
 
+**That plan comes in two halves and both are part of being done.** The plan document is forward-looking --
+phases, work lists, tests, exit criteria, and one `Status:` line each -- and stays short enough to read whole
+before starting.
+[`docs/bgperf2-measurement-decision-log.md`](docs/bgperf2-measurement-decision-log.md) holds why each change was
+made the way it was, what was measured to decide it, and what its Docker verification showed, one section per
+phase. Read the phase's log section before changing what that phase settled, and append to it when a change set
+lands; the `Status:` line moves in the plan. Several log entries exist because a first attempt was wrong -- a
+bound on an interval nobody measured, a poll resolution that understated itself, a guard that refused on one
+path while another accepted silently -- so it is append-only: correcting an entry means adding what was found,
+never editing the earlier reading away. The record of having been wrong is the part that stops it happening
+twice, which is the same reason `verify` exists.
+
 ### 64 GB timing validation campaign operator contract
 
 When the user says `continue the 64 GB timing validation campaign`, follow
@@ -1487,7 +1512,8 @@ this repository that no one asked it to. The resolutions:
   **not** the team-maintainer profile, and it is not an opt-in to anything.
 - **The ban on "markdown files for task tracking" does not reach the plan documents.** All
   four operator contracts here are driven by `docs/*.md`, and every one of them requires the
-  worker to record progress in the plan document as part of being done. A driver that took the
+  worker to record progress in a plan document -- or, for the measurement plan, in its decision
+  log -- as part of being done. A driver that took the
   injection literally would stop writing the record its own contract is defined by. Items in
   beads link to a document anchor; the document stays the durable account. The bans on
   `TodoWrite` and `MEMORY.md` are narrower still: a per-turn todo list is execution state

@@ -8,14 +8,29 @@ cd "$REPO_ROOT"
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/run_2026_suite.sh <next|all|smoke|core-synth|core-mrt|filters> [options]
+  scripts/run_2026_suite.sh <next|all|smoke|core-synth|core-mrt|filters
+                            |calibration-synth|calibration-mrt> [options]
+
+  The calibration suites are Phase 6 measurement calibration, not campaign
+  work: 'all' and 'next' do not include them, and they take no COMPLETE
+  marker into account. They are here so they run through the same preflight
+  and work directory as everything else.
 
 Options:
   --run-id ID           Stable run ID for results/2026/<run-id>
   --results-root DIR    Root for run directories (default: results/2026)
-  --workdir DIR         Benchmark work directory (default: /data/bgperf-work)
+  --workdir DIR         Benchmark work directory. Defaults to /data/bgperf-work
+                        when /data is a filesystem of its own; required
+                        otherwise, since the alternative is guessing at the
+                        root filesystem.
   --mrt-file PATH       Override every mrt_file: entry in selected suites
   --force               Re-run suites even if COMPLETE marker exists
+  --allow-root-workdir  Proceed even though the work directory is on the root
+                        filesystem. Two cases need it: a host that genuinely
+                        has one filesystem (--workdir is still required there),
+                        and honouring a manifest that recorded such a path for
+                        a run already in flight. On the campaign host with
+                        neither of those, it means /data did not mount.
   -h, --help            Show this help
 EOF
 }
@@ -35,11 +50,43 @@ shift
 
 RUN_ID=""
 RESULTS_ROOT="results/2026"
-# /data, not /var/tmp: the latter is on the 29 GB root on the campaign host,
-# and a full-table MRT suite can fill it hours into a batch. Both operator
-# contracts name this path; a default here that disagreed with them would be
-# the one an operator actually gets, since --workdir is optional.
-WORKDIR="/data/bgperf-work"
+# Prefer a large separate volume, fall back to a path that exists everywhere.
+# /var/tmp is on the root filesystem on most hosts -- 29 GB on the campaign
+# host -- and a full-table MRT suite can fill it hours into a batch, taking
+# journald and the root filesystem with it. Both operator contracts name
+# /data/bgperf-work, and a default here that disagreed with them would be the
+# one an operator actually gets, since --workdir is optional. But this script
+# is checked in and runs on other machines, so the host-specific path is a
+# preference and not a requirement: hardcoding it turns a fresh clone, or a
+# replacement spot instance before its volume is mounted, into an immediate
+# `mkdir -p` failure under `set -euo pipefail`.
+filesystem_device() {
+  # Empty when it cannot be answered, so a caller can tell "different device"
+  # from "no idea" rather than having the two collapse into one comparison.
+  stat -c %d "$1" 2>/dev/null || true
+}
+
+WORKDIR=""
+ALLOW_ROOT_WORKDIR=0
+# Writability is not the question -- an unmounted /data on a replacement spot
+# instance is usually a present, empty, writable mount point *on the root
+# filesystem*, which is precisely the 29 GB partition this default exists to
+# stay off. What makes /data usable is that it is a different filesystem from
+# /, so compare device numbers rather than permissions. The same test is
+# applied to whatever --workdir resolves to, further down: guarding only the
+# default would leave the check bypassed by the very invocation every operator
+# contract now prints.
+if [[ -d /data && -w /data ]]; then
+  data_device="$(filesystem_device /data)"
+  root_device_default="$(filesystem_device /)"
+  # Both must answer. Two empties would compare equal and silently decline the
+  # default; one empty would accept /data on the root filesystem as the default
+  # -- the failure this test exists to catch.
+  if [[ -n "$data_device" && -n "$root_device_default" \
+        && "$data_device" != "$root_device_default" ]]; then
+    WORKDIR="/data/bgperf-work"
+  fi
+fi
 MRT_FILE=""
 FORCE=0
 
@@ -63,6 +110,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --force)
       FORCE=1
+      shift
+      ;;
+    --allow-root-workdir)
+      ALLOW_ROOT_WORKDIR=1
       shift
       ;;
     -h|--help)
@@ -98,12 +149,33 @@ PY
 PYTHON_BIN="$(choose_python)"
 BGPERF_CMD=("$PYTHON_BIN" "bgperf2.py")
 
+# A distinct results/snapshot key per invocation for calibration, the suite
+# name itself for campaign work.
+INVOCATION_STAMP="$(date +%Y%m%d-%H%M%S)"
+
+suite_key() {
+  if [[ $(is_calibration_suite "$1") -eq 1 ]]; then
+    echo "$1-$INVOCATION_STAMP"
+  else
+    echo "$1"
+  fi
+}
+
+is_calibration_suite() {
+  case "$1" in
+    calibration-synth|calibration-mrt) echo 1 ;;
+    *) echo 0 ;;
+  esac
+}
+
 suite_config() {
   case "$1" in
     smoke) echo "benchmarks/2026-smoke.yaml" ;;
     core-synth) echo "benchmarks/2026-core-synth.yaml" ;;
     core-mrt) echo "benchmarks/2026-core-mrt.yaml" ;;
     filters) echo "benchmarks/2026-filters.yaml" ;;
+    calibration-synth) echo "benchmarks/2026-calibration-synth.yaml" ;;
+    calibration-mrt) echo "benchmarks/2026-calibration-mrt.yaml" ;;
     *)
       echo "unknown suite: $1" >&2
       exit 1
@@ -121,6 +193,63 @@ fi
 
 if [[ -z "$RUN_ID" ]]; then
   RUN_ID="$(date +%Y%m%d-%H%M%S)"
+fi
+
+if [[ -z "$WORKDIR" ]]; then
+  # No --workdir, and /data is not there to default to. Falling back to
+  # /var/tmp would put a full-table MRT suite on the root filesystem of
+  # whatever host this is -- 29 GB on the campaign host -- and fill it hours
+  # into a batch, taking journald and the finished cells' artifacts with it.
+  # That is the failure this default exists to avoid, so it is not something to
+  # guess at: on a replacement spot instance whose /data volume is not mounted
+  # yet, the quiet fallback is exactly the wrong answer.
+  cat >&2 <<'MSG'
+No --workdir given and /data is not available to default to.
+
+Pass --workdir explicitly, on a filesystem with room for the suite: a
+full-table MRT run puts bgpd.log alone past 1 GB per cell, and a suite runs
+many of them. Do not point it at the root filesystem.
+MSG
+  exit 1
+fi
+
+# The same device test, on whatever we ended up with. A --workdir naming a path
+# on the root filesystem is the identical hazard as a defaulted one, and it is
+# the more likely of the two now that every contract prints an explicit
+# --workdir: on a replacement instance whose /data never mounted,
+# `--workdir /data/bgperf-work` creates a directory on the root and looks
+# exactly like success. Refused rather than warned, because the warning would
+# be one line in a batch that then runs for hours; --allow-root-workdir is
+# there for a host that genuinely has one filesystem.
+workdir_device_root="$WORKDIR"
+while [[ -n "$workdir_device_root" && ! -e "$workdir_device_root" ]]; do
+  workdir_device_root="$(dirname "$workdir_device_root")"
+done
+workdir_device="$(filesystem_device "$workdir_device_root")"
+root_device="$(filesystem_device /)"
+# An unanswerable check is not a passed one, and it is not a failed one either.
+# Both sides come back empty on a host without GNU stat, and comparing two
+# empty strings would refuse every invocation with a diagnosis that is simply
+# wrong; comparing one empty against one real would wave through exactly the
+# case this guard exists for. Say which of the two happened instead.
+if [[ -z "$workdir_device" || -z "$root_device" ]]; then
+  echo "WARNING: cannot determine whether $WORKDIR is on the root filesystem" >&2
+  echo "         (stat -c is unavailable here). Proceeding without that check;" >&2
+  echo "         make sure the work directory has room for the whole suite." >&2
+elif [[ $ALLOW_ROOT_WORKDIR -eq 0 && "$workdir_device" == "$root_device" ]]; then
+  cat >&2 <<MSG
+Work directory $WORKDIR is on the root filesystem.
+
+A suite writes every role's config and logs there -- a full-table MRT run puts
+bgpd.log alone past 1 GB per cell -- and filling the root takes journald and
+the finished cells' artifacts with it, hours into a batch.
+
+If /data was expected to be mounted here, it is not. Pass --allow-root-workdir
+if this host really has one filesystem, or if you are resuming a run whose
+manifest recorded this path -- the recorded workdir wins, and honouring it is
+the one case where landing on the root filesystem is the correct answer.
+MSG
+  exit 1
 fi
 
 if [[ ! "$RUN_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
@@ -148,6 +277,49 @@ if [[ "$SUITE_SELECTOR" == "next" ]]; then
   fi
   echo "Next incomplete suite: ${SUITES[0]}"
 fi
+
+check_recorded_workdir() {
+  local manifest="$METADATA_DIR/manifest.json"
+  [[ -f "$manifest" ]] || return 0
+  WORKDIR_ARG="$WORKDIR" "$PYTHON_BIN" - "$manifest" <<'WORKDIRCHECK' || exit 1
+import json
+import os
+import sys
+
+manifest_path = sys.argv[1]
+invoked = os.path.abspath(os.path.normpath(os.environ["WORKDIR_ARG"]))
+try:
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        recorded_raw = json.load(f).get("workdir")
+except (OSError, ValueError) as exc:
+    # An unreadable manifest cannot be checked against, and bricking the run ID
+    # over it is worse than proceeding -- but proceeding silently would hide
+    # that the recorded-workdir guard did not run at all. capture_metadata
+    # catches the same pair and rewrites; the two must agree or the one that
+    # does not catch aborts the suite after directories have been created.
+    sys.stderr.write(
+        "WARNING: cannot read {0} ({1}); the recorded-workdir check is not "
+        "being applied to this invocation.\n".format(manifest_path, exc))
+    raise SystemExit(0)
+if not recorded_raw:
+    raise SystemExit(0)
+if os.path.abspath(os.path.normpath(recorded_raw)) == invoked:
+    raise SystemExit(0)
+sys.stderr.write(
+    "This run was recorded under workdir {0!r} but was invoked with {1!r}.\n"
+    "The recorded one wins: re-run with --workdir {0}, or start a new run ID "
+    "if you mean to change it.\n"
+    "Refusing rather than writing a manifest that disagrees with where the "
+    "logs go.\n".format(recorded_raw, os.environ["WORKDIR_ARG"]))
+raise SystemExit(1)
+WORKDIRCHECK
+}
+
+# Before anything is created. A refusal that fires after `mkdir -p "$WORKDIR"`
+# has already left an empty directory on whatever filesystem was named --
+# including the root filesystem the default exists to avoid -- so the check
+# that decides whether this invocation may proceed runs first.
+check_recorded_workdir
 
 mkdir -p "$RUN_ROOT" "$METADATA_DIR" "$ORIGINAL_CONFIG_DIR" "$RENDERED_CONFIG_DIR" "$LOG_DIR" "$WORKDIR"
 
@@ -210,7 +382,12 @@ CAPTURED_IMAGES=0
 
 capture_metadata() {
   local suite_list
-  suite_list="$(printf '%s\n' "${SUITES[@]}")"
+  local suite_keys=()
+  local s
+  for s in "${SUITES[@]}"; do
+    suite_keys+=("$(suite_key "$s")")
+  done
+  suite_list="$(printf '%s\n' "${suite_keys[@]}")"
   local config_list
   config_list="$(printf '%s\n' "${rendered_configs[@]}")"
 
@@ -240,6 +417,9 @@ import sys
 from datetime import datetime, timezone
 
 manifest_path, run_id, run_root, workdir, results_root = sys.argv[1:6]
+# The suite *keys*, not the bare names: a calibration suite writes to
+# <suite>-<stamp>, and a manifest naming only "calibration-synth" could not
+# be tied to either of two results directories under one run ID.
 suites = [s for s in os.environ.get("SUITE_TEXT", "").splitlines() if s]
 configs = [c for c in os.environ.get("CONFIG_TEXT", "").splitlines() if c]
 mrt_override = os.environ.get("MRT_OVERRIDE_VALUE") or None
@@ -255,8 +435,35 @@ for config_path in configs:
 now = datetime.now(timezone.utc).isoformat()
 existing = {}
 if os.path.exists(manifest_path):
-    with open(manifest_path, "r", encoding="utf-8") as f:
-        existing = json.load(f)
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            existing = json.load(f)
+    except (OSError, ValueError):
+        # A truncated manifest -- a filled disk or a kill inside the write
+        # below -- must not brick the run ID with a traceback on every later
+        # invocation. check_recorded_workdir already tolerates exactly this;
+        # the two have to agree or the pre-check passes and this dies.
+        sys.stderr.write(
+            "WARNING: {0} is not readable JSON and is being rewritten from "
+            "this invocation. Anything it recorded about earlier suites of "
+            "this run ID is lost.\n".format(manifest_path))
+
+# A recorded workdir is evidence, and this run is about to use whatever it was
+# invoked with. Preserving the record while silently switching the directory is
+# the worse of the two halves: the manifest would then disagree with the
+# `df -h` captured beside it and with where the logs actually are. The campaign
+# contract's rule is that the recorded manifest wins and the discrepancy is a
+# finding to report, so this refuses rather than choosing either half.
+recorded_workdir = existing.get("workdir")
+if recorded_workdir and (os.path.abspath(os.path.normpath(recorded_workdir))
+                         != os.path.abspath(os.path.normpath(workdir))):
+    sys.stderr.write(
+        "This run was recorded under workdir {0!r} but was invoked with "
+        "{1!r}.\nThe recorded one wins: re-run with --workdir {0}, or start a "
+        "new run ID if you mean to change it.\nRefusing rather than writing a "
+        "manifest that disagrees with where the logs go.\n".format(
+            recorded_workdir, workdir))
+    raise SystemExit(1)
 
 manifest = {
     "timestamp_utc": existing.get("timestamp_utc", now),
@@ -264,6 +471,8 @@ manifest = {
     "run_id": run_id,
     "run_root": run_root,
     "results_root": results_root,
+    # Unconditional is correct now: a mismatch has already been refused above,
+    # so this can only ever be the value already recorded.
     "workdir": workdir,
     "cwd": os.getcwd(),
     "hostname": platform.node(),
@@ -275,18 +484,23 @@ manifest = {
     "mrt_files": sorted(set(existing.get("mrt_files", [])) | mrt_files),
     "mrt_override": mrt_override or existing.get("mrt_override"),
 }
-with open(manifest_path, "w", encoding="utf-8") as f:
+tmp_path = manifest_path + ".tmp"
+with open(tmp_path, "w", encoding="utf-8") as f:
     json.dump(manifest, f, indent=2, sort_keys=True)
     f.write("\n")
+    f.flush()
+    os.fsync(f.fileno())
+os.replace(tmp_path, manifest_path)
 PY
 }
 
 rendered_configs=()
 preflight_args=(--workdir "$WORKDIR" --run-root "$RUN_ROOT")
 for suite in "${SUITES[@]}"; do
+  key="$(suite_key "$suite")"
   cfg="$(suite_config "$suite")"
-  rendered="$RENDERED_CONFIG_DIR/$suite.yaml"
-  render_config "$suite" "$cfg" "$rendered"
+  rendered="$RENDERED_CONFIG_DIR/$key.yaml"
+  render_config "$key" "$cfg" "$rendered"
   rendered_configs+=("$rendered")
   preflight_args+=(--config "$rendered")
 done
@@ -296,14 +510,27 @@ capture_metadata
 scripts/preflight_2026_suite.sh "${preflight_args[@]}"
 
 for suite in "${SUITES[@]}"; do
-  cfg="$RENDERED_CONFIG_DIR/$suite.yaml"
-  suite_dir="$RUN_ROOT/$suite"
+  key="$(suite_key "$suite")"
+  cfg="$RENDERED_CONFIG_DIR/$key.yaml"
+  suite_dir="$RUN_ROOT/$key"
   complete_marker="$suite_dir/COMPLETE"
   mkdir -p "$suite_dir"
 
-  if [[ -f "$complete_marker" && $FORCE -eq 0 ]]; then
-    echo "Skipping completed suite: $suite"
-    continue
+  # Calibration is the one thing an operator reruns -- its whole job is to be
+  # repeated when something changes -- so it takes no COMPLETE marker in either
+  # direction. Dropping the marker is not on its own enough: `batch --resume`
+  # records every cell in <test>.progress.json *including FAILED ones*, so a
+  # rerun into the same directory would skip all three failed passes and exit 0
+  # having done nothing. That is why a calibration suite gets its own
+  # timestamped results directory per invocation (see suite_key) -- a fresh
+  # directory has no progress file to resume from and no snapshot to collide
+  # with, which is also what lets an operator edit the config and rerun the
+  # same command.
+  if [[ $(is_calibration_suite "$suite") -eq 0 ]]; then
+    if [[ -f "$complete_marker" && $FORCE -eq 0 ]]; then
+      echo "Skipping completed suite: $suite"
+      continue
+    fi
   fi
 
   echo "Running suite: $suite"
@@ -313,9 +540,11 @@ for suite in "${SUITES[@]}"; do
   fi
   "${BGPERF_CMD[@]}" -d "$WORKDIR" batch -c "$cfg" --results-dir "$suite_dir" \
     "${resume_args[@]}" \
-    > "$LOG_DIR/$suite.stdout.log" 2> "$LOG_DIR/$suite.stderr.log"
+    > "$LOG_DIR/$key.stdout.log" 2> "$LOG_DIR/$key.stderr.log"
 
-  touch "$complete_marker"
+  if [[ $(is_calibration_suite "$suite") -eq 0 ]]; then
+    touch "$complete_marker"
+  fi
 done
 
 echo "All requested suites processed under $RUN_ROOT"

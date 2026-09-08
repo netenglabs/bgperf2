@@ -127,8 +127,21 @@ def test_benchmark_configs_expand():
 def test_the_bench_dir_default_is_not_tmpfs_by_convention():
     '''`-d/--dir` carries every role's config and logs, so a tmpfs default
     spends RAM the run then reports as `min free mem`. It was `/tmp` for years
-    while every operator contract said to pass `/var/tmp/bgperf`; the default
-    agrees with them now. `warn_if_log_dir_is_in_ram()` covers the rest.
+    while every operator contract said to pass `/var/tmp/bgperf`.
+
+This pins the literal path, deliberately. The property it stands for --
+    "not memory-backed" -- cannot be asserted portably: `is_memory_backed()`
+    answers for the machine the suite happens to run on, so a host where
+    `/tmp` is disk-backed would pass a property check while every other host
+    regressed. The constant is the only portable statement of the intent.
+
+    It is no longer agreement with the operator contracts, which moved to
+    `/data/bgperf-work` on 2026-09-08 because `/var/tmp` is on the root
+    filesystem on most hosts and a full-table MRT suite can fill it. The
+    default stays `/var/tmp` because it must work on any machine; the gap
+    between it and the contracts is permanent, and what covers it at run time
+    is `warn_if_log_dir_is_in_ram()` for tmpfs and
+    `warn_if_log_dir_is_short_on_space()` for the space.
     '''
     parser = importlib.import_module('bgperf2').create_args_parser()
     assert parser.get_default('dir') == '/var/tmp'

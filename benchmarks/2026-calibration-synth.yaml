@@ -4,9 +4,16 @@
 # Size was measured, not chosen. On this host (16 vCPU / 61.44 GiB, EPYC 9R14)
 # a 4-peer x 50,000 run converges in 2.06s with `injection_s` 0.0 -- every
 # interval inside one poll, so it calibrates nothing. 10 peers x 100,000 (1M
-# routes) converges in ~7s with a 4.2s post-injection tail against a 1.4s
-# bound, which is the smallest shape where the findings policy has something
-# to rule on.
+# routes) converges with a 4.2s post-injection tail against a 1.4s bound,
+# which is the smallest shape where the findings policy has something to rule
+# on. Six passes of this config measured `elapsed (s)` at a median of 10.0
+# (range 9-10) and `total time` at ~38.8s.
+#
+# Note what that resolution means: `elapsed (s)` is whole seconds off a 1s
+# poll, so 9-vs-10 is one boundary and the 5.97% CV it produces is that
+# boundary and nothing else. Six passes did not separate BIRD 2.19.2 from
+# 3.3.2 here, and the variance rule said so rather than letting a reader find
+# a difference in it.
 #
 # EXPECTED VERDICT: `unresolved`, decided by `injection_boundary_unresolved`.
 # This is the correct answer and not a defect. The synthetic generator is BIRD

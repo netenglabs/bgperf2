@@ -2933,3 +2933,102 @@ No release-gate item is claimed by this change set. The gate's "controlled
 calibration cases produce the expected findings" cannot be true for the MRT
 half while one command produces two verdicts; the synthetic half is unaffected,
 and its expected finding is now written down.
+
+### Progress on 2026-09-08: the MRT failure is systematic, and it is a threshold that is 0.5 points too tight
+
+Both calibration configs have now been run as batches on the campaign host,
+three passes each. Evidence in `results/2026/phase6-calibration/`
+(`synth-calibration/`, `mrt-calibration/`, `mrt-calibration-stdout.log`).
+
+**The synthetic calibration behaves exactly as the config predicts.** Six cells,
+no failures, verdict `unresolved` via `injection_boundary_unresolved` on every
+one, with `post_injection_tail` (4.3s against a 1.4s bound) published as
+evidence beside it. Repetitions, shuffled order and `summary.py` all worked on
+real data, and the variance rule reported what it should:
+
+    bird 2.19.2:  elapsed median 10.0 (9-10), CV 5.97%; total time CV 0.39%
+    bird 3.3.2:   elapsed median 10.0 (9-10), CV 5.97%; total time CV 0.32%
+    not separated on elapsed (s): medians differ by 0.0, inside a combined
+    deviation of 1.1547. Rerun this test with repetitions: 5.
+
+Two things follow that the campaign needs to know. **`elapsed (s)` has one
+second of resolution on a ten-second measurement here**, so its 5.97% CV is a
+9-versus-10 rounding boundary and nothing else -- which is precisely why
+`apply_variance_rule()` floors the comparison at `METRIC_RESOLUTION` rather
+than trusting a CV. And **1M routes does not separate BIRD 2.19 from BIRD 3**
+on this host at all; the campaign's core synthetic matrix starts at 500k
+(10 x 50,000), which will be faster still. Whether the core matrix can
+distinguish anything at its smaller cells is now a live question for the
+calibration's remaining work items, not an assumption.
+
+**The MRT calibration failed 3 of 3, and the earlier pair makes it 4 of 5.**
+`summary.py` reported `0 of 3 passes observed` -- the cell published no
+statistics at all, which is the silent observation loss predicted above,
+observed.
+
+The mechanism is not the collapse-and-recover read from the single converged
+run, and the earlier entry's "coin flip" framing was reasoning from the one
+pass that behaved differently. Per-poll, every failing pass does this:
+
+    t=24s  1,072,794   peak, with only 2 of 10 injectors finished
+    t=30s  1,069,588   3 injectors ... 4
+    t=37s  1,056,779   10 injectors finished
+    t=37..50s  flat at 1,056,779, drop 1.49% below peak, streak 1..10 -> FAILED
+
+**The count overshoots while a minority of injectors have finished, then
+declines to its true settled value as the rest complete.** Every run settles on the
+same `1,056,779`, to the prefix -- that is the table the target really holds,
+and the peak is the transient. (Not the configured 1,050,000, and not meant to
+be: ten injectors replaying overlapping MRT peer tables give a union of their
+own, and the check-point is 99% of the configured number.) And the decline from peak to settled
+is **1.49% to 1.56%**, against a `DROP_FRACTION` of **1%**. Once settled the
+count is flat, so the streak runs to `DROP_SAMPLES` without a single rise and
+the run is failed deterministically. `neighbors_checked` is 10 across the whole
+streak, so the flapping-session branch flagged in the previous entry is *not*
+involved -- worth stating, because that entry sent the next reader there first.
+
+So the run that converged is the exception: it never overshot, so its final
+count *was* its peak. What varies between passes is whether the overshoot
+happens, not whether a recovery plateaus.
+
+**This is the same phenomenon CLAUDE.md already records from the other side.**
+A 10-peer MRT run that "peaked at 973368 and settled at 971957 -- 0.145% down"
+hung indefinitely because the rule ignored sub-threshold settling; that is why
+stability is now tracked on every sample. This RIB settles 1.49% down, which is
+over the line, so the same overshoot fails the run instead. One workload,
+0.145% and 1.49%, on either side of a 1% constant.
+
+**What must not be concluded from this: that `DROP_FRACTION` should be 2%.**
+The number would be fitted to one RIB on one target, and the rule exists to
+catch a target that genuinely lost part of its table -- which at these sizes is
+tens of thousands of prefixes and looks identical from the monitor. What the
+next change set has to decide is whether an overshoot-then-settle is
+distinguishable from a real loss *at all* from the monitor's side, and if it is
+not, whether the target's own count is the right second witness. That is a
+design decision with a measurement behind it, and it is `bgperf2-dcs`.
+
+### Correction on 2026-09-08: `suite_config()` now knows six suites, not four
+
+The Phase 5A entry on peer scaling declined to register
+`benchmarks/2026-peer-scaling.yaml` with the driver, on the grounds that "the
+driver's `suite_config()` knows four suites and `all` runs those four; adding a
+fifth extends what `continue the 2026 benchmark campaign` runs." The premise is
+no longer true: this change set registered `calibration-synth` and
+`calibration-mrt`, so it knows six.
+
+The objection itself was sound and is answered rather than abandoned. What was
+missing then was a way to be *in* `suite_config()` without being in the
+campaign, and the calibration suites needed exactly that: they are excluded
+from `all` and from `next`, they take no `COMPLETE` marker in either direction,
+and they write to a timestamped results directory per invocation. So
+`continue the 2026 benchmark campaign` runs precisely what it ran before.
+
+That pattern is now available to `2026-peer-scaling.yaml`, which is why this
+correction is worth appending rather than leaving the entry to be read as a
+standing reason not to register anything. Registering it is still a separate
+decision -- the workload is a campaign question, not a driver one -- but the
+driver-shaped objection to it has been removed.
+
+Appended rather than edited into the original entry: the reasoning that was
+current when peer scaling landed is part of how this got here, and the record
+of a premise expiring is the point of an append-only log.

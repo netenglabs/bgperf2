@@ -1280,7 +1280,10 @@ both directions.
 56GB to **28.5GB** on a run whose target daemon used **0.56GB**. A published, graphed column was
 measuring tester logging. The default stayed `/tmp` long after that was found, while every operator
 contract and every doc told the operator to pass `-d /var/tmp/bgperf` — so the only runs that hit it
-were the ones nobody had thought about, which is the wrong way round.
+were the ones nobody had thought about, which is the wrong way round. (The contracts have since
+moved on again, to `/data/bgperf-work`; the `-d` default stays `/var/tmp` because it must work on
+any machine, so the gap between the default and the contract is permanent and is what
+`warn_if_log_dir_is_in_ram()` and `warn_if_log_dir_is_short_on_space()` are for.)
 `warn_if_log_dir_is_in_ram()` still runs at the start of every run, because `/var/tmp` is tmpfs on
 some systems and `-d` can still name one; `is_memory_backed()` in `contention.py` is the pure part.
 

@@ -457,10 +457,10 @@ calibration configs exist and both shapes have been run on the campaign host --
 which is now the machine this repository is checked out on, settled the same
 day. The synthetic shape behaves as designed and its expected verdict
 (`unresolved`, withheld by a queue-side generator counter) is recorded in the
-config itself. The MRT shape does not: two runs of one command gave CONVERGED
-and FAILED with an identical final count, because the monitor's count collapses
-44% mid-run and recovers, and the convergence rule fails it only when some
-`DROP_SAMPLES` consecutive polls below the threshold contain no rise at all. That is the shape of the campaign's whole core MRT
+config itself. The MRT shape does not: 4 of 5 runs FAIL, including
+3 of 3 in a batch that then published no statistics for the cell at all. The
+monitor's count overshoots by 1.49% before settling on the table the target
+actually holds, and `DROP_FRACTION` is 1%. That is the shape of the campaign's whole core MRT
 matrix, so the gate's "controlled calibration cases produce the expected
 findings" cannot be claimed for it yet.
 

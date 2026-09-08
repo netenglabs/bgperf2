@@ -12,15 +12,25 @@
 # here: the monitor reached the required count 5.9s to 30.3s *before* the last
 # injector finished, which is an overlap and is reported as one.
 #
-# KNOWN INSTABILITY -- read before trusting a row from this shape (bgperf2-dcs).
-# The monitor's count does not climb monotonically. It reaches ~979k, collapses
-# to ~544k (44% below its peak), and climbs back to ~1,056,779. Two runs of this
-# exact command on 2026-09-08 gave CONVERGED and FAILED ("dropping received
-# count"). ConvergenceTracker resets its regression streak only on a *rising*
-# sample, so the run fails whenever any DROP_SAMPLES consecutive polls below the
-# threshold contain no rise at all -- a longer fall, a plateau, or any mixture --
-# and survives when the recovery interleaves rises often enough. Until that is
-# resolved, a FAILED row from this config is not evidence about the target.
+# KNOWN FAILURE -- this config fails most of the time (bgperf2-dcs), by design
+# of the rule rather than of the target, and that is what it currently
+# calibrates.
+#
+# Measured 2026-09-08: 4 of 5 runs FAILED; a 3-pass batch failed 3 of 3 and
+# summary.py published "0 of 3 passes observed". The monitor's count overshoots
+# to ~1,072,794 while only 2 of 10 injectors have finished, then declines to
+# 1,056,779 as the rest complete. Every run settles on that same 1,056,779, to
+# the prefix -- it is the table the target really holds, and the peak is the
+# transient. (It is not the configured 1,050,000 and is not meant to be: the
+# injectors replay overlapping MRT peer tables, so the union is its own number
+# and the check-point is 99% of the configured one.) The decline is 1.49%, against a DROP_FRACTION of 1%; once settled
+# the count is flat, so the streak reaches DROP_SAMPLES with no rising sample
+# and the run fails. neighbors_checked stays 10 throughout, so the
+# flapping-session reset branch is not involved.
+#
+# A FAILED row from this config is not evidence about the target. Do not raise
+# DROP_FRACTION to make it pass -- see the bead.
+
 tests:
   -
      name: 2026-calibration-mrt

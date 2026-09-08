@@ -33,7 +33,15 @@ benchmark. Report the first unmet gate and tell the user to use:
 - results root: `results/2026`
 - run root: `results/2026/2026-timing-validation`
 - work directory: `/var/tmp/bgperf`
-- host class: local 64 GB server
+- host class: local 64 GB server -- settled on 2026-09-08 as **the machine this
+  repository is checked out on**: 16 vCPU, 61.44 GiB, AMD EPYC 9R14
+  (`m7a.4xlarge`). It is the closest available match to the host that produced
+  `benchmarks/baseline/baseline-benchmark.csv`, matching it on memory (61.44
+  GiB against 60.74) and **not on CPU**. Every block of this campaign runs
+  there; a block run anywhere else is a second experiment. The CPU difference
+  costs nothing *within* this campaign, which re-runs its own comparisons under
+  a new run identity -- but **no row here may be read against the
+  `2026-baseline` CSV**, and nothing downstream refuses that comparison.
 - MRT input: `mrt/rib.20260808.0000`
 - address family: IPv4
 - concurrent suites: never

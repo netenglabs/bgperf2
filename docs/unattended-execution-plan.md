@@ -289,6 +289,41 @@ supervised) is next, and is a stage-1 `/loop` against the measurement plan --
 whose remaining work is the three-to-five variance rule in Phase 5, then all of
 Phase 5A.
 
+#### Progress on 2026-09-08: the campaign host is settled, and one stop rule loses its reason
+
+The note above says the driver stops at Phase 6 because calibration taken on
+the development host "would describe a machine the campaign never runs on."
+That is no longer true, and the sentence is left standing above because this
+record is append-only -- the reading that was current on 2026-09-03 is part of
+how the decision was reached.
+
+What changed, in two steps. The development host was resized on 2026-09-03 from
+8 vCPU / 30.65 GiB to **16 vCPU / 61.44 GiB, AMD EPYC 9R14 (`m7a.4xlarge`)**,
+which removed the memory objection: the heaviest baseline row peaked at 25.3 GB
+target RSS with 14.25 GB free of 60.74, and that now fits. Then on 2026-09-08
+Justin chose this machine as the campaign host, as the closest available match
+to the host that produced `benchmarks/baseline/baseline-benchmark.csv`.
+
+So the development host and the campaign host are one machine, and the
+two-hosts-are-two-experiments objection no longer applies to anything run here.
+The match is on memory and **not on CPU**, which costs exactly one thing:
+campaign rows may never be read against the old baseline CSV. The campaign was
+already designed that way -- it is not a continuation of `2026-baseline` and
+re-runs its comparisons under a new run identity -- so nothing is given up, but
+nothing downstream refuses the comparison either.
+
+**The Phase 6 stop stays, on its remaining reason.** A calibration is a
+multi-hour benchmark that takes the whole host exclusively, and starting one is
+the operator's call. That reason was always underneath the host argument; it
+was simply never the binding one. It is stated in `CLAUDE.md` in the form the
+worker actually reads.
+
+The lesson is the one this repository keeps relearning and is worth naming
+here, because a driver is the thing least able to notice it: **a rule outlives
+the fact it was derived from.** "Stops at Phase 6" was correct on both readings
+and would have gone on being obeyed for a reason that had evaporated, in a
+document written to be followed without supervision.
+
 ### Step 1: driver, supervised
 
 Run stage 1 against the measurement plan for at least two change sets under
@@ -929,6 +964,56 @@ Stage 2, on a branch, with the notification path for gates verified first.
 
 **Exit criterion:** an unattended run completes at least one item, opens a gate
 on a decision rather than guessing, and continues to the next ready item.
+
+### Step 7: survive a reclaimed host
+
+The campaign host is intended to move to EC2 spot instances, which can be
+reclaimed and terminated at any moment. This step makes a reclamation cost at
+most the cell in flight: re-invoking the identical command resumes where it
+stopped. Tracked as `bgperf2-82b`.
+
+**Most of this already exists and must not be rebuilt.** `batch()` checkpoints
+per cell to `<test>.progress.json`, `--resume` skips cells with durable
+results, cell identity is stable across passes and across a changed execution
+order, and `scripts/run_2026_suite.sh` already passes `--resume` and gates
+suites on `COMPLETE` markers. **A cell is already the checkpoint unit**, which
+is the granularity this needs. What is missing is everything between "the
+process exited" and "the machine went away mid-write":
+
+- **`atomic_write()` does not fsync the directory.** It fsyncs the temp file
+  and then `os.replace()`s it, which orders the rename but does not make it
+  durable: a hard termination can leave the directory entry pointing at the
+  old file. This is the one real durability hole and it is one call. Every
+  durable record this repository writes goes through that function -- the
+  progress file, the summary, the event artifacts -- so it is also the only
+  place the fix is needed.
+- **Nothing handles SIGTERM.** A spot reclaim is SIGTERM, then SIGKILL about
+  two minutes later. Nothing stops the controller threads, tears down
+  containers, or declines to begin a cell it cannot finish. A batch that
+  stopped at the nearest cell boundary would lose nothing at all.
+- **The interruption notice is not polled.** The instance metadata endpoint
+  publishes `/latest/meta-data/spot/instance-action` about two minutes ahead.
+  Polling it turns "killed mid-cell" into "stopped between cells", which is
+  the difference between losing a cell and losing nothing. It is also the only
+  part of this that is EC2-specific, so it belongs behind a check that a
+  non-EC2 host passes silently.
+- **A hard kill mid-cell has never been tested.** `Container.run()` removes and
+  recreates by name and `surplus_receiver_names()` covers the receivers a
+  smaller run leaves behind, so the leftovers are *probably* handled -- but
+  "probably" is what this whole document exists to remove, and the test is
+  cheap: SIGKILL a batch mid-cell, re-invoke, and check for duplicate rows and
+  orphaned containers.
+
+**One part of it is not a code change and is Justin's**: results and the repo
+live on the `/data` EBS volume, and a checkpoint on a volume that is deleted
+with the instance is not a checkpoint. Whether that volume survives
+termination, and detaches and reattaches to the replacement, has to be decided
+and recorded before any of the above is worth having.
+
+**Exit criterion:** a batch killed with `SIGKILL` mid-cell, then re-invoked with
+the identical command, resumes at the next incomplete cell with no duplicate
+rows and no orphaned containers; a `SIGTERM` stops it at a cell boundary; and
+the progress file survives a simulated hard power-off.
 
 ## Traps
 

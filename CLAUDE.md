@@ -1540,6 +1540,19 @@ release gate first. Never run cells or blocks concurrently. Monitor or resume an
 one next block, review timing evidence, correctness, provenance, contention, and memory, then stop at the reviewed
 block boundary. The local 64 GB host is a hard ceiling; do not schedule a larger-memory workload.
 
+**The campaign host is settled: the machine this repository is checked out on** -- 16 vCPU, 61.44
+GiB, AMD EPYC 9R14 (`m7a.4xlarge`), resized into that shape on 2026-09-03. Justin chose it on
+2026-09-08 as the closest available match to the host that produced
+`benchmarks/baseline/baseline-benchmark.csv`, which is a match on memory (61.44 GiB against 60.74)
+and **not** on CPU. So Phase 6 calibration and every campaign block run here, which is what both
+plans require -- one host for the whole experiment -- and the cost is paid in exactly one place:
+**campaign rows may never be read against `benchmarks/baseline/baseline-benchmark.csv`**. That is
+already the campaign's own design (it is not a continuation of `2026-baseline`, it re-runs the
+comparisons under a new run identity), so nothing has to be given up for it -- but nothing refuses
+it either, and `create_batch_graphs()` will put two hosts' bars side by side without comment.
+`-d /var/tmp/bgperf` is on the 29 GB root here; prefer `-d /data/bgperf-work` for full-table MRT
+blocks, whose `bgpd.log` alone passes 1 GB.
+
 ### Unattended execution operator contract
 
 When the user says `continue the unattended execution plan`, follow
@@ -1550,13 +1563,15 @@ the other three contracts: it runs no benchmark and changes no measurement seman
 
 Two things the plan leaves to whoever adopts it, settled here:
 
-- **The driver's scope is the measurement plan, and it stops at Phase 6.** Phase 6 is the first
-  phase that needs real calibration runs, and those belong on the host the campaign will run on —
-  a 64 GB machine with a different CPU from the 8-core / 30 GB development host. A worker that
-  finds Phase 6 next stops and says so rather than starting a benchmark to see how it goes: rows
-  from two hosts are two experiments, and neither the CSV nor `create_batch_graphs()` refuses to
-  put them side by side. The 30 GB host cannot run the campaign workloads at all — the heaviest
-  baseline row peaked at 25.3 GB target RSS with 14.25 GB free of 60.74.
+- **The driver's scope is the measurement plan, and it stops at Phase 6 — for a reason that has
+  changed.** It used to stop because calibration taken on the development host would describe a
+  machine the campaign never runs on. That reason is gone: as of 2026-09-08 this *is* the campaign
+  host (see the campaign contract above), and the resize took it past the memory objection too. The
+  stop stays for the reason underneath it: a Phase 6 calibration is a multi-hour benchmark that
+  takes the whole host exclusively, and starting one is the operator's call, not something a worker
+  does to see how it goes. A worker that finds Phase 6 next still stops and says so. Do not restate
+  the old wording — an 8-core / 30 GB host is not what this runs on any more, and a contract that
+  describes a machine that no longer exists is followed anyway.
 - **Unattended work does not reach master.** It commits to `unattended/measurement`, and
   `/code-review` before every commit stays part of the definition of done — it is the only thing
   between a bad edit and the branch, and it does not become optional because nobody is watching.

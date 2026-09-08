@@ -1661,6 +1661,17 @@ release gate first. Never run cells or blocks concurrently. Monitor or resume an
 one next block, review timing evidence, correctness, provenance, contention, and memory, then stop at the reviewed
 block boundary. The local 64 GB host is a hard ceiling; do not schedule a larger-memory workload.
 
+**The entry point is `scripts/run_timing_validation_block.sh`** (`status`, `next`,
+`accept N --note "..."`), which carries that identity as its defaults and holds a lock so two blocks
+cannot run at once. It writes **two** markers: `RAN` when a block's mechanical work finished, and
+`COMPLETE` only when an operator accepts it after review -- `next` advances past `COMPLETE` alone.
+That split is what makes "stop at the reviewed block boundary" durable rather than a habit: a
+session that died between the batch and the review would otherwise leave a block indistinguishable
+from a reviewed one. A block whose configs and procedure have not been written yet exits 2 saying
+so rather than improvising a matrix, and every benchmark block runs
+`scripts/check_timing_evidence.py` over its own results before it claims to have run -- that is the
+plan's Acceptance Rules as code, reading the published documents and re-deriving no measurement.
+
 **The campaign host is settled: the machine this repository is checked out on** -- 16 vCPU, 61.44
 GiB, AMD EPYC 9R14 (`m7a.4xlarge`), resized into that shape on 2026-09-03. Justin chose it on
 2026-09-08 as the closest available match to the host that produced

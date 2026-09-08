@@ -5,6 +5,9 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$REPO_ROOT"
 
+# shellcheck source=lib/campaign_common.sh
+source "$SCRIPT_DIR/lib/campaign_common.sh"
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -47,25 +50,7 @@ if [[ ${#CONFIGS[@]} -eq 0 || -z "$WORKDIR" || -z "$RUN_ROOT" ]]; then
   exit 1
 fi
 
-choose_python() {
-  local candidate
-  for candidate in "venv/bin/python" "python3"; do
-    if [[ "$candidate" == "python3" ]] || [[ -x "$candidate" ]]; then
-      if "$candidate" - <<'PY' >/dev/null 2>&1
-import bgperf2
-PY
-      then
-        echo "$candidate"
-        return 0
-      fi
-    fi
-  done
-  echo "no usable Python with bgperf2 dependencies found; install the repo environment first" >&2
-  echo "expected something like: venv/bin/pip install -r pip-requirements.txt" >&2
-  exit 1
-}
-
-PYTHON_BIN="$(choose_python)"
+PYTHON_BIN="$(campaign_choose_python)"
 BGPERF_CMD=("$PYTHON_BIN" "bgperf2.py")
 
 mkdir -p "$WORKDIR" "$RUN_ROOT"

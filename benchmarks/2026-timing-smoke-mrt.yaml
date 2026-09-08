@@ -1,0 +1,30 @@
+# Block 0 of the 64 GB timing validation campaign: the bgpdump2 MRT timing
+# smoke. One cell, one target, two injectors replaying the pinned RIB.
+#
+# Same job as the synthetic smoke and the same non-goal: it proves the MRT path
+# publishes complete timing evidence under the campaign's run identity, not
+# that any daemon is fast. Blocks 5-7 run ten injectors at 1.05M prefixes
+# against the real matrix; two injectors at 10,000 prefixes exercise every part
+# of the instrument -- the blaster log reader, per-injector events, the fleet
+# aggregation, the wire-side octet count -- in seconds rather than in an hour.
+#
+# Two injectors rather than one: `tester_fleet_metrics()` aggregates across
+# generators (ready when the *last* is ready, completion all-or-nothing), and a
+# single-generator fleet cannot exercise that.
+#
+# Expect `injection_s` 0.0 with no rate: a 10,000-prefix walk is over before
+# the first poll, and each injector's own `reported_injection_s` is the only
+# thing that resolves it. That is the published, expected shape for this size.
+tests:
+  -
+     name: 2026-timing-smoke-mrt
+     neighbors: [2]
+     prefixes: [10_000]
+     filter_test: [None]
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000

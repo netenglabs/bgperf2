@@ -193,6 +193,39 @@ The campaign must distinguish:
 The follow-up runner should expose `next` behavior and durable `COMPLETE`
 markers in this fixed order.
 
+That runner is `scripts/run_timing_validation_block.sh`, and it carries the
+campaign identity above as its defaults:
+
+```bash
+scripts/run_timing_validation_block.sh status     # what each block's state is
+scripts/run_timing_validation_block.sh next       # run the first unaccepted block
+scripts/run_timing_validation_block.sh accept 0 --note "..."
+```
+
+**It writes two markers, not one.** A block writes `RAN` when its mechanical
+work finished; only an operator's `accept` writes `COMPLETE`, and `next`
+advances past `COMPLETE` alone. The exit criteria below are review criteria --
+a session that died between the batch and the review would otherwise leave a
+block that looks exactly like a reviewed one, and the campaign would never come
+back to it.
+
+**A block that has not been built refuses rather than improvising.** Each
+block's configs and procedure are their own change set, written when the
+campaign reaches that block; a runner that guessed at a matrix would produce
+rows indistinguishable from the right ones.
+
+**Benchmark blocks qualify their own rows before claiming to have run.**
+`scripts/check_timing_evidence.py` applies the Acceptance Rules below to every
+run in a block's results directory -- provenance for all three roles and for
+the bgperf2 revision that measured them, converged status, ordered and complete
+event stream, complete tester evidence, no tester error or timeout, no material
+foreign CPU contention, free memory above this campaign's 20% guardrail, and a
+limiting component that was assigned or explicitly left unresolved. It reads
+the published documents and re-derives no measurement: a checker that
+recomputed one would be a second implementation, and the two would disagree on
+exactly the runs anyone cared about. Its verdicts land in
+`<block>/evidence/*.json`.
+
 ### Block 0: preflight and timing smoke
 
 - Run `doctor`, `images`, and `verify`.

@@ -1,0 +1,33 @@
+# Block 0 of the 64 GB timing validation campaign: the BIRD synthetic timing
+# smoke. One cell, one target, one generator.
+#
+# Its job is not to measure anything. It is to prove, on the campaign host and
+# under the campaign's run identity, that a synthetic run publishes a complete
+# and internally consistent set of timing evidence: every generator reports
+# session-ready, first update and completion; the monitor reaches the required
+# count and the run converges; the event stream is ordered; and all three roles
+# plus the bgperf2 revision and schema versions are identified. Blocks 2-4 run
+# the same generator against the real matrix.
+#
+# 4 peers x 10,000 prefixes is deliberately small. `benchmarks/2026-calibration
+# -synth.yaml` is 10 x 100,000 because *calibration* needs intervals a 1s poll
+# can resolve; this needs the run to be complete, and a complete run is easier
+# to read when it takes seconds. Expect `injection_s` at or near 0.0 with
+# `offered_in_interval` 0 -- BIRD 2.19's `Export updates accepted` is
+# queue-side and saturates before the first poll, which is a known and
+# published property of the generator, not a defect in this run.
+#
+# EXPECTED VERDICT: `unresolved`, decided by `injection_boundary_unresolved`,
+# for exactly that reason. A verdict naming a component here is the surprise.
+tests:
+  -
+     name: 2026-timing-smoke-synth
+     neighbors: [4]
+     prefixes: [10_000]
+     filter_test: [None]
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird

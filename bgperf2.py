@@ -2676,12 +2676,27 @@ def bench(args):
     mem_free = 0
 
     recved = 0
+    # The target's own account of the table it holds, refreshed by its
+    # neighbour poll and read on every monitor sample. The monitor is one BGP
+    # session's view of the target and it is the only instrument every
+    # published timing comes from, so a move in its count has nothing to be
+    # checked against; this is the second witness. Empty for a daemon that has
+    # no gauge to read, and that emptiness is what keeps such a run's artifact
+    # exactly the shape it has always had.
+    latest_witness = None
+    latest_witness_s = None
+    target_table_samples = []
     tracker = ConvergenceTracker()
     while True:
         info = q.get()
 
         if not is_remote and info['who'] == target.name:
             if 'neighbors_checked' in info:
+                # Rides on this message so the dispatch below keeps reading
+                # anything with neither neighbour key as a cpu/mem sample.
+                if 'table_witness' in info:
+                    latest_witness = info['table_witness']
+                    latest_witness_s = info.get('monotonic_s')
                 if len(info['neighbors_checked']) > 0 and all(value == True for value in info['neighbors_checked'].values()):
                     neighbors_checked = sum(1 if value == True else 0 for value in info['neighbors_checked'].values())
                     tracker.note_neighbors_checkpoint()
@@ -2736,8 +2751,58 @@ def bench(args):
             if elapsed.seconds > 0:
                 rm_line()
 
+            if latest_witness:
+                # Paired with this monitor sample rather than carried on a
+                # clock of its own: the whole point is the comparison, and the
+                # witness's own timestamp is kept beside it so a reader can see
+                # how stale the pairing is.
+                target_table_samples.append({
+                    'monotonic_s': round(
+                        sample_monotonic_s - bench_clock_started_s, 6),
+                    'witness_monotonic_s': (
+                        None if latest_witness_s is None else
+                        round(latest_witness_s - bench_clock_started_s, 6)),
+                    # How old the carried reading was when this monitor sample
+                    # took it. The target's poll is a separate thread with no
+                    # guard around its exec, so if it stops, every later sample
+                    # repeats the same reading and the series would report a
+                    # perfectly stable table for a target nobody was asking.
+                    # Signed and unclamped, on `post_injection_tail_s`'s rule:
+                    # the two loops are independent, so a target read taken
+                    # just after a monitor sample is ordinary and reads
+                    # negative. Bounded by one poll either way, and staleness
+                    # is the positive side.
+                    'witness_age_s': (
+                        None if latest_witness_s is None else
+                        round(sample_monotonic_s - latest_witness_s, 6)),
+                    'monitor_accepted': int(recved),
+                    'best_paths': latest_witness.get('best_paths'),
+                    'imported_paths': latest_witness.get('imported_paths'),
+                    'exported_to_monitor': latest_witness.get(
+                        'exported_to_monitor'),
+                    'peerings': latest_witness.get('peerings'),
+                    'peerings_expected': latest_witness.get(
+                        'peerings_expected'),
+                    'peerings_measured': latest_witness.get(
+                        'peerings_measured'),
+                })
+
             print('elapsed: {0}sec, cpu: {1:>4.2f}%, mem: {2}, mon recved: {3}, neighbors_received: {4}, neighbors_accepted: {5}, %idle {6}, free mem {7}'.format(elapsed.seconds, 
-                    cpu, mem_human(mem), recved, neighbors_received_full, neighbors_checked, percent_idle, mem_human(mem_free)))
+                    cpu, mem_human(mem), recved, neighbors_received_full, neighbors_checked, percent_idle, mem_human(mem_free))
+                  # Appended only for a target that can be asked *and*
+                  # answered: the witness dict is truthy even when the sums
+                  # were withheld, and every BIRD run withholds them during
+                  # session ramp-up, so printing unconditionally puts
+                  # `target holds: None prefixes` into the stdout log that the
+                  # decision log cites as evidence. Tested against None rather
+                  # than truthiness: a target with every session up and no
+                  # routes yet has legitimately measured 0, and collapsing that
+                  # into the withheld case hides the one this guard is for.
+                  + ('' if (latest_witness or {}).get('best_paths') is None
+                     else
+                     ', target holds: {0} prefixes / {1} paths'.format(
+                         latest_witness['best_paths'],
+                         latest_witness['imported_paths'])))
             bench_stats.append([elapsed.seconds, float(f"{cpu:>4.2f}"), mem, recved, neighbors_checked, percent_idle, mem_free])
             f.write('{0}, {1}, {2}, {3}\n'.format(elapsed.seconds, cpu, mem, recved)) if f else None
             f.flush() if f else None
@@ -2764,7 +2829,10 @@ def bench(args):
                     export_required=export_required,
                     export_receiver_names=[r.name for r in receiver_containers],
                     export_unmeasured_reason=export_unmeasured,
-                    export_thread=export_thread)
+                    export_thread=export_thread,
+                    target_table=target_table_samples,
+                    target_table_unmeasured_reason=target_table_unmeasured(
+                        target, target_table_samples))
 
             if status == ConvergenceTracker.CONVERGED:
                 # Before the post-convergence workloads, which take this queue
@@ -2849,7 +2917,10 @@ def bench(args):
                     export_unmeasured_reason=export_unmeasured,
                     export_thread=export_thread,
                     churn_evidence=churn_evidence,
-                    policy_reload_evidence=reload_evidence)
+                    policy_reload_evidence=reload_evidence,
+                    target_table=target_table_samples,
+                    target_table_unmeasured_reason=target_table_unmeasured(
+                        target, target_table_samples))
 
             if elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
                 # The same stem the final graphs use. Built from args.target
@@ -2968,9 +3039,27 @@ def host_evidence(output_stats):
     }
 
 
+def target_table_unmeasured(target, samples):
+    '''Why a target that could have been asked produced no witness, or None.
+
+    A daemon with no gauge gets no section at all and no reason: that is the
+    document every non-BIRD run has always written. A target that *can* answer
+    and did not -- its poll thread died on the first read, or the run converged
+    before the first target poll landed -- says so by name, on the rule the
+    export section already follows: absent is what an older build wrote, so
+    silence could not otherwise be told from a build that never took the
+    measurement.
+    '''
+    if samples or not getattr(target, 'REPORTS_TABLE_WITNESS', False):
+        return None
+    return ('the target reports a table gauge but no sample reached the '
+            'monitor loop')
+
+
 def write_event_artifact(args, events, prefix, status, testers=None,
                          host=None, churn=None, policy_reload=None,
-                         export=None):
+                         export=None, target_table=None,
+                         target_table_unmeasured_reason=None):
     '''Atomically preserve lifecycle evidence before post-run collection.
 
     Returns the document it wrote, so the caller can print the findings it
@@ -2993,7 +3082,12 @@ def write_event_artifact(args, events, prefix, status, testers=None,
         # could not measure them supplies its own `unmeasured_reason` --
         # `export_lifecycle_summary()` builds that, so the fallback lives with
         # the summary rather than here.
-        export=export)
+        export=export,
+        # No fallback: a target with no gauge to read has nothing to say here,
+        # and a synthesised empty section would claim it was asked. A target
+        # that *can* answer and produced nothing is the caller's reason, below.
+        target_table=target_table,
+        target_table_unmeasured_reason=target_table_unmeasured_reason)
     # Derived from the finished document rather than from the events, so the
     # policy can only ever reason about intervals this artifact published.
     #
@@ -3061,7 +3155,8 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
                  export_read_failures=None, export_required=None,
                  export_receiver_names=(), export_unmeasured_reason=None,
                  export_thread=None,
-                 churn_evidence=None, policy_reload_evidence=None):
+                 churn_evidence=None, policy_reload_evidence=None,
+                 target_table=None, target_table_unmeasured_reason=None):
 
     bench_stop = time.time()
     output_stats['total_time'] = bench_stop - bench_start
@@ -3125,7 +3220,8 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
         status='failed' if fail else 'converged',
         testers=tester_evidence, host=host_evidence(output_stats),
         churn=churn_evidence, policy_reload=policy_reload_evidence,
-        export=export_evidence)
+        export=export_evidence, target_table=target_table,
+        target_table_unmeasured_reason=target_table_unmeasured_reason)
 
     # Scan the tester logs only after the clock has stopped. These used to run
     # in bench() before bench_stop, so walking every tester log line by line --

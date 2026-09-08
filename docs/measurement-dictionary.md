@@ -344,6 +344,63 @@ reuses whatever generator containers it finds, so `-p` need not be what they
 are announcing), and for a block count covering every block (a target left
 holding nothing cannot be told from one that lost its sessions).
 
+## Event artifact: the `target_table` section
+
+Present only on a run whose target has a table gauge this project knows how to
+read. Only BIRD does so far, so every other daemon's artifact is exactly what
+it has always been — the section is absent rather than empty, because an empty
+one would say the target was asked and had nothing to say.
+
+The monitor is one BGP session's view of the target and it is the instrument
+every published timing is read from, so a move in its `accepted` count has
+nothing to be compared against. This is the second witness: the target's own
+`Routes:` line, which is a **gauge** of the table as it stands, unlike the
+`Import updates accepted` counters `get_neighbors_state()` reads, which only
+ever rise and so can witness delivery but never a loss.
+
+`samples` is one entry per monitor poll — the raw observations, kept for the
+reason `summary.py` keeps its own: a number whose inputs are gone is not
+auditable, and where in the run a peak sits is the whole evidence. `series`
+summarises each of the four.
+
+| Field | Unit/type | Definition and interpretation |
+|---|---|---|
+| `samples[].monotonic_s` | seconds | The monitor sample this witness is paired with, from the bench clock origin. |
+| `samples[].witness_monotonic_s` | seconds | When the target was actually read. The two poll loops are independent, so this says how stale the pairing is rather than hiding it. |
+| `samples[].witness_age_s` | seconds, signed | How old the carried target reading was when this monitor sample took it. The target poll is a separate thread with no guard around its exec, so if it stops, every later sample repeats its last reading — without this, that reads as a perfectly stable table. Signed and unclamped for the reason `post_injection_tail_s` is: the two loops are independent, so a target read taken just after a monitor sample is ordinary and reads negative. Staleness is the positive side. |
+| `samples[].monitor_accepted` | prefixes | What the monitor reported on that poll — the same number `elapsed (s)` is decided from. |
+| `samples[].best_paths` | prefixes | Sum of each peering's `preferred`: one best route per prefix, so the count of **distinct prefixes the target holds**. This is the quantity `monitor_accepted` is supposed to track. |
+| `samples[].imported_paths` | paths | Sum of each peering's `imported`: every path held, losers included. It moves with delivery rather than with selection, which is what separates the two. |
+| `samples[].exported_to_monitor` | prefixes | The `exported` count on the monitor's own session — the target's end of the very session the monitor reads. `null` when the monitor's address could not be matched. |
+| `samples[].peerings` / `peerings_expected` / `peerings_measured` | counts | How many BGP peerings the target was showing, how many the scenario configured, and how many reported a `Routes:` line. The sums are withheld (`null`) unless `measured` equals `expected`. It is deliberately not compared against `peerings`: BIRD targets use `neighbor range`, so an unconnected peer is not a protocol at all and a dropped session takes its `dynbgp` protocol away — the denominator would shrink with the numerator and the guard would never fire, letting a flapping tester publish a `best_paths` decline shaped exactly like real route loss. |
+| `series[<name>].observations` | count | How many *monitor* polls carried a reading. A series nobody could read at all is absent, not null-filled. |
+| `series[<name>].resampled_onto_monitor_polls` | boolean | True for the three target-side series. The target and the monitor are polled by independent loops and a sample is one monitor poll carrying the target's last read, so a target read taken between two monitor polls is dropped and one that lands between none is carried twice. Each sample's `witness_monotonic_s` shows which, per row. Their `decline_from_peak` therefore has the monitor's resolution, not the target's. |
+| `series[<name>].peak` / `final` | as above | Highest reading, and the last one. |
+| `series[<name>].final_monotonic_s` | seconds | When that last reading was taken. The target's sums are withheld on any poll where a session was not reporting, so a peer dropping near the end truncates the target series while `monitor_accepted` runs on; comparing two `decline_from_peak` values across different windows is comparing different runs, and this is what makes that visible. |
+| `series[<name>].max_witness_age_s` | seconds or null | The oldest a carried reading got, for the three target-side series. `null` for `monitor_accepted`, which is read on the poll it is recorded with. No threshold is applied — there is no measured number to put on one. |
+| `series[<name>].decline_from_peak` | fraction | `(peak - final) / peak`, rounded to six places. Against the peak rather than the previous sample because that is the comparison `ConvergenceTracker` makes, and the one that decides whether a run is failed. |
+
+`unmeasured_reason` is present when the target *could* have been asked and no
+sample arrived — its poll thread died on the first read, or the run converged
+before the first target poll landed. A daemon with no gauge at all gets no
+section and no reason, which is the document every non-BIRD run has always
+written; without the distinction the two would be byte-identical. Same rule as
+the `export` section's own `unmeasured_reason`.
+
+**No verdict is derived here.** Whether a decline in the monitor's count is
+route loss is exactly the question this measurement exists to answer, and a
+rule shipped beside the first evidence for it would be fitted to the run in
+front of it — which is how all three convergence rules in `convergence.py` were
+broken.
+
+**What it showed first.** On four 10 x 1,050,000 bgpdump2 MRT runs, three of
+which `ConvergenceTracker` failed for a 1.2–1.5% decline, `best_paths` climbed
+to 1,080,985 and stayed flat — the same number to the prefix every time — while
+`exported_to_monitor` fell by the same fraction the monitor saw, agreeing with
+it to three decimal places. The target lost no routes and the monitor was not
+miscounting; what changed was which of the prefixes it held the target chose to
+export, as the last injectors delivered and best paths moved.
+
 ## Event artifact: the `findings` section
 
 The same artifact carries a `findings` object

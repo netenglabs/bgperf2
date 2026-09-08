@@ -452,17 +452,25 @@ correct final route counts and timing events.
 
 ### Phase 6: Calibration and release gate
 
-Status: started on 2026-09-08, and **blocked on `bgperf2-dcs`**. The two
-calibration configs exist and both shapes have been run on the campaign host --
-which is now the machine this repository is checked out on, settled the same
-day. The synthetic shape behaves as designed and its expected verdict
-(`unresolved`, withheld by a queue-side generator counter) is recorded in the
-config itself. The MRT shape does not: 4 of 5 runs FAIL, including
-3 of 3 in a batch that then published no statistics for the cell at all. The
-monitor's count overshoots by 1.49% before settling on the table the target
-actually holds, and `DROP_FRACTION` is 1%. That is the shape of the campaign's whole core MRT
-matrix, so the gate's "controlled calibration cases produce the expected
-findings" cannot be claimed for it yet.
+Status: started on 2026-09-08, and still **blocked on `bgperf2-dcs`** -- but
+no longer on an unanswered question. The two calibration configs exist and both
+shapes have been run on the campaign host, which is now the machine this
+repository is checked out on. The synthetic shape behaves as designed and its
+expected verdict (`unresolved`, withheld by a queue-side generator counter) is
+recorded in the config itself. The MRT shape fails most of the time and still
+does.
+
+What changed on 2026-09-08 is that the target is now asked what it holds. Its
+own `Routes:` gauge reaches the progress line and a `target_table` section of
+the events artifact, and four fresh runs settle the question the bead put
+first: **the target is not losing routes.** Its table climbs to 1,080,985
+distinct prefixes, to the prefix in every run, and stays there. What declines
+is what it *exports* -- and the target's own export count agrees with the
+monitor to three decimal places, so the monitor is not miscounting either. The
+discriminator a rule needs is therefore between two of the target's own
+numbers, and it now exists. Writing that rule is the next change set; the gate's
+"controlled calibration cases produce the expected findings" cannot be claimed
+for the MRT half until it does.
 
 Decisions and verification for this phase are in the
 [decision log](bgperf2-measurement-decision-log.md#phase-6-calibration-and-release-gate).

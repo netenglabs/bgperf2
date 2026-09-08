@@ -721,6 +721,48 @@ differently. There is no common API, so each target parses its own CLI:
   positionally.
 - Junos/EOS/SR Linux: vendor JSON via their own CLIs
 
+**Those counters are not the whole of what a target can be asked, and reading
+only them cost a whole phase.** `Import updates accepted` is a cumulative event
+counter: it only ever rises, so it can witness delivery and cannot witness a
+loss. `birdc show protocols all` also prints `Routes: N imported, N filtered, N
+exported, N preferred` per channel, which is a *gauge* of the table as it
+stands, and `parse_protocols()` had always parsed it while nothing read it. It
+is now `bird.table_witness()`, reaching the progress line and the events
+artifact's `target_table` section as three numbers: `best_paths` (the sum of
+each peering's `preferred` -- one best route per prefix, so the count of
+distinct prefixes held, which is what the monitor's `accepted` tracks),
+`imported_paths` (the sum of `imported` -- every path, losers included, so it
+moves with delivery rather than selection) and `exported_to_monitor` (the
+`exported` count on the monitor's own session: the target's end of the very
+session the monitor reads).
+
+- **The monitor cannot check itself.** It is one BGP session's view of the
+  target and it is the instrument every published timing comes from, so a move
+  in its count had nothing to be compared against -- which is how
+  `bgperf2-dcs` reached a state where an MRT run failed deterministically on a
+  1.5% decline nobody could attribute. With the gauge, four runs showed the
+  target's table climbing to 1,080,985 distinct prefixes and staying flat while
+  the *export* fell 1.35%, with the target's own export count agreeing with the
+  monitor to three decimal places. Neither instrument was wrong and no routes
+  were lost.
+- **One CLI read serves both.** `Target.sample_target_state()` is the single
+  call the poll makes, and `BIRDTarget` overrides it to parse one `show
+  protocols all` twice rather than exec twice: two reads would be two execs a
+  second into the container being measured, and -- worse for a number whose only
+  job is to be compared against another number -- two different instants. The
+  sample is stamped before the read, on the rule both poll loops already follow.
+- **A daemon with no gauge reports `None`, never 0**, and a run with no witness
+  gets no `target_table` section at all, so every other daemon's artifact and
+  progress line are exactly what they were. A sum is withheld when any peering
+  did not report -- `tester_offering()`'s rule, and it matters more here: a
+  partial read looks exactly like a table that shrank, which is the one thing
+  this measurement exists to rule on.
+- **It publishes no verdict.** `measurements.target_table_section()` records the
+  per-poll series and each series' peak and final value, and derives nothing.
+  The rule that reads it is a separate change set, because a rule shipped
+  beside the first evidence for it is fitted to the run in front of it -- which
+  is how all three convergence rules in `convergence.py` were broken.
+
 FRR is a special case worth knowing about: it has no received-prefix counter, so
 `FRRoutingTarget.get_neighbor_received_routes()` overrides the base method and greps `bgpd.log` for
 `End-of-RIB` messages instead.

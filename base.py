@@ -543,8 +543,21 @@ class Container(object):
             while True:
                 if self.stop_monitoring:
                     return
-                neighbors_received_full, neighbors_checked = self.get_neighbor_received_routes()
-                queue.put({'who': self.name, 'neighbors_checked': neighbors_checked})
+                # Stamped before the read, on the rule both poll loops already
+                # follow: a sample dated to when its read finished is dated
+                # late by the cost of a docker exec, and this one is compared
+                # against a monitor sample stamped the same way.
+                sampled_s = time.monotonic()
+                neighbors_received_full, neighbors_checked, witness = \
+                    self.sample_target_state()
+                # The witness rides on the neighbours message rather than
+                # travelling as one of its own: bench()'s dispatch reads any
+                # message from this producer carrying neither neighbour key as
+                # a cpu/mem sample, so a third shape would be read as one.
+                queue.put({'who': self.name,
+                           'neighbors_checked': neighbors_checked,
+                           'table_witness': witness,
+                           'monotonic_s': sampled_s})
                 queue.put({'who': self.name, 'neighbors_received_full': neighbors_received_full})
                 time.sleep(1)
 
@@ -630,12 +643,50 @@ class Container(object):
                 neighbors_checked[n] = False
         return tester_count, neighbors_checked
 
+    # Whether this daemon can be asked for a gauge of the table it holds. Read
+    # so that a target that *can* answer and did not -- a poll thread that died
+    # on its first read, a run that converged before the first target poll --
+    # is reported by name instead of producing an artifact byte-identical to a
+    # daemon that was never able to answer. Same rule as the export section's
+    # `unmeasured_reason`: absent is what an older build wrote, so silence
+    # cannot be told from a build that took no such measurement.
+    REPORTS_TABLE_WITNESS = False
+
+    def get_table_witness(self):
+        '''The target's own account of the table it holds, or None.
+
+        None means the daemon has no gauge this project knows how to read, and
+        that absence is recorded rather than filled in with a zero: a target
+        that could not be asked and a target holding nothing must not produce
+        the same document. Only BIRD answers so far.
+        '''
+        return None
+
+    def sample_target_state(self):
+        '''One sample of everything the target can be asked about itself.
+
+        One call rather than two so a daemon that can answer both from a single
+        CLI read -- BIRD does -- is not made to exec twice a second into the
+        container it is measuring, and so the two halves describe one instant.
+        '''
+        neighbors_received_full, neighbors_checked = \
+            self.get_neighbor_received_routes()
+        return neighbors_received_full, neighbors_checked, self.get_table_witness()
+
     def get_neighbor_received_routes(self):
         ## if we ccall this before the daemon starts we will not get output
-        
+        neighbors_received, neighbors_accepted = self.get_neighbors_state()
+        return self.classify_neighbor_counts(neighbors_received,
+                                             neighbors_accepted)
+
+    def classify_neighbor_counts(self, neighbors_received, neighbors_accepted):
+        '''Turn per-neighbour counts into the two all-sent verdicts.
+
+        Split from the CLI read so a daemon that reads its counters and its
+        table gauge out of one command can reuse it.
+        '''
         tester_count, neighbors_checked = self.get_test_counts()
         neighbors_received_full = neighbors_checked.copy()
-        neighbors_received, neighbors_accepted = self.get_neighbors_state()
         for n in neighbors_accepted.keys():
 
             #this will include the monitor, we don't want to check that
@@ -712,6 +763,18 @@ class Target(Container):
         if not sort:
             return neighbors
         return sorted(neighbors, key=lambda n: n['as'])
+
+    def monitor_neighbor_address(self):
+        '''The address this target peers with the monitor on, or None.
+
+        The monitor's `local-address` is, from the target's side, the monitor's
+        neighbour address. Scenario addresses carry a prefix length and BIRD
+        prints the bare address, so it is stripped here rather than at each
+        reader.
+        '''
+        monitor = (self.scenario_global_conf or {}).get('monitor') or {}
+        address = monitor.get('local-address')
+        return address.split('/')[0] if address else None
 
     def write_config(self):
         raise NotImplementedError()

@@ -3032,3 +3032,170 @@ driver-shaped objection to it has been removed.
 Appended rather than edited into the original entry: the reasoning that was
 current when peer scaling landed is part of how this got here, and the record
 of a premise expiring is the point of an append-only log.
+
+### Progress on 2026-09-08: the target is asked what it holds, and it is not losing routes
+
+`bgperf2-dcs` asked one question before any rule could be changed: **is
+overshoot-then-settle distinguishable from real route loss from the monitor's
+side at all, and if not, is the target's own count the second witness?** This
+change set answers it by taking the measurement. No convergence rule moved.
+
+**The witness is a gauge, and that is the whole point.** `get_neighbors_state()`
+already reads every neighbour's counters out of `birdc show protocols all` once
+a second -- but it reads `Import updates accepted`, which is a cumulative event
+counter and only ever rises, so it cannot witness a loss at all. The same
+command's `Routes: N imported, N filtered, N exported, N preferred` line is a
+gauge of the table as it stands, `parse_protocols()` has always parsed it, and
+nothing read it. Three numbers now reach the queue, the progress line and a
+`target_table` section of the events artifact:
+
+- `best_paths` -- the sum of each peering's `preferred`, which is one best
+  route per prefix and therefore the count of *distinct prefixes the target
+  holds*: the quantity the monitor's `accepted` is supposed to track.
+- `imported_paths` -- the sum of `imported`: every path held, losers included,
+  so it moves with delivery rather than with selection.
+- `exported_to_monitor` -- the `exported` count on the monitor's own session,
+  which is the target's end of the very session the monitor reads.
+
+It costs no extra `docker exec`: `BIRDTarget.sample_target_state()` takes one
+`show protocols all` and both parsers run over that one text, so the counters
+and the gauge describe one instant -- which matters for a number whose only job
+is to be compared against another number.
+
+**What four fresh 10 x 1,050,000 MRT runs say** (`mrt-witness-1` through `-4`,
+one FAILED-shaped, three of them actually FAILED):
+
+    run 1 CONVERGED  monitor 1056779 peak = final          best_paths 1080985 flat
+    run 2 FAILED     monitor peak 1069377 -> 1056779 (1.18%)  best_paths decline 0.02%
+    run 3 FAILED     monitor peak 1072575 -> 1056779 (1.47%)  best_paths decline 0.00%
+    run 4 FAILED     monitor peak 1071193 -> 1056779 (1.35%)  best_paths decline 0.00%
+
+**The target's table does not shrink in any way that matters, and the size of
+"any way" is measured rather than asserted.** `best_paths` reaches
+**1,080,985** in every run -- the same number to the prefix -- and holds it;
+`imported_paths` reaches 10,497,949 and never falls at all. The one exception
+is run 2, whose `best_paths` peaked at 1,081,194 and settled at 1,080,985:
+**209 prefixes, 0.019%**, against monitor declines of 1.18% to 1.47% in the
+same runs. Nearly two orders of magnitude apart, so it is a real wobble in the
+target's table and not a rounding artifact. Stated exactly because the next
+change set's rule is written against this series, and an invariant recorded as
+"monotonic" gets a threshold of zero and then fails on run 2's shape. There is
+no route loss of the kind `DROP_FRACTION` exists to catch. That settles the
+question the bead put first.
+
+**But the decline is real, and the monitor is not miscounting it.** The
+target's *own* `exported_to_monitor` falls by 1.36%, 1.43% and 1.35% in the
+three failing runs, tracking the monitor's decline to three decimal places
+(run 4: 0.013456 against the target's 0.013459 -- one poll of sampling skew).
+Both ends of that session agree. So the earlier entry's reading -- "the
+monitor's count overshoots ... the peak is the transient" -- was right about the
+shape and wrong about the cause: the peak is not an artifact of the instrument,
+it is a table the target really had exported and then really withdrew.
+
+**So the discriminator exists, and it is between two of the target's own
+numbers, not between the target and the monitor.** The target holds 1,080,985
+prefixes and ends up exporting 1,056,779 of them; as the last injectors deliver
+and best paths change, ~14,400 prefixes stop being exported while the table
+itself moves by at most 209. A genuine loss would take `best_paths` down with
+it, and by a comparable amount -- which is the shape of the rule, not
+"`best_paths` is exactly flat". That
+is a rule the next change set can write against a claim rather than against the
+case in front of it -- which is what `DROP_FRACTION` could not be given, and why
+this change set deliberately publishes no verdict: `target_table_section()`
+records the series and the peak/final of each, and derives nothing.
+
+*Why* those 14,400 prefixes become unexportable as best paths change is not
+answered here and is not guessed at. It is a property of BIRD's export decision
+over ten overlapping MRT peer tables, and naming a mechanism without measuring
+it is how this file gets entries that have to be corrected later.
+
+**A second finding, unlooked for: the instrument costs more CPU than the daemon
+under test.** Sampled with `docker stats` across a full run, `bgperf_monitor`
+(gobgp 4.9.0) peaked at **380.6%** while `bgperf_bird_target` (BIRD 3.3.2)
+peaked at **171.7%**, and the monitor went on spiking to ~300% at roughly 1 Hz
+*after* the target had fallen to 0.3% and no BGP traffic was flowing. That
+timing points at the poll rather than at BGP work, and timing the poll directly
+on a loaded run confirms it scales with the table: `gobgp neighbor -j` took
+**0.105s** early in the run and **0.44s** once the table was full, twenty calls
+in a row. bgperf2 makes that call once a second for the whole run. What GoBGP
+does internally to answer it has not been read, so the mechanism is a
+hypothesis; the cost is measured. Filed as its own bead (`bgperf2-4pm`) rather than
+folded in here -- it does not change the finding above, but an instrument that
+burns two cores answering a question about a benchmark is a confounder on any
+host smaller than this one, and `min idle%` is host-wide so it cannot separate
+it while `max foreign cpu %` cannot see it at all (`gobgp` is in
+`contention.BGPERF_PROCESSES`).
+
+**Scoped as a watch item rather than work, by the operator, the same day.**
+`%idle` stayed above 37% through the whole run on this 16-core host, so nothing
+was contended and no published row is in question; replacing the monitor would
+cost comparability with every row already taken, and results sooner are worth
+more than a cheaper instrument. The bead records what would change that --
+`min idle%` falling, the gap widening with table size or receiver count, a poll
+that stops keeping up (which the artifacts announce themselves, via
+`poll_resolution_s`), or the monitor's count and the target's own
+`exported_to_monitor` ceasing to agree, which this change set is what makes
+observable.
+
+**Evidence on disk**, under `results/2026/phase6-calibration/`:
+`mrt-witness-1/` .. `mrt-witness-4/`, each with `bench-stdout.log` (the
+poll-by-poll monitor count beside the target's own two numbers) and the
+`.events.json` carrying the `target_table` section;
+`mrt-witness-4/container-cpu.log` is the `docker stats` series behind the CPU
+numbers. `results/` is gitignored, so these live on the host's `/data` volume.
+
+**Seven defects review found in this change set, none in the measurement and
+all in how it is guarded or summarised** -- worth recording because most of
+them would have poisoned the very series the next rule reads, and every one of
+them has the same shape: a series that was truncated, frozen, partial or
+absent, published as a series that was steady. The completeness guard compared
+the peerings that answered against the peerings BIRD was *showing* -- but
+`BIRDTarget.DYNAMIC_NEIGHBORS` is True, so an unconnected peer is not a
+protocol at all and a dropped session takes its `dynbgp` protocol away with it:
+the denominator shrank with the numerator and the guard was vacuous. Visible in
+the evidence above, which has samples reading `peerings 1, measured 1` while
+eleven sessions were configured -- sums published over a tenth of the fleet. It
+now counts `scenario_neighbors()`, and an unstated expectation withholds the
+sums rather than falling back to the weaker check. Second, the progress line
+printed `target holds: None prefixes` on every withheld poll, into the stdout
+log this entry cites as evidence. Third, a sample is one *monitor* poll
+carrying the target's last read, so the target's series is resampled onto the
+monitor's cadence; that is now named in `measurements.py` and published per
+series as `resampled_onto_monitor_polls`, because the headline claim here is an
+agreement to three decimal places and the quantisation behind it must not be
+implicit.
+
+A second round found four more, and they are the interesting ones because
+none is a coding error -- each is a true statement the document would have made
+about a measurement it did not take. `final` was the last *readable* reading
+with nothing saying when: the target's sums are withheld whenever a session is
+not reporting, so a peer dropping near the end truncates the target series
+while `monitor_accepted` runs to the end, and the headline comparison above
+would then be between two different windows. Each series now publishes
+`final_monotonic_s`. The carried witness was never invalidated, and
+`Container.neighbor_stats()` has no guard around its exec, so one failed read
+ends that thread and every later monitor sample repeats its last reading --
+`decline_from_peak` 0.0 for a target nobody was asking. Every sample now
+carries `witness_age_s` and each target-side series its `max_witness_age_s`,
+which makes that honest rather than correct; the thread itself is
+`bgperf2-sl1`, kept separate because guarding it changes the convergence path.
+A BIRD run whose poll produced no sample at all was byte-identical to a
+daemon with no gauge, which is the absent-versus-unmeasured conflation the
+export section already solved -- there is now a `target_table` capability flag
+and an `unmeasured_reason`. And the progress line tested `best_paths` for
+truthiness, so a target with every session up and no routes yet printed nothing,
+which is what the withheld case looks like.
+
+No threshold was put on any of the new fields. There is no measured number to
+put on one, and this section derives no verdicts.
+
+The peak and final values quoted above are unaffected: they come from
+full-fleet samples, where the strengthened guard agrees with the old one, and
+from runs whose target poll ran to the end. The early ramp-up samples in those
+four artifacts were published under the vacuous guard and should not be read as
+fleet totals.
+
+No release-gate item is claimed. The MRT half of "controlled calibration cases
+produce the expected findings" still cannot be claimed, because the runs still
+fail -- but they now fail with the evidence that says why, and the bead is no
+longer blocked on a question nobody had measured.

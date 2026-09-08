@@ -295,6 +295,112 @@ def churn_failures(text, sessions, action, protocol=CHURN_PROTOCOL):
     return failures
 
 
+def neighbors_state(text):
+    '''Prefixes each neighbor has sent, from the target\'s own `Import
+    updates` counters.
+
+    Pure over the CLI text so one `birdc show protocols all` read can serve
+    both this and table_witness(), and so both can be tested without Docker.
+
+    This used to run a TextFSM template that took the fifth field of the row.
+    That is `accepted` on BIRD 2 and `RX limit` on BIRD 3, so every BIRD 3
+    target reported accepted=0 for every neighbor: `neighbors_checked` never
+    went all-True, and that route to the convergence checkpoint was dead for
+    half the BIRD matrix. Runs still finished, via `neighbors_received_full`,
+    which is why it stayed hidden -- only the progress line looked wrong.
+    parse_protocols() reads the row against its own header instead.
+    '''
+    neighbors_received = {}
+    neighbors_accepted = {}
+    for protocol in parse_protocols(text).values():
+        # A `neighbor range` listener has no address and is not a peering.
+        if protocol['proto'] != 'BGP' or not protocol['neighbor_address']:
+            continue
+        imported = protocol['channels'].get(
+            'ipv4', {}).get('stats', {}).get('Import updates', {})
+        address = protocol['neighbor_address']
+        # A counter BIRD prints as '---' does not apply to this row; the
+        # caller compares these against configured counts, so absent reads
+        # as none received rather than as a missing neighbor.
+        neighbors_received[address] = imported.get('received') or 0
+        neighbors_accepted[address] = imported.get('accepted') or 0
+
+    return neighbors_received, neighbors_accepted
+
+
+def table_witness(text, monitor_address=None, expected_peerings=None,
+                  channel='ipv4'):
+    '''What the target itself says about the table it is holding right now.
+
+    The monitor is one BGP session\'s view of the target and it is the only
+    instrument every published timing is read from, so when its count moves in
+    a direction the convergence rules treat as route loss there is nothing to
+    check it against. This is that second witness.
+
+    It is deliberately a *gauge* and not a counter. `Import updates accepted`
+    -- what neighbors_state() reads -- only ever rises, so it cannot witness a
+    loss at all, which is why the counters already on the queue were not
+    enough. `Routes:` is a gauge of the table as it stands.
+
+    `best_paths` sums each peering\'s `preferred`: one best route per prefix,
+    so it is the count of distinct prefixes the target holds, which is the
+    quantity the monitor\'s `accepted` is supposed to track.
+    `imported_paths` sums `imported`: every path held, losers included, so it
+    moves with delivery rather than with selection -- the two separate an
+    overshoot in selection from routes actually going away.
+    `exported_to_monitor` is what the target believes it has sent the monitor,
+    read off the monitor\'s own session, and is the closest thing there is to
+    the monitor\'s own number measured at the other end of the same session.
+
+    A sum is published only when every peering the *run configured* contributed
+    to it, on tester_offering()\'s rule: a channel that is DOWN prints no
+    `Routes:` line at all, so a session still coming up would drop out of a
+    total that still claims to cover it -- a partial read that looks exactly
+    like a table shrinking, which is the one thing this witness exists to rule
+    on.
+
+    `expected_peerings` is that configured count, and comparing against the
+    protocols BIRD is *showing* instead would be vacuous here.
+    `BIRDTarget.DYNAMIC_NEIGHBORS` is True, so a peer that has not connected is
+    not a protocol at all and one whose session drops takes its `dynbgp`
+    protocol away with it: the denominator would shrink with the numerator and
+    the guard would always be satisfied, so a flapping tester would publish a
+    `best_paths` decline of exactly the shape real route loss has. Omitting it
+    withholds the sums rather than falling back to that -- a guard that quietly
+    weakens is worse than one that refuses. `peerings`, `peerings_expected` and
+    `peerings_measured` are all published, so a reader can see what was
+    compared.
+    '''
+    protocols = parse_protocols(text)
+    # A `neighbor range` template is a listener rather than a peering; it holds
+    # no routes and stays Passive for the whole run.
+    bgp = {name: p for name, p in protocols.items()
+           if p['proto'] == 'BGP' and p['neighbor_range'] is None}
+
+    best_total = imported_total = 0
+    measured = 0
+    exported_to_monitor = None
+    for p in bgp.values():
+        c = p['channels'].get(channel)
+        routes = (c or {}).get('routes') or {}
+        if 'preferred' in routes and 'imported' in routes:
+            measured += 1
+            best_total += routes['preferred']
+            imported_total += routes['imported']
+        if monitor_address and p['neighbor_address'] == monitor_address:
+            exported_to_monitor = routes.get('exported')
+
+    complete = expected_peerings is not None and measured == expected_peerings
+    return {
+        'peerings': len(bgp),
+        'peerings_expected': expected_peerings,
+        'peerings_measured': measured,
+        'best_paths': best_total if complete else None,
+        'imported_paths': imported_total if complete else None,
+        'exported_to_monitor': exported_to_monitor,
+    }
+
+
 def tester_offering(text, channel='ipv4'):
     '''What a BIRD load generator has offered its peer, from its own CLI.
 
@@ -661,34 +767,44 @@ return true;
             guest_dir=self.guest_dir,
             config_file_name=self.CONFIG_FILE_NAME)
 
-    def get_neighbors_state(self):
-        '''Prefixes each neighbor has sent, from the target's own `Import
-        updates` counters.
+    # On the target rather than on `BIRD`, which `BIRDTester` also inherits: a
+    # generator is never asked this, and a flag that claimed otherwise would be
+    # a capability nothing reads and nothing tests.
+    REPORTS_TABLE_WITNESS = True
 
-        This used to run a TextFSM template that took the fifth field of the
-        row. That is `accepted` on BIRD 2 and `RX limit` on BIRD 3, so every
-        BIRD 3 target reported accepted=0 for every neighbor: `neighbors_checked`
-        never went all-True, and that route to the convergence checkpoint was
-        dead for half the BIRD matrix. Runs still finished, via
-        `neighbors_received_full`, which is why it stayed hidden -- only the
-        progress line looked wrong. `parse_protocols()` reads the row against
-        its own header instead.
+    def show_protocols(self):
+        '''One `birdc show protocols all` read.
+
+        Kept apart from the parsers so a single CLI read can serve both the
+        per-neighbour counters and the table witness. Two reads would be two
+        execs a second into the very container being measured, and -- worse for
+        a witness whose only job is to be compared against another number --
+        they would describe two different instants.
         '''
-        output = self.local("birdc 'show protocols all'").decode('utf-8')
+        return self.local("birdc 'show protocols all'").decode('utf-8')
 
-        neighbors_received = {}
-        neighbors_accepted = {}
-        for protocol in parse_protocols(output).values():
-            # A `neighbor range` listener has no address and is not a peering.
-            if protocol['proto'] != 'BGP' or not protocol['neighbor_address']:
-                continue
-            imported = protocol['channels'].get(
-                'ipv4', {}).get('stats', {}).get('Import updates', {})
-            address = protocol['neighbor_address']
-            # A counter BIRD prints as '---' does not apply to this row; the
-            # caller compares these against configured counts, so absent reads
-            # as none received rather than as a missing neighbor.
-            neighbors_received[address] = imported.get('received') or 0
-            neighbors_accepted[address] = imported.get('accepted') or 0
+    def get_neighbors_state(self):
+        '''Prefixes each neighbor has sent, from the target's own counters.
 
-        return neighbors_received, neighbors_accepted
+        The parsing is `neighbors_state()`, which is pure over the CLI text;
+        this is the one call that talks to the container.
+        '''
+        return neighbors_state(self.show_protocols())
+
+    def sample_target_state(self):
+        '''The neighbour verdicts and the table gauge, off one CLI read.
+
+        Both halves describe the same instant, which is the point: the witness
+        exists to be read beside the counters and beside one monitor poll.
+        '''
+        output = self.show_protocols()
+        received, accepted = neighbors_state(output)
+        full, checked = self.classify_neighbor_counts(received, accepted)
+        return full, checked, table_witness(
+            output, self.monitor_neighbor_address(),
+            # Every session the scenario configured -- generators, monitor and
+            # receivers alike -- because BIRD spawns one protocol per connected
+            # peer here, so the count of protocols it shows is not the count of
+            # sessions the run is supposed to have. `sort=False` because only
+            # the length is wanted and the ordering costs a sort per poll.
+            expected_peerings=len(self.scenario_neighbors(sort=False)))

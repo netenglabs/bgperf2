@@ -17,16 +17,25 @@
 # calibrates.
 #
 # Measured 2026-09-08: 4 of 5 runs FAILED; a 3-pass batch failed 3 of 3 and
-# summary.py published "0 of 3 passes observed". The monitor's count overshoots
-# to ~1,072,794 while only 2 of 10 injectors have finished, then declines to
-# 1,056,779 as the rest complete. Every run settles on that same 1,056,779, to
-# the prefix -- it is the table the target really holds, and the peak is the
-# transient. (It is not the configured 1,050,000 and is not meant to be: the
-# injectors replay overlapping MRT peer tables, so the union is its own number
-# and the check-point is 99% of the configured one.) The decline is 1.49%, against a DROP_FRACTION of 1%; once settled
-# the count is flat, so the streak reaches DROP_SAMPLES with no rising sample
-# and the run fails. neighbors_checked stays 10 throughout, so the
-# flapping-session reset branch is not involved.
+# summary.py published "0 of 3 passes observed". The monitor's count peaks
+# around 1,071,000 while a minority of injectors have finished, then declines
+# to 1,056,779 as the rest complete. Every run settles on that same 1,056,779,
+# to the prefix. (It is not the configured 1,050,000 and is not meant to be:
+# the injectors replay overlapping MRT peer tables, so the union is its own
+# number and the check-point is 99% of the configured one.) The decline is
+# 1.35% to 1.49%, against a DROP_FRACTION of 1%; once settled the count is
+# flat, so the streak reaches DROP_SAMPLES with no rising sample and the run
+# fails. neighbors_checked stays 10 throughout, so the flapping-session reset
+# branch is not involved.
+#
+# CORRECTED 2026-09-08 by the target's own table gauge (four runs,
+# results/2026/phase6-calibration/mrt-witness-*). This header used to say the
+# settled value "is the table the target really holds, and the peak is the
+# transient". Both halves were wrong. The target holds 1,080,985 distinct
+# prefixes -- more than either number -- and holds them flat from the moment it
+# has them. What declines is what it *exports*: its own exported-to-monitor
+# count falls by the same 1.35% the monitor sees, to three decimal places. The
+# peak is real and so is the decline; neither is route loss.
 #
 # A FAILED row from this config is not evidence about the target. Do not raise
 # DROP_FRACTION to make it pass -- see the bead.

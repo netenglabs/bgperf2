@@ -1831,8 +1831,95 @@ def policy_reload_metrics(events: Iterable[LifecycleEvent]):
     }
 
 
+# The series a target table witness contributes, in the order a reader wants
+# them: the instrument's own number first, then the two the target answers with.
+TARGET_TABLE_SERIES = ('monitor_accepted', 'best_paths', 'imported_paths',
+                       'exported_to_monitor')
+
+# The target and the monitor are polled by independent loops, and a sample here
+# is one *monitor* poll carrying whatever the target poll last produced. So the
+# target's series is resampled onto the monitor's cadence: a target read taken
+# between two monitor polls is dropped, and one that lands between none is
+# carried twice. Each sample's `witness_monotonic_s` says which, per row. It is
+# stated here because `decline_from_peak` for the target's own series is
+# computed over the resampled series, and a rule written against it must know
+# that its resolution is the monitor's, not the target's.
+TARGET_TABLE_RESAMPLED = ('best_paths', 'imported_paths', 'exported_to_monitor')
+
+
+def target_table_section(samples, unmeasured_reason=None):
+    """The per-poll witness series, and the peak and final value of each.
+
+    Publishes no verdict about whether a decline in the monitor's count is
+    route loss. That rule is the thing this measurement exists to decide, and a
+    rule shipped alongside the first evidence for it would be fitted to the run
+    in front of it -- which is how every convergence rule in this project has
+    been broken so far, each time by being written against the case rather than
+    against the claim.
+
+    The raw samples are kept beside the summary for the reason `summary.py`
+    keeps its observations: a number whose inputs are gone is not auditable,
+    and the shape here -- where in the run a peak sits, and what the other
+    series were doing at that moment -- is the whole evidence.
+
+    A series with no reading at all is absent rather than null-filled, and a
+    single missing reading leaves that sample's value None: a poll that could
+    not be parsed and a target holding nothing must not look the same.
+
+    Two things every series states about *when* it was read, because without
+    them a truncated or frozen series is indistinguishable from a steady table
+    -- which is the exact claim a rule built on this would be making.
+    `final_monotonic_s` is when the last reading was taken: the target's sums
+    are withheld on any poll where a session was not reporting, so a peer that
+    drops near the end truncates the target series while `monitor_accepted`
+    runs on, and a `decline_from_peak` compared across those two windows is
+    comparing different runs. `max_witness_age_s` is the oldest a carried
+    witness got: the target poll thread is not the monitor's, so if it stops,
+    every later sample repeats its last reading and the series reports
+    `decline_from_peak` 0.0 for a target nobody asked. No threshold is applied
+    to either -- there is no measured number to put on one, and a verdict is
+    not this function's job.
+    """
+    samples = [dict(sample) for sample in samples]
+    series = {}
+    for name in TARGET_TABLE_SERIES:
+        observed = [sample for sample in samples
+                    if sample.get(name) is not None]
+        if not observed:
+            continue
+        values = [sample[name] for sample in observed]
+        peak = max(values)
+        final = values[-1]
+        ages = [sample['witness_age_s'] for sample in observed
+                if sample.get('witness_age_s') is not None]
+        series[name] = {
+            # Monitor polls that carried a reading -- not target reads. The
+            # target's own series is resampled onto the monitor's cadence; see
+            # TARGET_TABLE_RESAMPLED.
+            'observations': len(values),
+            'resampled_onto_monitor_polls': name in TARGET_TABLE_RESAMPLED,
+            'peak': peak,
+            'final': final,
+            'final_monotonic_s': observed[-1].get('monotonic_s'),
+            # Only meaningful for the carried target-side series; the monitor's
+            # own count is read on the very poll it is recorded with.
+            'max_witness_age_s': (max(ages) if ages
+                                  and name in TARGET_TABLE_RESAMPLED else None),
+            # Against the peak, not the previous sample, because that is the
+            # comparison ConvergenceTracker makes and the one the failing runs
+            # are decided by.
+            'decline_from_peak': (round((peak - final) / peak, 6)
+                                  if peak else None),
+        }
+    section = {'samples': samples, 'series': series}
+    if unmeasured_reason:
+        section['unmeasured_reason'] = unmeasured_reason
+    return section
+
+
 def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
-                   churn=None, policy_reload=None, export=None):
+                   churn=None, policy_reload=None, export=None,
+                   target_table=None, target_table_unmeasured_reason=None):
     '''Build the stable JSON-compatible event artifact document.
 
     `testers` maps a generator's producer name to whatever evidence it holds
@@ -1891,6 +1978,14 @@ def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
                             for event in events):
         artifact['policy_reload'] = _policy_reload_section(
             events, policy_reload)
+    # Present when the target was read, and also when it *could* have been read
+    # and was not -- the latter carrying an `unmeasured_reason`, so a BIRD run
+    # whose poll never produced a sample cannot be mistaken for a daemon with
+    # no gauge at all. A daemon that cannot answer gets no section, so every
+    # such run keeps exactly the document it has always had.
+    if target_table or target_table_unmeasured_reason:
+        artifact['target_table'] = target_table_section(
+            target_table or [], target_table_unmeasured_reason)
     return artifact
 
 

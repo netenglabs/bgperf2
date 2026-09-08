@@ -14,6 +14,8 @@ import pytest
 
 import base
 import bgperf2
+import findings
+import measurements
 
 
 class FakeContainer:
@@ -334,3 +336,140 @@ class TestWriteProvenance:
         assert doc['run']['peers'] == 10
         assert doc['run']['prefixes_per_peer'] == 20000
         assert doc['run']['tester_type'] == 'bird'
+
+
+class FakeGit:
+    '''Stands in for the git commands `tool_revision()` runs.
+
+    Injected rather than run for real, because a test that reads the tree it
+    happens to run in passes or fails on whether someone has edited a file.
+    '''
+    class Result:
+        def __init__(self, returncode=0, stdout='', stderr=''):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def __init__(self, head, status=None):
+        self.head = head
+        self.status = status if status is not None else self.Result()
+
+    def __call__(self, *argv):
+        return self.head if argv[0] == 'rev-parse' else self.status
+
+
+class TestToolRevision:
+    '''Which bgperf2 produced a result, recorded the way a daemon version is.
+
+    The daemon versions say what was benchmarked and nothing about the code
+    that timed it, and the timing code is what the measurement plan changed
+    under those daemons. The rule is the one `version_string()` already
+    follows: report what was read, or say why it could not be -- never a value
+    that looks right and is not.
+    '''
+    def test_a_clean_tree_is_the_bare_revision(self):
+        git = FakeGit(FakeGit.Result(stdout='abc123\n'))
+        assert bgperf2.tool_revision(git) == 'abc123'
+
+    def test_an_edited_tree_says_so(self):
+        # The nearest commit does not contain the code that ran, and a row
+        # traced to it is worse than one that says it cannot be traced.
+        git = FakeGit(FakeGit.Result(stdout='abc123\n'),
+                      FakeGit.Result(stdout=' M bgperf2.py\n'))
+        assert bgperf2.tool_revision(git) == 'abc123-dirty'
+
+    def test_no_git_is_reported_not_guessed(self):
+        git = FakeGit(FakeGit.Result(returncode=128,
+                                     stderr='not a git repository'))
+        revision = bgperf2.tool_revision(git)
+        assert revision.startswith('UNKNOWN')
+        assert 'not a git repository' in revision
+
+    def test_an_empty_answer_is_not_a_revision(self):
+        git = FakeGit(FakeGit.Result(stdout='\n'))
+        assert bgperf2.tool_revision(git).startswith('UNKNOWN')
+
+    def test_an_unreadable_worktree_never_reports_a_clean_tree(self):
+        # The commit is known and its cleanliness is not. Publishing the bare
+        # sha would assert clean on the strength of a check that failed.
+        git = FakeGit(FakeGit.Result(stdout='abc123\n'),
+                      FakeGit.Result(returncode=1, stderr='index locked'))
+        revision = bgperf2.tool_revision(git)
+        assert revision != 'abc123'
+        assert 'abc123' in revision and 'index locked' in revision
+
+    def test_a_raising_git_costs_the_revision_not_the_run(self):
+        def boom(*argv):
+            raise OSError('no git binary')
+
+        revision = bgperf2.tool_revision(boom)
+        assert revision.startswith('UNKNOWN')
+        assert 'no git binary' in revision
+
+    def test_the_block_names_the_schemas_the_run_wrote(self):
+        block = bgperf2.tool_provenance()
+        assert block['event_schema'] == measurements.EVENT_ARTIFACT_SCHEMA
+        assert block['findings_schema'] == findings.FINDINGS_SCHEMA
+        assert block['findings_policy'] == findings.POLICY_VERSION
+        assert block['revision']
+
+    def test_the_manifest_records_which_bgperf2_measured_the_run(
+            self, tmp_path, prov_args):
+        prov_args.results_dir = str(tmp_path)
+        p = collect(prov_args, [FakeContainer('bgperf/bird:2.19.2', '2.19.2')])
+
+        path = bgperf2.write_provenance(prov_args, p, 'frr_c_bird_20000_10')
+        doc = json.loads(open(path).read())
+
+        assert doc['bgperf2']['findings_policy'] == findings.POLICY_VERSION
+        assert doc['bgperf2']['revision']
+
+    def test_the_event_artifact_records_it_too(self, tmp_path):
+        '''Both documents, on the rule both `run` blocks already follow: the
+        events artifact is what findings.py reads and what a summary groups
+        by, so a reader holding only that one must still be able to say which
+        build wrote it.
+        '''
+        args = Namespace(target='bird', label=None, version=None,
+                         tester_type='bird', prefix_num=100, neighbor_num=10,
+                         filter_test=None, path_diversity=1, receivers=0,
+                         churn_prefixes=0, churn_bursts=0, repetition=None,
+                         policy_reload_blocks=0, file=None,
+                         results_dir=str(tmp_path))
+        doc = bgperf2.write_event_artifact(args, [], 'stem', 'converged')
+        assert doc['bgperf2']['revision']
+        assert doc['bgperf2']['event_schema'] == doc['schema']
+        assert doc['bgperf2']['findings_policy'] == \
+            doc['findings']['policy_version']
+
+    def test_a_raising_status_keeps_the_revision(self):
+        '''The commit is already known by then. A `git status` that times out
+        on a loaded host must not report the run as having no traceable build
+        -- at startup that would stamp every cell of a matrix with UNKNOWN.
+        '''
+        class Raises(FakeGit):
+            def __call__(self, *argv):
+                if argv[0] == 'rev-parse':
+                    return self.head
+                raise TimeoutError('timed out')
+
+        revision = bgperf2.tool_revision(Raises(FakeGit.Result(
+            stdout='abc123\n')))
+        assert not revision.startswith('UNKNOWN')
+        assert 'abc123' in revision and 'timed out' in revision
+
+    def test_an_untracked_file_is_not_an_edit_to_the_code(self):
+        '''`bd` rewrites .beads/issues.jsonl on any issue activity and it is
+        neither tracked nor ignored here, so counting untracked files would
+        mark nearly every run dirty and empty the flag of its meaning.
+        '''
+        seen = []
+
+        class Recording(FakeGit):
+            def __call__(self, *argv):
+                seen.append(argv)
+                return super().__call__(*argv)
+
+        Recording(FakeGit.Result(stdout='abc123\n'))('rev-parse', 'HEAD')
+        bgperf2.tool_revision(Recording(FakeGit.Result(stdout='abc123\n')))
+        assert any('--untracked-files=no' in a for a in seen)

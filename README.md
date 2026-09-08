@@ -221,6 +221,15 @@ loops, so a tail whose magnitude is at or under
 of each other, in either direction, and says nothing about which side was
 slower.
 
+`post_injection_tail_s` is not the only measurement outside the CSV. A run
+also publishes what each generator offered and when (`testers`,
+`tester_fleet`), what the target itself held (`target_table`), what the export
+fan-out received (`export`), what a churn sequence or a policy reload cost
+(`churn`, `policy_reload`), and a `findings` section naming what the run was
+waiting for — or, more often, saying which measurement forbids naming it. All
+of them are in `<prefix>.events.json`, and each run records the bgperf2
+revision and schema versions that produced them.
+
 The measurement implementation and 64 GB validation plans
 ([implementation](docs/bgperf2-measurement-implementation-plan.md),
 [validation](docs/2026-64gb-timing-validation-plan.md)) add the remaining
@@ -400,6 +409,60 @@ set it for both.
 ```
 
 `--threads` is ignored by daemons with no such setting.
+
+### Workload controls beyond peers and prefixes
+
+`-n` and `-p` scale one axis: each peer gets its own disjoint prefix block, so
+session count and table size move together and the target holds `n * p`
+routes, each learned over exactly one path. Five flags separate the things
+that hides. Each is also a batch key -- a *test* key, beside `neighbors` and
+`prefixes`, not a target key -- and each is refused rather than approximated
+where it cannot be honoured.
+
+| flag | batch key | what it adds |
+|---|---|---|
+| `--prefix-scope total` | `prefix_scope: total` | reads `-p` as the whole table and splits it across the peers, so peer count can rise without the table rising with it |
+| `--path-diversity D` | `path_diversity: D` | deals the peers into groups of `D` sharing one prefix block, so the target has competing paths to choose between |
+| `--receivers N` | `receivers: N` | `N` extra sessions the target exports its whole table to and which announce nothing back |
+| `--churn-prefixes C --churn-bursts B` | `churn_prefixes` / `churn_bursts` | after convergence, withdraws and re-announces the last `C` prefixes of every peer, `B` times |
+| `--policy-reload-blocks N` | `policy_reload_blocks: N` | after convergence, installs an import policy rejecting `N` prefix blocks and applies it with the daemon's own reload command |
+
+```bash
+# 50 sessions holding the same 100,000 routes, not 5,000,000
+./bgperf2.py bench -t bird -n 50 -p 100000 --prefix-scope total
+
+# 10 peers in pairs, so 500,000 paths compete for 250,000 prefixes
+./bgperf2.py bench -t bird -n 10 -p 50000 --path-diversity 2
+
+# one table, twelve export sessions
+./bgperf2.py bench -t bird -n 10 -p 100000 --receivers 11
+
+# move a converged table: withdraw 1,000 prefixes per peer and put them back, 3 times
+./bgperf2.py bench -t bird -n 10 -p 100000 --churn-prefixes 1000 --churn-bursts 3
+
+# change the policy over a converged table
+./bgperf2.py bench -t bird -n 10 -p 100000 --policy-reload-blocks 2
+```
+
+What each refuses, and why, is worth knowing before a batch fails at cell
+three: `--prefix-scope total` needs the peer count to divide the table exactly
+and is refused for the MRT generators (whose check-point is already the whole
+table); `--path-diversity` needs the diversity to divide the peer count
+exactly and is refused for MRT playback and beside `--prefix-scope total`;
+churn works only with the synthetic BIRD generator (the burst is `birdc`
+switching a static protocol) and is refused under `-r/--repeat` and
+`--filter_test`; the policy reload needs a target with a reload mechanism
+(only BIRD today), and is refused for MRT playback, under `-r`, under
+`--filter_test`, and beside churn. Every one of them is also refused for a `-f` scenario file,
+which states its own paths. A batch is checked against **every** combination
+on its axes before the first container starts, not just the first.
+
+**None of these appear in the CSV.** `elapsed (s)` keeps meaning the monitor's
+convergence in every row. What a workload was is in the artifact filename
+(`pd2`, `rx11`, `ch1000x3`, `pr2`) and in the `run` block of both
+`<prefix>.events.json` and `<prefix>.versions.json`; what it cost is in that
+artifact's own section — `export`, `churn`, `policy_reload`. The
+[measurement dictionary](docs/measurement-dictionary.md) lists the fields.
 
 ### Asking whether the generator was blocked
 

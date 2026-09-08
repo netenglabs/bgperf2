@@ -456,6 +456,35 @@ it to three decimal places. The target lost no routes and the monitor was not
 miscounting; what changed was which of the prefixes it held the target chose to
 export, as the last injectors delivered and best paths moved.
 
+## Both documents: the `bgperf2` section
+
+`<prefix>.events.json` and `<prefix>.versions.json` each carry a `bgperf2`
+object saying which build produced them. The daemon versions beside it say
+what was benchmarked; this says what measured it, and over the measurement
+plan's phases the measuring code is what changed under those daemons.
+
+| field | meaning |
+|---|---|
+| `revision` | the bgperf2 git revision the run executed (see below) |
+| `event_schema` | schema of the event artifact, e.g. `bgperf2/measurement-events/v1alpha1` |
+| `findings_schema` | schema of the `findings` object |
+| `findings_policy` | the policy that reached the verdicts, e.g. `conservative/v1` |
+
+`revision` takes exactly four shapes, and the difference between them is what
+a row's traceability rests on:
+
+| value | means |
+|---|---|
+| `<sha>` | that commit, with a clean working tree |
+| `<sha>-dirty` | that commit **plus uncommitted edits**: the code that ran is not in any commit, so the row is not reproducible from the sha alone |
+| `<sha> (worktree state unknown: ...)` | the commit is known and whether the tree was clean is not -- the check failed, and a bare sha there would assert clean on the strength of it |
+| `UNKNOWN: ...` | no revision could be read at all, with the reason -- not a git checkout, no git binary, a command that raised |
+
+It is never a guess: the rule `Container.version_string()` follows for daemons,
+applied to bgperf2 itself. The value is resolved once, before the first
+container of a run or batch, so every cell of a batch names the code that was
+running when it started rather than whatever the tree became while it ran.
+
 ## Event artifact: the `findings` section
 
 The same artifact carries a `findings` object

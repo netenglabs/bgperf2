@@ -452,8 +452,7 @@ correct final route counts and timing events.
 
 ### Phase 6: Calibration and release gate
 
-Status: started on 2026-09-08, and **no longer blocked**: `bgperf2-dcs` is
-answered and closed. The two calibration configs exist and both shapes have
+Status: complete on 2026-09-08. `bgperf2-dcs` is answered and closed. The two calibration configs exist and both shapes have
 been run on the campaign host, which is now the machine this repository is
 checked out on. The synthetic shape behaves as designed and its expected
 verdict (`unresolved`, withheld by a queue-side generator counter) is recorded
@@ -483,11 +482,30 @@ this host is `venv/bin/python`. That change set also produced the phase's first
 *controlled* contention case, a two-core load started outside bgperf2's process
 tree, named end to end in the artifact and in the printed verdict.
 
-What remains for the gate's "controlled calibration cases produce the expected
-findings" is a controlled slow tester and a controlled target/observer tail --
-both shapes have been observed, neither is yet produced on demand -- along with
-the contention/memory/provenance/event-ordering review and the recorded
-measurement schema version.
+Status note: as of 2026-09-08 every item of this phase's work list is done and
+every release-gate condition below is met. The follow-up campaign is no longer
+blocked on measurement work.
+
+The gate's "controlled calibration cases produce the expected findings" is now
+met for all three shapes. `scripts/calibration_case.sh` starves one role from
+outside bgperf2, and two cases were produced on purpose: generators capped at
+4 mbit egress give `tester` via `tester_limited`, with each injector's own
+published numbers recovering the imposed cap to within 4%; a monitor capped at
+0.15 CPU gives `target_or_monitor` via `post_injection_tail`, a 9.9s tail
+against a 1.8s bound, with the generators byte-identical to the baseline. A
+starved *target* turns out not to produce a tail at all -- it back-pressures
+the generators through their sockets, and the run is attributed to `tester`
+(`bgperf2-bgg`).
+
+The review and the schema version are done too. `tool_provenance()` writes the
+bgperf2 revision and the event/findings schema versions into both the version
+manifest and the events artifact -- neither carried them, so a campaign row
+could not be tied to the code that produced it. The review ran over all 30
+event artifacts, 30 manifests and 34 stats rows already on disk: ordering,
+schema and clock clean in every one, no manifest missing a version for any
+role, no run within 10% of the memory ceiling and no unsampled extreme, and
+exactly four rows past the contention threshold -- `mrt-rule-1` to `-4`, the
+incident the entry above already identified (`bgperf2-mzy`).
 
 Decisions and verification for this phase are in the
 [decision log](bgperf2-measurement-decision-log.md#phase-6-calibration-and-release-gate).
@@ -499,15 +517,29 @@ Decisions and verification for this phase are in the
   smallest shape whose intervals a 1s poll can resolve on this host) and
   `benchmarks/2026-calibration-mrt.yaml` (the core matrix's own 10 x 1,050,000,
   since the behaviour is a property of the injector count).
-- Demonstrate a controlled slow tester and a controlled target/observer tail.
-  Both shapes have now been *observed* -- the MRT run names `tester`, the
-  synthetic run publishes a `post_injection_tail` -- but neither is yet
-  controlled, which is what this item asks for. A controlled *confounder* was
-  built on 2026-09-08 (a two-core foreign load, named end to end), which is the
-  same shape of demonstration for the host rules.
-- Run one BIRD synthetic and one bgpdump2 MRT calibration on the local host.
-- Review CPU contention, memory, correctness, provenance, and event ordering.
-- Record the measurement schema version used by the follow-up campaign.
+- ~~Demonstrate a controlled slow tester and a controlled target/observer
+  tail.~~ Done 2026-09-08, with `scripts/calibration_case.sh`: an egress cap on
+  the generators for the first (CPU is the wrong knob -- a bgpdump2 walk is
+  blocked on writes, and starving a BIRD synthetic generator starves the
+  `birdc` poll that reads it), and a CPU cap on the monitor for the second (a
+  starved target back-pressures the generators instead of leaving a tail). A
+  controlled *confounder* was built earlier the same day (a two-core foreign
+  load, named end to end), which is the same shape of demonstration for the
+  host rules.
+- ~~Run one BIRD synthetic and one bgpdump2 MRT calibration on the local
+  host.~~ Done 2026-09-08, on the campaign host:
+  `results/2026/phase6-calibration/synth-calibration/` (three passes) and, for
+  the MRT shape, `results/2026/2026-baseline/calibration-mrt-20260908-194900/`
+  -- two of three passes observed at 40s and 46s, the third having lost its
+  target container to something outside bgperf2 (`bgperf2-lze`). The earlier
+  `phase6-calibration/mrt-calibration/` batch is kept as the *pre-fix* record:
+  3 of 3 failed, which is what the convergence witness rule answered.
+- ~~Review CPU contention, memory, correctness, provenance, and event
+  ordering.~~ Done 2026-09-08, over the artifacts already on disk rather than
+  new runs: 30 event artifacts, 30 manifests, 34 stats rows.
+- ~~Record the measurement schema version used by the follow-up campaign.~~
+  Done 2026-09-08: `tool_provenance()` puts the bgperf2 revision and the
+  event/findings schema versions in both published documents.
 
 #### Release gate
 

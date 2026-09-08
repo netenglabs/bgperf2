@@ -36,6 +36,7 @@ from pyroute2 import IPRoute
 from socket import AF_INET
 from nsenter import Namespace
 from psutil import virtual_memory
+import subprocess
 from subprocess import check_output
 import matplotlib.pyplot as plt
 import numpy as np
@@ -66,8 +67,10 @@ from churn import (ChurnBurstTracker, ChurnConfigurationError,
 from contention import (describe_contention, foreign_cpu_report,
                         free_space_bytes, is_memory_backed, own_process_tree,
                         sample_processes)
-from findings import derive_findings, describe_findings, policy_failure
-from measurements import (ChurnEventRecorder, ExportEventRecorder,
+from findings import (FINDINGS_SCHEMA, POLICY_VERSION, derive_findings,
+                      describe_findings, policy_failure)
+from measurements import (EVENT_ARTIFACT_SCHEMA, ChurnEventRecorder,
+                          ExportEventRecorder,
                           MonitorEventRecorder, PolicyReloadEventRecorder,
                           TesterEventRecorder, event_artifact,
                           export_poll_can_stop, monitor_metrics, natural_key,
@@ -2996,6 +2999,104 @@ def collect_provenance(args, target, monitor, testers):
     return provenance
 
 
+# Resolved once, at startup, and reused.  The revision that matters is the code
+# that is *running*, and a lazy read taken at the first artifact write is not
+# that: the first write is at the end of cell 1, potentially an hour into a
+# batch, so an operator editing the tree while it ran -- or the unattended
+# driver committing to its own branch -- would stamp every cell, the finished
+# one included, with a HEAD that never ran. `capture_tool_revision()` is called
+# before the first container; the lazy path remains for callers that never go
+# through `main()`, which is the tests.
+_TOOL_REVISION = None
+
+
+def tool_revision(run=None):
+    """The checked-out revision, or a string saying why it is not known.
+
+    Never a guess -- the contract `Container.version_string()` already applies
+    to daemons, applied to bgperf2 itself. A tree with uncommitted changes is
+    reported as `<sha>-dirty` rather than as the commit it is nearest: a
+    campaign row traced to a commit that does not contain the code that
+    produced it is worse than one that says it cannot be traced, because only
+    the second is visible to whoever is reading it.
+
+    `run` is injectable so this can be tested without depending on the tree the
+    tests happen to run in -- which is the same reason it exists at all.
+    """
+    def git(*argv):
+        return subprocess.run(('git', '-C', str(REPO_ROOT)) + argv,
+                              capture_output=True, text=True, timeout=10)
+
+    runner = run or git
+    try:
+        head = runner('rev-parse', 'HEAD')
+        if head.returncode != 0:
+            return 'UNKNOWN: git rev-parse failed: {0}'.format(
+                head.stderr.strip() or head.returncode)
+        revision = head.stdout.strip()
+        if not revision:
+            return 'UNKNOWN: git rev-parse returned nothing'
+    except Exception as e:
+        return 'UNKNOWN: {0}: {1}'.format(type(e).__name__, e)
+
+    # Its own try, because the revision is already known by this point and a
+    # `git status` that raises -- a 10s timeout on a cold index or a loaded
+    # host, most concretely -- must not throw it away and report the run as
+    # having no traceable build at all. A batch that hit that at startup would
+    # stamp every cell of the matrix with `UNKNOWN`.
+    #
+    # `--untracked-files=no` because `-dirty` is a claim about the *code*, and
+    # an untracked file is usually not that: `bd` rewrites `.beads/issues.jsonl`
+    # on any issue activity and that path is neither tracked nor ignored here,
+    # so counting it would mark nearly every run dirty and empty the flag of
+    # the meaning it exists for. The gap this leaves is stated in the
+    # measurement dictionary rather than hidden: a *new* module that has never
+    # been added is code that ran and is not counted.
+    try:
+        state = runner('status', '--porcelain', '--untracked-files=no')
+        if state.returncode != 0:
+            # The commit is known and its cleanliness is not.  Publishing the
+            # bare sha here would assert a clean tree on the strength of a
+            # check that failed.
+            return '{0} (worktree state unknown: {1})'.format(
+                revision, state.stderr.strip() or state.returncode)
+        return revision + ('-dirty' if state.stdout.strip() else '')
+    except Exception as e:
+        return '{0} (worktree state unknown: {1}: {2})'.format(
+            revision, type(e).__name__, e)
+
+
+def capture_tool_revision():
+    '''Resolve the revision now, before anything runs, and cache it.'''
+    global _TOOL_REVISION
+    if _TOOL_REVISION is None:
+        _TOOL_REVISION = tool_revision()
+    return _TOOL_REVISION
+
+
+def tool_provenance():
+    """Which bgperf2 measured the run, beside which daemons it measured.
+
+    The daemon versions say what was benchmarked and nothing about the code
+    that timed it -- and over this plan's phases the timing code is exactly
+    what changed under those daemons. `POLICY_VERSION` exists so two runs'
+    verdicts can be told apart; without the revision beside it, two runs of one
+    policy version cannot be.
+
+    The campaign plans require a manifest to carry both. Recorded in the events
+    artifact as well as the version manifest, on the rule both `run` blocks
+    already follow: the events artifact is what `findings.py` reads and what a
+    summary groups by, and a reader who has only that document must still be
+    able to say which build wrote it.
+    """
+    return {
+        'revision': capture_tool_revision(),
+        'event_schema': EVENT_ARTIFACT_SCHEMA,
+        'findings_schema': FINDINGS_SCHEMA,
+        'findings_policy': POLICY_VERSION,
+    }
+
+
 def write_provenance(args, provenance, prefix):
     '''Write the full build manifest beside the run's other output.
 
@@ -3003,6 +3104,7 @@ def write_provenance(args, provenance, prefix):
     this carries the whole set, including the image each container ran from.
     '''
     doc = dict(provenance)
+    doc['bgperf2'] = tool_provenance()
     doc['run'] = {
         'name': run_name(args),
         'date': datetime.date.today().strftime('%Y-%m-%d'),
@@ -3169,6 +3271,7 @@ def write_event_artifact(args, events, prefix, status, testers=None,
         doc['findings'] = derive_findings(doc, host=host)
     except Exception as e:
         doc['findings'] = policy_failure(e)
+    doc['bgperf2'] = tool_provenance()
     doc['run'] = {
         'name': run_name(args),
         'peers': args.neighbor_num,
@@ -6015,6 +6118,11 @@ if __name__ == '__main__':
         func = args.func
     except AttributeError:
         parser.error("too few arguments")
+
+    # Before anything runs, so every document a batch writes names the code
+    # that was actually running when it started -- not whatever the tree became
+    # by the time the first cell finished writing its artifacts.
+    capture_tool_revision()
 
     try:
         args.func(args)

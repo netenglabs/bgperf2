@@ -3534,3 +3534,334 @@ operator to resume an active block; for calibration it cannot. It is left
 alone here because it is a decision about the suite driver rather than about
 this measurement, and because `--force` already drops `--resume`, so the
 options are not obvious enough to pick while landing something else.
+
+### Progress on 2026-09-08: the two calibration cases, produced on purpose
+
+Phase 6's work list asks for "a controlled slow tester and a controlled
+target/observer tail". Both shapes had been *observed* -- the MRT calibration
+names `tester`, the synthetic one publishes a `post_injection_tail` -- but
+observing a shape says nothing about whether the policy would name it when it
+was really there. `scripts/calibration_case.sh` produces each of them on
+demand, and the answers it gave were not the expected ones.
+
+**The constraint is applied from outside bgperf2, and bgperf2 is not told.**
+Same rule as the two-core foreign load of the previous entry: the harness
+starves one role -- `docker update --cpus` on its containers, or a `tbf` qdisc
+inside their own network namespaces -- and nothing about the instrument
+changes. In particular the run's manifest records no constraint, because
+provenance never guesses and a manifest may not claim something the tool did
+not do. The record is the script's own log beside each run.
+
+#### The slow tester: CPU is the wrong knob, and the reason is worth keeping
+
+The obvious knob fails on both generators, differently.
+
+**A bgpdump2 injector's walk is not CPU-bound.** At 0.2 CPU the two injectors
+became ready after 6.3s and 8.3s against 1.3s and 2.3s unconstrained -- reading
+the MRT file is CPU-bound -- and then walked their tables in 0.833s against
+0.867s: the walk is spent blocked on socket writes. A case built on
+`--cpus` here would have been reported as controlled and measured an
+unconstrained send.
+
+**Starving a BIRD synthetic generator starves the instrument reading it.** The
+offering poll is a `birdc` exec *inside* the generator's own container, so at
+0.5 CPU the poll's achieved cadence went from 1.0s to 3.30s -- and
+`injection_s` came back 3.297s against an `injection_resolution_s` of 3.297s,
+i.e. exactly one look. The verdict was unchanged (`unresolved`, decided by
+`injection_boundary_unresolved`, 18,848 of 1,000,000 prefixes inside the
+interval) because a queue-side counter does not move for CPU either way. Any
+instrument that reads a role by entering its container has this shape; the
+bgpdump2 reader does not, because the log is bind-mounted and read from the
+host.
+
+**Egress rate is the knob, and the run recovers it.** With every injector
+capped at 4 mbit, each one's own published numbers give back the cap:
+
+| | baseline | at 4 mbit |
+|---|---|---|
+| `mrt-injector0` | 7,493,578 B / 0.867020s = 69.1 mbit | 7,334,208 B / 14.111817s = **4.16 mbit** |
+| `mrt-injector1` | 16,196,887 B / 1.983521s = 65.3 mbit | 16,000,488 B / 32.391424s = **3.95 mbit** |
+
+Fleet injection went 3.0s -> 33.0s and `elapsed (s)` 7 -> 38, and the verdict
+is `tester` via `tester_limited`. Within 4% of a constraint the tool knew
+nothing about, from `octets_on_wire` and `reported_injection_s` alone.
+
+That also bounds how far the octet count can run ahead of the wire. It is
+counted on a successful `write()`, and a `write()` returns as soon as the
+kernel takes the bytes, so a deep socket buffer would let the generator
+"send" its first several MB at no cost and report a rate well above the cap:
+4 MB free ahead of injector0's 7.3 MB would have come back at 8.8 mbit rather
+than 4.16. The buffer ahead of these sends is small enough not to matter at
+this scale, which is what makes the number usable as evidence about a link.
+
+#### A starved target is not a tail
+
+Two runs, at 0.25 CPU on 2 x 500,000 and at 0.05 CPU on 2 x 100,000, both
+produced a *negative* tail: the monitor reached the required count 3.1s and
+4.9s **before** the last generator finished. A target that cannot process does
+not drain its sessions, the injectors block on their writes, and the
+constraint appears at the generators -- their measured send fell from 65-69
+mbit to 10.8/12.9 mbit at 0.25 CPU and 2.4/8.5 mbit at 0.05 CPU. The
+constraint demonstrably bound the container it named: `max cpu %` is 130
+unconstrained, 26 at 0.25 CPU and 5 at 0.05 CPU.
+
+So the tail case is reachable from the other end of the finding's own name.
+`observer-tail-case/` starves the monitor to 0.15 CPU: the generators are
+byte-identical to the baseline (1,568,321 and 3,490,412 octets, 0.091s and
+0.214s), the run continues for **9.9s** after they finish against a 1.8s
+bound, and the verdict is `target_or_monitor` via `post_injection_tail`. That
+finding is named for two components because no interval separates them, and
+this is the first run built to sit on one of the two on purpose.
+
+**What that leaves unresolved is a property of the policy, not of this
+harness.** A generator that is slow and a generator back-pressured by a slow
+target produce the same evidence -- the generators were still offering the
+workload when the run ended -- and `tester_limited` names `tester` for both.
+It is not wrong (the run really was waiting for the generators to deliver) and
+it is not the whole truth (they were waiting for the target). Nothing measured
+today separates them, and inventing a rule from these two runs would be fitting
+a policy to the case in front of it, which is how all three convergence rules
+were broken. Filed as `bgperf2-bgg` rather than answered here.
+
+#### A constraint that bound nothing, and reported that it had
+
+The first two "controlled" tester runs were not controlled, and said they
+were. Shaping was applied to `eth0`, and a bgperf2 container is on two
+networks: `interface-probe/eth0-only-qdisc-series.log` is a once-a-second
+`tc -s qdisc show` inside both injectors showing injector1 pushing 16.9 MB
+through its `eth0` tbf while injector0's `eth0` carried **84 bytes** and its
+BGP went over the unshaped `eth1`. The run before it had neither injector
+shaped -- which is why a 4 mbit cap produced a *faster* run than a 10 mbit one.
+Both were logged as constrained, because `tc` had exited 0.
+
+The script already refuses a run in which nothing was constrained, and that
+guard did not fire, because it asks whether the command succeeded rather than
+whether it bound the traffic. The fix is structural rather than another check:
+every device in the namespace is shaped, and the device set is re-read on every
+pass so one attached after the container starts is shaped too. A harness whose
+whole purpose is to make a known cause visible must not have a silent way of
+applying no cause -- the same reason `verify` exists, and the same reason a
+detector that never fires is worse than none.
+
+Two smaller things the same probe settled. The watcher keys on container id,
+not name: bgperf2 removes and recreates each generator container within one
+run, and a name-keyed watcher takes the second for the first and leaves it
+unconstrained. And it polls at 0.1s, because an injector begins its walk as
+soon as it has read its MRT file: a constraint that lands after that is
+recorded as applied while an unconstrained send is measured.
+
+#### The runs, and the host they ran on
+
+Seven runs, one at a time, `-d /data/bgperf-work`, on the campaign host. All
+seven were quiet -- `max foreign cpu %` 4-9, `min idle%` 72-87, no host finding
+-- so every verdict above was reached on its own timing evidence and none was
+withheld. The evidence is in `results/2026/phase6-calibration/`, whose README
+carries the table; `results/` is gitignored, so the numbers quoted here are the
+durable record.
+
+#### What review found: three more ways to report a case that was not controlled
+
+The harness shipped with the eth0 defect fixed and three more of exactly the
+same shape, all found in review and all fixed here. They are worth listing
+because the pattern is the point: every one of them was a path on which the
+script printed "constrained" and exited 0 for a run whose role was untouched.
+
+- **A leftover container satisfied the guard.** The watcher matched by name
+  from the moment it started, and bgperf2 removes and recreates anything it
+  finds by name seconds later. Demonstrated: `--role tester --cpus 1 -- --help`
+  reported two injectors constrained and exited 0 without running a benchmark
+  at all, because an earlier bench had left them up -- which is the hazard
+  CLAUDE.md's contention section already records for this host. The constraint
+  went away with the container and the run's own generators were never
+  touched. It is not a rare condition either: bgperf2 leaves the tester and
+  monitor containers up when a bench ends, so this is the *normal* state of the
+  machine after any run, and every calibration case taken this afternoon
+  started from it. The script now snapshots the matching container ids before
+  bgperf2 starts, skips them, and says so.
+- **`--role tester` matched no MRT injector for two of the five generators.**
+  The pattern required a literal `_tester_`, and `mrt_tester.py` names its
+  containers `bgperf_exabgp_mrttester_` and `bgperf_gobgp_mrttester_`. On its
+  own the guard would have caught that loudly; combined with the leftovers
+  above it was silent, since the leftovers satisfied the guard while the run's
+  real injectors ran unshaped.
+- **The guard asked whether *something* was constrained, not whether each knob
+  applied.** With `--cpus` and `--rate` together, a successful `docker update`
+  wrote the log and reported a controlled case even if every `tc` had failed --
+  a missing `sch_tbf`, an `nsenter` that could not enter, a stale pid, all
+  silenced by the redirect. The rate cap is the knob that binds the tester
+  case. It is now checked per knob.
+
+**And one that would have made the instrument the contention it reports.** The
+watcher re-read every container's device list on every 0.1s pass for the whole
+run, even after all of them were shaped. It is a *sibling* of the bgperf2
+process rather than a descendant, so `own_process_tree()` cannot exclude it,
+and `sudo`, `nsenter` and `ip` are not in `BGPERF_PROCESSES`; `contention.py`
+deliberately charges first-seen short-lived processes at full interval cost,
+which is this shape exactly. Two injectors measured 4-9%, but the MRT
+calibration runs ten, and past `CONTENTION_PERCENT` the findings policy
+withholds `limiting_component` -- the harness would have suppressed the verdict
+its own case was built to produce. Enumeration now stops once a container's
+device set comes back unchanged three times, which is bounded because a
+bgperf2 container was measured holding both interfaces from the moment it
+appears.
+
+The `slow-tester-case/` evidence was re-taken on the final script. Three runs
+of that command across the afternoon -- the first version, the one with every
+device shaped, and the fully reviewed one -- put injector0's own send at
+14.115846s, 14.113216s and 14.111817s, and injector1's at 32.391538s,
+32.394345s and 32.391424s. A constraint imposed from outside and recovered from the artifact
+reproduces to a few milliseconds across three builds of the harness.
+
+### Progress on 2026-09-08: which bgperf2 measured the run, and the gate review
+
+The last two items of Phase 6, done from evidence already on disk rather than
+from new runs.
+
+#### The manifest said what was benchmarked and not what measured it
+
+`.versions.json` recorded the target's, the testers' and the monitor's daemon
+versions and images, and nothing at all about bgperf2 itself. Both campaign
+plans require a manifest to carry the git revision and the measurement schema
+version, and it carried neither -- so a campaign row could not be tied to the
+code that produced it, which is the gcov trap one layer up: two runs months
+apart, indistinguishable in the document, with the timing code changed under
+them. `findings.POLICY_VERSION` exists precisely so two runs' verdicts can be
+told apart, and without a revision beside it two runs of one policy version
+cannot be.
+
+`tool_provenance()` is now written into **both** documents -- the version
+manifest and the events artifact -- on the rule both `run` blocks already
+follow: the events artifact is what `findings.py` reads and what a summary
+groups by, so a reader holding only that one must still be able to say which
+build wrote it. It carries the revision, the event-artifact schema, the
+findings schema and the findings policy version.
+
+Three things about the revision:
+
+- **It is read, never guessed** -- `Container.version_string()`'s contract,
+  applied to bgperf2 itself. No git, no `HEAD`, an exception: the value starts
+  `UNKNOWN` and says why.
+- **An edited tree is `<sha>-dirty`, not `<sha>`.** A row traced to a commit
+  that does not contain the code that produced it is worse than one that says
+  it cannot be traced, because only the second is visible to the person
+  reading it.
+- **A revision whose worktree could not be checked keeps the sha and refuses
+  to claim clean** (`<sha> (worktree state unknown: ...)`). Publishing the bare
+  sha there would assert a clean tree on the strength of a check that failed.
+
+Computed once and cached, because the revision that matters is the code that
+is *running*: a tree edited mid-batch does not change the process, and the two
+documents of one run must not disagree about which build wrote them. The git
+runner is injectable so the tests do not pass or fail on whether someone has
+edited a file. Verified end to end on the smallest real run (`-n 1 -p 1`):
+both documents carry the block, and both said `-dirty`, which the tree was.
+
+#### The gate review: contention, memory, correctness, provenance, ordering
+
+Run over all 30 event artifacts and 30 manifests in
+`results/2026/phase6-calibration/`, plus the 34 stats rows recorded beside
+them. No new benchmarks: a review that needs its own runs is measuring a
+different machine-day than the one it is reviewing.
+
+- **Event ordering: 30 of 30 clean.** Every artifact is monotonic in
+  `monotonic_s`, declares the current schema and a `monotonic` clock, and
+  holds no duplicate (event, producer) pair. The phase sets are what they
+  should be: every FAILED run carries `setup,injection,convergence` and **no**
+  `assurance` phase, because it never confirmed one -- the absence is
+  structural rather than incidental.
+- **Provenance: 30 of 30 complete.** Every manifest records a real version for
+  the target, the monitor and every distinct tester image. No `UNKNOWN`
+  anywhere, which is the check that would have caught the rustybgp-read-with-
+  GoBGP's-parser defect `verify` was built for.
+- **Memory: no run near the ceiling and no unsampled extreme.** `min free mem`
+  is between 57.4 and 59.4 GB across every row, so nothing is within 10% of
+  the host and no `low_free_memory` finding is owed; no row carries the
+  ~931,322 GB sentinel or a `max mem` of 0, so no sampler silently died.
+- **Contention: exactly four rows past one core, and they are the four already
+  explained.** `mrt-rule-1` to `-4`, at 108-110%, which the previous entry
+  identified as a previous bgperf2 run that outlived its own bench
+  (`bgperf2-mzy`). Every other row on this host is between 4 and 9. The audit
+  rediscovering that incident and nothing else is the useful result: the
+  column is not noisy here, so a future row past the threshold means something.
+- **Correctness** is the one item this pass does not add to, because the
+  convergence rules were settled by the two entries above it and are pinned by
+  `tests/test_convergence_mrt_replay.py` against the recorded series.
+
+#### What the second review found: the harness again, and one in the revision
+
+Five findings, all acted on. Four were in the same shell harness and, again,
+all of one shape -- a way for the script to report a controlled case that was
+not one. The pattern is now recorded rather than rediscovered a third time:
+**any check of the form "did something get constrained?" is wrong; the check
+has to be "was every container of this run constrained by every knob asked
+for?"**
+
+- **A failed `tc` counted as a settled device set.** The settle test was "this
+  pass found devices and added none", which is true both when every device is
+  already shaped and when every `tc` failed. Three such passes -- 0.3s -- and
+  the container was dropped from the scan for the rest of the run. One
+  injector of ten whose `nsenter` failed would have run at line rate while the
+  other nine were shaped, with the script exiting 0. A container is now
+  counted as rate-constrained only when *every* device it has is shaped.
+- **The success marker was global, so one container satisfied it for all.**
+  With ten injectors, one success out of ten passed the guard; under `batch`,
+  a constraint that stopped applying at cell 5 left cells 5-40 unconstrained
+  while cell 1's marker still said the run was controlled. The guard now
+  counts distinct container ids seen against ids constrained, per knob, and
+  names the shortfall (`--rate (7 of 10)`).
+- **A persistent failure was retried at 10 Hz for the whole run** -- and on
+  the `sudo nsenter ip` path, which is charged to `max foreign cpu %`, so a
+  broken sudo credential would have turned the harness into the contention
+  that withholds the verdict. Bounded at `MAX_ATTEMPTS`; giving up is safe
+  *because* the guard counts containers, so an abandoned container fails the
+  run rather than passing quietly.
+
+**And one in the revision, which contradicted its own comment.** The cache was
+filled lazily at the first artifact write -- the end of cell 1, potentially an
+hour into a batch -- while the comment beside it said the point was that a tree
+edited mid-batch does not change the running process. An operator editing
+during cell 1, or the unattended driver committing to its branch, would have
+stamped every cell, the finished one included, with a HEAD that never ran.
+`capture_tool_revision()` now runs in `main()` before any container; the lazy
+path stays for callers that never go through it, which is the tests.
+
+The fifth was `docs/measurement-dictionary.md`, which documents every other
+artifact section and did not document this one -- and the four shapes
+`revision` can take are exactly what a row's traceability rests on. Added.
+
+#### The third review, and one finding deliberately not acted on
+
+Three findings, none high -- the severity fell with each round, which is the
+only evidence that the harness converged rather than just changed.
+
+- **A `git status` that *raises* threw away a revision already read.** There
+  was a branch preserving the sha when the status check returned non-zero, with
+  its own test and dictionary entry, and the call sat inside the same `try` as
+  `rev-parse` -- so a 10s timeout on a loaded host fell through to
+  `UNKNOWN: TimeoutExpired`, discarding a commit that had been read one line
+  earlier. At the startup of a batch that is every cell of the matrix stamped
+  as having no traceable build. The status call now has its own `try` and falls
+  into the same `worktree state unknown` shape.
+- **`-dirty` counted untracked files, and `bd` rewrites one on every issue.**
+  `.beads/issues.jsonl` is neither tracked nor ignored in this repository and
+  `bd` writes it as a matter of course, so nearly every run would have been
+  stamped `-dirty` on a tree whose measurement code was exactly the commit --
+  emptying the flag of the one distinction it exists to make. Now
+  `--untracked-files=no`. The gap that leaves is real and is written into the
+  dictionary rather than hidden: a *new* module never added to git is code that
+  ran and is not counted.
+- **The settling passes defended nothing.** Once a container was fully shaped
+  the rate branch short-circuited on `limited_rate` and never re-enumerated, so
+  the three passes the comment said existed to catch a late-attached device
+  could not catch one -- partial shaping, reported as controlled, arrived at
+  from a third direction. It now re-reads the device list every pass until the
+  container is finished; `limited_dev` still keeps `tc` from being re-issued.
+
+**And one thing found while re-reading, judged not worth fixing.** A container
+seen on one pass and gone before the next would be counted as seen-but-
+unconstrained and fail the run. With leftovers now excluded that leaves one
+case: a container of this run that died mid-run -- which is `bgperf2-lze`, and
+in that case the run has failed anyway and "this is not a controlled case" is
+the *correct* verdict, not a spurious one. Machinery to distinguish it would
+be machinery to soften a true answer. Written down because a later reader
+finding that path should know it was seen and left.

@@ -61,6 +61,12 @@ BGPERF_PROCESSES = frozenset((
 # not meaningfully perturbed on a machine with many cores.
 CONTENTION_PERCENT = 100.0
 
+# How many competing commands are named, in a warning and in the run's record.
+# A bound is needed because a saturated machine has many; three is enough to
+# say what the machine was doing, and the total is published beside them so a
+# reader can see how much of it the names account for.
+TOP_FOREIGN_COMMANDS = 3
+
 # Fields of /proc/<pid>/stat, counted from after the comm field. The comm can
 # contain spaces and parentheses, so everything is measured from the last ')'
 # rather than by splitting the whole line. flags is field 9, utime 14, stime 15.
@@ -264,24 +270,87 @@ def foreign_cpu_percent(previous, current, elapsed_seconds, extra_allowed=(),
         previous, current, elapsed_seconds, extra_allowed, clock_ticks, own_pids))
 
 
-def top_foreign(previous, current, elapsed_seconds, limit=3, extra_allowed=(),
-                clock_ticks=None, own_pids=None):
-    '''The heaviest competing processes, for naming names in a warning.'''
-    ranked = sorted(foreign_processes(previous, current, elapsed_seconds,
-                                      extra_allowed, clock_ticks, own_pids),
-                    reverse=True)
-    return ranked[:limit]
+def foreign_by_command(previous, current, elapsed_seconds, extra_allowed=(),
+                       clock_ticks=None, own_pids=None):
+    '''[(percent, command, process_count)] for competitors, heaviest first.
+
+    Aggregated by command name rather than left per-pid, because the canonical
+    "someone else is on the box" case is a parallel build: thousands of
+    sub-second cc1 processes, none of which is individually large. Ranking
+    those by pid names three cc1 processes at 1% each beside a total of 800%,
+    which is a list that cannot be acted on and reads as though the total came
+    from somewhere the names do not cover. One line saying cc1 held eight cores
+    across 312 processes is the same measurement and is actionable.
+
+    The count is carried because it is the difference between one runaway
+    process and a swarm, and those send an operator to different places.
+    '''
+    totals = {}
+    for percent, comm in foreign_processes(previous, current, elapsed_seconds,
+                                           extra_allowed, clock_ticks, own_pids):
+        seen_percent, seen_count = totals.get(comm, (0.0, 0))
+        totals[comm] = (seen_percent + percent, seen_count + 1)
+    ranked = [(percent, comm, count)
+              for comm, (percent, count) in totals.items()]
+    ranked.sort(key=lambda entry: (-entry[0], entry[1]))
+    return ranked
+
+
+def foreign_cpu_report(previous, current, elapsed_seconds,
+                       limit=TOP_FOREIGN_COMMANDS, extra_allowed=(),
+                       clock_ticks=None, own_pids=None):
+    '''(total percent, the heaviest commands) for competing load, in one pass.
+
+    The two are returned together rather than computed by separate calls so
+    that the names always describe the number they are published beside. A
+    confounder that withholds a verdict has to be arguable, and until this
+    existed the only thing recorded about foreign CPU was a percentage: four
+    consecutive MRT calibration runs on this host had their verdict withheld by
+    "processes outside the benchmark used up to 1.1 cores" with nothing saying
+    which. The offending process was gone by the time anyone looked, so the one
+    moment the answer existed was the sample that set the maximum.
+
+    Each name is JSON-ready, because this goes into the run's own record and
+    not only into a warning nobody keeps.
+    '''
+    ranked = foreign_by_command(previous, current, elapsed_seconds,
+                                extra_allowed, clock_ticks, own_pids)
+    total = sum(percent for percent, _comm, _count in ranked)
+    named = [{'command': comm, 'percent': percent, 'process_count': count}
+             for percent, comm, count in ranked[:limit]]
+    return total, named
+
+
+def format_foreign_load(named):
+    '''"python 101%, cc1 780% (312 procs)" from foreign_cpu_report() names.
+
+    The process count is printed only when a name covers more than one, since
+    "(1 procs)" beside every entry is noise on the common case and the count
+    only says anything when it separates a runaway from a swarm.
+
+    Anything under one percent is printed as "<1%" rather than rounded. On a
+    quiet machine the third name is often a fraction of a percent -- a real
+    run named "sshd 0%", which reads as a process listed for having used
+    nothing, and invites the reader to discount the whole list.
+    '''
+    return ', '.join(
+        '{0} {1}{2}'.format(
+            entry['command'],
+            '<1%' if entry['percent'] < 1.0
+            else '{0:.0f}%'.format(entry['percent']),
+            '' if entry['process_count'] <= 1
+            else ' ({0} procs)'.format(entry['process_count']))
+        for entry in named)
 
 
 def describe_contention(previous, current, elapsed_seconds, extra_allowed=(),
                         clock_ticks=None, own_pids=None):
     '''One line naming who is competing, or None if the machine is quiet.'''
-    percent = foreign_cpu_percent(previous, current, elapsed_seconds,
-                                  extra_allowed, clock_ticks, own_pids)
+    percent, named = foreign_cpu_report(
+        previous, current, elapsed_seconds, extra_allowed=extra_allowed,
+        clock_ticks=clock_ticks, own_pids=own_pids)
     if percent < CONTENTION_PERCENT:
         return None
-    names = ', '.join('{0} {1:.0f}%'.format(comm, pct) for pct, comm in top_foreign(
-        previous, current, elapsed_seconds, extra_allowed=extra_allowed,
-        clock_ticks=clock_ticks, own_pids=own_pids))
+    names = format_foreign_load(named)
     return ('{0:.0f}% CPU ({1:.1f} cores) used by processes outside the '
             'benchmark: {2}'.format(percent, percent / 100.0, names))

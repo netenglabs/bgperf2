@@ -474,10 +474,20 @@ converged, and `summary.py` published statistics for this shape for the first
 time; the third pass failed because its target container was removed mid-run by
 something outside bgperf2 (`bgperf2-lze`).
 
+That last `unresolved` is now answered. The confounder was right -- the machine
+really was shared -- but it named nobody, so four withheld verdicts could not
+be argued with. Foreign CPU is now recorded with the heaviest competing
+commands from the sample that set the maximum, and the offender turns out to
+have been **a previous bgperf2 run that outlived its own bench**: `python` on
+this host is `venv/bin/python`. That change set also produced the phase's first
+*controlled* contention case, a two-core load started outside bgperf2's process
+tree, named end to end in the artifact and in the printed verdict.
+
 What remains for the gate's "controlled calibration cases produce the expected
-findings" is the *finding*, not the verdict: the MRT shape is reproducible now,
-two of these runs reported the expected `tester`, but one reported `unresolved`,
-withheld by foreign CPU on a host that should have had none.
+findings" is a controlled slow tester and a controlled target/observer tail --
+both shapes have been observed, neither is yet produced on demand -- along with
+the contention/memory/provenance/event-ordering review and the recorded
+measurement schema version.
 
 Decisions and verification for this phase are in the
 [decision log](bgperf2-measurement-decision-log.md#phase-6-calibration-and-release-gate).
@@ -492,7 +502,9 @@ Decisions and verification for this phase are in the
 - Demonstrate a controlled slow tester and a controlled target/observer tail.
   Both shapes have now been *observed* -- the MRT run names `tester`, the
   synthetic run publishes a `post_injection_tail` -- but neither is yet
-  controlled, which is what this item asks for.
+  controlled, which is what this item asks for. A controlled *confounder* was
+  built on 2026-09-08 (a two-core foreign load, named end to end), which is the
+  same shape of demonstration for the host rules.
 - Run one BIRD synthetic and one bgpdump2 MRT calibration on the local host.
 - Review CPU contention, memory, correctness, provenance, and event ordering.
 - Record the measurement schema version used by the follow-up campaign.

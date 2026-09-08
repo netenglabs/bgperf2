@@ -63,7 +63,7 @@ from policy import (DEFAULT_POLICY_RELOAD_BLOCKS,
 from churn import (ChurnBurstTracker, ChurnConfigurationError,
                    DEFAULT_CHURN_BURSTS, DEFAULT_CHURN_PREFIXES,
                    churn_operation_counts)
-from contention import (describe_contention, foreign_cpu_percent,
+from contention import (describe_contention, foreign_cpu_report,
                         free_space_bytes, is_memory_backed, own_process_tree,
                         sample_processes)
 from findings import derive_findings, describe_findings, policy_failure
@@ -1610,9 +1610,16 @@ def controller_foreign_cpu(queue, interval=5):
                 # never let a sampling hiccup take down a running benchmark
                 continue
             now = time.time()
-            output['foreign_cpu'] = foreign_cpu_percent(
-                previous, current, now - previous_at,
-                own_pids=own_process_tree(current))
+            # The names come from the same pass as the total, so whatever is
+            # published beside the number is what produced it. Recording only
+            # the number is what left four MRT calibration runs on this host
+            # with their verdict withheld by 1.1 cores of foreign CPU and
+            # nothing saying whose -- the process was gone by the time anyone
+            # looked, and the sample that saw it was the only place the answer
+            # ever existed.
+            output['foreign_cpu'], output['foreign_cpu_processes'] = (
+                foreign_cpu_report(previous, current, now - previous_at,
+                                   own_pids=own_process_tree(current)))
             output['time'] = datetime.datetime.now()
             queue.put(dict(output))
             previous, previous_at = current, now
@@ -2662,6 +2669,10 @@ def bench(args):
     output_stats['min_idle'] = 100
     output_stats['min_free'] = UNSAMPLED_MIN_FREE
     output_stats['max_foreign_cpu'] = 0
+    # None until a sample sets the maximum: a run that never sampled and a run
+    # whose competitors could not be named must not both read as a run that
+    # looked and found nobody.
+    output_stats['max_foreign_cpu_processes'] = None
     # finish_bench() fills these in once the clock has stopped; a run with no
     # testers (a remote target) never gets there, and they are printed and
     # written into the row unconditionally.
@@ -2723,9 +2734,7 @@ def bench(args):
                 percent_idle = info['idle']
                 output_stats['min_idle'] = percent_idle if percent_idle < output_stats['min_idle'] else output_stats['min_idle']
             elif 'foreign_cpu' in info:
-                foreign = info['foreign_cpu']
-                if foreign > output_stats['max_foreign_cpu']:
-                    output_stats['max_foreign_cpu'] = foreign
+                note_foreign_cpu_sample(output_stats, info)
         if 'tester_offering' in info:
             observe_tester_sample(info, tester_lifecycles,
                                   tester_observation_errors)
@@ -3042,6 +3051,29 @@ def write_provenance(args, provenance, prefix):
     return path
 
 
+def note_foreign_cpu_sample(output_stats, info):
+    """Keep the largest foreign-CPU sample, and the names that produced it.
+
+    The number and the names move together and only together: a peak taken
+    from one sample beside names taken from another is two moments in the run
+    reported as one, and the whole point of the names is that they describe
+    the sample the published maximum came from.
+
+    A sample that carries no names still sets the maximum. Losing a peak
+    because the competitors could not be listed would understate the very
+    column that decides whether the row is comparable.
+
+    It is a function rather than four lines inside bench()'s monitor loop
+    because no Docker-free test can drive that loop, and a rule that cannot be
+    tested is one review has already deleted here twice.
+    """
+    foreign = info['foreign_cpu']
+    if foreign > output_stats['max_foreign_cpu']:
+        output_stats['max_foreign_cpu'] = foreign
+        output_stats['max_foreign_cpu_processes'] = info.get(
+            'foreign_cpu_processes')
+
+
 def host_evidence(output_stats):
     '''The run-level evidence that is not an event, for the findings policy.
 
@@ -3059,6 +3091,12 @@ def host_evidence(output_stats):
     return {
         'min_idle_percent': output_stats.get('min_idle'),
         'max_foreign_cpu_percent': output_stats.get('max_foreign_cpu'),
+        # Who that CPU was, from the sample that set the maximum. None means
+        # no sample ever set one, which is not the same as a machine whose
+        # competitors could not be named -- absent is also what an older build
+        # wrote, so an empty list would read as "nobody" on both.
+        'max_foreign_cpu_processes':
+            output_stats.get('max_foreign_cpu_processes'),
         'min_free_bytes': None if free == UNSAMPLED_MIN_FREE else free,
         'total_memory_bytes': output_stats.get('memory'),
     }

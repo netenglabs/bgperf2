@@ -25,7 +25,7 @@ event artifact measurements.py builds, which means it can never reason about a
 duration the event stream did not support.
 '''
 
-from contention import CONTENTION_PERCENT
+from contention import CONTENTION_PERCENT, format_foreign_load
 
 
 FINDINGS_SCHEMA = 'bgperf2/measurement-findings/v1alpha1'
@@ -378,14 +378,25 @@ def _host_findings(host):
 
     foreign = host.get('max_foreign_cpu_percent')
     if foreign is not None and foreign >= CONTENTION_PERCENT:
+        # Named where the run recorded them, never re-derived: this reads the
+        # artifact long after the run, and a competitor that has since exited
+        # is exactly the case -- four MRT calibration runs on the campaign host
+        # were withheld by a `python` process that was gone before anyone
+        # asked. An older artifact carries no names and says so by their
+        # absence rather than by an empty list.
+        named = host.get('max_foreign_cpu_processes')
+        evidence = {'max_foreign_cpu_percent': foreign,
+                    'threshold_percent': CONTENTION_PERCENT}
+        summary = ('processes outside the benchmark used up to {0:.1f} cores '
+                   'during this run'.format(foreign / 100.0))
+        if named:
+            evidence['processes'] = named
+            summary += ', led by ' + format_foreign_load(named)
         findings.append(_finding(
             'foreign_cpu_contention', CONFOUNDER,
             'a run sharing the machine is not comparable with one that did '
             'not',
-            'processes outside the benchmark used up to {0:.1f} cores during '
-            'this run'.format(foreign / 100.0),
-            {'max_foreign_cpu_percent': foreign,
-             'threshold_percent': CONTENTION_PERCENT}))
+            summary, evidence))
 
     free = host.get('min_free_bytes')
     total = host.get('total_memory_bytes')

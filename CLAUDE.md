@@ -1271,6 +1271,30 @@ Docker and privileges so the test suite covers it, like `convergence.py`. Two co
   parameter so the tests can pass a short one — the first sample only arrives one interval in,
   because the measurement is a delta.
 
+**The names travel with the number, and only ever together.** A confounder that withholds a verdict
+has to be arguable, and for a while this one was not: four consecutive MRT calibration runs on this
+host were withheld by "processes outside the benchmark used up to 1.1 cores" with nothing anywhere
+saying which process, and by the time anyone looked it had exited. `foreign_cpu_report()` returns
+the total and the heaviest commands from one pass, `note_foreign_cpu_sample()` replaces both or
+neither — names from a different sample than the published peak are two moments reported as one —
+and they reach `host_evidence()` and the finding's `evidence.processes`. Three details:
+
+- **Aggregated by command, with a `process_count`.** The canonical competitor is a parallel build:
+  thousands of sub-second `cc1` processes, none individually large. Ranked per pid that names three
+  `cc1` at 1% each beside a total of 800%, which reads as though the names do not cover the number.
+- **A peak whose competitors could not be named is still kept**, and publishes `null` rather than an
+  empty list. Absent is also what an older build wrote, so an empty list would report both as a run
+  that found nobody. Dropping the peak instead would understate the column that decides whether the
+  row is comparable at all.
+- **`findings.py` never re-derives them.** It reads the artifact, and the run that fires this
+  finding is exactly the one whose competitor has since exited.
+
+The identification that closed those four runs is worth keeping: **`python` on this host is
+`venv/bin/python`, which is bgperf2 itself** — the system interpreter reports `python3`. A bare
+`python` at one core is a *previous bgperf2 run that outlived its own bench* and is now competing
+with the next one, which `own_process_tree()` cannot exclude because it is not a descendant. Check
+for one before reading a contention number, and before starting a campaign block.
+
 `min idle%` cannot replace this: bgperf's *own* daemons move it, so it cannot separate "the target
 worked hard" from "something else was running."
 

@@ -34,6 +34,12 @@ def test_foreign_cpu_thread_samples_then_stops():
     sample = q.get()
     assert sample['who'] == 'controller'
     assert 'foreign_cpu' in sample
+    # The names travel with the number they describe. A percentage with
+    # nothing saying whose it was is what withheld four calibration verdicts
+    # on this host, and the competitor had exited before anyone could look.
+    assert 'foreign_cpu_processes' in sample
+    for entry in sample['foreign_cpu_processes']:
+        assert set(entry) == {'command', 'percent', 'process_count'}
 
     bgperf2.controller_stop.set()
     deadline = time.time() + 5

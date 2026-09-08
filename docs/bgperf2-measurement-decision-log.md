@@ -3399,3 +3399,138 @@ version of each bound was checked against the runs on disk, which do not
 contain either case, and the reasoning that filled the gap was written in a
 comment rather than in a test. Both are now pinned by tests that construct the
 case rather than replay a run.
+
+### Progress on 2026-09-08: naming the machine's other tenant, and finding out it was us
+
+The previous entry ended with an open question rather than a finding: `mrt-rule-1`
+reported `unresolved`, withheld by 1.1 cores of foreign CPU "on a host that
+should have had none", and said what that meant belonged here. It is answered,
+and answering it exposed a hole in the confounder itself.
+
+**The confounder could not be argued with.** `foreign_cpu_contention` published
+one number -- "processes outside the benchmark used up to 1.1 cores during this
+run" -- and named nobody. Four consecutive MRT calibration runs had their
+verdict withheld by it, and an operator reading those artifacts today has no
+way to tell a neighbour's build from bgperf2's own leftovers, which are two
+completely different actions. The evidence existed: `contention.py` computes
+per-process percentages on every sample and `describe_contention()` already
+names them in the pre-run warning. The sampler summed them and threw the names
+away. This is the rule the findings section already states -- a confounder
+withholds the verdict, not the evidence -- applied to the one confounder that
+was not following it.
+
+**The names come from the sample that set the maximum, and move with it.**
+`foreign_cpu_report()` returns the total and the heaviest commands from a
+single pass over the two `/proc` samples, so what is published beside the
+number is what produced it. `note_foreign_cpu_sample()` replaces the peak and
+the names together or not at all: names taken from a later, quieter sample
+beside an earlier peak are two moments in the run reported as one. It is a
+function rather than four lines inside `bench()`'s monitor loop because no
+Docker-free test can drive that loop, which is how a churn fallback was written
+and then deleted again with the suite still green.
+
+**Aggregated by command name, with the count.** Per-pid ranking answers the
+wrong question on the canonical case: a parallel build is thousands of
+sub-second `cc1` processes, so the top three are three `cc1` entries at 1% each
+beside a total of 800%, which reads as though the number came from somewhere
+the names do not cover. One line saying `cc1 780% (312 procs)` is the same
+measurement and is actionable, and the count is what separates a runaway
+process from a swarm. `describe_contention()`'s warning gets this too, since it
+now formats the same list.
+
+**A peak nobody could name is still a peak.** The names are `null` when no
+sample ever set a maximum, and deliberately not an empty list: absent is also
+what every build before this one wrote, so an empty list would report those
+runs as having looked and found the machine quiet. And a sample that carries no
+names still sets the maximum -- dropping a peak for want of a list would
+understate the one column that decides whether the row is comparable.
+`findings.py` reads the artifact and never re-derives the names, because the
+run that fires this finding is precisely the one whose competitor has since
+exited.
+
+#### What was using the campaign host
+
+**`python` on this host is `venv/bin/python`, and that is bgperf2.** Verified:
+the venv interpreter reports `python` in `/proc/<pid>/comm`, the system one
+reports `python3`, and nothing else here runs a bare `python`. The pre-run
+warnings the four runs happened to print to stdout name `python 101%`,
+`python 99%`, `python 101%`, `python 101%` -- one core, pegged, in four
+consecutive runs between 19:43 and 19:48, and gone by 20:00.
+
+So the competitor was **a previous bgperf2 run that outlived its own bench**,
+polling `gobgp neighbor -j` against a 1M-route table once a second and parsing
+the result in-process (`bgperf2-4pm`), while the next four runs measured
+themselves beside it. `own_process_tree()` cannot exclude it: it walks
+*descendants* of `os.getpid()`, and a stale sibling is not one. The 18:44-19:43
+window is when the excused-sample defect described in the previous entry was
+live -- a run kept alive by the witness with no terminating path, which
+`bench()`'s lack of a run timeout turns into a hang -- so the most likely
+origin is a run abandoned rather than ended. That identification is by command
+name and elimination, not by pid, because the pid was never recorded: exactly
+the gap this change set closes for the next one.
+
+The operational consequence is in `CLAUDE.md` beside the contention section:
+check for a stray `python` before reading a contention number, and before
+starting a campaign block. Nothing here changes `CONTENTION_PERCENT` -- the
+confounder fired correctly on all four runs, and the machine really was being
+shared.
+
+#### Docker verification, on the campaign host
+
+Two runs of `bench -t bird --version 3.3.2 -n 10 -p 100000 -d /data/bgperf-work`,
+one under a controlled 2-core foreign load and one on a quiet machine. This is
+also the first *controlled* contention case the plan has: two detached
+`spinhog` processes (a copy of the interpreter, renamed so `/proc/comm` names
+it) burning one core each, started outside bgperf2's process tree.
+
+| | busy | quiet |
+|---|---|---|
+| `max foreign cpu %` | 207 | 7 |
+| verdict | `unresolved` | `unresolved` (injection unresolved) |
+| named | `spinhog 200% (2 procs), claude 6%, sshd <1%` | -- |
+| `elapsed (s)` | 9 | 10 |
+| post-injection tail | 4.1s | 4.3s |
+
+The busy run's finding carries the three commands in `evidence.processes` with
+their percentages and counts, and the printed last line names them. The quiet
+run publishes no contention finding at all and the artifact is byte-comparable
+in shape with what an older build wrote.
+
+**One defect the verification found, in the formatting rather than the rule.**
+The quiet third name was `sshd 0%` -- a process listed for having used nothing,
+which invites discounting the two real names beside it. Anything under one
+percent now prints as `<1%`. Rounding a real measurement to zero and printing
+it is the same mistake as publishing an unsampled sentinel: both state a
+quantity the run did not observe.
+
+**`claude` is in both lists and is not a defect.** The harness driving these
+runs is a real process using real CPU on the machine under measurement, it is
+not bgperf2's own tree, and 6% is well under the threshold. A campaign block
+run this way pays it; a block run from a detached shell does not. Recorded so
+nobody later reads it as an instrument artifact.
+
+#### What review found, and what was deferred
+
+Three findings, one of which was already fixed while the review ran (a
+`format_foreign_load` import in `bgperf2.py` left over from a progress line
+that was never written -- the names reach the operator through `findings.py`
+and the printed verdict, not through the poll output).
+
+**The documentation contradicted itself on the one distinction the change
+exists to preserve.** The host-evidence paragraph said a peak whose
+competitors could not be listed "shows as a percentage with a `null` list",
+while the findings table said the finding carries no `processes` key at all.
+Both are true of different documents -- `host_evidence()` publishes `null`,
+and `_host_findings()` omits the key rather than writing an empty list -- and
+saying only one of them in each place left a reader with no way to tell which
+applied where. Now stated together in both directions.
+
+**And one finding is real, is not in this change set, and is filed rather than
+fixed**: `scripts/run_2026_suite.sh`'s `suite_key()` stamps a fresh directory
+per invocation for calibration suites, so `--resume` is passed and is inert,
+and an interrupted multi-hour calibration silently restarts its whole matrix
+(`bgperf2-afb`, introduced by 393dc10). The 64 GB campaign contract asks the
+operator to resume an active block; for calibration it cannot. It is left
+alone here because it is a decision about the suite driver rather than about
+this measurement, and because `--force` already drops `--resume`, so the
+options are not obvious enough to pick while landing something else.

@@ -497,7 +497,7 @@ interval supports).
 | `missing_timing_evidence` | missing_evidence | No generator in the run could be asked what it offered (ExaBGP and GoBGP playback), or the monitor never reached the required count, which is also every failed run. |
 | `backpressure_observed` | confounder | A generator reported cumulative blocked writes or send stalls. Which end of a blocked write was at fault is not in these numbers, so it withholds an attribution rather than supplying one. BIRD 3's `TX pending` queue depths are deliberately **not** read as backpressure: a session with something queued at the instant it is polled is what a working session looks like, and treating it as backpressure would withhold every BIRD 3 verdict there is. |
 | `host_cpu_saturated` | confounder | Host idle fell to `HOST_IDLE_PERCENT` (5%) or below. `min idle%` is host-wide and includes bgperf2's own load, so it says the machine had nothing spare and not whose work that was — see the CPU attribution boundary in the implementation plan. Per-role, time-aligned CPU would be needed to say more, and no such measurement exists. |
-| `foreign_cpu_contention` | confounder | `max foreign cpu %` reached `contention.CONTENTION_PERCENT` (one core). A run sharing the machine is not comparable with one that did not, and a version ranking read off it would be an artifact of the neighbour. |
+| `foreign_cpu_contention` | confounder | `max foreign cpu %` reached `contention.CONTENTION_PERCENT` (one core). A run sharing the machine is not comparable with one that did not, and a version ranking read off it would be an artifact of the neighbour. Its `evidence.processes` names the heaviest competing commands from the sample that set that maximum — aggregated by command name with a `process_count`, since the canonical competitor is a parallel build of thousands of short-lived processes rather than one large one. They are recorded during the run and never re-derived here: a competitor that has since exited is exactly the case this fires on. An artifact written before that was recorded carries no `processes` key at all, which is deliberately not an empty list. |
 | `low_free_memory` | confounder | Free memory fell below `LOW_FREE_MEMORY_FRACTION` (5%) of the host's total, so the intervals include page pressure. A fraction rather than a constant because the column is also moved by bgperf2's own logging when the bench directory is tmpfs. |
 
 A run whose policy raised still writes its artifact: `write_event_artifact()`
@@ -510,6 +510,18 @@ The host evidence comes from `bgperf2.host_evidence()`, which maps the
 controller's sentinels back to "never sampled": the minima start above every
 real value so the first sample can only lower them, and an untouched sentinel
 must not read as an idle host with free memory.
+
+`max_foreign_cpu_processes` is the one piece of host evidence that is not a
+number. It carries the heaviest competing commands seen by the sample that set
+`max_foreign_cpu_percent`, as `{command, percent, process_count}`, and the two
+are replaced only ever together: names taken from a different sample than the
+published peak are two moments in the run reported as one. A peak whose
+competitors could not be listed is still kept -- losing it would understate the
+column that decides whether the row is comparable -- and carries `null` here.
+The finding derived from it drops the key entirely in that case rather than
+publishing an empty list, which is the same distinction stated from the other
+side: an empty list would say the run looked and found nobody, and that is
+what neither a failed listing nor an older build did.
 
 ## Batch summary: `<test>.summary.json`
 

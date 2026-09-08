@@ -20,12 +20,14 @@ from contention import (
     describe_contention,
     filesystem_type,
     free_space_bytes,
+    foreign_by_command,
     foreign_cpu_percent,
+    foreign_cpu_report,
+    format_foreign_load,
     is_memory_backed,
     own_process_tree,
     parse_proc_stat,
     sample_processes,
-    top_foreign,
 )
 
 
@@ -130,12 +132,88 @@ def test_zero_or_negative_interval_is_not_divided_by():
     assert foreign_cpu_percent(before, after, 0, clock_ticks=TICKS) == 0
 
 
-def test_top_foreign_is_ordered_and_limited():
+def test_the_heaviest_commands_are_ordered_and_limited():
     before = sample(p1=('julia', 0), p2=('matlab', 0), p3=('R', 0))
     after = sample(p1=('julia', 300 * TICKS), p2=('matlab', 100 * TICKS),
                    p3=('R', 200 * TICKS))
-    top = top_foreign(before, after, 100, limit=2, clock_ticks=TICKS)
-    assert [comm for _, comm in top] == ['julia', 'R']
+    _total, named = foreign_cpu_report(before, after, 100, limit=2,
+                                       clock_ticks=TICKS)
+    assert [entry['command'] for entry in named] == ['julia', 'R']
+
+
+def test_a_swarm_is_named_once_with_its_size():
+    """The canonical competitor is a parallel build, not one big process.
+
+    Ranked per pid, 300 cc1 processes at 1% each are named three times at 1%
+    beside a total of 300%, which reads as though the number came from
+    somewhere the names do not cover. The count is what separates one runaway
+    process from a swarm, and they send an operator to different places.
+    """
+    before = sample(**{'p{0}'.format(i): ('cc1', 0) for i in range(300)})
+    after = sample(**{'p{0}'.format(i): ('cc1', TICKS) for i in range(300)})
+    total, named = foreign_cpu_report(before, after, 100, clock_ticks=TICKS)
+
+    assert [entry['command'] for entry in named] == ['cc1']
+    assert named[0]['process_count'] == 300
+    assert named[0]['percent'] == pytest.approx(300.0)
+    assert total == pytest.approx(300.0)
+
+
+def test_the_names_account_for_the_total_they_are_published_beside():
+    """Both come from one pass, so they cannot describe different moments."""
+    before = sample(p1=('julia', 0), p2=('julia', 0), p3=('R', 0))
+    after = sample(p1=('julia', 200 * TICKS), p2=('julia', 100 * TICKS),
+                   p3=('R', 50 * TICKS))
+    total, named = foreign_cpu_report(before, after, 100, clock_ticks=TICKS)
+
+    assert total == pytest.approx(
+        foreign_cpu_percent(before, after, 100, clock_ticks=TICKS))
+    assert sum(entry['percent'] for entry in named) == pytest.approx(total)
+
+
+def test_named_load_excludes_the_benchmark_and_its_own_tree():
+    """A name only appears if it would have counted towards the total."""
+    before = sample(p1=('bird', 0), p2=('julia', 0))
+    after = sample(p1=('bird', 400 * TICKS), p2=('julia', 100 * TICKS))
+    _total, named = foreign_cpu_report(before, after, 100, clock_ticks=TICKS)
+    assert [entry['command'] for entry in named] == ['julia']
+
+    _total, named = foreign_cpu_report(before, after, 100, clock_ticks=TICKS,
+                                       extra_allowed=('julia',))
+    assert named == []
+
+
+def test_aggregated_ranking_carries_the_count_for_every_command():
+    before = sample(p1=('cc1', 0), p2=('cc1', 0), p3=('julia', 0))
+    after = sample(p1=('cc1', 100 * TICKS), p2=('cc1', 100 * TICKS),
+                   p3=('julia', 300 * TICKS))
+    assert foreign_by_command(before, after, 100, clock_ticks=TICKS) == [
+        (pytest.approx(300.0), 'julia', 1),
+        (pytest.approx(200.0), 'cc1', 2),
+    ]
+
+
+def test_a_single_process_is_not_labelled_with_its_count():
+    """"(1 procs)" beside every name is noise on the common case."""
+    assert format_foreign_load([
+        {'command': 'python', 'percent': 101.4, 'process_count': 1},
+        {'command': 'cc1', 'percent': 780.0, 'process_count': 312},
+    ]) == 'python 101%, cc1 780% (312 procs)'
+
+
+def test_a_fraction_of_a_percent_is_not_printed_as_none():
+    """A real run named "sshd 0%", which reads as a process listed for having
+    used nothing and invites discounting the names beside it."""
+    assert format_foreign_load([
+        {'command': 'sshd', 'percent': 0.199, 'process_count': 1},
+    ]) == 'sshd <1%'
+
+
+def test_the_warning_names_a_swarm_by_its_command():
+    before = sample(**{'p{0}'.format(i): ('cc1', 0) for i in range(300)})
+    after = sample(**{'p{0}'.format(i): ('cc1', TICKS) for i in range(300)})
+    complaint = describe_contention(before, after, 100, clock_ticks=TICKS)
+    assert 'cc1 300% (300 procs)' in complaint
 
 
 def test_extra_allowed_processes_are_excluded():

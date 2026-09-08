@@ -72,6 +72,12 @@ def names(result):
     return [f['finding'] for f in result['findings']]
 
 
+def by_name(result, name):
+    matched = [f for f in result['findings'] if f['finding'] == name]
+    assert len(matched) == 1, '{0} not published exactly once'.format(name)
+    return matched[0]
+
+
 def test_a_generator_still_sending_at_the_end_is_the_named_limit():
     '''The one shape that earns `tester`: a measured, observed send that ran
     to the moment the monitor reached its check-point.'''
@@ -205,6 +211,40 @@ def test_foreign_cpu_withholds_the_component():
 
     assert result['limiting_component'] == UNRESOLVED
     assert 'foreign_cpu_contention' in names(result)
+
+
+def test_the_withheld_verdict_names_who_was_using_the_machine():
+    """A confounder that cannot be argued with is a boolean with extra words.
+
+    Four MRT calibration runs on the campaign host were withheld by "processes
+    outside the benchmark used up to 1.1 cores" with nothing saying which, and
+    the process had exited before anyone could look. The names come from the
+    run's own record of the sample that set the maximum.
+    """
+    result = derive_findings(rate_limited_run(), host={
+        'max_foreign_cpu_percent': 110.0,
+        'max_foreign_cpu_processes': [
+            {'command': 'python', 'percent': 101.4, 'process_count': 1},
+            {'command': 'claude', 'percent': 8.6, 'process_count': 1},
+        ],
+    })
+
+    finding = by_name(result, 'foreign_cpu_contention')
+    assert 'python 101%' in finding['summary']
+    assert finding['evidence']['processes'][0]['command'] == 'python'
+    assert result['reason'] == finding['summary']
+
+
+def test_an_older_artifact_names_nobody_rather_than_naming_no_one():
+    """Absent is what a build that never took this measurement wrote, so an
+    empty list would report those runs as having found the machine quiet."""
+    result = derive_findings(rate_limited_run(),
+                             host={'max_foreign_cpu_percent': 110.0})
+
+    finding = by_name(result, 'foreign_cpu_contention')
+    assert 'led by' not in finding['summary']
+    assert 'processes' not in finding['evidence']
+    assert result['limiting_component'] == UNRESOLVED
 
 
 def test_a_quiet_machine_produces_no_host_finding():
@@ -357,6 +397,46 @@ def test_the_run_artifact_carries_the_findings(tmp_path, bench_args):
     written = json.loads((tmp_path / 'run.events.json').read_text())
     assert written['findings'] == doc['findings']
     assert written['findings']['limiting_component'] == TESTER
+
+
+def test_the_peak_and_its_names_are_only_ever_replaced_together():
+    """A peak from one sample beside names from another is two moments in the
+    run reported as one, and the names exist to describe the published peak."""
+    import bgperf2
+
+    stats = {'max_foreign_cpu': 0, 'max_foreign_cpu_processes': None}
+    quiet = [{'command': 'claude', 'percent': 30.0, 'process_count': 1}]
+    busy = [{'command': 'python', 'percent': 101.0, 'process_count': 1}]
+
+    bgperf2.note_foreign_cpu_sample(
+        stats, {'foreign_cpu': 30.0, 'foreign_cpu_processes': quiet})
+    bgperf2.note_foreign_cpu_sample(
+        stats, {'foreign_cpu': 101.0, 'foreign_cpu_processes': busy})
+    bgperf2.note_foreign_cpu_sample(
+        stats, {'foreign_cpu': 5.0, 'foreign_cpu_processes': quiet})
+
+    assert stats['max_foreign_cpu'] == 101.0
+    assert stats['max_foreign_cpu_processes'] == busy
+
+
+def test_a_peak_is_kept_even_when_its_competitors_could_not_be_named():
+    """Dropping a peak for want of a list would understate the one column
+    that decides whether the row is comparable at all."""
+    import bgperf2
+
+    stats = {'max_foreign_cpu': 0, 'max_foreign_cpu_processes': None}
+    bgperf2.note_foreign_cpu_sample(stats, {'foreign_cpu': 400.0})
+
+    assert stats['max_foreign_cpu'] == 400.0
+    assert stats['max_foreign_cpu_processes'] is None
+
+
+def test_a_run_that_never_sampled_names_nobody():
+    import bgperf2
+
+    evidence = bgperf2.host_evidence({'min_free': bgperf2.UNSAMPLED_MIN_FREE})
+
+    assert evidence['max_foreign_cpu_processes'] is None
 
 
 def test_an_unsampled_free_memory_sentinel_is_not_a_measurement():

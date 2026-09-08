@@ -2745,8 +2745,16 @@ def bench(args):
                 output_stats['first_received_time'] = datetime.timedelta(
                     seconds=measured['first_prefix_s'])
             
+            # The target's own reading of the table it holds goes in beside
+            # the monitor's count, so a decline in what one session is served
+            # can be told from a decline in what the target has. Absent for a
+            # daemon with no gauge, which is every daemon but BIRD, and such a
+            # run is decided exactly as it always was.
+            excused_before = tracker.witness_excused_samples
             status = tracker.update(elapsed.seconds, recved, neighbors_checked,
-                                    neighbors_received_full, info['checked'])
+                                    neighbors_received_full, info['checked'],
+                                    table_witness=latest_witness,
+                                    witness_monotonic_s=latest_witness_s)
 
             if elapsed.seconds > 0:
                 rm_line()
@@ -2803,6 +2811,21 @@ def bench(args):
                      ', target holds: {0} prefixes / {1} paths'.format(
                          latest_witness['best_paths'],
                          latest_witness['imported_paths'])))
+            if tracker.witness_excused_samples > excused_before \
+                    and excused_before == 0:
+                # Once, on the first sample the witness saved, and never again:
+                # a 1.5%-below-peak MRT table stays there for the rest of the
+                # run, so one line per sample would be forty copies of the same
+                # sentence in the log this decision is read from. What it
+                # excused in total is in the artifact.
+                print('the monitor is {0:.2f}% below its peak of {1} while the '
+                      'target holds {2} prefixes, {3:.2f}% below its own peak: '
+                      'reading the decline as export change, not route '
+                      'loss'.format(
+                          100.0 * tracker.max_excused_decline,
+                          tracker.peak_recved,
+                          (latest_witness or {}).get('best_paths'),
+                          100.0 * tracker.max_excused_witness_decline))
             bench_stats.append([elapsed.seconds, float(f"{cpu:>4.2f}"), mem, recved, neighbors_checked, percent_idle, mem_free])
             f.write('{0}, {1}, {2}, {3}\n'.format(elapsed.seconds, cpu, mem, recved)) if f else None
             f.flush() if f else None
@@ -2832,7 +2855,8 @@ def bench(args):
                     export_thread=export_thread,
                     target_table=target_table_samples,
                     target_table_unmeasured_reason=target_table_unmeasured(
-                        target, target_table_samples))
+                        target, target_table_samples),
+                    target_table_witness_rule=tracker.witness_rule())
 
             if status == ConvergenceTracker.CONVERGED:
                 # Before the post-convergence workloads, which take this queue
@@ -2920,7 +2944,8 @@ def bench(args):
                     policy_reload_evidence=reload_evidence,
                     target_table=target_table_samples,
                     target_table_unmeasured_reason=target_table_unmeasured(
-                        target, target_table_samples))
+                        target, target_table_samples),
+                    target_table_witness_rule=tracker.witness_rule())
 
             if elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
                 # The same stem the final graphs use. Built from args.target
@@ -3059,7 +3084,8 @@ def target_table_unmeasured(target, samples):
 def write_event_artifact(args, events, prefix, status, testers=None,
                          host=None, churn=None, policy_reload=None,
                          export=None, target_table=None,
-                         target_table_unmeasured_reason=None):
+                         target_table_unmeasured_reason=None,
+                         target_table_witness_rule=None):
     '''Atomically preserve lifecycle evidence before post-run collection.
 
     Returns the document it wrote, so the caller can print the findings it
@@ -3087,7 +3113,13 @@ def write_event_artifact(args, events, prefix, status, testers=None,
         # and a synthesised empty section would claim it was asked. A target
         # that *can* answer and produced nothing is the caller's reason, below.
         target_table=target_table,
-        target_table_unmeasured_reason=target_table_unmeasured_reason)
+        target_table_unmeasured_reason=target_table_unmeasured_reason,
+        # What the convergence rule did with that witness, from the tracker
+        # that did it. No fallback: a run whose verdict the witness never
+        # touched says nothing here rather than publishing a rule that did not
+        # fire, which is how it stays legible that the rule is not a filter
+        # every run passes through.
+        target_table_witness_rule=target_table_witness_rule)
     # Derived from the finished document rather than from the events, so the
     # policy can only ever reason about intervals this artifact published.
     #
@@ -3156,7 +3188,8 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
                  export_receiver_names=(), export_unmeasured_reason=None,
                  export_thread=None,
                  churn_evidence=None, policy_reload_evidence=None,
-                 target_table=None, target_table_unmeasured_reason=None):
+                 target_table=None, target_table_unmeasured_reason=None,
+                 target_table_witness_rule=None):
 
     bench_stop = time.time()
     output_stats['total_time'] = bench_stop - bench_start
@@ -3221,7 +3254,8 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
         testers=tester_evidence, host=host_evidence(output_stats),
         churn=churn_evidence, policy_reload=policy_reload_evidence,
         export=export_evidence, target_table=target_table,
-        target_table_unmeasured_reason=target_table_unmeasured_reason)
+        target_table_unmeasured_reason=target_table_unmeasured_reason,
+        target_table_witness_rule=target_table_witness_rule)
 
     # Scan the tester logs only after the clock has stopped. These used to run
     # in bench() before bench_stop, so walking every tester log line by line --

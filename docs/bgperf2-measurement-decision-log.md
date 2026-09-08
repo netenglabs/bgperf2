@@ -3199,3 +3199,203 @@ No release-gate item is claimed. The MRT half of "controlled calibration cases
 produce the expected findings" still cannot be claimed, because the runs still
 fail -- but they now fail with the evidence that says why, and the bead is no
 longer blocked on a question nobody had measured.
+
+### Progress on 2026-09-08: the rule that reads the second witness
+
+The previous entry took the measurement and deliberately published no verdict
+from it. This change set writes the rule, and nothing else: no threshold moved,
+`DROP_FRACTION` is still 1%, and a daemon with no table gauge -- every daemon
+but BIRD -- is decided exactly as it was.
+
+**The rule.** `ConvergenceTracker.update()` now takes the target's own reading
+beside each monitor sample, and a monitor decline past `DROP_FRACTION` is not
+route loss while the target's own `best_paths` is within `DROP_FRACTION` of
+*its* peak. The monitor counts what the target re-advertises to one session;
+`best_paths` counts what it holds. A genuine loss takes both down together, and
+by a comparable amount -- which is why the same constant serves both counts and
+nothing was fitted to this RIB. It is deliberately not "`best_paths` is flat":
+one of the four recorded runs really did wobble by 209 prefixes, and an
+invariant recorded as monotonic gets a threshold of zero and then fails on the
+next run of the same workload.
+
+**It applies in two places, and it had to.** Excusing the drop-streak samples
+only keeps such a run alive: with the convergence gate unchanged, a settled MRT
+table 1.5% below its own transient peak would poll on until `STUCK_SAMPLES` and
+fail anyway -- the same verdict by a slower route, which is exactly what the
+old rule did to the run that settled 0.145% down and hung.
+
+**Four things do not attest**, each of which would otherwise excuse a decline
+nobody measured. A withheld sum (`None`), which is what a peering still coming
+up or a partial CLI read produces. A reading with no timestamp, which cannot be
+shown to be current. A reading carried for `WITNESS_CARRY_SAMPLES` monitor
+samples without being re-read, which is what a dead target poll thread looks
+like -- `Container.neighbor_stats()` has no guard around its exec
+(`bgperf2-sl1`), so this is a live bug and not a hypothetical. And a target that
+holds nothing and never held anything, whose 0 equals its own peak.
+
+`WITNESS_CARRY_SAMPLES` is `ASSURANCE_SAMPLES_AFTER_CHECKPOINT` rather than a
+staleness constant of its own, and the claim it keeps true is that **no single
+reading can decide a verdict**: one reading attests for at most that many
+consecutive samples, fewer than the identical samples convergence needs on its
+shortest window and far fewer than `DROP_SAMPLES`. A run whose target poll dies
+mid-decline still fails, later than it would have. It is not tighter than that
+because the target read is a `docker exec` whose cost grows with the table --
+measured here, the witness was re-read on every monitor sample but one across
+159 samples of four runs, but a bound fitted to that would quietly switch the
+rule off on the larger runs that need it most.
+
+**The convergence gate also requires the sample's own check-point flag, and
+that is the guard review found missing first.** A target holding its whole
+table is precisely what a *broken monitor session* looks like from the target's
+side: the witness cannot tell "the target stopped exporting to one session"
+from "the instrument stopped seeing the run". Without the flag this gate would
+have reported CONVERGED for a run whose monitor sat at zero while the target
+held everything -- the very case the gate was added for, reached from the other
+side. `checked` is the monitor's own per-sample answer to "am I at or above the
+check-point", so it says the instrument is still seeing the run. The cost is
+paid in two places and is stated rather than hidden: a run whose monitor never
+reaches the check-point at all (a filtered run) cannot be carried by the
+witness and is decided as it was before, and a monitor that stops seeing the
+run is no longer failed by the drop streak in `DROP_SAMPLES` -- it is failed as
+stuck, `STUCK_SAMPLES` later. The streak excuse is deliberately *not* narrowed
+the same way: the declines that fail these runs settle above the check-point,
+but the mid-run collapses are entirely below it -- one recorded run fell 22%
+below its peak while the target's table was still climbing -- so narrowing it
+would leave open the hole the rule exists to close.
+
+**What the rule did is published, and only when it did something.**
+`target_table.witness_rule` carries the policy sentence, the excused sample
+count, the largest monitor decline excused, how far the target's own table was
+below its peak on those samples, both peaks, and whether the final verdict
+rested on the witness (`converged_below_monitor_peak`). It comes from the
+tracker that decided the run rather than being recomputed from the series, because
+two derivations of one verdict can disagree and only one of them decided
+anything. A run the rule never touched publishes nothing, so it stays legible
+that this is not a filter every run passes through. A one-line notice is
+printed the first time it fires, once and not per sample.
+
+**A `pytest` replay of the four recorded runs is part of the suite.**
+`tests/test_convergence_mrt_replay.py` carries the (monitor, `best_paths`)
+pairs of `mrt-witness-1` .. `-4` and pins three things: that the monitor alone
+fails three of the four, that all four converge once the target is asked, and
+that the same series with the target's own count falling from the monitor's
+peak still fails. `results/` is gitignored, so a rule written against a series
+nobody can re-read would not be auditable -- `summary.py`'s rule, applied to a
+rule instead of to a number.
+
+**What the row does not say, deliberately.** Nothing about the CSV moves: a run
+the rule carried has the same columns as one it did not, and `MSG` is left
+alone. `elapsed (s)` is still the monitor's convergence and must keep meaning
+that in every row, and `summary.py` reads `MSG` only for a failed row, so
+writing there would be invisible where it matters and would sit in the one
+field a churn or reload failure claims. What the rule did is printed beside the
+run and published in the artifact, on churn's and the reload's rule.
+
+#### Docker verification, on the campaign host
+
+Five single runs of the MRT calibration command and one 3-pass batch of
+`benchmarks/2026-calibration-mrt.yaml`, `-d /data/bgperf-work`, one at a time.
+Evidence in `results/2026/phase6-calibration/mrt-rule-1` .. `-5` and
+`results/2026/2026-baseline/calibration-mrt-20260908-194900/`.
+
+**The single runs converged 5 of 5**, against 4 of 5 *failing* before. Each
+published its `witness_rule` and printed the notice:
+
+| run | outcome | monitor peak -> final | excused | max monitor decline excused | target's own decline while excusing |
+|---|---|---|---|---|---|
+| `mrt-rule-1` | CONVERGED 39s | 1,073,143 -> 1,056,779 | 7 | 1.52% | 0.185% |
+| `mrt-rule-2` | CONVERGED 47s | 1,073,056 -> 1,056,779 | 11 | 2.63% | 0.00% |
+| `mrt-rule-3` | CONVERGED 39s | 1,071,947 -> 1,056,779 | 8 | 1.61% | 0.00% |
+| `mrt-rule-4` | CONVERGED 42s | 1,073,417 -> 1,056,779 | 10 | 1.59% | 0.00% |
+| `mrt-rule-5` | CONVERGED 43s | 1,072,591 -> 1,056,779 | 9 | 1.58% | 0.00% |
+| `mrt-rule-6` | CONVERGED 45s | 1,063,710 -> 1,056,779 | 4 | 2.51% | 0.117% |
+
+**The batch converged 2 of 3, and `summary.py` published statistics for the
+first time on this shape** -- `0 of 3 passes observed` before, two real
+observations now (`elapsed (s)` 40 and 46, `received` 1,056,779 in both with a
+CV of 0). The third pass is `bgperf2-lze` and not this rule: its *target
+container was removed 24 seconds into the run* by something outside bgperf2,
+the monitor went to 0 in one sample, and the row was published FAILED with
+`UNKNOWN (404 ... No such container)` in the version column.
+
+**That accident is the most useful thing the verification produced**, because
+it exercised the frozen-witness path in the wild and showed the guard doing
+its job and one thing it did not do. `Container.neighbor_stats()` died with the
+container (`bgperf2-sl1`), so the last reading -- a full 1,072,263-prefix table
+-- was carried, `witness_age_s` climbed to 18.1s, and the rule excused what it
+printed as a "100.00% below its peak" export change for three samples before
+`WITNESS_CARRY_SAMPLES` cut it off. The run failed either way, which is what
+the bound is for. But for three samples it failed later than it would have,
+and the printed line asserted something untrue.
+
+**So one more thing does not attest, added after that run: a monitor count of
+zero.** Zero is not a decline in what the target exports; it is the absence of
+the session every published timing is read from, and the target-side witness
+cannot see that session at all. It is the same rule churn already applies from
+the other side of convergence -- "a collapsed count is not a withdrawal" -- and
+it needs no new constant. `mrt-rule-5` re-ran the shape on the final code. The
+unit test for it is written against the claim, not the accident: the accident
+also needed `checked` to be false, and it was the *gate's* check-point conjunct
+that stopped that run being declared converged.
+
+A run with no witness at all -- every daemon but BIRD -- takes none of these
+paths, and `tests/test_convergence.py` pins that its verdicts are unchanged.
+
+`mrt-rule-1` to `-3` ran on the rule as first written, `mrt-rule-4` on the
+version with the gate's check-point conjunct, `mrt-rule-5` with the zero guard,
+and `mrt-rule-6` on the final code, after review added the excused-sample limit
+and the fresh-reading requirement (below). The settled count is above the
+check-point in all of them, so every version agrees here -- which is exactly
+why each of those guards needed a unit test rather than a run. `mrt-rule-6`
+also settled 0.65% below its peak, inside `DROP_FRACTION`, so its verdict did
+not rest on the witness at all (`converged_below_monitor_peak` false) even
+though four mid-run samples did: the two are separate claims for this reason.
+
+**And `mrt-rule-5` and `-6` produced the config's expected verdict**: `limiting
+component: tester`, with the monitor reaching the required count 20.0s and
+25.9s before the last generator finished. So the MRT half of "controlled calibration cases
+produce the expected findings" is now demonstrated, on one run. It is not
+claimed as a gate item on one run, and `mrt-rule-1` is why: it reported
+`unresolved`, withheld by 1.1 cores of foreign CPU on a host that should have
+had none. That is the confounder rule working exactly as written, and what it
+says about this host belongs to the next change set.
+
+#### Two defects review found in the rule itself, and what they have in common
+
+Both were in the rule, not in the measurement, and both are the same mistake in
+two shapes: **a bound that was argued for rather than tested, and therefore
+covered the case in front of it and not the claim.**
+
+**A run kept alive by the witness had no terminating path.** The excuse resets
+the drop streak, and a count that declines a *little on every sample* also
+resets the stability counter by changing, so `STUCK_SAMPLES` never fired
+either. Simulated at 100 prefixes a sample with the witness pinned at its peak:
+still CONTINUE after 2000 samples with a fifth of the table gone, where the old
+rule failed it at ten. `bench()` has no run timeout, so that is a hang, and
+under `batch()` it is the rest of the matrix. The inline comment claimed the
+fallback -- "failed as stuck, `STUCK_SAMPLES` later" -- and the claim was true
+only for a count that goes flat, which is the shape the eight measured runs
+happen to have. `WITNESS_EXCUSED_LIMIT` (= `STUCK_SAMPLES`) now bounds
+consecutive excused samples, and its message names the witness, because a stuck
+count and this send a reader to different places: one says the target stopped,
+the other that it holds its table while the session the run is read through
+keeps losing it.
+
+**And a frozen reading could still decide CONVERGED.** The constant's own
+comment argued that `WITNESS_CARRY_SAMPLES` attesting samples is "fewer than
+the identical samples convergence needs" -- true only when the freeze begins at
+or before the assurance window does. A witness re-read for three flat samples
+and frozen thereafter is still inside the carry bound when the window closes,
+and the run converged on a reading three polls stale: the exact co-occurrence
+the bound exists for, since a dead target poll and a parked monitor have the
+same cause. The gate now requires a reading taken on the deciding sample, which
+is a property of that sample rather than an arithmetic relation between two
+constants that no test could hold together. It costs at most one poll -- the
+count is flat by then, so the next fresh read converges -- and the eight
+measured runs re-read the witness on all but one monitor sample in 159.
+
+Recorded because the pattern is the one this file exists to catch: the first
+version of each bound was checked against the runs on disk, which do not
+contain either case, and the reasoning that filled the gap was written in a
+comment rather than in a test. Both are now pinned by tests that construct the
+case rather than replay a run.

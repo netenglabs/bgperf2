@@ -452,25 +452,32 @@ correct final route counts and timing events.
 
 ### Phase 6: Calibration and release gate
 
-Status: started on 2026-09-08, and still **blocked on `bgperf2-dcs`** -- but
-no longer on an unanswered question. The two calibration configs exist and both
-shapes have been run on the campaign host, which is now the machine this
-repository is checked out on. The synthetic shape behaves as designed and its
-expected verdict (`unresolved`, withheld by a queue-side generator counter) is
-recorded in the config itself. The MRT shape fails most of the time and still
-does.
+Status: started on 2026-09-08, and **no longer blocked**: `bgperf2-dcs` is
+answered and closed. The two calibration configs exist and both shapes have
+been run on the campaign host, which is now the machine this repository is
+checked out on. The synthetic shape behaves as designed and its expected
+verdict (`unresolved`, withheld by a queue-side generator counter) is recorded
+in the config itself.
 
-What changed on 2026-09-08 is that the target is now asked what it holds. Its
-own `Routes:` gauge reaches the progress line and a `target_table` section of
-the events artifact, and four fresh runs settle the question the bead put
-first: **the target is not losing routes.** Its table climbs to 1,080,985
-distinct prefixes, to the prefix in every run, and stays there. What declines
-is what it *exports* -- and the target's own export count agrees with the
-monitor to three decimal places, so the monitor is not miscounting either. The
-discriminator a rule needs is therefore between two of the target's own
-numbers, and it now exists. Writing that rule is the next change set; the gate's
-"controlled calibration cases produce the expected findings" cannot be claimed
-for the MRT half until it does.
+The MRT shape used to fail most of the time. Two change sets on 2026-09-08
+settled why. The first asked the target what it holds -- its own `Routes:`
+gauge now reaches the progress line and a `target_table` section of the events
+artifact -- and four runs answered the question the bead put first: **the
+target is not losing routes.** Its table climbs to 1,080,985 distinct prefixes,
+to the prefix in every run, and stays there; what declines is what it
+*exports*, and the target's own export count agrees with the monitor to three
+decimal places, so the monitor is not miscounting either. The second wrote the
+rule that reads the two: a monitor decline past `DROP_FRACTION` is not route
+loss while the target's own best-path count is within `DROP_FRACTION` of its
+peak. No threshold moved. Six single runs and two of three batch passes then
+converged, and `summary.py` published statistics for this shape for the first
+time; the third pass failed because its target container was removed mid-run by
+something outside bgperf2 (`bgperf2-lze`).
+
+What remains for the gate's "controlled calibration cases produce the expected
+findings" is the *finding*, not the verdict: the MRT shape is reproducible now,
+two of these runs reported the expected `tester`, but one reported `unresolved`,
+withheld by foreign CPU on a host that should have had none.
 
 Decisions and verification for this phase are in the
 [decision log](bgperf2-measurement-decision-log.md#phase-6-calibration-and-release-gate).

@@ -12,9 +12,15 @@
 # here: the monitor reached the required count 5.9s to 30.3s *before* the last
 # injector finished, which is an overlap and is reported as one.
 #
-# KNOWN FAILURE -- this config fails most of the time (bgperf2-dcs), by design
-# of the rule rather than of the target, and that is what it currently
-# calibrates.
+# WAS A KNOWN FAILURE, RESOLVED 2026-09-08 (bgperf2-dcs). The history below is
+# kept because it is what this config calibrates: the failure was a property of
+# the convergence rule, not of the target, and the rule now has a second
+# witness. `ConvergenceTracker` reads the target's own `best_paths` gauge
+# beside the monitor's count and does not treat a decline the target's table
+# did not follow as route loss. Four runs of the command this config runs
+# converged, and each published a `target_table.witness_rule` saying what the
+# rule excused. Nothing else about the run moved: the settled count is still
+# 1,056,779, and `elapsed (s)` is still the monitor's.
 #
 # Measured 2026-09-08: 4 of 5 runs FAILED; a 3-pass batch failed 3 of 3 and
 # summary.py published "0 of 3 passes observed". The monitor's count peaks
@@ -37,8 +43,9 @@
 # count falls by the same 1.35% the monitor sees, to three decimal places. The
 # peak is real and so is the decline; neither is route loss.
 #
-# A FAILED row from this config is not evidence about the target. Do not raise
-# DROP_FRACTION to make it pass -- see the bead.
+# A FAILED row from this config is not evidence about the target, and
+# DROP_FRACTION was never raised to make it pass: it is unchanged at 1%, and is
+# now applied to the target's own count as well as the monitor's.
 
 tests:
   -

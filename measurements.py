@@ -1847,15 +1847,16 @@ TARGET_TABLE_SERIES = ('monitor_accepted', 'best_paths', 'imported_paths',
 TARGET_TABLE_RESAMPLED = ('best_paths', 'imported_paths', 'exported_to_monitor')
 
 
-def target_table_section(samples, unmeasured_reason=None):
+def target_table_section(samples, unmeasured_reason=None, witness_rule=None):
     """The per-poll witness series, and the peak and final value of each.
 
-    Publishes no verdict about whether a decline in the monitor's count is
-    route loss. That rule is the thing this measurement exists to decide, and a
-    rule shipped alongside the first evidence for it would be fitted to the run
-    in front of it -- which is how every convergence rule in this project has
-    been broken so far, each time by being written against the case rather than
-    against the claim.
+    Derives no verdict of its own. The rule that reads this witness lives in
+    `convergence.py`, where it decides the run, and `witness_rule` is that
+    tracker's account of what it did -- carried here rather than recomputed,
+    because two derivations of one verdict can disagree and the one that
+    decided the run is the one worth publishing. It is absent when the rule
+    changed nothing, so a run whose monitor count never fell writes the
+    document it always did.
 
     The raw samples are kept beside the summary for the reason `summary.py`
     keeps its observations: a number whose inputs are gone is not auditable,
@@ -1914,12 +1915,15 @@ def target_table_section(samples, unmeasured_reason=None):
     section = {'samples': samples, 'series': series}
     if unmeasured_reason:
         section['unmeasured_reason'] = unmeasured_reason
+    if witness_rule:
+        section['witness_rule'] = witness_rule
     return section
 
 
 def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
                    churn=None, policy_reload=None, export=None,
-                   target_table=None, target_table_unmeasured_reason=None):
+                   target_table=None, target_table_unmeasured_reason=None,
+                   target_table_witness_rule=None):
     '''Build the stable JSON-compatible event artifact document.
 
     `testers` maps a generator's producer name to whatever evidence it holds
@@ -1985,7 +1989,8 @@ def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
     # such run keeps exactly the document it has always had.
     if target_table or target_table_unmeasured_reason:
         artifact['target_table'] = target_table_section(
-            target_table or [], target_table_unmeasured_reason)
+            target_table or [], target_table_unmeasured_reason,
+            target_table_witness_rule)
     return artifact
 
 

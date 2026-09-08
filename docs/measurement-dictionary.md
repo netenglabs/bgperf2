@@ -387,11 +387,66 @@ section and no reason, which is the document every non-BIRD run has always
 written; without the distinction the two would be byte-identical. Same rule as
 the `export` section's own `unmeasured_reason`.
 
-**No verdict is derived here.** Whether a decline in the monitor's count is
-route loss is exactly the question this measurement exists to answer, and a
-rule shipped beside the first evidence for it would be fitted to the run in
-front of it — which is how all three convergence rules in `convergence.py` were
-broken.
+**No verdict is derived here**, and that has not changed: the rule that reads
+this witness lives in `convergence.py`, where it decides the run.
+`witness_rule` is that tracker's own account of what it did, carried into this
+section rather than recomputed from the series — two derivations of one verdict
+can disagree, and the one that decided the run is the one worth publishing.
+
+The rule is: **a decline in the monitor's count past `DROP_FRACTION` is not
+route loss while the target's own `best_paths` is within `DROP_FRACTION` of its
+peak.** The monitor counts what the target re-advertises to one session;
+`best_paths` counts what it holds. A genuine loss takes both down together.
+Measured on eight 10 × 1,050,000 MRT runs: the monitor settled 1.18% to 1.55%
+below its peak, while the target's own table was between 0.00% and 0.19% below
+its own on the samples that decline was excused on. The same `DROP_FRACTION`
+separates them, so no constant is fitted to that RIB, and the rule is
+deliberately not "`best_paths` is flat": the gauge is read while injectors are
+still delivering, one run's table really did wobble by 209 prefixes, and one
+sample of another sat 1.02% below its own peak and correctly did not attest.
+It is a per-sample rule: a sample where the target is also past the threshold
+advances the drop streak like any other.
+
+`witness_rule` is **absent unless the rule changed something**, so a run whose
+count never fell far enough to need it writes the document it always wrote.
+
+| Field | Unit/type | Definition and interpretation |
+|---|---|---|
+| `witness_rule.policy` | text | The rule in one sentence, so a reader can disagree with it without re-deriving the numbers — `findings.py`'s rule. |
+| `witness_rule.drop_fraction` | fraction | The threshold applied to both counts. |
+| `witness_rule.excused_samples` | count | Monitor samples where the target's gauge is what kept the drop streak from advancing. Counted, not flagged: one excused sample and forty are different claims about a run. Samples where the monitor was climbing anyway are not counted — they needed no excusing. |
+| `witness_rule.max_excused_monitor_decline` | fraction | The largest monitor decline the rule excused. |
+| `witness_rule.max_witness_decline_while_excusing` | fraction | How far the target's own table was below its peak on those same samples. This is the number that says how much room the rule had: 0.019% against a 1.47% monitor decline is not the same claim as 0.9% against 1.0%. |
+| `witness_rule.witness_peak_best_paths` / `monitor_peak` | prefixes | The two high-water marks the declines are measured from. |
+| `witness_rule.converged_below_monitor_peak` | boolean | True when the run was declared converged on a sample the monitor was still more than `DROP_FRACTION` below its own peak on — i.e. the final verdict rested on the witness, not only the samples it kept alive. |
+
+A carried reading stops keeping a run alive after `WITNESS_CARRY_SAMPLES`
+monitor samples re-use it; a reading with no timestamp is never evidence; and a
+monitor count of **zero** is never excused, because zero is not a decline in
+what the target exports but the absence of the session the run is measured
+through. `Container.neighbor_stats()` has no guard around its exec, so one
+failed read freezes the witness for the rest of the run (`bgperf2-sl1`).
+
+Two further bounds, both added by review, and each closing a way the rule could
+have said something it had not measured:
+
+- **A CONVERGED verdict requires a reading taken on the sample that decides
+  it**, not merely one inside the carry bound. A witness that freezes partway
+  through the assurance window is still inside that bound when the window
+  closes, so the carry bound alone would have let a verdict rest on a reading
+  several polls stale — taken, in the case it exists for, from a poll thread
+  that had already died. The cost is at most one poll: the count is flat by
+  then, so the next sample carrying a fresh read converges.
+- **A run the witness alone is keeping alive ends after
+  `WITNESS_EXCUSED_LIMIT` consecutive excused samples** (`STUCK_SAMPLES`, the
+  same judgement that constant already makes). A count that declines a little
+  on *every* sample resets the drop streak through the excuse and the stability
+  counter through changing, so such a run had no terminating path at all —
+  simulated at 100 prefixes a sample it was still running after 2000 samples
+  with a fifth of the table gone, and `bench()` has no run timeout. The failure
+  message names the witness, because a stuck count and this point somewhere
+  different: one says the target stopped, the other that it holds its table
+  while the session the run is read through keeps losing it.
 
 **What it showed first.** On four 10 x 1,050,000 bgpdump2 MRT runs, three of
 which `ConvergenceTracker` failed for a 1.2–1.5% decline, `best_paths` climbed

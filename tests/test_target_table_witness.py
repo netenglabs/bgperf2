@@ -6,13 +6,15 @@ of injectors have finished, then settles as the rest complete, and
 one BGP session's view of the target and it is the only instrument any
 published timing comes from, so nothing checks it.  These cover the second
 witness -- BIRD's own `Routes:` gauge -- and the artifact section that records
-it.  Nothing here decides a convergence rule; that decision waits on what the
-measurement says.
+it, plus the account `ConvergenceTracker` publishes here of what the rule it
+feeds actually did.  The rule itself is pinned in `test_convergence.py`: this
+module covers the measurement and the document, not the verdict.
 '''
 import pytest
 
 from base import Target
 from bgperf2 import target_table_unmeasured
+from convergence import ConvergenceTracker
 from bird import BIRDTarget, neighbors_state, table_witness
 from measurements import (
     EventKind,
@@ -349,3 +351,32 @@ def test_a_daemon_with_no_gauge_gets_no_reason_and_no_section():
 def test_a_target_that_answered_needs_no_reason():
     assert target_table_unmeasured(_OneReadTarget(TARGET_PROTOCOLS),
                                    OVERSHOOT_SAMPLES) is None
+
+
+# --- the rule the witness feeds -------------------------------------------
+
+def test_a_run_the_rule_never_touched_publishes_no_rule():
+    '''Absent rather than a rule that did not fire, so it stays legible that
+    this is not a filter every run passes through.'''
+    artifact = event_artifact(_converged_events(), 'converged',
+                              target_table=OVERSHOOT_SAMPLES)
+    assert 'witness_rule' not in artifact['target_table']
+
+
+def test_the_rule_that_decided_a_run_is_published_beside_its_evidence():
+    tracker = ConvergenceTracker()
+    tracker.note_neighbors_checkpoint()
+    for i, sample in enumerate(OVERSHOOT_SAMPLES):
+        tracker.update(i, sample['monitor_accepted'], 2, 2, True,
+                       table_witness={'best_paths': 1000},
+                       witness_monotonic_s=float(i))
+    rule = tracker.witness_rule()
+    assert rule['excused_samples'] == 1
+    artifact = event_artifact(_converged_events(), 'converged',
+                              target_table=OVERSHOOT_SAMPLES,
+                              target_table_witness_rule=rule)
+    section = artifact['target_table']
+    assert section['witness_rule'] == rule
+    # The rule's own account sits beside the series it was applied to, so a
+    # reader can check one against the other.
+    assert section['series']['monitor_accepted']['decline_from_peak'] == 0.015

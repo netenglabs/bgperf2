@@ -17,11 +17,11 @@ named monotonic phase intervals live in each run's `.events.json` artifact.
 | `required` | prefixes | Configured monitor accepted-prefix checkpoint. Reaching it shortens the stability-assurance window; stable completion may still be reported below it when target-neighbor completion evidence is available. It is 99% of the configured synthetic total, 99% of the scanned MRT prefix count for bgpdump2, or 93% of that MRT count for GoBGP playback. The synthetic total is the number of **distinct** prefixes, not the number of paths offered: the monitor counts what the target re-advertises, which is one best path per prefix, so it is `(peers / path diversity) x prefixes per peer`. |
 | `received` | prefixes | GoBGP monitor accepted-prefix count in the sample that completed or failed the run. Unaffected by `--receivers`: export fan-out adds sessions the target advertises the same table to, and they announce nothing, so neither this nor `required` moves with the receiver count. The fan-out is recorded as `run.receivers` in both `<prefix>.events.json` and `<prefix>.versions.json` and appears in the artifact stem as `rx<N>`; it is not a CSV column, and a run whose sessions came from a scenario file (`-f`) records `null`. Receivers run the same `bgperf/gobgp` image as the monitor, so the `monitor version` column describes their build too. |
 | `monitor (s)` | seconds | Time spent waiting for the monitor's BGP session with the target to become established, before the measured sampling loop starts. |
-| `elapsed (s)` | seconds | Monitor-observed convergence boundary in whole seconds from the tester launch origin. The controller estimates the boundary by subtracting the trailing stability-assurance samples from the final monitor sample. It is not necessarily a literal full-table time or the whole-run time. Unaffected by `--churn-prefixes`: churn bursts run after this boundary has been settled, and what they cost is in the artifact's `churn` section. |
+| `elapsed (s)` | seconds | Monitor-observed convergence boundary in whole seconds from the tester launch origin. The controller estimates the boundary by subtracting the trailing stability-assurance samples from the final monitor sample. It is not necessarily a literal full-table time or the whole-run time. Unaffected by `--churn-prefixes` and `--policy-reload-blocks`: both run after this boundary has been settled, and what they cost is in the artifact's `churn` and `policy_reload` sections. |
 | `prefix received (s)` | seconds | Whole seconds from tester launch origin to the first monitor sample with a nonzero accepted-prefix count. Zero also represents a run that never observed a prefix, so failure state must be checked. |
 | `testers (s)` | seconds | Legacy post-first-prefix interval: `elapsed (s) - prefix received (s)`. Despite its name, it does not measure tester duration or tester completion and cannot establish an injection bottleneck. |
-| `total time` | seconds | Wall-clock seconds from the start of benchmark setup through convergence/failure handling up to the stop point in `finish_bench()`. Post-stop log scanning, graphing, and artifact writing are excluded. **Churn is inside it**: the bursts run before that stop point, so a `--churn-prefixes` run's `total time` is not comparable with a run that did not churn. The artifact stem carries `ch<C>x<B>` so the two are at least distinguishable by name. |
-| `max cpu %` | percent | Maximum sampled CPU use of the target container, rounded to an integer. Values may exceed 100% on multicore hosts. Covers the delivery of the table only: samples taken during churn bursts are drained and dropped, so a burst's peak does not enter this column and make a churn run's row mean something different while looking identical. |
+| `total time` | seconds | Wall-clock seconds from the start of benchmark setup through convergence/failure handling up to the stop point in `finish_bench()`. Post-stop log scanning, graphing, and artifact writing are excluded. **Churn is inside it**: the bursts run before that stop point, so a `--churn-prefixes` run's `total time` is not comparable with a run that did not churn. The artifact stem carries `ch<C>x<B>` so the two are at least distinguishable by name. The same holds for `--policy-reload-blocks`, whose stem carries `pr<N>`. |
+| `max cpu %` | percent | Maximum sampled CPU use of the target container, rounded to an integer. Values may exceed 100% on multicore hosts. Covers the delivery of the table only: samples taken during churn bursts are drained and dropped, so a burst's peak does not enter this column and make a churn run's row mean something different while looking identical. A policy reload is the same: its samples are kept in the artifact's `policy_reload` section, not in this column. |
 | `max mem (GB)` | GiB | Maximum sampled target-container memory use, divided by 1024^3 and rounded to three decimal places. The historical `GB` label is retained for compatibility. Covers the delivery of the table only, like `max cpu %`. |
 | `min idle%` | percent | Minimum sampled host-wide idle CPU percentage, rounded to an integer. It includes bgperf2's own workload and is not a foreign-contention measure. |
 | `min free mem (GB)` | GiB | Minimum sampled host available memory, divided by 1024^3 and rounded to three decimal places. The historical `GB` label is retained for compatibility. It is host-wide and includes bgperf2's own containers, so `--receivers N` is in it: each receiver is a full GoBGP holding its own copy of the table on the same host. A fan-out large enough relative to the table can therefore drive this column low enough for `findings.py` to raise the `low_free_memory` confounder and withhold `limiting_component` — on memory the run consumed by design. `bench` prints the mechanism when a run asks for receivers; it does not estimate the size, because what a GoBGP holds per route depends on the paths. |
@@ -32,7 +32,7 @@ named monotonic phase intervals live in each run's `.events.json` artifact.
 | `tester errors` | count | Tester log lines classified as errors after convergence timing stops. Known benign BIRD messages are excluded by the tester parser. |
 | `tester timeouts` | count | Tester log lines classified as timeouts after convergence timing stops. |
 | `failed` | string | `FAILED` when convergence tracking declares failure; otherwise empty. |
-| `MSG` | string | Convergence failure explanation when available; otherwise empty. Also carries a churn sequence that did not complete, with `failed` left blank: the run converged and that measurement stands, but a batch of churn cells whose rows all read as ordinary would say nothing about the second workload. `summary.py` reads this column only for a row marked failed, so no summary is affected. |
+| `MSG` | string | Convergence failure explanation when available; otherwise empty. Also carries a churn sequence that did not complete, with `failed` left blank: the run converged and that measurement stands, but a batch of churn cells whose rows all read as ordinary would say nothing about the second workload. `summary.py` reads this column only for a row marked failed, so no summary is affected. A policy reload that did not complete is carried the same way. |
 | `filters` | string | Requested filter/policy test identifier; otherwise empty. |
 | `max foreign cpu %` | percent of one core | Maximum sampled CPU attributed to non-bgperf2 processes above the controller's baseline, rounded to an integer. Use it to qualify contention; it is not host utilization. |
 | `target image` | string | Normalized container image reference used by the target. |
@@ -175,6 +175,71 @@ issue the burst and nothing rewrites the generator config), and alongside
 `--filter_test` (a policy that drops part of the block makes the burst's
 completion count unreachable, so a correctly filtered run would be published as
 a stalled one).
+
+## Event artifact: the `policy_reload` section
+
+Present only on a run that asked for `--policy-reload-blocks` (batch:
+`policy_reload_blocks` on a test) or that asked and could not run the reload.
+As with churn, everything else about a reload run is a normal run: the CSV row,
+`elapsed (s)`, `max cpu %`, `max mem (GB)` and `min free mem (GB)` all describe
+the *initial delivery* of the table and are settled before the policy is
+changed. What the reload cost is here and nowhere else.
+
+Once the run has converged, an import policy rejecting the last
+`policy_reload_blocks` of the fleet's prefix blocks is installed and applied
+with the target's own reload command. A **block** is the group of peers
+`--path-diversity` deals the fleet into — one peer per block at the default —
+and whole blocks are rejected rather than individual peers: rejecting some
+peers of a shared block leaves the prefix behind a surviving path, so the
+target does real best-path work and the monitor's count does not move at all.
+
+| Field | Unit/type | Definition and interpretation |
+|---|---|---|
+| `requested` | boolean | Whether a reload was issued. `false` with an `incomplete_reason` is a run that asked for one and could not run it. |
+| `complete` | boolean | Whether the event stream shows the reload finishing — derived from the events. |
+| `reload_complete` | boolean | Whether the *controller* drove it to the end. Named apart from `complete` because one is what the events show and the other is what the controller knows; a disagreement is worth seeing. `false` also puts the reason in the row's `MSG` column with the `failed` flag left blank, exactly as an incomplete churn sequence does. |
+| `incomplete_reason` | string or null | Why not: a daemon that did not report the new configuration accepted, an exec that raised, a count that stalled for `POLICY_RELOAD_STALL_SAMPLES` polls, or a count that collapsed below what the policy leaves. |
+| `rejected_blocks` | count | How many prefix blocks the new policy rejects. |
+| `rejected_peer_asns` | list of AS numbers | Exactly which peers it rejects — the tail of the fleet, ordered by AS. A reader can rebuild the workload from this without the config. |
+| `rejected_prefixes` | prefixes | `rejected_blocks x prefixes per peer`: the distinct prefixes the policy removes from what the monitor can see. |
+| `converged_prefixes` | prefixes | What the monitor accepted when the run converged, which is what the expected count is measured down from — not what the fleet offered, since the check-point carries a 0.99 factor for a target that does not hold everything offered to it. |
+| `expected_accepted` | prefixes | `converged_prefixes - rejected_prefixes`. Completion is `accepted <= expected_accepted`, exactly. |
+| `accepted_before` / `accepted_after` | prefixes | What the monitor saw on the sample the reload was issued from, and on the sample it completed. |
+| `command_s` | seconds | How long issuing the change took — the `docker exec` and the daemon's reply. **Not the reload**: on BIRD the reply comes back in milliseconds and the table drains afterwards, so publishing one number would credit the daemon with an instant reload. |
+| `reload_s` | seconds | From the sample the reload was issued on to the sample where the table had settled at `expected_accepted`. |
+| `reload_resolution_s` | seconds | How coarsely that interval is placed, from the polls that bound it. |
+| `target_cpu_percent_max` / `_mean` | percent | The target container's CPU across the interval, sampled from its existing stats thread. `null` where no sample fell inside — an interval too short to sample and an interval in which the target did nothing are different findings, and 0.0 would publish the second. |
+| `target_cpu_samples` | count | How many samples that was, so a mean over one sample is not read as a distribution. |
+| `mechanism` | string or null | What the reload was carried out with, e.g. `birdc configure`. Reported because applying policy by file reload, management CLI and transactional API are operationally different, and only like mechanisms compare. |
+| `session_preserving` | boolean or null | Whether the BGP sessions stayed up. A reload that resets them measures a second table delivery and belongs in a separately labelled comparison. |
+
+**An interval of one poll is an upper bound, not a duration**, the same rule the
+churn intervals follow and for the same reason: the reload is issued just after
+a sample and the soonest it can be seen is the next one. The printed line says
+`within the 1.0s poll resolution` for that case.
+
+**What BIRD actually does, verified on `bgperf/bird:2.19.2` and
+`bgperf/bird:3.3.2`.** `birdc configure` holds the sessions up — their `Since`
+is unchanged across the reconfigure and both stay Established — so these runs
+belong in the no-reset comparison. But neither series re-evaluates purely
+locally: both answer a changed import filter by asking their peers for a route
+refresh, and each generator's `Export updates` counter doubles. So `reload_s`
+covers re-import as well as re-decision. That is what an operator changing
+policy on BIRD pays, and it is recorded rather than hidden; it is not
+comparable with a daemon that re-filters from its own stored routes.
+
+**A reload is refused rather than interpreted** for a target with no reload
+mechanism (only BIRD has one here), for an MRT generator (the policy selects a
+block by the peer AS bgperf2 assigned, and an MRT injector replays the AS paths
+in the file), for `-f`/a scenario target, alongside `--filter_test` (the
+target's import filter is already the policy under test and the reload is
+written into the same place), alongside a churn workload (both run against the
+converged table off the same monitor samples, so one would take the other's
+outcome as its baseline and nothing would say which ran first), for
+`-r/--repeat` (the completion count is `blocks x prefixes per peer`, and repeat
+reuses whatever generator containers it finds, so `-p` need not be what they
+are announcing), and for a block count covering every block (a target left
+holding nothing cannot be told from one that lost its sessions).
 
 ## Event artifact: the `findings` section
 

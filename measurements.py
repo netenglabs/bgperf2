@@ -29,6 +29,8 @@ class EventKind(str, Enum):
     CHURN_BURST_STARTED = 'churn_burst_started'
     CHURN_WITHDRAW_COMPLETE = 'churn_withdraw_complete'
     CHURN_BURST_COMPLETE = 'churn_burst_complete'
+    POLICY_RELOAD_STARTED = 'policy_reload_started'
+    POLICY_RELOAD_COMPLETE = 'policy_reload_complete'
 
 
 class EventPhase(str, Enum):
@@ -42,6 +44,14 @@ class EventPhase(str, Enum):
     # phase would otherwise find two `injection` intervals in one document and
     # no way to tell which one the row's `elapsed (s)` came from.
     CHURN = 'churn'
+    # A policy reload is a third workload run against the converged target, and
+    # it gets a phase of its own for the reason churn has one: a reader
+    # grouping by phase must never find two intervals under one name with
+    # nothing saying which of them the row describes. It is separate from
+    # `CHURN` as well -- both happen after convergence, but one measures a
+    # table moving under a fixed policy and the other a fixed table under a
+    # policy that moved, and averaging those would describe neither.
+    POLICY_RELOAD = 'policy_reload'
 
 
 EVENT_PHASE = {
@@ -57,6 +67,8 @@ EVENT_PHASE = {
     EventKind.CHURN_BURST_STARTED: EventPhase.CHURN,
     EventKind.CHURN_WITHDRAW_COMPLETE: EventPhase.CHURN,
     EventKind.CHURN_BURST_COMPLETE: EventPhase.CHURN,
+    EventKind.POLICY_RELOAD_STARTED: EventPhase.POLICY_RELOAD,
+    EventKind.POLICY_RELOAD_COMPLETE: EventPhase.POLICY_RELOAD,
 }
 
 
@@ -1351,8 +1363,169 @@ def churn_metrics(events: Iterable[LifecycleEvent]):
     }
 
 
+class PolicyReloadEventRecorder:
+    """Translate one policy reload into the typed lifecycle vocabulary.
+
+    The monitor is the instrument here for the same reason it is for churn:
+    what a policy change costs on a loaded table is what the target takes to
+    re-evaluate it and to withdraw the rejected routes from its export
+    sessions, and that is what the monitor reads. So both events are stamped at
+    monitor samples and carry that loop's achieved resolution.
+
+    A recorder of its own rather than more state on `MonitorEventRecorder`, on
+    the two rules `ChurnEventRecorder` was separated for: that recorder refuses
+    samples after convergence is confirmed, which is what keeps the published
+    `elapsed (s)` from drifting once the table is delivered, and its clock
+    origin is the start of the run rather than the moment this workload began
+    -- measuring this interval's resolution from the run origin would publish
+    the whole convergence time as the resolution of the reload.
+    """
+
+    def __init__(self, since_s, producer='monitor', sample_interval_s=None,
+                 counters=None, rejected_peer_asns=()):
+        if not isinstance(producer, str) or not producer.strip():
+            raise ValueError('producer must be a non-empty string')
+        self.producer = producer
+        self.sample_interval_s = _validated_interval(sample_interval_s)
+        self._since_s = float(since_s)
+        self._counts = dict(counters or {})
+        # In `details` rather than `counters`, which holds integers only: the
+        # peers a policy rejects are the set a reader rebuilds the workload
+        # from, and a count of them alone would not say *which* blocks moved.
+        self._rejected_peer_asns = [int(asn) for asn in rejected_peer_asns]
+        self._events = []
+        self._last_sample_s = None
+        self._last_accepted = None
+        self._poll_resolution_s = None
+        self._started = False
+        self._completed = False
+
+    @property
+    def events(self):
+        """Return the recorded facts in deterministic monotonic order."""
+        return ordered_events(self._events)
+
+    def _details(self):
+        details = {'rejected_peer_asns': list(self._rejected_peer_asns)}
+        if self.sample_interval_s is not None:
+            details['sample_interval_s'] = self.sample_interval_s
+        if self._poll_resolution_s is not None:
+            details['poll_resolution_s'] = self._poll_resolution_s
+        return details
+
+    def observe(self, monotonic_s, accepted_prefixes):
+        """Record one post-convergence monitor sample.
+
+        Produces no event of its own. It is what dates the two that matter:
+        both ends of this interval are decisions about a sample, so each is
+        stamped at that sample and carries the gap since the previous look.
+        """
+        if not isinstance(monotonic_s, (int, float)) \
+                or isinstance(monotonic_s, bool) \
+                or not math.isfinite(monotonic_s):
+            raise ValueError('monotonic_s must be a finite number')
+        monotonic_s = float(monotonic_s)
+        if not isinstance(accepted_prefixes, int) \
+                or isinstance(accepted_prefixes, bool) \
+                or accepted_prefixes < 0:
+            raise ValueError('accepted_prefixes must be a non-negative integer')
+        if monotonic_s < self._since_s:
+            raise EventOrderError('policy reload sample precedes convergence')
+        if self._last_sample_s is not None and monotonic_s < self._last_sample_s:
+            raise EventOrderError('policy reload samples are not monotonic')
+        self._poll_resolution_s = _resolution_for_poll(
+            monotonic_s,
+            self._since_s if self._last_sample_s is None else self._last_sample_s,
+            self.sample_interval_s)
+        self._last_sample_s = monotonic_s
+        self._last_accepted = accepted_prefixes
+
+    def _add(self, kind, **details):
+        if self._last_sample_s is None:
+            raise MeasurementEventError(
+                'cannot record {0} before a policy reload sample'.format(
+                    kind.value))
+        counters = dict(self._counts)
+        counters['accepted_prefixes'] = self._last_accepted
+        stamped = self._details()
+        stamped.update(details)
+        self._events.append(LifecycleEvent(
+            kind, self._last_sample_s, self.producer,
+            EventPhase.POLICY_RELOAD, counters=counters, details=stamped))
+
+    def note_reload_started(self, command_s=None):
+        """Record the sample the reload was issued from.
+
+        Dated to the *sample* the reload was issued from, not to the moment
+        the command came back -- on the rule both poll loops stamp a sample
+        before their read. Carrying the change into the container is a `docker
+        exec` and the expensive half, so starting the interval at its return
+        would take the cost of issuing the policy out of the interval this
+        workload exists to measure. It is recorded once the command has
+        returned, because `command_s` is that cost stated separately: a reader
+        can then see how much of the interval was the controller reaching the
+        daemon at all, and a daemon whose reply is instant is not thereby
+        credited with an instant reload.
+        """
+        if self._started:
+            raise DuplicateEventError('the policy reload already started')
+        extra = {} if command_s is None else {'command_s': float(command_s)}
+        self._add(EventKind.POLICY_RELOAD_STARTED, **extra)
+        self._started = True
+
+    def note_reload_complete(self):
+        """Record the sample on which the new policy's count was first seen."""
+        if not self._started:
+            raise MeasurementEventError('the policy reload did not start')
+        if self._completed:
+            raise DuplicateEventError('the policy reload already completed')
+        self._add(EventKind.POLICY_RELOAD_COMPLETE)
+        self._completed = True
+
+
+def policy_reload_metrics(events: Iterable[LifecycleEvent]):
+    """Derive the reload interval and the counts either side of it.
+
+    `accepted_before` and `accepted_after` are read off the two events rather
+    than taken from the caller, for the reason `churn_metrics()` reads its
+    requested burst count off the stream: a count the event stream cannot
+    corroborate could describe a table the run never held.
+
+    A reload that started and did not finish keeps its `accepted_before` and is
+    reported `complete: false`, rather than being dropped. A document holding a
+    reload with nothing saying it did not finish reads as a run that never
+    asked for one.
+    """
+    events = [event for event in ordered_events(events)
+              if event.phase == EventPhase.POLICY_RELOAD]
+    started = unique_event(events, EventKind.POLICY_RELOAD_STARTED)
+    completed = unique_event(events, EventKind.POLICY_RELOAD_COMPLETE)
+    counters = dict(started.counters) if started else {}
+    return {
+        'requested': started is not None,
+        'complete': completed is not None,
+        'rejected_blocks': counters.get('rejected_blocks'),
+        'rejected_peer_asns': (list(started.details.get('rejected_peer_asns'))
+                               if started else None),
+        'rejected_prefixes': counters.get('rejected_prefixes'),
+        'converged_prefixes': counters.get('converged_prefixes'),
+        'expected_accepted': counters.get('expected_accepted'),
+        'accepted_before': counters.get('accepted_prefixes'),
+        'accepted_after': (completed.counters.get('accepted_prefixes')
+                           if completed else None),
+        # What issuing the change cost, as distinct from what applying it did.
+        # The command returning is not the daemon having finished: on BIRD the
+        # reply comes back in milliseconds and the table drains afterwards, so
+        # publishing one number would credit the daemon with an instant reload.
+        'command_s': (started.details.get('command_s') if started else None),
+        'reload_s': duration_s(events, EventKind.POLICY_RELOAD_STARTED,
+                               EventKind.POLICY_RELOAD_COMPLETE),
+        'reload_resolution_s': _bounding_resolution(started, completed),
+    }
+
+
 def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
-                   churn=None):
+                   churn=None, policy_reload=None):
     '''Build the stable JSON-compatible event artifact document.
 
     `testers` maps a generator's producer name to whatever evidence it holds
@@ -1391,7 +1564,38 @@ def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
     # would read as a run that never asked for any.
     if churn or any(event.phase == EventPhase.CHURN for event in events):
         artifact['churn'] = _churn_section(events, churn)
+    # Present on the same rule as the churn section, and absent otherwise so a
+    # run that asked for no reload keeps the document it has always produced.
+    # Evidence alone is enough: a reload refused before it was issued -- a
+    # policy that would reject more than the target converged on -- has nothing
+    # in the event stream, and a document with no section at all would read as
+    # a run that never asked for one.
+    if policy_reload or any(event.phase == EventPhase.POLICY_RELOAD
+                            for event in events):
+        artifact['policy_reload'] = _policy_reload_section(
+            events, policy_reload)
     return artifact
+
+
+def _policy_reload_section(events, evidence):
+    '''The derived reload interval, plus what the controller alone knows.
+
+    The evidence is caller-supplied -- whether the policy was applied, why not,
+    the mechanism used, and the target CPU sampled across the interval -- and
+    is refused where it would land on a derived name, for the reason
+    `_churn_section()` and `_tester_section()` refuse the same thing: a caller
+    able to overwrite a measured interval with a value the events do not
+    support defeats the point of deriving them.
+    '''
+    measured = policy_reload_metrics(events)
+    evidence = dict(evidence or {})
+    collisions = sorted(set(evidence) & set(measured))
+    if collisions:
+        raise MeasurementEventError(
+            'policy reload evidence would overwrite derived {0}'.format(
+                ', '.join(collisions)))
+    measured.update(evidence)
+    return measured
 
 
 def _churn_section(events, evidence):

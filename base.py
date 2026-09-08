@@ -655,6 +655,34 @@ class Target(Container):
 
     CONFIG_FILE_NAME = None
 
+    # Set by a target that can be told to re-evaluate its import policy
+    # against the table it already holds, without resetting its sessions.
+    # Only BIRD can so far: the mechanism is that daemon's own reconfigure
+    # command over the config file bgperf2 wrote, so there is nothing generic
+    # to fall back on -- which is why a policy reload is refused for every
+    # other target at every entry point rather than discovered here, once the
+    # run has already converged.
+    SUPPORTS_POLICY_RELOAD = False
+
+    # What the reload is carried out with, and whether it holds the BGP
+    # sessions up. Both are recorded in the artifact rather than assumed: a
+    # reload that resets its sessions measures a second table delivery and
+    # belongs in a different comparison from one that does not, and a reader
+    # cannot tell which they have without being told.
+    POLICY_RELOAD_MECHANISM = None
+    POLICY_RELOAD_SESSION_PRESERVING = None
+
+    def policy_reload(self, reject_peer_asns):
+        """Install an import policy rejecting these peers and apply it.
+
+        Returns the daemon's own reply where it did not report the change
+        carried out, and None where it did. A reload nobody performed has no
+        symptom except the monitor's count not moving, which arrives as a stall
+        minutes later and reads as a stuck target -- the same reason
+        `Tester.churn()` reports its failures rather than raising.
+        """
+        raise NotImplementedError()
+
     def scenario_neighbors(self, sort=True):
         """Every BGP session this target is configured with.
 

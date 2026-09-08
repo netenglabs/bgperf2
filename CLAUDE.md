@@ -417,6 +417,76 @@ withdrawing and re-advertising on every export session.
 - Stem gets `ch<C>x<B>`, both `run` blocks record both numbers, `-f` records `null`. Not a CSV
   column, for the reason `--path-diversity` is not.
 
+`--policy-reload-blocks N` (batch: `policy_reload_blocks: N`, a *test* key) is the fifth workload
+control and the last of Phase 5A's: once the run has converged, an import policy rejecting the last
+`N` of the fleet's prefix blocks is installed on the target and applied with that daemon's own
+reload command. Churn makes a converged table move; this makes the *policy over* a converged table
+move, which is the thing an operator does most often and the thing nothing here has measured. The
+daemon re-reads its config, re-evaluates its import policy against routes it already holds, and
+withdraws the rejected ones from every export session, with the sessions staying up.
+
+- **The workload is stated in blocks, not peers, and whole blocks are rejected.** A block is the
+  group `--path-diversity` deals the fleet into -- one peer per block at the default. Rejecting
+  *part* of a shared block leaves the prefix behind a surviving path, so the target does real
+  best-path work and the monitor's count does not move at all: the reload could never be observed
+  to complete. Same reason `split_churn_paths()` shares its block, reached from the other side.
+- **The blocks are the tail, so there is no seed** -- churn's determinism rule. The set is
+  rebuildable from the peer count, the diversity and the block count alone, and is published as
+  `rejected_peer_asns` so nobody has to. The peers are ordered by **AS**, not by mapping order: a
+  scenario is YAML and a mapping's order is not part of what the file means, while `gen_conf()`
+  assigns the address and the AS from the same index it keys the diversity block on.
+- **The expected count is exact and measured down from what the run converged on**, not from what
+  the fleet offered -- the check-point's 0.99 factor exists because a target does not always hold
+  everything offered to it. A target missing prefixes that fall *inside* a rejected block stalls,
+  naming both counts, on `ChurnBurstTracker`'s rule: a tolerance would have to be a number nobody
+  measured, and it would let a half-applied policy be published as an applied one.
+- **`command_s` is published beside `reload_s`, never as it.** Measured on 3.3.2, `birdc configure`
+  returns in ~20ms while the table drains over the following polls, so one number would credit the
+  daemon with an instant reload. The started event is dated to the *sample* the reload was issued
+  from rather than to the command's return -- the rule both poll loops already follow.
+- **The CPU across the interval is the measurement, and an unsampled interval is `null`.**
+  Re-evaluating a table is mostly CPU, and a reload finishing inside one poll would otherwise have
+  no measurement beyond "it happened". Samples come from the target's existing stats thread and stay
+  in the artifact -- `max cpu %` still describes the delivery, on churn's rule. `0.0` would publish
+  an interval too short to sample as a daemon that did no work; those are different findings.
+- **A collapsed count is not an applied policy**, in either phase, and the message names which.
+  `DROP_FRACTION` and `CHURN_COLLAPSE_FRACTION` on a third side of convergence. Rejecting *every*
+  block is refused up front for the same reason: an empty table cannot be told from an empty session.
+- **What BIRD does was measured, not assumed** (2.19.2 and 3.3.2, two peers each). `birdc configure`
+  holds the sessions up -- `Since` unchanged, both Established -- so these runs belong in the
+  no-reset comparison `docs/policy-testing-plan.md`'s P4 asks for. But neither series re-evaluates
+  purely locally: both answer a changed import filter by asking their peers for a route refresh, and
+  each generator's `Export updates` doubled. `reload_s` therefore covers re-import as well as
+  re-decision. Recorded as `mechanism` and `session_preserving` rather than hidden, and not
+  comparable with a daemon that re-filters from its own stored routes.
+- **Refused for**: a target with no reload mechanism (only BIRD has one -- read through
+  `Target.SUPPORTS_POLICY_RELOAD`, never a list of names), an MRT generator (the policy selects a
+  block by the peer AS bgperf2 assigned, and an injector replays the file's own paths), `-f`/a
+  scenario target, `--filter_test` (the target's import filter is already the policy under test and
+  the reload is written into the same place, so the run would change two policies at once), a churn
+  workload, and a block count covering every block. `check_batch_test()` checks every
+  (target, filter, peers) combination, not the first.
+- **Refused alongside churn, deliberately**: both run against the converged table off the same
+  monitor samples, so running both means fixing an order, and the second would take the first's
+  outcome as its baseline with nothing in the row, the stem or the manifest saying which ran first.
+  A deferred definition, like `total` under `--path-diversity`.
+- **Refused under `-r/--repeat` too**, for a different reason than churn's. Churn needs the
+  *generator* config rewritten; a reload is target-side and the target is rebuilt anyway, so the
+  first version accepted `-r`. What breaks is the completion count: it is `blocks x prefixes per
+  peer`, and repeat reuses whatever tester containers it finds while regenerating the scenario, so
+  `-p` need not be what the generators are announcing. Measured -- `-n 4 -p 1000 -r` behind a
+  `-p 10000` run converged at 40,000, expected the policy to leave 39,000, and the rejected peer
+  took 10,000 with it. The collapse guard named it correctly, which is the point: it named it after
+  a full run, and this is knowable from the command line.
+- **There are three entry points here, not four.** `config` deliberately does not take the flag: a
+  reload is a runtime action on the target and changes no part of the scenario, so `config` has
+  nothing to emit for it and offering it there would print a scenario that reads as though it
+  encoded a workload it does not.
+- Stem gets `pr<N>`, both `run` blocks record it, `-f` records `null`. Not a CSV column, for the
+  reason `--path-diversity` is not. The evidence key is `reload_complete`, not `complete`:
+  `policy_reload_metrics()` derives a `complete` off the event stream, and
+  `_policy_reload_section()` refuses a caller that lands on a derived name.
+
 `--threads N` sets worker threads on the target (`conf['target']['threads']`). Only BIRD reads it
 so far: **BIRD 3 runs one worker unless the config says otherwise**, so benching 3.x against 2.x
 without it measures nothing (verified: 3.3.2 gives 2 OS threads by default, 5 with `threads 4`;

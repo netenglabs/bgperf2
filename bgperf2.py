@@ -56,6 +56,10 @@ from mrt_tester import GoBGPMRTTester, ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
 from monitor import Monitor, Receiver
 from convergence import ConvergenceTracker
+from policy import (DEFAULT_POLICY_RELOAD_BLOCKS,
+                    PolicyReloadConfigurationError, PolicyReloadTracker,
+                    policy_reload_counts, rejected_block_indexes,
+                    rejected_peer_asns)
 from churn import (ChurnBurstTracker, ChurnConfigurationError,
                    DEFAULT_CHURN_BURSTS, DEFAULT_CHURN_PREFIXES,
                    churn_operation_counts)
@@ -64,9 +68,9 @@ from contention import (describe_contention, foreign_cpu_percent,
                         sample_processes)
 from findings import derive_findings, describe_findings, policy_failure
 from measurements import (ChurnEventRecorder, MonitorEventRecorder,
-                          TesterEventRecorder, event_artifact,
-                          monitor_metrics, tester_fleet_metrics,
-                          tester_metrics)
+                          PolicyReloadEventRecorder, TesterEventRecorder,
+                          event_artifact, monitor_metrics,
+                          tester_fleet_metrics, tester_metrics)
 from settings import dckr
 from summary import describe_batch_summary, summarize_batch
 from queue import Queue
@@ -208,6 +212,14 @@ def bench_output_prefix(args):
         parts.append('ch{0}x{1}'.format(
             churn_prefixes,
             getattr(args, 'churn_bursts', None) or DEFAULT_CHURN_BURSTS))
+    # And the policy reload, on the same rule: two tests differing only in how
+    # much of the table the new policy rejects are the same peers and the same
+    # per-peer prefix count everywhere else in this stem, so without it each
+    # would overwrite the other's events, versions and PNGs.
+    reload_blocks = (getattr(args, 'policy_reload_blocks', None)
+                     or DEFAULT_POLICY_RELOAD_BLOCKS)
+    if reload_blocks != DEFAULT_POLICY_RELOAD_BLOCKS:
+        parts.append('pr{0}'.format(reload_blocks))
     return '_'.join(parts)
 
 
@@ -690,6 +702,172 @@ def resolve_churn(churn_prefixes, churn_bursts, neighbor_num, prefix_num,
             '--churn-prefixes needs a whole number of peers to churn, got '
             '{0!r}'.format(neighbor_num))
     return churn_prefixes, churn_bursts
+
+
+def policy_reload_target_supported(target):
+    """Whether this target daemon can be told to re-evaluate a loaded table.
+
+    Asked of the class that really runs the image rather than of a list of
+    names kept here, for the reason `verify` probes through `TARGET_CLASSES`:
+    a second list is a second thing to forget when a daemon gains the
+    mechanism.
+    """
+    cls = TARGET_CLASSES.get(target)
+    return bool(cls and getattr(cls, 'SUPPORTS_POLICY_RELOAD', False))
+
+
+def resolve_policy_reload(blocks, neighbor_num, diversity=None, target=None,
+                          tester_type=None, filter_test=None,
+                          churn_prefixes=None, churn_bursts=None,
+                          repeat=False):
+    """The validated policy reload, checked before any container starts.
+
+    Every workload before this one measures a target *acquiring* routes. A
+    reload measures the other thing a router spends its life doing: carrying a
+    full table while the policy over it changes. The daemon re-reads its
+    configuration, re-evaluates its import policy against routes it already
+    holds, and withdraws the rejected ones from every export session, with the
+    BGP sessions staying up throughout.
+
+    The workload is stated in **blocks** -- the prefix blocks
+    `--path-diversity` deals the fleet into, one per peer at the default -- and
+    the policy rejects the last `blocks` of them. Whole blocks, because a block
+    is what the monitor can see: rejecting some peers of a shared block leaves
+    the prefix behind a surviving path, so the target does real best-path work
+    and the count does not move, and a reload that cannot be observed to
+    complete is one that stalls.
+
+    Five things are refused rather than interpreted:
+
+    - **A target that has no mechanism.** The reload is that daemon's own
+      reconfigure command over the config file bgperf2 wrote, and only BIRD has
+      one here. Accepting another would converge a run and then find out, with
+      the only symptom a stall that reads as a stuck target.
+    - **An MRT generator.** The policy selects a block by the peer AS bgperf2
+      assigned, and an MRT injector replays the AS paths in the file; `-p` is
+      the whole table there rather than a per-peer count, so neither the
+      selection nor the expected count survives.
+    - **A policy filter.** The target's import filter is already the policy
+      under test, and the reload's filter is written into the same place -- so
+      a run would be changing two policies at once and attributing the result
+      to one. Composing them means deciding what a reload *on top of* `transit`
+      rejects, which is its own change set with its own expected counts.
+    - **A churn workload.** Both run against the converged table off the same
+      monitor samples, so running both means fixing an order, and the second
+      would take the first's outcome as its baseline. Nothing in the row, the
+      stem or the manifest would say which order ran. Deferred deliberately,
+      like `--prefix-scope total` under `--path-diversity`.
+    - **`-r/--repeat`.** The count the reload completes on is
+      `blocks x prefixes per peer`, and under repeat the per-peer count on the
+      command line is not necessarily the count the reused generators are
+      announcing -- bgperf2 regenerates the scenario but keeps whatever tester
+      containers it finds. Measured: `-n 4 -p 1000 -r` behind a `-p 10000` run
+      converged at 40,000, expected the policy to leave 39,000, and the
+      rejected peer took 10,000 with it. The collapse guard named it
+      correctly, which is the point -- it named it after a full run, and this
+      is knowable from the command line. Churn is refused here too, for a
+      different reason.
+    - **A block count the fleet cannot supply**, including every block:
+      `rejected_block_indexes()` refuses that, because a target left holding
+      nothing cannot be told from one that lost its sessions.
+
+    `bench` and `batch` are the entry points. `config` deliberately does not
+    take the flag at all: a reload is a runtime action on the target and
+    changes no part of the scenario, so `config` has nothing to emit for it and
+    offering it there would print a scenario that reads as though it encoded a
+    workload it does not.
+
+    Returns the validated block count. Zero is no reload, and every existing
+    command line and batch config carries it.
+    """
+    if blocks in (None, DEFAULT_POLICY_RELOAD_BLOCKS):
+        return DEFAULT_POLICY_RELOAD_BLOCKS
+    if not _is_positive_count(blocks):
+        raise ValueError(
+            '--policy-reload-blocks must be a whole number of 1 or more, got '
+            '{0!r}'.format(blocks))
+    if target is not None and not policy_reload_target_supported(target):
+        raise ValueError(
+            '--policy-reload-blocks does not apply to the {0!r} target: the '
+            "reload is the daemon's own reconfigure over the config bgperf2 "
+            'wrote, and only {1} has one here'.format(
+                target,
+                ', '.join(sorted(name for name in TARGET_CLASSES
+                                 if policy_reload_target_supported(name)))))
+    if tester_type in MRT_TESTER_TYPES:
+        raise ValueError(
+            '--policy-reload-blocks does not apply to the {0!r} tester: the '
+            'policy rejects a block by the peer AS bgperf2 assigned, and an '
+            'MRT injector replays the AS paths in the file. -p is the whole '
+            'table there too, so the count the reload should leave is not '
+            '{1} x -p'.format(tester_type, blocks))
+    if filter_test:
+        raise ValueError(
+            '--policy-reload-blocks and --filter_test {0} are not defined '
+            "together: the target's import filter is already the policy under "
+            'test and the reload is written into the same place, so the run '
+            'would change two policies at once and attribute the result to '
+            'one'.format(filter_test))
+    if repeat:
+        raise ValueError(
+            '--policy-reload-blocks cannot be used with -r/--repeat: the count '
+            'the reload completes on is blocks x prefixes per peer, and repeat '
+            'reuses the generator containers as they are -- so -p need not be '
+            'what they are announcing')
+    churn = churn_flags_set(churn_prefixes, churn_bursts)
+    if churn:
+        raise ValueError(
+            '--policy-reload-blocks and {0} are not defined together: both run '
+            'against the converged table off the same monitor samples, so one '
+            'would take the other\'s outcome as its baseline and nothing in '
+            'the row or the artifacts would say which ran first'.format(
+                ' and '.join(churn)))
+    # `path_diversity_groups()` is the one place the block arithmetic lives,
+    # and it refuses a diversity that does not deal the fleet into equal
+    # groups. Reached through it rather than repeated, so the block a peer is
+    # given and the block a policy rejects cannot drift apart.
+    groups = path_diversity_groups(
+        neighbor_num, diversity or DEFAULT_PATH_DIVERSITY)
+    try:
+        rejected_block_indexes(groups, blocks)
+    except PolicyReloadConfigurationError as e:
+        raise ValueError(str(e)) from None
+    return blocks
+
+
+def describe_policy_reload_workload(blocks, neighbor_num, prefix_num,
+                                    diversity=None, mechanism=None):
+    """What the reload will do, before the run rather than after it."""
+    if not blocks:
+        return None
+    groups = path_diversity_groups(
+        neighbor_num, diversity or DEFAULT_PATH_DIVERSITY)
+    peers = blocks * (diversity or DEFAULT_PATH_DIVERSITY)
+    return ('policy reload: once converged, an import policy rejecting {0} of '
+            '{1} prefix block(s) -- {2} peer(s), {3} distinct prefix(es) -- is '
+            'installed and applied with {4}. The sessions stay up, so what is '
+            'measured is a loaded table being re-evaluated, not a second '
+            'delivery'.format(blocks, groups, peers, blocks * prefix_num,
+                              mechanism or "the target's own reload command"))
+
+
+def unrun_policy_reload_evidence(args, status):
+    """The reload section of a run that asked for one and issued none.
+
+    A `run.policy_reload_blocks: 2` with no `policy_reload` section at all
+    reads as a run that asked for no reload, which is the ambiguity the
+    artifact exists to remove. The fallback lives here rather than at the
+    branch that needs it for the reason the churn one does: that branch is
+    inside `bench()`'s monitor loop, which no Docker-free test can drive, so a
+    fix written there passes the whole suite even when it has been deleted.
+    """
+    if not (getattr(args, 'policy_reload_blocks', None)
+            or DEFAULT_POLICY_RELOAD_BLOCKS):
+        return None
+    return {'reload_complete': False,
+            'incomplete_reason': (
+                'the run did not converge, so no policy reload was issued'
+                if status == 'failed' else 'no policy reload was issued')}
 
 
 def churn_flags_set(churn_prefixes, churn_bursts):
@@ -1617,6 +1795,17 @@ def bench(args):
                  "each neighbour's prefixes itself".format(
                      ' and '.join(churn_flags),
                      'have' if len(churn_flags) > 1 else 'has'))
+    if args.file and (getattr(args, 'policy_reload_blocks', None)
+                      or DEFAULT_POLICY_RELOAD_BLOCKS) \
+            != DEFAULT_POLICY_RELOAD_BLOCKS:
+        # A scenario file states the peers and the blocks they announce, and
+        # the reload's policy is built from exactly those -- so there is
+        # nothing here to select. Above the teardown, like the refusals beside
+        # it, and refused rather than ignored for the reason the churn flags
+        # are: accepted, the run would name its artifacts `pr<N>`, record the
+        # workload in both manifests, and change no policy at all.
+        sys.exit('--policy-reload-blocks has nothing to reject under -f: a '
+                 "scenario file states each neighbour's prefixes itself")
     if args.file and (getattr(args, 'path_diversity', None)
                       or DEFAULT_PATH_DIVERSITY) != DEFAULT_PATH_DIVERSITY:
         # Same rule as the scope beside it, and above the teardown for the same
@@ -1664,6 +1853,25 @@ def bench(args):
                      'repeat reuses the generator containers as they are, so '
                      'the churn block is neither written into their config '
                      'nor reachable to withdraw')
+        # After the scope for the reason churn is: the reload's block count is
+        # checked against the peer count and the diversity, and `--prefix-scope
+        # total` changes neither -- but the expected count it will be measured
+        # against is `blocks x prefixes per peer`, so it must be the resolved
+        # per-peer number. The churn values here are the normalised ones, which
+        # is enough: `resolve_churn()` has already refused a bare
+        # `--churn-bursts`, so anything still set is a real churn workload.
+        try:
+            args.policy_reload_blocks = resolve_policy_reload(
+                getattr(args, 'policy_reload_blocks', None),
+                args.neighbor_num,
+                getattr(args, 'path_diversity', None),
+                getattr(args, 'target', None),
+                getattr(args, 'tester_type', None),
+                getattr(args, 'filter_test', None),
+                args.churn_prefixes, args.churn_bursts,
+                getattr(args, 'repeat', False))
+        except ValueError as e:
+            sys.exit(str(e))
 
     if not args.file:
         # After every guard that reads only the command line, and still before
@@ -1738,6 +1946,15 @@ def bench(args):
             getattr(args, 'path_diversity', None) or DEFAULT_PATH_DIVERSITY)
         print(describe_churn_workload(churn_prefixes, churn_bursts,
                                       args.neighbor_num, churn_groups))
+
+    policy_reload_blocks = (getattr(args, 'policy_reload_blocks', None)
+                            or DEFAULT_POLICY_RELOAD_BLOCKS)
+    if policy_reload_blocks:
+        print(describe_policy_reload_workload(
+            policy_reload_blocks, args.neighbor_num, args.prefix_num,
+            getattr(args, 'path_diversity', None),
+            getattr(TARGET_CLASSES.get(getattr(args, 'target', None)),
+                    'POLICY_RELOAD_MECHANISM', None)))
 
     # A remote target is not a container bgperf2 starts, so it has no image --
     # resolving one would fail a remote run on the default target's image.
@@ -2160,6 +2377,21 @@ def bench(args):
                 churn_events, churn_evidence = churn_phase(
                     args, q, m, testers, sample_monotonic_s, int(recved),
                     churn_prefixes, churn_bursts, churn_groups)
+                # The third workload, and refused alongside churn at every
+                # entry point -- so at most one of these two ever runs against
+                # a given converged table and neither takes the other's outcome
+                # as its baseline.
+                reload_events, reload_evidence = policy_reload_phase(
+                    args, q, m, target, sample_monotonic_s, int(recved),
+                    policy_reload_blocks, conf)
+                if reload_evidence and not reload_evidence['reload_complete']:
+                    # Into MSG without marking the row FAILED, exactly as an
+                    # incomplete churn sequence is: the run converged and that
+                    # measurement stands, and a batch of reload cells whose
+                    # rows all read as ordinary would say nothing about the
+                    # second workload.
+                    output_stats['fail_msg'] = reload_evidence[
+                        'incomplete_reason'] or 'the policy reload did not complete'
                 if churn_evidence and not churn_evidence['sequence_complete']:
                     # Into the row's MSG column without setting its FAILED
                     # flag. The run converged and that measurement stands; what
@@ -2172,11 +2404,14 @@ def bench(args):
                 return finish_bench(
                     args, output_stats, bench_stats, bench_start, target, m,
                     testers,
-                    lifecycle_events=list(lifecycle.events) + list(churn_events),
+                    lifecycle_events=(list(lifecycle.events)
+                                      + list(churn_events)
+                                      + list(reload_events)),
                     tester_lifecycles=tester_lifecycles,
                     tester_observation_errors=tester_observation_errors,
                     tester_read_failures=tester_read_failures,
-                    churn_evidence=churn_evidence)
+                    churn_evidence=churn_evidence,
+                    policy_reload_evidence=reload_evidence)
 
             if elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
                 # The same stem the final graphs use. Built from args.target
@@ -2251,6 +2486,15 @@ def write_provenance(args, provenance, prefix):
         'churn_bursts': (None if getattr(args, 'file', None) else
                          getattr(args, 'churn_bursts', None)
                          or DEFAULT_CHURN_BURSTS),
+        # And the reload, on the same rule and for the same reason: it changes
+        # what the target held at the end of the run, and the only other
+        # carrier is the `pr2` in the filename. `None` under `-f` because the
+        # scenario file states the peers a policy would reject and a reload is
+        # refused there -- so a 0 would be an assertion about a workload
+        # bgperf2 did not build.
+        'policy_reload_blocks': (None if getattr(args, 'file', None) else
+                                 getattr(args, 'policy_reload_blocks', None)
+                                 or DEFAULT_POLICY_RELOAD_BLOCKS),
         # Which pass over the matrix this row came from, or None for a batch
         # that made one pass. The name carries it too, but a summary over
         # repetitions should not have to parse a label to group them.
@@ -2287,7 +2531,7 @@ def host_evidence(output_stats):
 
 
 def write_event_artifact(args, events, prefix, status, testers=None,
-                         host=None, churn=None):
+                         host=None, churn=None, policy_reload=None):
     '''Atomically preserve lifecycle evidence before post-run collection.
 
     Returns the document it wrote, so the caller can print the findings it
@@ -2296,8 +2540,14 @@ def write_event_artifact(args, events, prefix, status, testers=None,
     # A run that asked for churn and ran none still says so. The fallback is
     # taken only where the caller supplied nothing, so a sequence that was
     # driven -- complete or not -- always wins.
-    doc = event_artifact(events, status, testers=testers,
-                         churn=churn or unrun_churn_evidence(args, status))
+    doc = event_artifact(
+        events, status, testers=testers,
+        churn=churn or unrun_churn_evidence(args, status),
+        # A run that asked for a reload and issued none says so, on the rule
+        # above it: the fallback is taken only where the caller supplied
+        # nothing, so a reload that was driven -- complete or not -- wins.
+        policy_reload=(policy_reload
+                       or unrun_policy_reload_evidence(args, status)))
     # Derived from the finished document rather than from the events, so the
     # policy can only ever reason about intervals this artifact published.
     #
@@ -2336,6 +2586,15 @@ def write_event_artifact(args, events, prefix, status, testers=None,
         'churn_bursts': (None if getattr(args, 'file', None) else
                          getattr(args, 'churn_bursts', None)
                          or DEFAULT_CHURN_BURSTS),
+        # And the reload, on the same rule and for the same reason: it changes
+        # what the target held at the end of the run, and the only other
+        # carrier is the `pr2` in the filename. `None` under `-f` because the
+        # scenario file states the peers a policy would reject and a reload is
+        # refused there -- so a 0 would be an assertion about a workload
+        # bgperf2 did not build.
+        'policy_reload_blocks': (None if getattr(args, 'file', None) else
+                                 getattr(args, 'policy_reload_blocks', None)
+                                 or DEFAULT_POLICY_RELOAD_BLOCKS),
         'repetition': getattr(args, 'repetition', None),
         'filter_test': getattr(args, 'filter_test', None),
     }
@@ -2352,7 +2611,7 @@ def write_event_artifact(args, events, prefix, status, testers=None,
 def finish_bench(args, output_stats, bench_stats, bench_start, target, m, testers=(), fail=False,
                  lifecycle_events=(), tester_lifecycles=None,
                  tester_observation_errors=None, tester_read_failures=None,
-                 churn_evidence=None):
+                 churn_evidence=None, policy_reload_evidence=None):
 
     bench_stop = time.time()
     output_stats['total_time'] = bench_stop - bench_start
@@ -2375,7 +2634,7 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
         args, lifecycle_events, bench_prefix,
         status='failed' if fail else 'converged',
         testers=tester_evidence, host=host_evidence(output_stats),
-        churn=churn_evidence)
+        churn=churn_evidence, policy_reload=policy_reload_evidence)
 
     # Scan the tester logs only after the clock has stopped. These used to run
     # in bench() before bench_stop, so walking every tester log line by line --
@@ -2397,6 +2656,8 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
     print_final_stats(args, target_version, output_stats)
     print_tester_metrics(lifecycle_events, tester_evidence)
     for line in describe_churn_metrics(artifact.get('churn')):
+        print(line)
+    for line in describe_policy_reload_metrics(artifact.get('policy_reload')):
         print(line)
     # Last, because it is the one line that reads the rest of them together.
     for line in describe_findings(artifact['findings']):
@@ -2558,6 +2819,196 @@ def churn_phase(args, q, monitor, testers, since_s, converged_count,
         # guards passed.
         return (), {'sequence_complete': False, 'incomplete_reason': str(e)}
     return run_churn_bursts(q, monitor.name, recorder, tracker, generators)
+
+
+def run_policy_reload(q, monitor_name, target, recorder, tracker,
+                      reject_asns):
+    """Issue the policy change and measure the table settling under it.
+
+    Runs *after* convergence has been confirmed and, like the churn sequence,
+    updates none of `output_stats`: the published row describes the initial
+    delivery of the table, and folding a reload's peak into `max cpu %` would
+    make a reload run's row mean something different from every other row in
+    the same CSV while looking identical.
+
+    What it does read from the other producers is the target's own CPU. That
+    is the one thing this workload needs that churn does not: the cost of
+    re-evaluating a table is mostly CPU, and a reload that finished inside one
+    monitor poll would otherwise have no measurement at all beyond "it
+    happened". The samples are taken from the target's existing stats thread
+    and kept here rather than in the row, so they describe the interval and
+    nothing else.
+
+    Returns `(events, evidence)`; the evidence is what the controller knows and
+    the event stream cannot show.
+    """
+    reason = None
+    issued = False
+    cpu_samples = []
+    while True:
+        info = q.get()
+        # The target's own CPU, and only from inside the measured interval.
+        # Everything else -- host samplers, generator polls that have not
+        # stopped -- is drained and dropped, for the reason
+        # `run_churn_bursts()` drops all of it.
+        #
+        # Gated on the reload having been issued because this loop is entered
+        # one monitor sample before that: a target stats message already
+        # sitting in the queue describes the converged table doing nothing, and
+        # counting it would pull the reported peak and mean towards a workload
+        # that had not started.
+        if info.get('who') == target.name and 'cpu' in info:
+            if issued:
+                cpu_samples.append(float(info['cpu']))
+            continue
+        if info.get('who') != monitor_name:
+            continue
+        sample_monotonic_s = monitor_sample_monotonic_s(info)
+        state = info['afi_safis'][0]['state']
+        accepted = int(state['accepted'] if 'accepted' in state else 0)
+        recorder.observe(sample_monotonic_s, accepted)
+        step = tracker.update(accepted)
+
+        if step.completed == PolicyReloadTracker.RELOAD_PHASE:
+            recorder.note_reload_complete()
+            print('policy reload: applied, {0} accepted prefix(es) '
+                  'remain'.format(accepted))
+
+        if step.action == PolicyReloadTracker.RELOAD:
+            print('policy reload: rejecting {0} peer AS(es) from {1} accepted '
+                  'prefix(es), expecting {2}'.format(
+                      len(reject_asns), accepted, tracker.expected_accepted))
+            # Timed around the exec alone. The daemon's reply is not the daemon
+            # having finished -- on BIRD it comes back in milliseconds and the
+            # table drains afterwards -- so this is published beside the
+            # interval, never as it.
+            issued_s = time.monotonic()
+            try:
+                reason = target.policy_reload(reject_asns)
+            except Exception as e:                  # noqa: BLE001
+                # A failed exec is a reload nobody performed, and its only
+                # other symptom is the count not moving -- which arrives
+                # `POLICY_RELOAD_STALL_SAMPLES` later and reads as a stuck
+                # target. Named here instead.
+                reason = 'the policy reload command failed: {0}'.format(e)
+            command_s = time.monotonic() - issued_s
+            # The event is dated to the sample above, not to this moment; see
+            # `note_reload_started()`.
+            recorder.note_reload_started(command_s=command_s)
+            issued = True
+        elif step.action == PolicyReloadTracker.FAILED:
+            reason = step.reason
+        if reason or step.action in (PolicyReloadTracker.DONE,
+                                     PolicyReloadTracker.FAILED):
+            break
+
+    evidence = {
+        # Named apart from the derived `complete` that `policy_reload_metrics()`
+        # reads off the event stream: one is what the controller drove and the
+        # other is what the events show, and `_policy_reload_section()` refuses
+        # a caller that lands on a derived name for exactly that reason.
+        'reload_complete': reason is None and tracker.complete,
+        'incomplete_reason': reason,
+        # An interval nobody sampled is not a CPU of zero: the target's stats
+        # thread produces one message per Docker stats frame, and a reload that
+        # completed inside a single poll can close before any of them arrive.
+        # `null` says the interval was too short to sample, which 0.0 would
+        # publish as a daemon that did no work.
+        'target_cpu_samples': len(cpu_samples),
+        'target_cpu_percent_max': max(cpu_samples) if cpu_samples else None,
+        'target_cpu_percent_mean': (sum(cpu_samples) / len(cpu_samples)
+                                    if cpu_samples else None),
+    }
+    return recorder.events, evidence
+
+
+def policy_reload_phase(args, q, monitor, target, since_s, converged_count,
+                        blocks, conf):
+    """Set up and run the reload, or say why it could not run.
+
+    Returns `((), None)` for a run that asked for none, so a document produced
+    by every command line that predates this flag is unchanged.
+
+    A reload that cannot be *driven* is reported in the same shape as one that
+    stalled rather than raised, for the reason `churn_phase()` is: by the time
+    this runs the target has converged, and that measurement is the thing being
+    preserved.
+    """
+    if not blocks:
+        return (), None
+    neighbors = list(flatten(list(t.get('neighbors', {}).values())
+                             for t in conf['testers']))
+    diversity = getattr(args, 'path_diversity', None) or DEFAULT_PATH_DIVERSITY
+    mechanism = {
+        'mechanism': getattr(target, 'POLICY_RELOAD_MECHANISM', None),
+        'session_preserving': getattr(
+            target, 'POLICY_RELOAD_SESSION_PRESERVING', None),
+    }
+    if not getattr(target, 'SUPPORTS_POLICY_RELOAD', False):
+        # Refused at every entry point, so unreachable from a checked path --
+        # and here because the alternative is a sequence that changes nothing,
+        # waits out the stall bound and reports a stuck target.
+        return (), dict(mechanism, reload_complete=False,
+                        incomplete_reason='this target cannot reload its policy')
+    try:
+        reject_asns = rejected_peer_asns(neighbors, diversity, blocks)
+        counts = policy_reload_counts(converged_count, args.prefix_num, blocks)
+        tracker = PolicyReloadTracker(converged_count,
+                                      counts['expected_accepted'])
+    except PolicyReloadConfigurationError as e:
+        # The rules that cannot be checked before the run: the converged count
+        # is not known until the table has been delivered, so a run that
+        # accepted fewer prefixes than it offered can reach a policy the flag
+        # guards passed.
+        return (), dict(mechanism, reload_complete=False,
+                        incomplete_reason=str(e))
+    recorder = PolicyReloadEventRecorder(
+        since_s, producer=monitor.name,
+        sample_interval_s=MONITOR_POLL_INTERVAL_S,
+        counters={'rejected_blocks': blocks,
+                  'rejected_prefixes': counts['rejected_prefixes'],
+                  'converged_prefixes': converged_count,
+                  'expected_accepted': counts['expected_accepted']},
+        rejected_peer_asns=reject_asns)
+    events, evidence = run_policy_reload(
+        q, monitor.name, target, recorder, tracker, reject_asns)
+    evidence.update(mechanism)
+    return events, evidence
+
+
+def describe_policy_reload_metrics(reload_section):
+    """Report what the reload cost, or why there is no interval to report."""
+    if not reload_section:
+        return []
+    lines = []
+    if reload_section.get('reload_complete'):
+        lines.append(
+            'policy reload: {0} accepted prefix(es) became {1} {2}; the '
+            'command itself returned in {3:.3f}s'.format(
+                reload_section.get('accepted_before'),
+                reload_section.get('accepted_after'),
+                churn_interval_phrase(reload_section.get('reload_s'),
+                                      reload_section.get(
+                                          'reload_resolution_s')),
+                reload_section.get('command_s') or 0.0))
+        cpu_max = reload_section.get('target_cpu_percent_max')
+        if cpu_max is None:
+            # Said out loud rather than left absent: an interval too short to
+            # sample and an interval in which the target did nothing are
+            # different findings, and only the second is about the daemon.
+            lines.append(
+                'policy reload: no target CPU sample fell inside the '
+                'interval, so what re-evaluating the table cost is unmeasured '
+                'at this resolution')
+        else:
+            lines.append(
+                'policy reload: target CPU peaked at {0:.2f}% over {1} '
+                'sample(s) inside the interval'.format(
+                    cpu_max, reload_section.get('target_cpu_samples')))
+    else:
+        reason = reload_section.get('incomplete_reason') or 'no reason recorded'
+        lines.append('policy reload: not completed; {0}'.format(reason))
+    return lines
 
 
 def churn_interval_phrase(seconds, resolution):
@@ -3092,7 +3543,7 @@ BATCH_TEST_KEYS = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
 # `repetitions` misspelt runs one pass of a matrix someone asked three of.
 BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope',
                             'path_diversity', 'receivers', 'churn_prefixes',
-                            'churn_bursts')
+                            'churn_bursts', 'policy_reload_blocks')
 
 
 # Keys that mean something on a *test* and nothing on a target. There is no
@@ -3109,7 +3560,7 @@ BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope',
 BATCH_TEST_ONLY_KEYS = ('prefix_scope', 'repetitions', 'order', 'seed',
                         'neighbors', 'prefixes', 'filter_test',
                         'path_diversity', 'receivers', 'churn_prefixes',
-                        'churn_bursts')
+                        'churn_bursts', 'policy_reload_blocks')
 
 # Target keys whose absence means something other than `None`. `batch()`
 # otherwise gives every unset field `None`, and `gen_conf()` routes anything
@@ -3423,6 +3874,37 @@ def check_batch_test(test):
                              for f in churn_flags),
                 'have' if len(churn_flags) > 1 else 'has',
                 ', '.join(scenarios)))
+    reload_blocks = test.get('policy_reload_blocks')
+    if reload_blocks not in (None, DEFAULT_POLICY_RELOAD_BLOCKS) and scenarios:
+        # `bench()`'s own `-f` refusal is reachable from here -- `batch()`
+        # passes the block count straight through to a scenario target -- but
+        # it would fire mid-batch, after that cell had torn down the previous
+        # one's containers. The rule is the same one: the file states the peers
+        # and the blocks they announce, so there is nothing here to select.
+        sys.exit(
+            "test '{0}': policy_reload_blocks has nothing to reject for {1}, "
+            "which name a scenario file: the file states each neighbour's "
+            'prefixes itself'.format(test['name'], ', '.join(scenarios)))
+    # Every target, generator, filter and peer count on the axes rather than
+    # the first of each: a batch is where a reload that suits one target and
+    # not the next is easy to write -- `frr_c` beside `bird` under one
+    # `policy_reload_blocks` -- and a block count that divides one peer count
+    # and not another is the same trap `--path-diversity` has. Finding either
+    # out at cell three is hours lost.
+    #
+    # The target's *daemon* is what decides the mechanism, so it is read from
+    # `name` rather than from the label: `expand_target_versions()` labels each
+    # version, and a label is free text.
+    for target, filter_test, neighbors in product(
+            [t for t in test['targets'] if not t.get('file')],
+            filters, test['neighbors']):
+        try:
+            resolve_policy_reload(
+                reload_blocks, neighbors, diversity, target['name'],
+                batch_target_field(target, 'tester_type'), filter_test,
+                churn_prefixes, churn_bursts, bool(target.get('repeat')))
+        except ValueError as e:
+            sys.exit("test '{0}': {1}".format(test['name'], e))
     repeated = [t.get('label') or t['name'] for t in test['targets']
                 if t.get('repeat')]
     if churn_flags and repeated:
@@ -3520,6 +4002,11 @@ def expand_batch_cells(test, targets):
     # more of the same one.
     churn_prefixes = test.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
     churn_bursts = test.get('churn_bursts') or DEFAULT_CHURN_BURSTS
+    # And the reload, for the same reason: widening the policy is a different
+    # run rather than more of the same one, so `--resume` must not match a cell
+    # measured against the old one.
+    reload_blocks = (test.get('policy_reload_blocks')
+                     or DEFAULT_POLICY_RELOAD_BLOCKS)
     cells = []
     for repetition in range(1, repetitions + 1):
         ordinal = 0
@@ -3544,6 +4031,7 @@ def expand_batch_cells(test, targets):
                             'receivers': receivers,
                             'churn_prefixes': churn_prefixes,
                             'churn_bursts': churn_bursts,
+                            'policy_reload_blocks': reload_blocks,
                             'target': t,
                         })
                         ordinal += 1
@@ -3902,6 +4390,8 @@ def batch(args):
             # what the id, the row and the artifact names were built from.
             a.churn_prefixes = cell.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
             a.churn_bursts = cell.get('churn_bursts') or DEFAULT_CHURN_BURSTS
+            a.policy_reload_blocks = (cell.get('policy_reload_blocks')
+                                      or DEFAULT_POLICY_RELOAD_BLOCKS)
             a.filter_test = cell['filter'] if cell['filter'] != 'None' else None
             # None for a single-pass test, so its rows, graphs and event
             # artifacts keep the names they have always had; set for every pass
@@ -4011,6 +4501,10 @@ def batch_cell_id(test_name, cell):
         identity['churn_prefixes'] = churn_prefixes
         identity['churn_bursts'] = (cell.get('churn_bursts')
                                     or DEFAULT_CHURN_BURSTS)
+    reload_blocks = (cell.get('policy_reload_blocks')
+                     or DEFAULT_POLICY_RELOAD_BLOCKS)
+    if reload_blocks != DEFAULT_POLICY_RELOAD_BLOCKS:
+        identity['policy_reload_blocks'] = reload_blocks
     return json.dumps(identity, sort_keys=True, separators=(',', ':'), default=str)
 
 
@@ -4035,6 +4529,11 @@ def batch_cell_description(cell, repetitions=1):
         described = '{0}, churn={1}x{2}'.format(
             described, churn_prefixes,
             cell.get('churn_bursts') or DEFAULT_CHURN_BURSTS)
+    reload_blocks = (cell.get('policy_reload_blocks')
+                     or DEFAULT_POLICY_RELOAD_BLOCKS)
+    if reload_blocks != DEFAULT_POLICY_RELOAD_BLOCKS:
+        described = '{0}, policy reload={1} block(s)'.format(
+            described, reload_blocks)
     if repetitions > 1:
         described = '{0}, repetition {1}/{2}'.format(
             described, cell['repetition'], repetitions)
@@ -4650,6 +5149,26 @@ def create_args_parser(main=True):
                                    'are rebuilt and re-peered either way -- '
                                    'Container.run() removes and recreates '
                                    'anything it finds by name')
+    # On `bench` and not in `add_gen_conf_args()`, deliberately: a policy
+    # reload is a runtime action on the target after it has converged and
+    # changes no part of the scenario, so `config` has nothing to emit for it
+    # and offering it there would print a scenario that reads as though it
+    # encoded a workload it does not.
+    parser_bench.add_argument('--policy-reload-blocks', type=int,
+                              default=DEFAULT_POLICY_RELOAD_BLOCKS,
+                              help='how many of the fleet\'s prefix blocks an '
+                                   'import policy should reject once the '
+                                   'table has converged. 0 (the default, and '
+                                   'every run bgperf has made) changes no '
+                                   'policy, so nothing here has measured what '
+                                   'a policy change costs on a loaded table. '
+                                   'A block is what --path-diversity deals '
+                                   'the peers into -- one peer per block at '
+                                   'the default -- and the last blocks are '
+                                   'the ones rejected. The sessions stay up. '
+                                   'Only a target with a reload mechanism can '
+                                   'do this, and not with an MRT generator, a '
+                                   'policy filter or a churn workload')
     parser_bench.add_argument('-f', '--file', metavar='CONFIG_FILE')
     parser_bench.add_argument('-o', '--output', metavar='STAT_FILE')
     parser_bench.add_argument('--results-dir', default=DEFAULT_RESULTS_DIR,

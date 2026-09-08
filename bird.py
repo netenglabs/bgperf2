@@ -210,6 +210,63 @@ CHURN_PROTOCOL = 'churn'
 # which is not success either -- the sequence alternates, so reaching a
 # `disable` on an already-disabled protocol means the previous `enable` was
 # lost, and treating it as success would measure a burst that did not happen.
+# The filter a policy reload installs on the target's import. One name, because
+# the reload rewrites the whole config file and then asks BIRD to re-read it:
+# the filter has to be found by the same name it was written under, and a
+# second one left behind from an earlier reload would be dead config that still
+# parses.
+POLICY_RELOAD_FILTER = 'bgperf_policy_reload'
+
+# What `birdc configure` says when it accepted the new configuration. Both are
+# success: BIRD answers `Reconfigured` when it applied the change outright and
+# `Reconfiguration in progress` when it accepted it and is still applying --
+# which is the reply a large table can produce, and reading it as a failure
+# would abandon exactly the reloads worth measuring.
+_RECONFIGURE_OK = ('Reconfigured', 'Reconfiguration in progress')
+
+
+def policy_reload_filter_config(reject_peer_asns):
+    """The import filter a reload installs, or nothing where none was asked for.
+
+    One `bgp_path ~ [...]` membership test over the whole rejected set rather
+    than a line per peer: it is the form `filters/bird.conf` already uses for
+    its bogon ASNs, and a fifty-block reload would otherwise write fifty
+    branches that all have to be evaluated for every route in the table --
+    turning the cost of the policy into a property of how the filter was
+    generated.
+    """
+    if not reject_peer_asns:
+        return ''
+    return '''filter {0} {{
+  if (bgp_path ~ [{1}]) then reject;
+  accept;
+}}
+'''.format(POLICY_RELOAD_FILTER,
+           ', '.join(str(int(asn)) for asn in reject_peer_asns))
+
+
+def policy_reload_failure(text):
+    """The daemon's reply where it did not report the new policy accepted.
+
+    Returns None when it did. The reply text is the signal because the exit
+    status is not available to us: `Container.local()` is a `docker exec` whose
+    output is all that comes back, and nothing here inspects the exec's status.
+    `birdc configure` does exit 1 on a bad config -- verified on
+    bgperf/bird:3.3.2, which answers `<file>:N:1 syntax error, unexpected
+    CF_SYM_UNDEFINED` and exits 1 -- so the two signals agree; it is simply the
+    one we can read, exactly as it is for a churn burst.
+
+    Reading it matters because a rejected configuration leaves the *running*
+    one untouched (verified: the previous protocols are still there
+    afterwards). A failure taken for success would mean the run went on
+    measuring the old policy while the artifact recorded the new one.
+    """
+    text = (text or '').strip()
+    if any(ok in text for ok in _RECONFIGURE_OK):
+        return None
+    return text or 'no reply from birdc configure'
+
+
 def churn_reply_ok(text, action, protocol=CHURN_PROTOCOL):
     '''Whether one session\'s reply says the churn command was carried out.'''
     wanted = '{0}: {1}d'.format(protocol, action)
@@ -388,8 +445,55 @@ class BIRDTarget(BIRD, Target):
     CONTAINER_NAME = 'bgperf_bird_target'
     CONFIG_FILE_NAME = 'bird.conf'
     DYNAMIC_NEIGHBORS = True
+    SUPPORTS_POLICY_RELOAD = True
+    POLICY_RELOAD_MECHANISM = 'birdc configure'
+    # Verified on bgperf/bird:2.19.2 and bgperf/bird:3.3.2, two peers each: the
+    # sessions' `Since` is unchanged across the reconfigure and both stay
+    # Established, so this belongs in the session-preserving comparison. What
+    # it is *not* is a purely local re-evaluation: both series answer a changed
+    # import filter by asking their peers for a route refresh -- each
+    # generator's `Export updates` doubled -- so the interval covers re-import
+    # as well as re-decision. That is what an operator changing policy on BIRD
+    # actually pays, and it is recorded rather than hidden.
+    POLICY_RELOAD_SESSION_PRESERVING = True
 
-    def write_config(self):
+    def policy_reload(self, reject_peer_asns):
+        """Reject these peers' routes on import, and re-read the config.
+
+        The config file is rewritten whole rather than patched: it is generated
+        from the scenario every run, so writing it again with the filter in it
+        is the same code path that produced the one BIRD is already running,
+        and there is no second renderer to drift.
+        """
+        self.write_config(reject_peer_asns=reject_peer_asns)
+        output = self.local('birdc configure').decode('utf-8', 'replace')
+        return policy_reload_failure(output)
+
+    def import_filter_clause(self, reject_peer_asns=None):
+        '''What a session's `import` says, in one place rather than two.
+
+        Both config paths read it -- the dynamic `neighbor range` protocol that
+        every BIRD target actually runs, and the per-neighbour one behind
+        `DYNAMIC_NEIGHBORS = False`. Nothing sets that today and the
+        per-neighbour path does not currently run at all (its format string
+        mixes manual and automatic field numbering and raises), so this serves
+        one live caller and one dormant one; it is written for both so that
+        fixing the dormant path does not also mean remembering this.
+
+        A policy reload and `--filter_test` are refused together at every entry
+        point -- the target's import filter is the policy under test, and a
+        reload that replaced it would change two things at once -- so this
+        never has to compose them. It takes the reload first all the same: if
+        that refusal is ever lifted, a run whose config quietly dropped the
+        reload it recorded would be the worse of the two failures.
+        '''
+        if reject_peer_asns:
+            return 'filter {0}'.format(POLICY_RELOAD_FILTER)
+        if 'filter_test' in self.conf:
+            return 'filter {0}'.format(self.conf['filter_test'])
+        return 'all'
+
+    def write_config(self, reject_peer_asns=None):
         # BIRD 3 is the multi-threaded rewrite, but it starts a single worker
         # unless told otherwise -- benchmarked without this it looks like 2.x.
         # BIRD 2 parses the keyword and ignores it, so a shared batch config
@@ -426,9 +530,7 @@ export all;
 '''
 
         def gen_neighbor_config(n):
-            filter = 'all'
-            if 'filter_test' in self.conf:
-                filter = f"filter {self.conf['filter_test']}"
+            filter = self.import_filter_clause(reject_peer_asns)
             return ('''ipv4 table table_{0};
 protocol pipe pipe_{0} {{
     table master4;
@@ -501,6 +603,10 @@ return true;
             f.write(config)
             if 'filter_test' in self.conf:
                 f.write(self.get_filter_test_config())
+            # Written only for a reload, so a run that asked for none renders
+            # exactly the config it always has -- the same rule the churn
+            # protocol and the diversity block follow.
+            f.write(policy_reload_filter_config(reject_peer_asns))
 
             if 'policy' in self.scenario_global_conf:
                 for k, v in self.scenario_global_conf['policy'].items():
@@ -518,7 +624,7 @@ return true;
                         match_info.append((match['type'], n))
                     f.write(gen_filter(k, match_info))
             if self.DYNAMIC_NEIGHBORS:
-                config = self.get_dynamic_neighbor_config()
+                config = self.get_dynamic_neighbor_config(reject_peer_asns)
                 f.write(config)
                 f.flush()
 
@@ -527,10 +633,8 @@ return true;
                     f.write(gen_neighbor_config(n))
 
             
-    def get_dynamic_neighbor_config(self):
-        filter = 'all'
-        if 'filter_test' in self.conf:
-            filter = f"filter {self.conf['filter_test']}"
+    def get_dynamic_neighbor_config(self, reject_peer_asns=None):
+        filter = self.import_filter_clause(reject_peer_asns)
         config = '''protocol bgp everything {{
     local as {};
     neighbor range 10.0.0.0/8 external;

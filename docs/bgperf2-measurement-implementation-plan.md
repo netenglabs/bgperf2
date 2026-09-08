@@ -1802,9 +1802,134 @@ resume safely, and produce auditable summary statistics.
 ### Phase 5A: Add BIRD architecture workload controls
 
 Status: in progress. The peer-scaling workload landed on 2026-09-03, path
-diversity and export fan-out on 2026-09-07, churn bursts on 2026-09-08; the
-remaining two work items below -- the policy reload/recalculation action and the
-independent-timing check over all of them -- are untaken.
+diversity and export fan-out on 2026-09-07, churn bursts and the policy
+reload/recalculation action on 2026-09-08; the one remaining work item below --
+the independent-timing check over all of them -- is untaken.
+
+#### Progress on 2026-09-08: policy can be changed on a table already held
+
+`--policy-reload-blocks N` (batch: `policy_reload_blocks: N` on a test)
+installs an import policy rejecting the last `N` of the fleet's prefix blocks
+once the run has converged, applies it with the target's own reload command,
+and measures the table settling at what the new policy leaves.
+
+It closes the last workload gap of this phase. Churn made a converged table
+*move*; this makes the policy over a converged table move, which is the thing
+an operator does most often and the thing this tool has never measured. The
+daemon has to re-read its configuration, re-evaluate its import policy against
+routes it already holds, and withdraw the rejected ones from every export
+session, with the sessions staying up throughout.
+
+Seven decisions worth keeping:
+
+- **The workload is stated in blocks, not peers.** A block is the group
+  `--path-diversity` deals the fleet into -- one peer per block at the default
+  -- and whole blocks are rejected. Rejecting *part* of a shared block leaves
+  the prefix behind a surviving path: the target does real best-path work and
+  the monitor's count does not move at all, so the reload could never be
+  observed to complete. Rejecting whole blocks is what makes the completion
+  count exact, and it is the same reason `split_churn_paths()` shares its
+  block.
+- **The blocks are the tail, so there is no seed.** Same determinism rule as
+  churn's: a sampled selection would need one, and a seed is another dimension
+  in the cell identity, the stem and the manifest -- what `--prefix-scope` and
+  `--path-diversity` both refuse to become. The set is rebuildable from the
+  peer count, the diversity and the block count alone, and it is published in
+  the artifact as `rejected_peer_asns` so a reader need not rebuild it.
+- **The peers are ordered by AS, not by mapping order.** A scenario is YAML and
+  the order of a mapping is not part of what the file means, while `gen_conf()`
+  assigns the address and the AS from the same incrementing index it keys the
+  diversity block on. Ordering by AS reproduces the block assignment exactly;
+  `Target.scenario_neighbors()` already sorts the same way.
+- **What issuing the change cost is published beside what applying it cost,
+  never as it.** Measured on `bgperf/bird:3.3.2`, `birdc configure` returns in
+  about 20ms while the table drains over the following polls. One number would
+  credit the daemon with an instant reload, so `command_s` and `reload_s` are
+  separate fields, and the event is dated to the *sample* the reload was issued
+  from rather than to the command's return -- the rule both poll loops already
+  follow.
+- **The CPU across the interval is the measurement, and an unsampled interval
+  is not zero.** Re-evaluating a table is mostly CPU, and a reload that
+  finishes inside one monitor poll would otherwise have no measurement at all
+  beyond "it happened". The samples come from the target's existing stats
+  thread and are kept in the artifact rather than in the row -- `max cpu %`
+  still describes the delivery, on churn's rule. Where no sample fell inside,
+  the field is `null` and the printed line says so: an interval too short to
+  sample and an interval in which the target did nothing are different
+  findings, and only the second is about the daemon.
+- **A collapsed count is not an applied policy**, in either phase, and the
+  message names which. `ConvergenceTracker.DROP_FRACTION` and
+  `CHURN_COLLAPSE_FRACTION` on a third side of convergence: without it a
+  post-reload sample of 0 satisfies `accepted <= expected` for every policy
+  there is, and a target that had lost its sessions would be published as one
+  that re-evaluated a table quickly. Rejecting *every* block is refused up
+  front for the same reason -- an empty table cannot be told from an empty
+  session.
+- **What BIRD actually does was measured, not assumed.** On both 2.19.2 and
+  3.3.2, two peers each: `birdc configure` holds the sessions up -- `Since`
+  unchanged, both Established -- so these runs belong in the no-reset
+  comparison the policy-testing plan's P4 asks for. But neither series
+  re-evaluates purely locally: both answer a changed import filter by asking
+  their peers for a route refresh, and each generator's `Export updates`
+  doubled. So `reload_s` covers re-import as well as re-decision. That is what
+  an operator changing policy on BIRD pays; it is recorded as `mechanism` and
+  `session_preserving` rather than hidden, and it is not comparable with a
+  daemon that re-filters from its own stored routes.
+
+Refused, at every entry point, for: a target with no reload mechanism (only
+BIRD has one), an MRT generator (the policy selects a block by the peer AS
+bgperf2 assigned, and an injector replays the file's own AS paths), `-f`/a
+scenario target, `--filter_test` (the target's import filter is already the
+policy under test and the reload is written into the same place, so the run
+would change two policies at once and attribute the result to one), a churn
+workload, `-r/--repeat`, and a block count covering every block.
+`check_batch_test()` checks every (target, filter, peer count) combination, not
+the first.
+
+**`--policy-reload-blocks` and a churn workload are refused together,
+deliberately.** Both run against the converged table off the same monitor
+samples, so running both means fixing an order, and the second would take the
+first's outcome as its baseline -- with nothing in the row, the stem or the
+manifest saying which ran first. Choosing that order is its own change set,
+like `--prefix-scope total` under `--path-diversity`.
+
+**`-r/--repeat` is refused too, and the first version of this change did not
+refuse it.** Churn is refused there because repeat builds no tester objects and
+nothing rewrites the generator config the churn protocol lives in; a reload is
+target-side and the target is rebuilt anyway, so the reasoning that applies to
+churn does not apply here and `-r` was left accepted. What actually breaks is
+the completion count. It is `blocks x prefixes per peer`, and repeat reuses
+whatever tester containers it finds while regenerating the scenario -- so `-p`
+need not be what the generators are announcing. Verified by running it:
+`-n 4 -p 1000 -r` behind a `-p 10000` run converged at 40,000, expected the
+policy to leave 39,000, and the rejected peer took 10,000 with it. The collapse
+guard named that correctly and the run was published incomplete, which is the
+point -- it named it after a full run, and the rule is knowable from the
+command line.
+
+Stem gets `pr<N>`, both `run` blocks record it, `-f` records `null`. Not a CSV
+column, for the reason `--path-diversity` is not. `config` deliberately does
+not take the flag at all: a reload is a runtime action on the target and
+changes no part of the scenario, so `config` has nothing to emit for it and
+offering it there would print a scenario that reads as though it encoded a
+workload it does not.
+
+##### Docker verification
+
+`bench -t bird --version 3.3.2 -n 4 -p 100 --policy-reload-blocks 1` on
+2026-09-08: converged at 400 accepted prefixes, the reload rejected AS 1006,
+the monitor settled at exactly 300, `command_s` 0.023s, target CPU 0.69% peak
+over 2 samples, `session_preserving: true`. Repeated at `-p 50000`
+(200,000 -> 150,000) and on `--version 2.19.2` at `-p 10000` with
+`--policy-reload-blocks 2` (40,000 -> 20,000). Every refusal was exercised from
+the command line and each fired before the first container.
+
+The reload completed inside one poll at all three sizes, so `reload_s` equals
+its own resolution and the printed line reports it as a bound rather than a
+duration -- which is the honest reading, and the reason `command_s` and the CPU
+samples are published beside it. A table large enough to make BIRD 3 take
+several polls over this has not been run on this host; that is Phase 6 work on
+the campaign host.
 
 #### Progress on 2026-09-08: a converged table can be made to move
 
@@ -2599,8 +2724,8 @@ and needs no enumeration of what a target may legitimately carry.
   receiver sessions without treating the extra receivers as route sources.
 - Add bounded withdrawal/reannouncement bursts with explicit operation counts
   and completion events.
-- Add a loaded-table policy reload/recalculation action and record its start,
-  completion, resulting route counts, and CPU interval.
+- ~~Add a loaded-table policy reload/recalculation action and record its start,
+  completion, resulting route counts, and CPU interval.~~ Done 2026-09-08.
 - Preserve independent ingress, table-selection, export, and monitor timing so
   parallel work is not collapsed into one end-to-end number.
 

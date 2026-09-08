@@ -655,6 +655,36 @@ class Target(Container):
 
     CONFIG_FILE_NAME = None
 
+    def scenario_neighbors(self, sort=True):
+        """Every BGP session this target is configured with.
+
+        Three kinds, and this is the one place that knows there are three: the
+        generators' peers, the monitor, and the export-fan-out receivers. Eight
+        target modules built this list independently before receivers existed,
+        each of them `flatten(testers) + [monitor]`, and a receiver added to
+        seven of them is a target that quietly exports to fewer sessions than
+        the run says it does -- with nothing in the row, the artifact or the
+        graph to show for it.
+
+        Receivers are deliberately *not* in `conf['testers']`. That is what
+        keeps them from being route sources: `get_test_counts()` reads the
+        testers, so a receiver is never waited on for a full table it will
+        never send, and the monitor's check-point and the ingress accounting
+        are untouched by how many of them there are.
+
+        `sort=False` for the two callers that never sorted -- ordering is
+        cosmetic in a config file, and changing it would put an unrelated diff
+        in front of anyone comparing a generated config against an older run's.
+        """
+        conf = self.scenario_global_conf
+        neighbors = list(flatten(list(t.get('neighbors', {}).values())
+                                 for t in conf['testers']))
+        neighbors.append(conf['monitor'])
+        neighbors.extend(conf.get('receivers') or [])
+        if not sort:
+            return neighbors
+        return sorted(neighbors, key=lambda n: n['as'])
+
     def write_config(self):
         raise NotImplementedError()
 

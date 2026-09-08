@@ -1801,8 +1801,132 @@ resume safely, and produce auditable summary statistics.
 
 ### Phase 5A: Add BIRD architecture workload controls
 
-Status: in progress. The peer-scaling workload landed on 2026-09-03 and path
-diversity on 2026-09-07; the remaining four work items below are untaken.
+Status: in progress. The peer-scaling workload landed on 2026-09-03, path
+diversity and export fan-out on 2026-09-07; the remaining three work items below
+are untaken.
+
+#### Progress on 2026-09-07: the table can be exported more than once
+
+`--receivers N` (batch: `receivers: N` on a test) adds N sessions the target
+advertises its whole table to and which announce nothing back.
+
+The gap it closes is that **a run has always had exactly one export session**.
+The monitor is the only thing the target advertises to, so what a table costs to
+*send* -- building a RIB-out, encoding updates, draining a socket -- and what it
+costs to *receive* are a single number in every result this tool has produced.
+Decoupled exports are the third responsibility BIRD 3's worker threads exist to
+parallelise, and nothing here has been able to put load on it.
+
+Five decisions worth keeping:
+
+- **A receiver is not a route source, and that is structural rather than
+  documented.** It is a top-level `receivers` key in the scenario and never an
+  entry in `conf['testers']`, so `get_test_counts()` -- which reads the testers
+  -- can never wait on one for a table it will never send, the monitor's
+  check-point does not move with the receiver count, and neither does anything
+  derived from it. Verified on Docker: 2 peers x 10 prefixes reports `required`
+  19 and `received` 20 with 0 receivers and with 3. It also falls out that
+  FRR's End-of-RIB reader is safe by construction: it marks `addr` only `if
+  addr in neighbors`, and `neighbors` comes from the testers.
+- **It is not a second monitor.** The monitor is the single instrument every
+  published timing is read from, and a second one polled into the same queue
+  would be an unlabelled second `recved` series in the same stats stream.
+  `Receiver(Monitor)` inherits the gobgpd config writer, the startup script and
+  the establishment wait -- two copies of that config would drift, and the
+  receiver's would drift silently -- and **refuses `stats()`**, so it cannot be
+  polled as an instrument by accident.
+- **`Target.scenario_neighbors()` is the one place that knows a target has
+  three kinds of session.** Eight target modules built `flatten(testers) +
+  [monitor]` independently, and a receiver added to seven of them is a target
+  quietly exporting to fewer sessions than the run says -- with nothing in the
+  row, the artifact or the graph to show for it. The two callers that never
+  sorted (`frr.py`, `gobgp.py`) pass `sort=False`, since ordering in a generated
+  config is cosmetic and changing it would put an unrelated diff in front of
+  anyone comparing a config against an older run's. A test asserts no module
+  still builds that list by hand, because the seam is only a seam while every
+  caller goes through it.
+- **Receivers are established before any generator launches.** A session that
+  came up mid-run would take a partial table and land the export work at a
+  moment nothing recorded, which is the one thing this exists to measure. Their
+  wait is deliberately *not* folded into `monitor_wait_time`: that column is the
+  instrument coming up, and adding the fan-out to it would make a
+  `--receivers 20` run read as a slow monitor in every published row.
+- **Their addresses continue the peers' own index rather than occupying a
+  region of their own.** Continuing means neither the address nor the AS number
+  (`1000 + i`) can collide with a peer whatever the peer count; a separate
+  region is safe only until somebody runs enough peers to reach it, and that
+  collision surfaces as a daemon quietly refusing one session.
+
+It is refused for **nothing** that `--path-diversity` and `--prefix-scope` are
+refused for, and that asymmetry is the point: a receiver is a target-side
+session, so it does not interact with the generator and an MRT run has the same
+reason to want export fan-out as a synthetic one. The only refusals are a value
+that is not a count, and `-f`/a scenario target -- where the file states the
+sessions the target has, so the flag would add nothing to the config while
+starting containers nobody peered with.
+
+**Docker verification, which this phase requires.** Both target topologies were
+run at 2 peers x 10 prefixes on `/var/tmp/bgperf`:
+
+- `bird` (dynamic neighbours) with `--receivers 3`: all three receivers reached
+  `Establ` with the target and held 20 of 20 prefixes, so the target really did
+  fan one table out to four sessions while ingress stayed at 20.
+- `frr_c` (explicit enumeration, the path through the new seam) with
+  `--receivers 2`: the generated `frr.conf` carries five `remote-as` neighbours
+  -- two testers, the monitor, two receivers -- in the unsorted order that
+  caller has always produced.
+- A following run with no receivers removed both containers, so a batch cannot
+  inherit a previous cell's fan-out. The removal line said "tester container"
+  for them and now names the role.
+
+No result rows were published: these are correctness checks on a development
+host, not measurements, and the campaign's rows may not cross hosts.
+
+Four things review found, and two of them are the shape this phase keeps
+producing -- a knob that reaches most of the run and not all of it:
+
+- **`-r/--repeat` inherited the previous run's receivers while everything else
+  acted on the number asked for.** `gen_conf()` writes the requested sessions
+  into the target's config, `bench_output_prefix()` names the artifacts `rx<N>`
+  and both `run` blocks record N, but `if not args.repeat:` skipped creating
+  them -- so `bench -r --receivers 3` after a run with none published a row and
+  a manifest claiming a three-way fan-out for a run with one export session.
+  The inverse is worse: `-r --receivers 1` after `--receivers 5` leaves five
+  containers up, and a dynamic-neighbour target's `neighbor range 10.0.0.0/8`
+  accepts every one of them, so the target really does export to six sessions
+  while provenance says two. Neither direction failed, because unlike the
+  testers -- whose already running is `--repeat`'s whole premise -- nothing
+  establishes or polls a receiver. `check_repeat_receivers()` refuses a
+  mismatch above the teardown; it does not reconcile, since creating the
+  difference would make `--repeat` start containers and destroying it would
+  drop sessions the target is mid-run with.
+- **The fan-out lands in a published column that feeds a confounder.** Each
+  receiver is a full GoBGP holding its own copy of the table on the same host,
+  and `min free mem (GB)` is host-wide, so `findings.py` can raise
+  `low_free_memory` -- which withholds `limiting_component` entirely -- on
+  memory the run consumed by design. `describe_export_fanout_cost()` names the
+  mechanism before the run and deliberately estimates nothing, for the reason
+  `LOG_SPACE_FLOOR_GB` is not an estimate: what a GoBGP holds per route depends
+  on the paths, and a number invented here would be quoted back as measured.
+  The measurement dictionary's `min free mem` entry says it too; only the
+  `received` entry had been updated.
+- **The one path that is handed a scenario rather than building one was
+  unguarded.** `resolve_receivers()` covers `bench`, `config` and `batch`, but a
+  `-f` file's own `receivers` key went straight into
+  `enumerate(conf['receivers'])` and `scenario_neighbors()`'s `extend`, so an
+  operator mirroring the CLI flag as `receivers: 3` got
+  `TypeError: 'int' object is not iterable`. `scenario_receivers()` refuses it
+  by name, and checks each entry carries the three fields every target's
+  `gen_neighbor_config()` reads, so a malformed one is not a `KeyError` inside
+  a config writer.
+- **A comment ended up documenting the wrong block.** The note explaining why
+  the diversity is resolved before the scope stayed put while the receivers
+  call was inserted between it and the code it described -- and it then read as
+  a claim about a scope interaction `resolve_receivers()` deliberately does not
+  have.
+
+The change is otherwise pure and covered by the new
+`tests/test_export_fanout.py` (59 tests); 934 total, Docker-free.
 
 #### Progress on 2026-09-07: the target can be made to choose between paths
 

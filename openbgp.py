@@ -130,7 +130,7 @@ fib-update no
                         match_info.append((match['type'], n))
                     f.write(gen_filter(k, match_info))
 
-            for n in sorted(list(flatten(list(t.get('neighbors', {}).values()) for t in self.scenario_global_conf['testers'])) + [self.scenario_global_conf['monitor']], key=lambda n: n['as']):
+            for n in self.scenario_neighbors():
                 f.write(gen_neighbor_config(n))
             f.write('allow to any\n')
             

@@ -68,7 +68,7 @@ no bgp ebgp-requires-policy
                 c +="    neighbor {0} route-map {1} in\n".format(local_addr, self.conf['filter_test'])
             return c
 
-        neighbors = list(flatten(list(t.get('neighbors', {}).values()) for t in self.scenario_global_conf['testers'])) + [self.scenario_global_conf['monitor']]
+        neighbors = self.scenario_neighbors(sort=False)
         
         with open('{0}/{1}'.format(self.host_dir, self.CONFIG_FILE_NAME), 'w') as f:
             f.write(config)

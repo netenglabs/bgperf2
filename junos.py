@@ -60,8 +60,7 @@ class JunosTarget(Junos, Target):
 
         bgp['license'] = self.get_license_key(self.conf['license_file'])
 
-        for n in sorted(list(flatten(list(t.get('neighbors', {}).values()) for t in self.scenario_global_conf['testers'])) + 
-            [self.scenario_global_conf['monitor']], key=lambda n: n['as']):
+        for n in self.scenario_neighbors():
                 bgp['neighbors'].append(n)
         config = self.get_template(bgp, template_file="junos.j2")
      

@@ -262,6 +262,61 @@ parallelise.
   from the function that owns that diagnosis, rather than being blamed on the combination -- which
   sends the operator to remove the diversity and meet the same typo again.
 
+`--receivers N` (batch: `receivers: N`, a *test* key) is export fan-out: N sessions the
+target advertises its whole table to and which announce nothing back. Without it a run has exactly
+one export session -- the monitor -- so what a table costs to *send* and what it costs to *receive*
+have been one number in every result this tool has produced, and decoupled exports are the third
+thing BIRD 3's worker threads exist to parallelise.
+
+- **A receiver is not a route source.** It is a top-level `receivers` key in the scenario, never an
+  entry in `conf['testers']`: `get_test_counts()` reads the testers, so a receiver is never waited
+  on for a table it will never send, and the monitor's check-point and the whole ingress side do
+  not move with the receiver count. Verified: 2 peers x 10 prefixes gives `required` 19 and
+  `received` 20 with 0 receivers and with 3.
+- **It is not a second monitor.** The monitor is the single instrument every published timing is
+  read from; a second one polled into the same queue would be an unlabelled second `recved` series.
+  `Receiver(Monitor)` inherits the gobgpd config, the startup script and the establishment wait, and
+  **refuses `stats()`** so that cannot happen by accident.
+- **`Target.scenario_neighbors()` (base.py) is the one place that knows a target has three kinds of
+  session.** Eight target modules built `flatten(testers) + [monitor]` independently, and a receiver
+  added to seven of them is a target quietly exporting to fewer sessions than the run claims.
+  `sort=False` for `frr.py` and `gobgp.py`, which never sorted -- ordering in a generated config is
+  cosmetic and changing it puts an unrelated diff in front of anyone comparing against an older run.
+  `tests/test_export_fanout.py` asserts no module still builds that list by hand.
+- **Receivers are established before any generator launches**, since a session that came up mid-run
+  would take a partial table and put the export work at a moment nothing recorded. Their wait is
+  *not* folded into `monitor (s)`: that column is the instrument coming up, and a `--receivers 20`
+  run would otherwise read as a slow monitor in every row.
+- **They are removed like testers** (`bgperf_receiver<i>`), because `batch()` reuses the process per
+  cell and a leftover fails the next cell on a duplicate name.
+- **Their addresses continue the peers' own index**, so neither the address nor the AS number
+  (`1000 + i`) can collide whatever the peer count -- a separate region would be safe only until
+  someone ran enough peers to reach it.
+- Unlike `--path-diversity` and `--prefix-scope`, it is refused for **nothing** except a bad count
+  and `-f`/a scenario target: a receiver is a target-side session, so an MRT run has the same reason
+  to want fan-out as a synthetic one. Stem gets `rx<N>`, both `run` blocks record it, `-f` records
+  `null`.
+- **`-r/--repeat` must ask for the fan-out that is already running.** `-r` reuses the previous run's
+  containers while everything else still acts on the number asked for -- the target's config, the
+  artifact names, both `run` blocks -- so a mismatch publishes a topology that did not run, in
+  silence and in both directions. Asking for more claims a fan-out that never existed; asking for
+  fewer leaves surplus containers up, which a dynamic-neighbour target's `neighbor range
+  10.0.0.0/8` accepts, so the target exports to sessions the manifest omits.
+  `check_repeat_receivers()` refuses a mismatch above the teardown rather than reconciling it:
+  creating the difference would make `-r` start containers, destroying it would drop sessions the
+  target is mid-run with.
+- **The fan-out is in `min free mem (GB)`, and that column feeds a confounder.** Each receiver holds
+  its own copy of the table on the same host, and a low value becomes `findings.py`'s
+  `low_free_memory`, which withholds `limiting_component` -- so a run can be told its intervals
+  include page pressure caused by memory it consumed on purpose. `describe_export_fanout_cost()`
+  says so before the run and deliberately **does not estimate the size**, for the reason
+  `LOG_SPACE_FLOOR_GB` is not an estimate: what a GoBGP holds per route depends on the paths, and an
+  invented number gets quoted back as though it had been measured.
+- **A `-f` scenario's own `receivers` key is validated where the file is parsed**
+  (`scenario_receivers()`). `resolve_receivers()` guards every path that *builds* a scenario; this
+  guards the one path that is handed one, so `receivers: 3` written into a scenario file is refused
+  by name instead of reaching `enumerate()` as a bare `TypeError`.
+
 `--threads N` sets worker threads on the target (`conf['target']['threads']`). Only BIRD reads it
 so far: **BIRD 3 runs one worker unless the config says otherwise**, so benching 3.x against 2.x
 without it measures nothing (verified: 3.3.2 gives 2 OS threads by default, 5 with `threads 4`;

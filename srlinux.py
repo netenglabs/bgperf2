@@ -91,8 +91,7 @@ set / network-instance default protocols bgp neighbor {0} peer-group neighbors
             pass   
 
 
-        for n in sorted(list(flatten(list(t.get('neighbors', {}).values()) for t in self.scenario_global_conf['testers'])) + 
-            [self.scenario_global_conf['monitor']], key=lambda n: n['as']):
+        for n in self.scenario_neighbors():
             config[key]["default"]["protocols"].update(gen_neighbor_config(n))
         
 

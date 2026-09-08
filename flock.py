@@ -69,8 +69,7 @@ class FlockTarget(Flock, Target):
 
         config["bgp"]["as"] = []
 
-        for n in sorted(list(flatten(list(t.get('neighbors', {}).values()) for t in self.scenario_global_conf['testers'])) + 
-            [self.scenario_global_conf['monitor']], key=lambda n: n['as']):
+        for n in self.scenario_neighbors():
             config["bgp"]["as"].append(gen_neighbor_config(n))
         
         with open('{0}/{1}'.format(self.host_dir, self.CONFIG_FILE_NAME), 'w') as f:

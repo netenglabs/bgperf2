@@ -53,8 +53,7 @@ class EosTarget(Eos, Target):
         bgp['asn'] = self.conf['as']
         bgp['router-id'] = self.conf['router-id']
 
-        for n in sorted(list(flatten(list(t.get('neighbors', {}).values()) for t in self.scenario_global_conf['testers'])) + 
-            [self.scenario_global_conf['monitor']], key=lambda n: n['as']):
+        for n in self.scenario_neighbors():
                 bgp['neighbors'].append(n)
         config = self.get_template(bgp, template_file="eos.j2")
     

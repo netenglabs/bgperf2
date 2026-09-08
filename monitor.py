@@ -14,6 +14,7 @@
 # limitations under the License.
 
 from json.decoder import JSONDecodeError
+from base import Container
 from gobgp import GoBGP
 import os
 from  settings import dckr
@@ -33,15 +34,19 @@ class Monitor(GoBGP):
     def run(self, conf, dckr_net_name=''):
         ctn = super(GoBGP, self).run(dckr_net_name)
         config = {}
+        # From `self.conf` rather than `conf['monitor']`: `Container.__init__`
+        # was already handed this role's own dict, and reading it here is what
+        # lets `Receiver` inherit this method unchanged instead of copying a
+        # gobgpd config writer that would then drift from the monitor's.
         config['global'] = {
             'config': {
-                'as': conf['monitor']['as'],
-                'router-id': conf['monitor']['router-id'],
+                'as': self.conf['as'],
+                'router-id': self.conf['router-id'],
             },
         }
         config ['neighbors'] = [{'config': {'neighbor-address': conf['target']['local-address'],
                                             'peer-as': conf['target']['as']},
-                                 'transport': {'config': {'local-address': conf['monitor']['local-address']}},
+                                 'transport': {'config': {'local-address': self.conf['local-address']}},
                                  'timers': {'config': {'connect-retry': 10}}}]
         with open('{0}/{1}'.format(self.host_dir, 'gobgpd.conf'), 'w') as f:
             f.write(yaml.dump(config))
@@ -49,7 +54,7 @@ class Monitor(GoBGP):
         startup = '''#!/bin/bash
 ulimit -n 65536
 gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
-'''.format(conf['monitor']['local-address'], self.guest_dir, self.config_name, 'info')
+'''.format(self.conf['local-address'], self.guest_dir, self.config_name, 'info')
         filename = '{0}/start.sh'.format(self.host_dir)
         with open(filename, 'w') as f:
             f.write(startup)
@@ -63,12 +68,12 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
         i = dckr.exec_create(container=self.name, cmd=cmd)
         return dckr.exec_start(i['Id'], stream=stream)
 
-    def wait_established(self, neighbor):
+    def wait_established(self, neighbor, role='monitor'):
         n = 0
         while True:
             if n > 0:
                  rm_line()
-            print(f"Waiting {n} seconds for monitor")
+            print(f"Waiting {n} seconds for {role}")
 
             neighbor_data = self.local('gobgp neighbor {0} -j'.format(neighbor)).decode('utf-8')
 
@@ -137,3 +142,42 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
         t = Thread(target=stats)
         t.daemon = True
         t.start()
+
+
+class Receiver(Monitor):
+    '''A session the target exports its table to, and nothing else.
+
+    Export fan-out is the third kind of session in a run. A tester is a route
+    source and the monitor is the measurement instrument; a receiver is neither
+    -- it announces nothing and is never polled, so what it costs the target is
+    one more copy of the RIB-out and one more set of updates to encode and
+    send. Without it, "how much does a table cost to export" and "how much does
+    it cost to receive" are one number in every result this tool has produced,
+    and decoupled exports are one of the three responsibilities BIRD 3's worker
+    threads exist to parallelise.
+
+    It is a `Monitor` because the two are the same container doing the same
+    thing -- a GoBGP peered with the target and importing everything -- and the
+    only difference is that nothing reads this one. Subclassing rather than
+    copying keeps the gobgpd config, the startup script and the establishment
+    wait single-sourced; `stats()` is refused rather than inherited, because a
+    receiver polled as though it were the instrument would publish a second,
+    unlabelled `recved` series into the same queue the monitor feeds.
+
+    Receivers are deliberately absent from `conf['testers']`, so
+    `get_test_counts()` never waits on them for a table they will never send
+    and the monitor's check-point does not move with their number.
+    '''
+
+    CONTAINER_NAME = None
+    CONTAINER_NAME_PREFIX = 'bgperf_receiver'
+
+    def __init__(self, index, host_dir, conf, image='bgperf/gobgp'):
+        self.index = index
+        Container.__init__(self, '{0}{1}'.format(self.CONTAINER_NAME_PREFIX, index),
+                           image, host_dir, self.GUEST_DIR, conf)
+
+    def stats(self, queue, interval=1):
+        raise NotImplementedError(
+            'a receiver is not an instrument: it announces nothing and is '
+            'never polled. Read the monitor.')

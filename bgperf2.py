@@ -54,7 +54,7 @@ from eos import Eos, EosTarget
 from tester import ExaBGPTester, BIRDTester
 from mrt_tester import GoBGPMRTTester, ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
-from monitor import Monitor
+from monitor import Monitor, Receiver
 from convergence import ConvergenceTracker
 from contention import (describe_contention, foreign_cpu_percent,
                         free_space_bytes, is_memory_backed, own_process_tree,
@@ -187,6 +187,12 @@ def bench_output_prefix(args):
     diversity = getattr(args, 'path_diversity', None) or DEFAULT_PATH_DIVERSITY
     if diversity != DEFAULT_PATH_DIVERSITY:
         parts.append('pd{0}'.format(diversity))
+    # The export fan-out is the same kind of dimension and carried the same
+    # way: nothing else in this stem moves with it, so two tests differing only
+    # in `receivers` would write every per-run artifact over each other.
+    receivers = getattr(args, 'receivers', None) or DEFAULT_RECEIVERS
+    if receivers != DEFAULT_RECEIVERS:
+        parts.append('rx{0}'.format(receivers))
     return '_'.join(parts)
 
 
@@ -463,6 +469,136 @@ def resolve_path_diversity(diversity, neighbor_num, tester_type=None,
                 diversity, neighbor_num, neighbor_num % diversity,
                 ' or '.join(str(d) for d in groups)))
     return diversity
+
+
+# How many receive-only sessions the target exports its table to, beside the
+# monitor. 0 is every run bgperf has ever made: one table in, one session out,
+# so the cost of exporting a table and the cost of receiving one are a single
+# number that nothing downstream can separate. Each receiver is one more copy
+# of the RIB-out for the target to build, encode and send, and it announces
+# nothing -- so the ingress side of the run is untouched by how many there are.
+DEFAULT_RECEIVERS = 0
+
+
+def resolve_receivers(receivers):
+    """The validated export fan-out, checked before any container starts.
+
+    Deliberately unconstrained by the things `--path-diversity` and
+    `--prefix-scope` are constrained by. A receiver is a *target-side* session:
+    it is not a route source, so it does not interact with the generator, and
+    an MRT run has the same reason to want export fan-out as a synthetic one.
+    The only rules are that it is a count, and that a run whose sessions come
+    from a scenario file states them there rather than here -- which is
+    `bench()`'s and `check_batch_test()`'s to refuse, since only they know
+    whether a file was named.
+    """
+    if receivers is None:
+        return DEFAULT_RECEIVERS
+    if (not isinstance(receivers, int) or isinstance(receivers, bool)
+            or receivers < 0):
+        raise ValueError(
+            '--receivers must be a whole number of 0 or more, got '
+            '{0!r}'.format(receivers))
+    return receivers
+
+
+def existing_receiver_count(container_names):
+    """How many receiver containers a previous run left running."""
+    return sum(1 for name in container_names
+               if name.startswith(Receiver.CONTAINER_NAME_PREFIX))
+
+
+def check_repeat_receivers(requested, existing):
+    """Refuse a `--repeat` whose fan-out is not the one already running.
+
+    `-r/--repeat` reuses the previous run's monitor and testers, and receivers
+    are reused with them -- but every other part of the run still acts on the
+    number *asked for*: `gen_conf()` writes those sessions into the target's
+    config, `bench_output_prefix()` names the artifacts `rx<N>`, and both `run`
+    blocks record it. So the two counts disagreeing is a published claim about
+    a topology that did not run, and it is silent in both directions.
+
+    Asking for more than exist gives a row and a manifest claiming a fan-out
+    the run never had. Asking for fewer is worse on a dynamic-neighbour target:
+    the surplus containers are still up and `neighbor range 10.0.0.0/8` accepts
+    every one of them, so the target really does fan out to sessions the
+    manifest does not mention. Nothing else notices, because unlike the testers
+    -- whose already running is `--repeat`'s whole premise -- nothing
+    establishes or polls a receiver.
+
+    Refused rather than reconciled: creating the difference would make
+    `--repeat` start containers, and destroying it would drop sessions the
+    target is mid-run with.
+    """
+    if requested == existing:
+        return
+    raise ValueError(
+        '-r/--repeat reuses the previous run\'s containers, and it left {0} '
+        'receiver{1} running while this run asks for {2}. The target would be '
+        'configured for {2} and the artifacts named for {2} while {0} '
+        'actually {3} the table. Drop -r to build the fan-out this run asks '
+        'for, or ask for {0}'.format(
+            existing, '' if existing == 1 else 's', requested,
+            'receives' if existing == 1 else 'receive'))
+
+
+def scenario_receivers(conf):
+    """The receiver list a parsed scenario declares, checked before it is used.
+
+    `resolve_receivers()` guards every path that *builds* a scenario; this
+    guards the one path that is handed one. An operator mirroring the CLI flag
+    into a scenario file as `receivers: 3` otherwise reached
+    `enumerate(conf['receivers'])` and `neighbors.extend(...)` as a bare
+    `TypeError: 'int' object is not iterable`, and each entry has to carry the
+    three fields every target's `gen_neighbor_config()` reads or the failure is
+    a `KeyError` inside a config writer instead.
+    """
+    receivers = conf.get('receivers')
+    if receivers is None:
+        return []
+    if not isinstance(receivers, list):
+        raise ValueError(
+            "scenario `receivers` must be a list of sessions, got {0!r}. It is "
+            'not a count: each entry is one session, like the monitor '
+            'entry'.format(receivers))
+    required = ('as', 'router-id', 'local-address')
+    for index, receiver in enumerate(receivers):
+        if not isinstance(receiver, dict):
+            raise ValueError(
+                'scenario receiver {0} must be a session, got {1!r}'.format(
+                    index, receiver))
+        missing = [key for key in required if key not in receiver]
+        if missing:
+            raise ValueError(
+                'scenario receiver {0} is missing {1}. A receiver carries the '
+                'same fields as the monitor entry'.format(
+                    index, ', '.join(missing)))
+    return receivers
+
+
+def describe_export_fanout_cost(receivers):
+    """What the fan-out costs the host, said out loud before the run.
+
+    Each receiver is a full GoBGP holding its own copy of the table, on the
+    same host, and `min free mem (GB)` is host-wide -- so the fan-out lands in
+    a published column, and `findings.py` turns a low value into the
+    `low_free_memory` confounder, which withholds `limiting_component`
+    entirely. A run can therefore be told its intervals include page pressure
+    caused by memory it consumed on purpose.
+
+    Deliberately not an estimate of how much, for the reason
+    `LOG_SPACE_FLOOR_GB` is not one: what a GoBGP holds per route depends on
+    the paths, and a number this function invented would be quoted back as
+    though it had been measured. It names the mechanism and leaves the
+    arithmetic to whoever knows the table.
+    """
+    if not receivers:
+        return None
+    return ('export fan-out: {0} receiver{1} will each hold a full copy of the '
+            'table on this host. That memory is bgperf2\'s own and is counted '
+            'in the published `min free mem` column, where a low value becomes '
+            'the low_free_memory confounder and withholds the '
+            'verdict'.format(receivers, '' if receivers == 1 else 's'))
 
 
 def gen_mako_macro():
@@ -970,12 +1106,21 @@ def remove_old_containers():
         dckr.remove_container(Monitor.CONTAINER_NAME, force=True)
 
     for i, ctn_name in enumerate (get_ctn_names()):
-        if ctn_name.startswith(ExaBGPTester.CONTAINER_NAME_PREFIX) or \
+        # Receivers are named like the testers and have to be removed like
+        # them: batch() runs cell after cell in one process, so a receiver left
+        # behind fails the next cell on a duplicate container name -- and a run
+        # with fewer receivers than the last would otherwise inherit the
+        # difference as sessions nobody configured.
+        if ctn_name.startswith(Receiver.CONTAINER_NAME_PREFIX) or \
+            ctn_name.startswith(ExaBGPTester.CONTAINER_NAME_PREFIX) or \
             ctn_name.startswith(ExaBGPMrtTester.CONTAINER_NAME_PREFIX) or \
             ctn_name.startswith(GoBGPMRTTester.CONTAINER_NAME_PREFIX) or \
             ctn_name.startswith(Bgpdump2Tester.CONTAINER_NAME_PREFIX) or \
             ctn_name.startswith(BIRDTester.CONTAINER_NAME_PREFIX):
-            print(f"removing tester container {i} {ctn_name}")
+            role = ('receiver'
+                    if ctn_name.startswith(Receiver.CONTAINER_NAME_PREFIX)
+                    else 'tester')
+            print(f"removing {role} container {i} {ctn_name}")
             if i > 0:
                 rm_line()
             dckr.remove_container(ctn_name, force=True)
@@ -1291,6 +1436,19 @@ def bench(args):
                 sys.exit('{0} must be a whole number of 1 or more, got '
                          '{1!r}'.format(flag, value))
         check_generator_matches_workload(args)
+        try:
+            args.receivers = resolve_receivers(getattr(args, 'receivers', None))
+        except ValueError as e:
+            sys.exit(str(e))
+        if args.repeat:
+            # Above the teardown with the other guards: this costs a message,
+            # and everything below destroys the previous run's containers and
+            # logs -- which under `-r` are the ones the run is about to use.
+            try:
+                check_repeat_receivers(args.receivers,
+                                       existing_receiver_count(get_ctn_names()))
+            except ValueError as e:
+                sys.exit(str(e))
         # Before the scope, so a run asking for both is told they are not
         # defined together rather than being told the arithmetic of a
         # combination that is refused anyway.
@@ -1301,6 +1459,14 @@ def bench(args):
                 getattr(args, 'prefix_scope', None))
         except ValueError as e:
             sys.exit(str(e))
+    if args.file and (getattr(args, 'receivers', None)
+                      or DEFAULT_RECEIVERS) != DEFAULT_RECEIVERS:
+        # A scenario file states every session the target has, receivers
+        # included, so this would add nothing to the config and start
+        # containers nobody peered with -- above the teardown, like the two
+        # refusals beside it.
+        sys.exit('--receivers has nothing to add under -f: a scenario file '
+                 'states the sessions the target has itself')
     if args.file and (getattr(args, 'path_diversity', None)
                       or DEFAULT_PATH_DIVERSITY) != DEFAULT_PATH_DIVERSITY:
         # Same rule as the scope beside it, and above the teardown for the same
@@ -1356,6 +1522,18 @@ def bench(args):
     # of the ways the flag reaches nothing.
     warn_if_trace_io_reaches_no_generator(args, conf)
 
+    # Same place, and for both halves the same reason: a `-f` run's fan-out is
+    # whatever the file says, so neither the check nor the notice can be made
+    # before the file has been read. `resolve_receivers()` guards every path
+    # that builds the scenario; this guards the one path that is handed one.
+    try:
+        scenario_receivers(conf)
+    except ValueError as e:
+        sys.exit(str(e))
+    fanout_cost = describe_export_fanout_cost(len(conf.get('receivers') or []))
+    if fanout_cost:
+        print(fanout_cost)
+
     # A remote target is not a container bgperf2 starts, so it has no image --
     # resolving one would fail a remote run on the default target's image.
     is_remote = bool(conf['target'].get('remote'))
@@ -1374,7 +1552,11 @@ def bench(args):
         ipam = IPAMConfig(pool_configs=[IPAMPool(subnet=subnet)])
         network = dckr.create_network(dckr_net_name, driver='bridge', ipam=ipam)
 
-    num_tester = sum(len(t.get('neighbors', [])) for t in conf.get('testers', []))
+    # Every session the target holds, not just the route sources: this warns
+    # about the kernel's ARP table, and a receiver occupies an entry in it
+    # exactly as a generator peer does.
+    num_tester = (sum(len(t.get('neighbors', [])) for t in conf.get('testers', []))
+                  + len(conf.get('receivers') or []))
     if num_tester > gc_thresh3():
         print('gc_thresh3({0}) is lower than the number of peer({1})'.format(gc_thresh3(), num_tester))
         print('type next to increase the value')
@@ -1384,6 +1566,21 @@ def bench(args):
     m = Monitor(config_dir+'/monitor', conf['monitor'])
     m.monitor_for = args.target
     m.run(conf, dckr_net_name)
+
+    # Started with the monitor and established before any generator launches:
+    # a receiver that came up mid-run would take a partial table and the
+    # export work would land on the target at a moment nothing recorded, which
+    # is the one thing this fan-out exists to measure. `-r/--repeat` reuses the
+    # previous run's containers, so receivers are not recreated under it for
+    # the same reason the testers are not.
+    receiver_containers = []
+    if not args.repeat:
+        for idx, receiver in enumerate(conf.get('receivers') or []):
+            r = Receiver(idx, '{0}/receiver{1}'.format(config_dir, idx),
+                         receiver)
+            print('run receiver', r.name)
+            r.run(conf, dckr_net_name)
+            receiver_containers.append(r)
 
 
     ## I'd prefer to start up the testers and then start up the target  
@@ -1559,6 +1756,11 @@ def bench(args):
     time.sleep(1)
 
     output_stats['monitor_wait_time'] = m.wait_established(conf['target']['local-address'])
+    # Not folded into `monitor_wait_time`: that column is the instrument coming
+    # up, and adding the fan-out's establishment to it would make a
+    # `--receivers 20` run look like a slow monitor in every published row.
+    for r in receiver_containers:
+        r.wait_established(conf['target']['local-address'], role=r.name)
     output_stats['cores'], output_stats['memory'] = get_hardware_info()
     # target_class is only bound in the local branch above; a remote run used to
     # die here with NameError. Pre-existing, but the remote path is now something
@@ -1800,6 +2002,8 @@ def write_provenance(args, provenance, prefix):
         'path_diversity': (None if getattr(args, 'file', None) else
                            getattr(args, 'path_diversity', None)
                            or DEFAULT_PATH_DIVERSITY),
+        'receivers': (None if getattr(args, 'file', None) else
+                      getattr(args, 'receivers', None) or DEFAULT_RECEIVERS),
         # Which pass over the matrix this row came from, or None for a batch
         # that made one pass. The name carries it too, but a summary over
         # repetitions should not have to parse a label to group them.
@@ -1869,6 +2073,8 @@ def write_event_artifact(args, events, prefix, status, testers=None,
         'path_diversity': (None if getattr(args, 'file', None) else
                            getattr(args, 'path_diversity', None)
                            or DEFAULT_PATH_DIVERSITY),
+        'receivers': (None if getattr(args, 'file', None) else
+                      getattr(args, 'receivers', None) or DEFAULT_RECEIVERS),
         'repetition': getattr(args, 'repetition', None),
         'filter_test': getattr(args, 'filter_test', None),
     }
@@ -2392,7 +2598,7 @@ BATCH_TEST_KEYS = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
 # a fresh permutation on every invocation while looking pinned, and
 # `repetitions` misspelt runs one pass of a matrix someone asked three of.
 BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope',
-                            'path_diversity')
+                            'path_diversity', 'receivers')
 
 
 # Keys that mean something on a *test* and nothing on a target. There is no
@@ -2408,7 +2614,7 @@ BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope',
 # read as a peer sweep.
 BATCH_TEST_ONLY_KEYS = ('prefix_scope', 'repetitions', 'order', 'seed',
                         'neighbors', 'prefixes', 'filter_test',
-                        'path_diversity')
+                        'path_diversity', 'receivers')
 
 # Target keys whose absence means something other than `None`. `batch()`
 # otherwise gives every unset field `None`, and `gen_conf()` routes anything
@@ -2647,6 +2853,16 @@ def check_batch_test(test):
             'of the batch with it'.format(
                 test['name'], ', '.join(fileless),
                 'names' if len(fileless) == 1 else 'name'))
+    receivers = test.get('receivers')
+    if receivers not in (None, DEFAULT_RECEIVERS) and scenarios:
+        sys.exit(
+            "test '{0}': receivers has nothing to add for {1}, which name a "
+            'scenario file: the file states the sessions the target has '
+            'itself'.format(test['name'], ', '.join(scenarios)))
+    try:
+        resolve_receivers(receivers)
+    except ValueError as e:
+        sys.exit("test '{0}': {1}".format(test['name'], e))
     # Every peer count on the axis, for the same reason the scope is checked
     # against every combination below: a matrix is where a division that works
     # for one entry and not the next is easy to write -- `neighbors: [10, 25,
@@ -2736,6 +2952,9 @@ def expand_batch_cells(test, targets):
     # edited between runs describes a different workload, and a cell id that
     # did not say so would reuse rows measured against the old one.
     diversity = test.get('path_diversity') or DEFAULT_PATH_DIVERSITY
+    # Carried on the cell for the same reason: it changes what the run does,
+    # so it has to change what `--resume` thinks the cell is.
+    receivers = test.get('receivers') or DEFAULT_RECEIVERS
     cells = []
     for repetition in range(1, repetitions + 1):
         ordinal = 0
@@ -2757,6 +2976,7 @@ def expand_batch_cells(test, targets):
                             'prefixes': resolve_prefix_scope(scope, n, p),
                             'filter': filter_test,
                             'path_diversity': diversity,
+                            'receivers': receivers,
                             'target': t,
                         })
                         ordinal += 1
@@ -3110,6 +3330,7 @@ def batch(args):
             # again here would let a config edited mid-batch run a cell under a
             # diversity its own id does not record.
             a.path_diversity = cell.get('path_diversity') or DEFAULT_PATH_DIVERSITY
+            a.receivers = cell.get('receivers') or DEFAULT_RECEIVERS
             a.filter_test = cell['filter'] if cell['filter'] != 'None' else None
             # None for a single-pass test, so its rows, graphs and event
             # artifacts keep the names they have always had; set for every pass
@@ -3208,6 +3429,9 @@ def batch_cell_id(test_name, cell):
     diversity = cell.get('path_diversity') or DEFAULT_PATH_DIVERSITY
     if diversity != DEFAULT_PATH_DIVERSITY:
         identity['path_diversity'] = diversity
+    receivers = cell.get('receivers') or DEFAULT_RECEIVERS
+    if receivers != DEFAULT_RECEIVERS:
+        identity['receivers'] = receivers
     return json.dumps(identity, sort_keys=True, separators=(',', ':'), default=str)
 
 
@@ -3224,6 +3448,9 @@ def batch_cell_description(cell, repetitions=1):
         # Named only when it is not the disjoint workload, so every existing
         # printed line and every summary description is unchanged.
         described = '{0}, paths per prefix={1}'.format(described, diversity)
+    receivers = cell.get('receivers') or DEFAULT_RECEIVERS
+    if receivers != DEFAULT_RECEIVERS:
+        described = '{0}, receivers={1}'.format(described, receivers)
     if repetitions > 1:
         described = '{0}, repetition {1}/{2}'.format(
             described, cell['repetition'], repetitions)
@@ -3350,6 +3577,7 @@ def gen_conf(args):
     # `path_diversity_groups()` refuses to do the arithmetic if it is not a
     # number the fleet can be dealt into.
     diversity = getattr(args, 'path_diversity', None) or DEFAULT_PATH_DIVERSITY
+    receivers = getattr(args, 'receivers', None) or DEFAULT_RECEIVERS
 
 
     local_address_prefix = netaddr.IPNetwork(args.local_address_prefix)
@@ -3470,7 +3698,17 @@ def gen_conf(args):
 
     neighbors = {}
     configured_neighbors_cnt = 0
+    # Where the receiver addresses start. Tracked as the loop runs rather than
+    # read off the leaked loop variable afterwards, and continued from rather
+    # than allocated in a region of its own: continuing means a receiver cannot
+    # collide with a peer whatever the peer count, and its AS number
+    # (`1000 + i`) is distinct by the same construction. A separate region
+    # would only be safe until somebody ran enough peers to reach it, which is
+    # exactly the kind of collision that shows up as a daemon quietly refusing
+    # one session.
+    next_index = 3
     for i in range(3, neighbor_num+3+2):
+        next_index = i + 1
         if configured_neighbors_cnt == neighbor_num:
             break
         curr_ip = local_address_prefix.ip + i
@@ -3499,6 +3737,33 @@ def gen_conf(args):
             },
         }
         configured_neighbors_cnt += 1
+
+    # Export fan-out: sessions the target advertises its table to and which
+    # announce nothing back. They are a top-level key rather than entries in
+    # `conf['testers']`, which is what keeps them from being route sources --
+    # `get_test_counts()` reads the testers, so a receiver is never waited on
+    # for a table it will never send -- and rather than extra monitors, since
+    # the monitor is the single instrument every published timing is read from
+    # and a second one would be a second, unlabelled `recved` series.
+    #
+    # The monitor's check-point is not touched here: it counts the distinct
+    # prefixes the generators offer, and a receiver offers none.
+    if receivers:
+        conf['receivers'] = []
+        for _ in range(receivers):
+            while (local_address_prefix.ip + next_index) in [
+                    target_local_address, monitor_local_address]:
+                print(('skipping receiver with IP {} because it collides with '
+                       'target or monitor'.format(
+                           local_address_prefix.ip + next_index)))
+                next_index += 1
+            router_id = str(local_address_prefix.ip + next_index)
+            conf['receivers'].append({
+                'as': 1000 + next_index,
+                'router-id': router_id,
+                'local-address': router_id,
+            })
+            next_index += 1
 
     print(f"Tester Type: {tester_type}")
     if tester_type == 'exa' or tester_type == 'bird':
@@ -3583,6 +3848,10 @@ def config(args):
             sys.exit('{0} must be a whole number of 1 or more, got {1!r}'.format(
                 flag, value))
     check_generator_matches_workload(args)
+    try:
+        args.receivers = resolve_receivers(getattr(args, 'receivers', None))
+    except ValueError as e:
+        sys.exit(str(e))
     try:
         args.path_diversity = resolve_path_diversity(
             getattr(args, 'path_diversity', None), args.neighbor_num,
@@ -3672,6 +3941,15 @@ def create_args_parser(main=True):
                                  'Must divide exactly, and does not apply to '
                                  'the MRT testers, where -p is already the '
                                  'whole table')
+        parser.add_argument('--receivers', type=int, default=DEFAULT_RECEIVERS,
+                            help='extra receive-only sessions the target '
+                                 'exports its table to, beside the monitor. '
+                                 'They announce nothing, so the table and the '
+                                 'ingress side of the run are unchanged by how '
+                                 'many there are -- what grows is the export '
+                                 'work: one more RIB-out to build and one more '
+                                 'set of updates to encode and send. Default '
+                                 '0, which is every run bgperf has made')
         parser.add_argument('--path-diversity', type=int,
                             default=DEFAULT_PATH_DIVERSITY,
                             help='how many peers announce each block of '

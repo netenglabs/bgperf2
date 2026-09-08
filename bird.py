@@ -479,7 +479,7 @@ return true;
                 f.flush()
 
             else:
-                for n in sorted(list(flatten(list(t.get('neighbors', {}).values()) for t in self.scenario_global_conf['testers'])) + [self.scenario_global_conf['monitor']], key=lambda n: n['as']):
+                for n in self.scenario_neighbors():
                     f.write(gen_neighbor_config(n))
 
             

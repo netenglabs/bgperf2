@@ -1,0 +1,38 @@
+# Phase 6 synthetic calibration: the smallest realistic run whose intervals the
+# 1s poll loops can actually resolve, on the campaign host.
+#
+# Size was measured, not chosen. On this host (16 vCPU / 61.44 GiB, EPYC 9R14)
+# a 4-peer x 50,000 run converges in 2.06s with `injection_s` 0.0 -- every
+# interval inside one poll, so it calibrates nothing. 10 peers x 100,000 (1M
+# routes) converges in ~7s with a 4.2s post-injection tail against a 1.4s
+# bound, which is the smallest shape where the findings policy has something
+# to rule on.
+#
+# EXPECTED VERDICT: `unresolved`, decided by `injection_boundary_unresolved`.
+# This is the correct answer and not a defect. The synthetic generator is BIRD
+# 2.19, whose `Export updates accepted` counter is queue-side and saturates
+# before the instrument first looks: `offered_in_interval` is 0 of 1,000,000,
+# so no measured interval may be read as the generators' send. The run still
+# publishes `post_injection_tail` (target_or_monitor) as evidence -- a
+# confounder withholds the verdict, not the evidence. A run here that names a
+# component is the finding that needs investigating, not the other way round.
+tests:
+  -
+     name: 2026-calibration-synth
+     neighbors: [10]
+     prefixes: [100_000]
+     filter_test: [None]
+     repetitions: 3
+     order: shuffle
+     seed: 20260908
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bird

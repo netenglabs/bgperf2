@@ -2809,3 +2809,127 @@ total` under a target runs that target at `neighbors x prefixes`, which is
 rows and bars that read as a peer sweep. `BATCH_TEST_ONLY_KEYS` refuses the
 seven of them at target level, which is the reverse of the unknown-key check
 and needs no enumeration of what a target may legitimately carry.
+
+## Phase 6: Calibration and release gate
+
+### Progress on 2026-09-08: the two calibration shapes, and a coin flip in the MRT one
+
+The first work item -- the smallest realistic synthetic and MRT calibration
+configs -- is done, and both were sized from measurement on the campaign host
+rather than chosen. This is also the first work in this plan taken on the host
+the campaign will run on, since that was settled the same day.
+
+**The synthetic size is set by what the poll can resolve, not by what runs
+quickly.** A 4-peer x 50,000 BIRD 3.3.2 run converges in **2.0606s** here, with
+`injection_s` 0.0, `offered_in_interval` 0 of 200,000, and a
+`post_injection_tail_s` of **-0.11s** against a 1.03s bound -- every interval
+inside a single poll. The policy says so itself, in as many words:
+`no_dominant_interval`, "the whole run finished inside what these poll loops
+can resolve". A run that finishes before the instrument can see it calibrates
+nothing. 10 peers x 100,000 (1M routes) converges in **~7s** with a **4.2s**
+post-injection tail against a **1.4s** bound, which is the smallest shape where
+the findings policy has an interval to rule on. That is
+`benchmarks/2026-calibration-synth.yaml`, and it takes about 45s per pass.
+
+That 4-peer number was first taken from a Phase 5A artifact that happened to be
+on disk, and re-measured on a clean run once review pointed out that the
+artifact carried `policy_reload_blocks: 1` -- a post-convergence workload, not
+the shape the config describes. The two agree to 3ms (2.0635s against 2.0606s),
+so the sizing decision does not change, but the datum now comes from a run of
+the thing it is a datum about. Both are on disk; see the artifact list below.
+
+**Its expected verdict is `unresolved`, and that is the calibration.** The
+synthetic generator is BIRD 2.19 whatever the target is -- the 1M-route probe
+ran a 3.3.2 target against a `2.19.0+branch.master` tester -- and its `Export
+updates accepted` counter is queue-side, so `offered_in_interval` was 0 of
+1,000,000 and `injection_boundary_unresolved` withheld the verdict. The run
+still published `post_injection_tail` naming `target_or_monitor`, which is the
+confounder rule working exactly as written: it withholds the verdict, not the
+evidence. Recording the expected verdict in the config header matters more here
+than it looks -- an operator meeting `unresolved` on a calibration run will
+read it as a broken instrument unless something says it is the right answer,
+and the thing that would "fix" it is reading a queue-side counter as a send.
+
+**The MRT shape does name a component**, because bgpdump2 times its own send
+and so needs no coverage test: `limiting component: tester`, with the monitor
+reaching the required count 5.9s to 30.3s *before* the last injector finished.
+An overlap, reported as one. `benchmarks/2026-calibration-mrt.yaml` keeps the
+core matrix's 10 peers x 1,050,000 deliberately -- the behaviour being
+calibrated is a property of the injector count, so a smaller fleet calibrates a
+different run.
+
+**And that run is not reproducible, which is the finding of the day
+(`bgperf2-dcs`).** Two runs of one command gave **CONVERGED and FAILED** with
+the identical final count of 1,056,779. The monitor's count is not monotonic on
+this shape; measured, poll by poll:
+
+    979,394  ->  891,947  ->  725,555  ->  543,965   (44.5% below peak)
+    -> 622,175 -> ... -> 964,274 -> 1,005,127 -> ... -> 1,056,779
+
+It collapses by nearly half over three polls and takes about twelve to climb
+back. `ConvergenceTracker` resets its regression streak **only on a rising
+sample** (`convergence.py:96-99`); a flat sample and a still-falling one both
+*advance* it. So the run fails whenever any `DROP_SAMPLES` consecutive polls
+below the threshold contain no rise at all -- a longer fall, a plateau, or any
+mixture of the two -- and survives when the recovery interleaves a rise often
+enough. That is a coin flip, and it decides whether a row exists at all.
+
+**And there is a third reset path, which matters more than the other two.**
+`convergence.py:106-110` restarts the streak whenever `neighbors_checked`
+*falls* -- a peer that dropped out explains the loss "for now". So a collapse
+accompanied by a session flapping cannot fail the run at all, whatever the
+samples do. That is not a footnote here: a flapping injector session is one of
+the plausible causes of the 44% dip itself, which means the mechanism and the
+rule that hides it may be the same event. The `mrt-probe-2` trace does not
+exercise it -- `neighbors_received` climbs 0 -> 1 -> 2 monotonically -- so
+nothing on disk yet distinguishes "the target lost routes" from "a session went
+away and came back". Whoever picks up `bgperf2-dcs` should instrument the
+neighbour count alongside the accepted count before anything else.
+
+This entry has now been corrected twice, both times by review and both times in
+the same direction: the first version said the run failed "only if the recovery
+happens to plateau" (the plateau half of one branch), and the second still
+described only the rise path. Left corrected rather than rewritten silently,
+because `bgperf2-dcs` forbids touching `DROP_FRACTION` and `DROP_SAMPLES` until
+the mechanism is understood, and a partial failure condition is exactly what
+sends the next reader after the wrong part of it. Twice is a pattern worth
+naming: a rule with three branches gets described by whichever branch the run
+in front of you took. `benchmarks/2026-core-mrt.yaml` is this exact
+shape across 14 target configurations with repetitions, and `summary.py`
+counts a failed pass apart and never averages it in, so the damage is not a
+loud failure but cells whose dispersion silently describes fewer passes than
+were run.
+
+Phase 6 is blocked on it, and the bead says what must not be done: **do not
+touch `DROP_FRACTION` or `DROP_SAMPLES` before knowing whether the collapse is
+real route loss in the target or an artifact of reading `accepted` mid-churn.**
+The monitor is the only instrument that has seen this, and it is one BGP
+session's view of a target that is re-running best-path selection against ten
+overlapping tables; the target's own count has not been looked at. Every one of
+the three convergence rules in `convergence.py` has been broken at some point,
+and CLAUDE.md records that each was broken by being changed against the case in
+front of it rather than against the claim -- which is exactly what widening a
+threshold to make this run pass would be.
+
+**The evidence is on disk**, under
+`results/2026/phase6-calibration/` on the campaign host, with a `README.md`
+naming each run's command:
+
+- `synth-toosmall-probe/` -- 4 x 50,000, the size that resolves nothing.
+- `synth-probe/` -- 10 x 100,000, the size the config uses.
+- `mrt-probe-1/` -- 10 x 1,050,000, the pass that came back **FAILED**.
+- `mrt-probe-2/` -- the same command, **CONVERGED**, with the full bench stdout
+  and the poll-by-poll `monitor-count-series.txt` the collapse above is read
+  from.
+
+`results/` is gitignored, so these live on the host's `/data` volume rather
+than in the repository -- which is the same durability the campaign's own rows
+will have, and one more reason the volume question in the unattended plan's
+Step 7 is not a detail. Recorded because this log is where "what was measured
+to decide it" is supposed to be checkable: a number whose inputs are gone is
+not auditable, which is the rule `summary.py` is already held to.
+
+No release-gate item is claimed by this change set. The gate's "controlled
+calibration cases produce the expected findings" cannot be true for the MRT
+half while one command produces two verdicts; the synthetic half is unaffected,
+and its expected finding is now written down.

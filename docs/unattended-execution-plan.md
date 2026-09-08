@@ -166,7 +166,7 @@ Unchanged from the current contracts, with one addition at the end:
 2. the full unit suite when shared timing, batch, convergence, result or
    lifecycle code changed;
 3. required Docker verification for phases that call for it, smallest realistic
-   workload, `/var/tmp/bgperf`;
+   workload, `/data/bgperf-work`;
 4. `/code-review` on the working diff, findings acted on;
 5. progress recorded in the plan document as today;
 6. commit;
@@ -982,11 +982,20 @@ process exited" and "the machine went away mid-write":
 
 - **`atomic_write()` does not fsync the directory.** It fsyncs the temp file
   and then `os.replace()`s it, which orders the rename but does not make it
-  durable: a hard termination can leave the directory entry pointing at the
-  old file. This is the one real durability hole and it is one call. Every
-  durable record this repository writes goes through that function -- the
-  progress file, the summary, the event artifacts -- so it is also the only
-  place the fix is needed.
+  durable: a hard termination can leave the directory entry pointing at the old
+  file. That is one call, and it covers the four records that go through it --
+  the progress file, the batch CSV, the batch summary, and the event artifacts.
+- **`write_provenance()` does not go through it at all**, and this is the worse
+  hole of the two. It writes `<prefix>.versions.json` with a plain
+  `open(path, 'w')` and a `json.dump` (`bgperf2.py:2943`), as do the per-run
+  PNGs. A kill landing inside that dump leaves a **truncated** file rather than
+  the old-or-new an atomic writer guarantees, and provenance is the one record
+  this repository says must never guess. An earlier draft of this step claimed
+  every durable record went through `atomic_write()` and that the directory
+  fsync was therefore "the only place the fix is needed" -- false, and false in
+  the direction that would have let the exit criterion below pass over a
+  half-written manifest. Corrected rather than deleted, because the appealing
+  wrong answer here is to fix the writer you already know about.
 - **Nothing handles SIGTERM.** A spot reclaim is SIGTERM, then SIGKILL about
   two minutes later. Nothing stops the controller threads, tears down
   containers, or declines to begin a cell it cannot finish. A batch that
@@ -997,6 +1006,13 @@ process exited" and "the machine went away mid-write":
   the difference between losing a cell and losing nothing. It is also the only
   part of this that is EC2-specific, so it belongs behind a check that a
   non-EC2 host passes silently.
+- **A hard kill leaves `atomic_write()`'s temp file behind.** Its cleanup is in
+  a `finally`, which a `SIGKILL` never reaches, so a `<name>.tmp` survives
+  beside the real document and nothing removes it on the next run. Harmless
+  today -- nothing reads those files, and the next write truncates -- but it is
+  the visible trace of an interrupted checkpoint, and the exit criterion below
+  should account for it rather than let a resumed batch look clean while
+  carrying one.
 - **A hard kill mid-cell has never been tested.** `Container.run()` removes and
   recreates by name and `surplus_receiver_names()` covers the receivers a
   smaller run leaves behind, so the leftovers are *probably* handled -- but
@@ -1008,12 +1024,24 @@ process exited" and "the machine went away mid-write":
 live on the `/data` EBS volume, and a checkpoint on a volume that is deleted
 with the instance is not a checkpoint. Whether that volume survives
 termination, and detaches and reattaches to the replacement, has to be decided
-and recorded before any of the above is worth having.
+and recorded before any of the above is worth having. Campaign artifacts
+already depend on it -- `results/` is gitignored, so every row and every
+evidence directory this campaign produces lives only there.
+
+**That decision is a gate, not a note.** It is recorded on `bgperf2-82b` as an
+acceptance criterion rather than left in this paragraph, because the
+[Human Decisions](#human-decisions) rule in this document says a decision must
+block the item and be surfaced out of band, and warns that a gate nobody sees
+is worse than stopping. Without it a worker passes every test below, closes the
+item green, and has built checkpointing onto a volume that dies with the host --
+the exact failure the step exists to prevent, reached through the step itself.
 
 **Exit criterion:** a batch killed with `SIGKILL` mid-cell, then re-invoked with
 the identical command, resumes at the next incomplete cell with no duplicate
-rows and no orphaned containers; a `SIGTERM` stops it at a cell boundary; and
-the progress file survives a simulated hard power-off.
+rows and no orphaned containers; a `SIGTERM` stops it at a cell boundary; the
+progress file **and the versions manifest of a completed cell** survive a
+simulated hard power-off; no stray `*.tmp` is left beside a durable document;
+and the volume question above is answered and recorded.
 
 ## Traps
 

@@ -1,0 +1,39 @@
+# Phase 6 MRT calibration: the same shape as the campaign's core MRT matrix,
+# on one target, so the full-table path is calibrated before 14 of them run.
+#
+# Peer count and prefix count deliberately match `2026-core-mrt.yaml` rather
+# than being reduced. The behaviour this calibrates -- ten injectors replaying
+# overlapping MRT peer tables into one target -- is a property of the injector
+# count, so a smaller fleet would calibrate a different run.
+#
+# EXPECTED VERDICT: `tester`, via `tester_limited`. Unlike the synthetic
+# generator, bgpdump2 times its own send (`reported_injection_s`), which gives
+# the injection/tail boundary a basis the coverage test cannot supply. Measured
+# here: the monitor reached the required count 5.9s to 30.3s *before* the last
+# injector finished, which is an overlap and is reported as one.
+#
+# KNOWN INSTABILITY -- read before trusting a row from this shape (bgperf2-dcs).
+# The monitor's count does not climb monotonically. It reaches ~979k, collapses
+# to ~544k (44% below its peak), and climbs back to ~1,056,779. Two runs of this
+# exact command on 2026-09-08 gave CONVERGED and FAILED ("dropping received
+# count"). ConvergenceTracker resets its regression streak only on a *rising*
+# sample, so the run fails whenever any DROP_SAMPLES consecutive polls below the
+# threshold contain no rise at all -- a longer fall, a plateau, or any mixture --
+# and survives when the recovery interleaves rises often enough. Until that is
+# resolved, a FAILED row from this config is not evidence about the target.
+tests:
+  -
+     name: 2026-calibration-mrt
+     neighbors: [10]
+     prefixes: [1_050_000]
+     filter_test: [None]
+     repetitions: 3
+     order: shuffle
+     seed: 20260908
+     targets:
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000

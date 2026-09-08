@@ -1500,11 +1500,11 @@ already records different values:
 
 - run ID: `2026-baseline`
 - results root: `results/2026`
-- work directory: `/var/tmp/bgperf`
+- work directory: `/data/bgperf-work`
 
 Inspect `COMPLETE` markers, progress JSON, CSV rows, logs, and active benchmark processes first. Never run suites
 concurrently. Monitor an active suite or resume an interrupted one; otherwise run exactly one suite with
-`scripts/run_2026_suite.sh next --run-id 2026-baseline --workdir /var/tmp/bgperf`. Review it for failed rows,
+`scripts/run_2026_suite.sh next --run-id 2026-baseline --workdir /data/bgperf-work`. Review it for failed rows,
 tester errors/timeouts, foreign CPU contention, low free memory, and timing evidence. The legacy `testers (s)`
 field is elapsed minus time to the first monitor-visible prefix, so its proximity to elapsed must not be used as
 an injection-bound verdict. Stop after that one
@@ -1535,7 +1535,7 @@ twice, which is the same reason `verify` exists.
 
 When the user says `continue the 64 GB timing validation campaign`, follow
 [`docs/2026-64gb-timing-validation-plan.md`](docs/2026-64gb-timing-validation-plan.md) with run ID
-`2026-timing-validation`, results root `results/2026`, and work directory `/var/tmp/bgperf`. Verify the measurement
+`2026-timing-validation`, results root `results/2026`, and work directory `/data/bgperf-work`. Verify the measurement
 release gate first. Never run cells or blocks concurrently. Monitor or resume an active block; otherwise run exactly
 one next block, review timing evidence, correctness, provenance, contention, and memory, then stop at the reviewed
 block boundary. The local 64 GB host is a hard ceiling; do not schedule a larger-memory workload.
@@ -1544,14 +1544,28 @@ block boundary. The local 64 GB host is a hard ceiling; do not schedule a larger
 GiB, AMD EPYC 9R14 (`m7a.4xlarge`), resized into that shape on 2026-09-03. Justin chose it on
 2026-09-08 as the closest available match to the host that produced
 `benchmarks/baseline/baseline-benchmark.csv`, which is a match on memory (61.44 GiB against 60.74)
-and **not** on CPU. So Phase 6 calibration and every campaign block run here, which is what both
-plans require -- one host for the whole experiment -- and the cost is paid in exactly one place:
+and **not** on CPU. Run Phase 6 calibration and every campaign block on this machine; that is what both plans
+require -- one host for the whole experiment. The cost is paid in exactly one place:
 **campaign rows may never be read against `benchmarks/baseline/baseline-benchmark.csv`**. That is
 already the campaign's own design (it is not a continuation of `2026-baseline`, it re-runs the
 comparisons under a new run identity), so nothing has to be given up for it -- but nothing refuses
 it either, and `create_batch_graphs()` will put two hosts' bars side by side without comment.
-`-d /var/tmp/bgperf` is on the 29 GB root here; prefer `-d /data/bgperf-work` for full-table MRT
-blocks, whose `bgpd.log` alone passes 1 GB.
+
+**The work directory in both contracts above moved to `/data/bgperf-work` for this host**, and
+that is the whole of the change -- there is no advisory version of it, because a work directory
+named in prose beside a contract that pins a different one is read as decoration. `/var/tmp` here
+is on the **29 GB root**, with ~26 GB free, shared with journald and the OS; `/data` has ~150 GB.
+Docker itself is safe either way -- `/etc/docker/daemon.json` sets `data-root` to `/data/docker` on
+this host, so images and container logs are not on the root. `2026-core-mrt.yaml` runs 14 target
+configurations at 1.05M prefixes, five of them `frr_c` whose `bgpd.log` alone passes 1 GB, and
+`warn_if_log_dir_is_short_on_space()` only fires below `LOG_SPACE_FLOOR_GB` (10) -- so a batch can
+fill the root hours in and take Docker and journald down with it, losing the *finished* cells'
+artifacts rather than the current run. The `2026-baseline` contract's "unless durable run metadata
+already records different values" clause still wins for that campaign, so anything in flight keeps
+the directory it recorded. **The timing-validation campaign has no such clause** -- its work
+directory is part of Fixed Campaign Identity -- but it has not started, so there is nothing to
+contradict; if a block is ever found mid-flight against `/var/tmp/bgperf`, the recorded manifest
+wins and the discrepancy is a finding to report, not a path to silently switch.
 
 ### Unattended execution operator contract
 

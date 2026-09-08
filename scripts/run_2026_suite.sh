@@ -13,7 +13,7 @@ Usage:
 Options:
   --run-id ID           Stable run ID for results/2026/<run-id>
   --results-root DIR    Root for run directories (default: results/2026)
-  --workdir DIR         Benchmark work directory (default: /var/tmp/bgperf)
+  --workdir DIR         Benchmark work directory (default: /data/bgperf-work)
   --mrt-file PATH       Override every mrt_file: entry in selected suites
   --force               Re-run suites even if COMPLETE marker exists
   -h, --help            Show this help
@@ -35,7 +35,11 @@ shift
 
 RUN_ID=""
 RESULTS_ROOT="results/2026"
-WORKDIR="/var/tmp/bgperf"
+# /data, not /var/tmp: the latter is on the 29 GB root on the campaign host,
+# and a full-table MRT suite can fill it hours into a batch. Both operator
+# contracts name this path; a default here that disagreed with them would be
+# the one an operator actually gets, since --workdir is optional.
+WORKDIR="/data/bgperf-work"
 MRT_FILE=""
 FORCE=0
 

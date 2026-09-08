@@ -32,7 +32,7 @@ benchmark. Report the first unmet gate and tell the user to use:
 - run ID: `2026-timing-validation`
 - results root: `results/2026`
 - run root: `results/2026/2026-timing-validation`
-- work directory: `/var/tmp/bgperf`
+- work directory: `/data/bgperf-work`
 - host class: local 64 GB server -- settled on 2026-09-08 as **the machine this
   repository is checked out on**: 16 vCPU, 61.44 GiB, AMD EPYC 9R14
   (`m7a.4xlarge`). It is the closest available match to the host that produced
@@ -56,7 +56,11 @@ order seed, and repetition ID. Do not assume those facts from this plan.
 - Preflight disk, available memory, swap use, images, and MRT input before each
   suite or repetition block.
 - Run one benchmark cell at a time.
-- Use `/var/tmp/bgperf`; do not place heavy working data on tmpfs.
+- Use `/data/bgperf-work`; do not place heavy working data on tmpfs, and do
+  not use `/var/tmp` on this host -- it is on the 29 GB root, shared with
+  journald and the OS, and a full-table MRT block can fill it hours in.
+  (Docker's own storage is on `/data`, so it is not at risk; the root
+  filesystem and the finished cells' artifacts are.)
 - Flag a row when minimum free memory is below 20% of recorded host memory.
 - Stop the active block after a low-memory row, swap growth, OOM, or host
   instability. Review before resuming.

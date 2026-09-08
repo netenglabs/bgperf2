@@ -75,7 +75,7 @@ venv/bin/python -m pytest tests/ -q
 Use focused tests while developing. Run the full unit suite before accepting a
 change that touches shared timing, batch, convergence, result, or lifecycle
 code. Run Docker verification only in the phases that call for it, using the
-smallest realistic workload and `/var/tmp/bgperf`.
+smallest realistic workload and `/data/bgperf-work`.
 
 The implementation workflow is intentionally incremental:
 
@@ -452,10 +452,32 @@ correct final route counts and timing events.
 
 ### Phase 6: Calibration and release gate
 
+Status: started on 2026-09-08, and **blocked on `bgperf2-dcs`**. The two
+calibration configs exist and both shapes have been run on the campaign host --
+which is now the machine this repository is checked out on, settled the same
+day. The synthetic shape behaves as designed and its expected verdict
+(`unresolved`, withheld by a queue-side generator counter) is recorded in the
+config itself. The MRT shape does not: two runs of one command gave CONVERGED
+and FAILED with an identical final count, because the monitor's count collapses
+44% mid-run and recovers, and the convergence rule fails it only when some
+`DROP_SAMPLES` consecutive polls below the threshold contain no rise at all. That is the shape of the campaign's whole core MRT
+matrix, so the gate's "controlled calibration cases produce the expected
+findings" cannot be claimed for it yet.
+
+Decisions and verification for this phase are in the
+[decision log](bgperf2-measurement-decision-log.md#phase-6-calibration-and-release-gate).
+
 #### Work
 
-- Add the smallest realistic synthetic and MRT calibration configs.
+- ~~Add the smallest realistic synthetic and MRT calibration configs.~~ Done
+  2026-09-08: `benchmarks/2026-calibration-synth.yaml` (10 x 100,000, the
+  smallest shape whose intervals a 1s poll can resolve on this host) and
+  `benchmarks/2026-calibration-mrt.yaml` (the core matrix's own 10 x 1,050,000,
+  since the behaviour is a property of the injector count).
 - Demonstrate a controlled slow tester and a controlled target/observer tail.
+  Both shapes have now been *observed* -- the MRT run names `tester`, the
+  synthetic run publishes a `post_injection_tail` -- but neither is yet
+  controlled, which is what this item asks for.
 - Run one BIRD synthetic and one bgpdump2 MRT calibration on the local host.
 - Review CPU contention, memory, correctness, provenance, and event ordering.
 - Record the measurement schema version used by the follow-up campaign.

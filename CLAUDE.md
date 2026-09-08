@@ -296,15 +296,24 @@ thing BIRD 3's worker threads exist to parallelise.
   and `-f`/a scenario target: a receiver is a target-side session, so an MRT run has the same reason
   to want fan-out as a synthetic one. Stem gets `rx<N>`, both `run` blocks record it, `-f` records
   `null`.
-- **`-r/--repeat` must ask for the fan-out that is already running.** `-r` reuses the previous run's
-  containers while everything else still acts on the number asked for -- the target's config, the
-  artifact names, both `run` blocks -- so a mismatch publishes a topology that did not run, in
-  silence and in both directions. Asking for more claims a fan-out that never existed; asking for
-  fewer leaves surplus containers up, which a dynamic-neighbour target's `neighbor range
-  10.0.0.0/8` accepts, so the target exports to sessions the manifest omits.
-  `check_repeat_receivers()` refuses a mismatch above the teardown rather than reconciling it:
-  creating the difference would make `-r` start containers, destroying it would drop sessions the
-  target is mid-run with.
+- **A receiver follows the monitor's lifecycle, not the testers'.** `--repeat` reuses the *tester*
+  containers and has never reused the monitor: `Container.run()` removes and recreates anything it
+  finds by name, and the target is rebuilt under `-r` too, so every receiver session has to re-peer
+  regardless. Receivers are therefore built and established on **every** run. Skipping them under
+  `-r` -- the first version -- meant the count the target was configured for, the count in the
+  artifact name and the count in both manifests were three claims about sessions that did not
+  exist, and the establishment wait that keeps the export work from landing mid-run went with them.
+  `surplus_receiver_names()` covers the one case recreating by name does not: a run asking for fewer
+  than the last built leaves the rest up, `--repeat` skips `remove_old_containers()`, and a
+  dynamic-neighbour target's `neighbor range 10.0.0.0/8` accepts every one of them.
+- **No call that asks the world may run before the guards that read only the command line.**
+  `bench()`'s argument guards are covered by a suite that deliberately needs no Docker daemon, so a
+  Docker call ahead of them makes that suite depend on machine state -- it went green or red
+  according to whether a verification run had left receiver containers up. `target_image()` was
+  doing the same thing and older: a mistyped `-p` was answered by `ImageNotBuilt` on a host with no
+  daemon or no built image rather than by the typo. Image resolution now sits after every pure guard
+  and still above the teardown, which is the invariant
+  `test_image_resolves_before_containers_are_torn_down` was always about.
 - **The fan-out is in `min free mem (GB)`, and that column feeds a confounder.** Each receiver holds
   its own copy of the table on the same host, and a low value becomes `findings.py`'s
   `low_free_memory`, which withholds `limiting_component` -- so a run can be told its intervals

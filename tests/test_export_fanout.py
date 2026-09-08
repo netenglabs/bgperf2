@@ -225,37 +225,95 @@ class TestTheReceiverContainer:
         assert monitor.Receiver.run is monitor.Monitor.run
 
 
-class TestWhatARepeatInherits:
-    """`-r/--repeat` reuses the previous run's containers, but everything else
-    still acts on the number asked for -- the target's config, the artifact
-    names and both `run` blocks -- so the two disagreeing is a published claim
-    about a topology that did not run, silently, in both directions.
+class TestWhatARepeatDoesWithTheFanOut:
+    """`--repeat` reuses the *tester* containers and has never reused the
+    monitor -- `Container.run()` removes and recreates anything it finds by
+    name, and the target is rebuilt under `-r` too. Receivers follow the
+    monitor: built and established on every run, so the count the target is
+    configured for, the count in the artifact name and the count in the
+    manifest describe sessions that actually exist.
     """
 
-    def test_a_matching_fan_out_is_accepted(self):
-        bgperf2.check_repeat_receivers(3, 3)
-        bgperf2.check_repeat_receivers(0, 0)
-
-    def test_asking_for_more_than_are_running_is_refused(self):
-        '''The row and the manifest would claim a fan-out the run never had.'''
-        with pytest.raises(ValueError) as raised:
-            bgperf2.check_repeat_receivers(3, 0)
-        assert 'asks for 3' in str(raised.value)
-
-    def test_asking_for_fewer_than_are_running_is_refused(self):
-        """Worse on a dynamic-neighbour target: the surplus containers are
-        still up and `neighbor range 10.0.0.0/8` accepts every one of them, so
-        the target really does export to sessions the manifest omits.
+    def test_surplus_receivers_are_named_for_removal(self):
+        """The one case recreating by name does not cover. A run asking for
+        fewer than the last built leaves the rest up, `--repeat` skips
+        `remove_old_containers()`, and a dynamic-neighbour target's `neighbor
+        range 10.0.0.0/8` accepts every one of them -- so the target exports to
+        sessions nothing in the row or the manifest mentions.
         """
-        with pytest.raises(ValueError) as raised:
-            bgperf2.check_repeat_receivers(1, 5)
-        assert 'left 5 receivers running' in str(raised.value)
-
-    def test_the_running_count_comes_from_the_container_names(self):
         names = ['bgperf_monitor', 'bgperf_receiver0', 'bgperf_receiver1',
-                 'bgperf_bird_tester_x', 'bgperf_bird_target']
-        assert bgperf2.existing_receiver_count(names) == 2
-        assert bgperf2.existing_receiver_count([]) == 0
+                 'bgperf_receiver2', 'bgperf_bird_target']
+        assert bgperf2.surplus_receiver_names(names, 1) == ['bgperf_receiver1',
+                                                            'bgperf_receiver2']
+
+    def test_the_ones_this_run_wants_are_left_to_be_recreated(self):
+        '''`Container.run()` removes them by name itself, which is what makes
+        the receiver lifecycle the monitor's rather than a second one.'''
+        names = ['bgperf_receiver0', 'bgperf_receiver1']
+        assert bgperf2.surplus_receiver_names(names, 2) == []
+
+    def test_asking_for_none_names_all_of_them(self):
+        names = ['bgperf_receiver0', 'bgperf_receiver1']
+        assert bgperf2.surplus_receiver_names(names, 0) == names
+
+    def test_nothing_else_is_touched(self):
+        names = ['bgperf_monitor', 'bgperf_bird_tester_x', 'bgperf_bird_target']
+        assert bgperf2.surplus_receiver_names(names, 0) == []
+
+    def test_an_unparseable_suffix_is_left_alone(self):
+        '''Not this scheme's container; removing it would be a guess.'''
+        assert bgperf2.surplus_receiver_names(['bgperf_receiverX'], 0) == []
+
+    def test_bench_builds_and_waits_for_them_on_every_run(self):
+        """The `if not args.repeat:` this replaced meant a `-r` run configured
+        the target for N sessions, named its artifacts `rxN` and recorded N in
+        both manifests while creating none of them -- and skipped the
+        establishment wait that keeps the export work from landing mid-run.
+        """
+        import inspect
+        source = inspect.getsource(bgperf2.bench)
+        creation = source.index('r.run(conf, dckr_net_name)')
+        assert 'surplus_receiver_names(' in source[:creation]
+        assert 'if not args.repeat' not in \
+            source[source.index('receivers_wanted ='):creation]
+        assert 'r.wait_established(' in source[creation:]
+
+    def test_nothing_asks_docker_before_the_arguments_are_validated(
+            self, monkeypatch):
+        """The suite deliberately needs no Docker daemon, and `bench()`'s
+        argument guards are covered by it -- so no call that asks the *world*
+        may run before the ones that read only the command line.
+
+        Both halves of this were broken. The receiver reconciliation was
+        written above the guards, and the suite promptly went green or red
+        according to whether a verification run had left receiver containers
+        up. Review then found `target_image()` doing the same thing one line
+        higher, and older: a mistyped `-p` was answered with `ImageNotBuilt` on
+        a host with no daemon or no built image, rather than with the typo.
+
+        The client itself is what is withdrawn, in both modules that hold a
+        reference to it, rather than the two functions that were caught using
+        it. Naming those two would pass while a third route -- `base`'s own
+        `get_ctn_names`, reached from `remove_target_containers()` through
+        `ctn_exists`, or a bare `dckr` call -- reintroduced exactly this.
+        """
+        class NoDocker:
+            def __getattr__(self, name):
+                raise AssertionError(
+                    'bench() asked Docker (dckr.{0}) before validating its '
+                    'arguments'.format(name))
+
+        monkeypatch.setattr(bgperf2, 'dckr', NoDocker())
+        monkeypatch.setattr(base, 'dckr', NoDocker())
+        args = Namespace(dir='/tmp', bench_name='x', docker_network_name=None,
+                         file=None, target='bird', version=None, image=None,
+                         repeat=True, neighbor_num=10, prefix_num=100,
+                         prefix_scope='per-peer', tester_type='bird',
+                         mrt_file=None, mrt_injector=None, path_diversity=4,
+                         receivers=0)
+        with pytest.raises(SystemExit) as raised:
+            bgperf2.bench(args)
+        assert 'does not divide 10 peers' in str(raised.value)
 
 
 class TestWhatTheFanOutCostsTheHost:

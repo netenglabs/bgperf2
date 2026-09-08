@@ -502,44 +502,33 @@ def resolve_receivers(receivers):
     return receivers
 
 
-def existing_receiver_count(container_names):
-    """How many receiver containers a previous run left running."""
-    return sum(1 for name in container_names
-               if name.startswith(Receiver.CONTAINER_NAME_PREFIX))
+def surplus_receiver_names(container_names, wanted):
+    """Receiver containers a previous run left that this one does not want.
 
+    `Container.run()` removes and recreates a container it finds by name, so
+    receivers 0..wanted-1 are rebuilt and re-peered on every run exactly as the
+    monitor is -- including under `-r/--repeat`, which reuses the *tester*
+    containers and has never reused the monitor. What that does not cover is a
+    run asking for fewer receivers than the last one built: `--repeat` skips
+    `remove_old_containers()`, so the surplus stays up, and a
+    dynamic-neighbour target's `neighbor range 10.0.0.0/8` accepts every one of
+    them. The target would then export to sessions the artifact name, the
+    manifest and the `min free mem` column know nothing about.
 
-def check_repeat_receivers(requested, existing):
-    """Refuse a `--repeat` whose fan-out is not the one already running.
-
-    `-r/--repeat` reuses the previous run's monitor and testers, and receivers
-    are reused with them -- but every other part of the run still acts on the
-    number *asked for*: `gen_conf()` writes those sessions into the target's
-    config, `bench_output_prefix()` names the artifacts `rx<N>`, and both `run`
-    blocks record it. So the two counts disagreeing is a published claim about
-    a topology that did not run, and it is silent in both directions.
-
-    Asking for more than exist gives a row and a manifest claiming a fan-out
-    the run never had. Asking for fewer is worse on a dynamic-neighbour target:
-    the surplus containers are still up and `neighbor range 10.0.0.0/8` accepts
-    every one of them, so the target really does fan out to sessions the
-    manifest does not mention. Nothing else notices, because unlike the testers
-    -- whose already running is `--repeat`'s whole premise -- nothing
-    establishes or polls a receiver.
-
-    Refused rather than reconciled: creating the difference would make
-    `--repeat` start containers, and destroying it would drop sessions the
-    target is mid-run with.
+    Named by index rather than counted, because the count is what is wrong in
+    that situation: a container whose index is at or above `wanted` is one this
+    run did not ask for, whether or not it is still running.
     """
-    if requested == existing:
-        return
-    raise ValueError(
-        '-r/--repeat reuses the previous run\'s containers, and it left {0} '
-        'receiver{1} running while this run asks for {2}. The target would be '
-        'configured for {2} and the artifacts named for {2} while {0} '
-        'actually {3} the table. Drop -r to build the fan-out this run asks '
-        'for, or ask for {0}'.format(
-            existing, '' if existing == 1 else 's', requested,
-            'receives' if existing == 1 else 'receive'))
+    surplus = []
+    for name in container_names:
+        if not name.startswith(Receiver.CONTAINER_NAME_PREFIX):
+            continue
+        index = name[len(Receiver.CONTAINER_NAME_PREFIX):]
+        # An unparseable suffix is not this scheme's container; leaving it
+        # alone is safer than removing something on a guess.
+        if index.isdigit() and int(index) >= wanted:
+            surplus.append(name)
+    return surplus
 
 
 def scenario_receivers(conf):
@@ -548,10 +537,10 @@ def scenario_receivers(conf):
     `resolve_receivers()` guards every path that *builds* a scenario; this
     guards the one path that is handed one. An operator mirroring the CLI flag
     into a scenario file as `receivers: 3` otherwise reached
-    `enumerate(conf['receivers'])` and `neighbors.extend(...)` as a bare
-    `TypeError: 'int' object is not iterable`, and each entry has to carry the
-    three fields every target's `gen_neighbor_config()` reads or the failure is
-    a `KeyError` inside a config writer instead.
+    `enumerate(conf['receivers'])` and `scenario_neighbors()`'s `extend` as a
+    bare `TypeError: 'int' object is not iterable`, and each entry has to carry
+    the three fields every target's `gen_neighbor_config()` reads or the
+    failure is a `KeyError` inside a config writer instead.
     """
     receivers = conf.get('receivers')
     if receivers is None:
@@ -1406,23 +1395,15 @@ def bench(args):
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
     dckr_net_name = args.docker_network_name or args.bench_name + '-br'
 
-    # Resolve the target image before anything is torn down: a typo'd --version
-    # should cost nothing, and everything below this point destroys the previous
-    # run's containers and config dir, which CLAUDE.md keeps around on purpose so
-    # a failure can be investigated.
-    #
-    # Only a -f scenario can declare the target remote, and a remote target has
-    # no local image to resolve, so that case waits until the scenario is parsed.
     target_image_name = None
-    if not args.file:
-        target_image_name = target_image(args.target, getattr(args, 'version', None), args.image)
-
-    # Also before the teardown, and before anything reads `prefix_num`: the
-    # row, the artifact names and the scenario all take the per-peer count, so
-    # the division happens once, here. A scope that cannot be applied should
-    # cost a message rather than the previous run's containers, for the same
-    # reason the image is resolved above. batch() has already divided by the
-    # time it gets here, which is why it passes `per-peer` explicitly.
+    # Above the teardown, and before anything reads `prefix_num`: the row, the
+    # artifact names and the scenario all take the per-peer count, so the
+    # division happens once, here. A scope that cannot be applied should cost a
+    # message rather than the previous run's containers -- which is why every
+    # guard in this function sits above the teardown, and why the ones that
+    # read only the command line sit above the one Docker call among them.
+    # batch() has already divided by the time it gets here, which is why it
+    # passes `per-peer` explicitly.
     if not args.file:
         # `check_batch_test()` refuses these on the batch path; nothing did
         # here. `resolve_prefix_scope()` is the single normalisation point but
@@ -1440,15 +1421,6 @@ def bench(args):
             args.receivers = resolve_receivers(getattr(args, 'receivers', None))
         except ValueError as e:
             sys.exit(str(e))
-        if args.repeat:
-            # Above the teardown with the other guards: this costs a message,
-            # and everything below destroys the previous run's containers and
-            # logs -- which under `-r` are the ones the run is about to use.
-            try:
-                check_repeat_receivers(args.receivers,
-                                       existing_receiver_count(get_ctn_names()))
-            except ValueError as e:
-                sys.exit(str(e))
         # Before the scope, so a run asking for both is told they are not
         # defined together rather than being told the arithmetic of a
         # combination that is refused anyway.
@@ -1490,6 +1462,22 @@ def bench(args):
         except ValueError as e:
             sys.exit(str(e))
 
+    if not args.file:
+        # After every guard that reads only the command line, and still before
+        # anything is torn down. Both halves matter: a typo'd --version must
+        # cost nothing, since everything below destroys the previous run's
+        # containers and config dir, which this repository keeps on purpose so
+        # a failure can be investigated -- and this is a Docker call, so
+        # running it *first* meant a mistyped -p or --path-diversity was
+        # answered by `ImageNotBuilt` on a host with no daemon or no image, and
+        # made the argument guards' own tests depend on which images happened
+        # to be built. That suite deliberately needs no Docker.
+        #
+        # Only a -f scenario can declare the target remote, and a remote target
+        # has no local image to resolve, so that case waits for the parse.
+        target_image_name = target_image(args.target,
+                                         getattr(args, 'version', None),
+                                         args.image)
     remove_target_containers()
 
     if not args.repeat:
@@ -1568,19 +1556,31 @@ def bench(args):
     m.run(conf, dckr_net_name)
 
     # Started with the monitor and established before any generator launches:
-    # a receiver that came up mid-run would take a partial table and the
-    # export work would land on the target at a moment nothing recorded, which
-    # is the one thing this fan-out exists to measure. `-r/--repeat` reuses the
-    # previous run's containers, so receivers are not recreated under it for
-    # the same reason the testers are not.
+    # a receiver that came up mid-run would take a partial table and the export
+    # work would land on the target at a moment nothing recorded, which is the
+    # one thing this fan-out exists to measure.
+    #
+    # Built on every run, `-r/--repeat` included, because that is the monitor's
+    # contract and a receiver is a monitor in every respect but being read.
+    # `--repeat` reuses the *tester* containers; `Container.run()` removes and
+    # recreates anything else it finds by name, and the target is rebuilt from
+    # scratch under it too, so every receiver session has to be re-established
+    # anyway. Skipping them under `--repeat` meant the count the target was
+    # configured for, the count in the artifact name and the count in the
+    # manifest were three claims about sessions that did not exist.
+    receivers_wanted = conf.get('receivers') or []
+    for name in surplus_receiver_names(get_ctn_names(), len(receivers_wanted)):
+        # The one case recreating by name does not cover: a run asking for
+        # fewer than the last built leaves the rest up, and under `--repeat`
+        # nothing else removes them.
+        print('removing surplus receiver container', name)
+        dckr.remove_container(name, force=True)
     receiver_containers = []
-    if not args.repeat:
-        for idx, receiver in enumerate(conf.get('receivers') or []):
-            r = Receiver(idx, '{0}/receiver{1}'.format(config_dir, idx),
-                         receiver)
-            print('run receiver', r.name)
-            r.run(conf, dckr_net_name)
-            receiver_containers.append(r)
+    for idx, receiver in enumerate(receivers_wanted):
+        r = Receiver(idx, '{0}/receiver{1}'.format(config_dir, idx), receiver)
+        print('run receiver', r.name)
+        r.run(conf, dckr_net_name)
+        receiver_containers.append(r)
 
 
     ## I'd prefer to start up the testers and then start up the target  
@@ -4013,7 +4013,13 @@ def create_args_parser(main=True):
                               'determine the Linux bridge name starting from '
                               'the Docker network name in case of tests of '
                               'remote targets.')
-    parser_bench.add_argument('-r', '--repeat', action='store_true', help='use existing tester/monitor container')
+    parser_bench.add_argument('-r', '--repeat', action='store_true',
+                              help='reuse the existing tester containers, '
+                                   'which are the expensive ones to rebuild. '
+                                   'The target, the monitor and any receivers '
+                                   'are rebuilt and re-peered either way -- '
+                                   'Container.run() removes and recreates '
+                                   'anything it finds by name')
     parser_bench.add_argument('-f', '--file', metavar='CONFIG_FILE')
     parser_bench.add_argument('-o', '--output', metavar='STAT_FILE')
     parser_bench.add_argument('--results-dir', default=DEFAULT_RESULTS_DIR,

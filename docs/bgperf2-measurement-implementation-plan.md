@@ -1885,21 +1885,48 @@ host, not measurements, and the campaign's rows may not cross hosts.
 Four things review found, and two of them are the shape this phase keeps
 producing -- a knob that reaches most of the run and not all of it:
 
-- **`-r/--repeat` inherited the previous run's receivers while everything else
-  acted on the number asked for.** `gen_conf()` writes the requested sessions
-  into the target's config, `bench_output_prefix()` names the artifacts `rx<N>`
-  and both `run` blocks record N, but `if not args.repeat:` skipped creating
-  them -- so `bench -r --receivers 3` after a run with none published a row and
-  a manifest claiming a three-way fan-out for a run with one export session.
-  The inverse is worse: `-r --receivers 1` after `--receivers 5` leaves five
-  containers up, and a dynamic-neighbour target's `neighbor range 10.0.0.0/8`
-  accepts every one of them, so the target really does export to six sessions
-  while provenance says two. Neither direction failed, because unlike the
-  testers -- whose already running is `--repeat`'s whole premise -- nothing
-  establishes or polls a receiver. `check_repeat_receivers()` refuses a
-  mismatch above the teardown; it does not reconcile, since creating the
-  difference would make `--repeat` start containers and destroying it would
-  drop sessions the target is mid-run with.
+- **`-r/--repeat` skipped creating the receivers while everything else acted
+  on the number asked for.** `gen_conf()` writes the requested sessions into the
+  target's config, `bench_output_prefix()` names the artifacts `rx<N>` and both
+  `run` blocks record N, but `if not args.repeat:` created none of them -- so
+  `bench -r --receivers 3` published a row and a manifest describing a
+  three-way fan-out that did not exist, and skipped the establishment wait with
+  it. The inverse left five containers up against a requested two, and a
+  dynamic-neighbour target's `neighbor range 10.0.0.0/8` accepts every one, so
+  the target exported to sessions provenance did not mention.
+
+  The first fix refused a mismatch. Review found the premise underneath it was
+  simply wrong: `--repeat` reuses the *tester* containers and has never reused
+  the monitor -- `Container.run()` removes and recreates anything it finds by
+  name, and the target is rebuilt under `-r` too, so every receiver session has
+  to re-peer regardless. A receiver is a monitor in every respect but being
+  read, so it now follows the monitor's lifecycle: built and established on
+  every run. That dissolved the refusal, its message (whose "or ask for N"
+  advice was unfollowable under `-f`, where `--receivers` is refused), its
+  reliance on `dckr.containers(all=True)` (which counts *stopped* containers,
+  so a died receiver satisfied the equality check), and the untested call site
+  review flagged beside them. What remains is `surplus_receiver_names()`, for
+  the one case recreating by name does not cover: a run asking for fewer than
+  the last built, where `--repeat` skips `remove_old_containers()`.
+
+  Verified on Docker: three receivers built and waited for; then `-r
+  --receivers 1` removed receiver1 and receiver2, rebuilt and re-established
+  receiver0; then `-r` with no fan-out removed the last one. Each run's `rx`
+  name described the sessions that existed.
+- **A Docker call sat ahead of the guards that read only the command line.**
+  The refusal above was written there first, and the suite immediately began
+  going green or red according to whether a verification run had left receiver
+  containers up -- the same tree passed 934 on the branch and failed one on
+  master minutes later. Review then found `target_image()` doing the same thing
+  one line higher and years older: a mistyped `-p` was answered with
+  `ImageNotBuilt` on a host with no daemon or no built image rather than with
+  the typo, and every `bench()` guard test depended on which images happened to
+  be built. Image resolution now sits after every pure guard and still above
+  the teardown -- which is the invariant
+  `test_image_resolves_before_containers_are_torn_down` was always about, so
+  that test keeps its assertion and gains the workload fields the guards now
+  read. A test monkeypatches both `get_ctn_names()` and `target_image()` to
+  raise, so neither can drift back up.
 - **The fan-out lands in a published column that feeds a confounder.** Each
   receiver is a full GoBGP holding its own copy of the table on the same host,
   and `min free mem (GB)` is host-wide, so `findings.py` can raise
@@ -1926,7 +1953,7 @@ producing -- a knob that reaches most of the run and not all of it:
   have.
 
 The change is otherwise pure and covered by the new
-`tests/test_export_fanout.py` (59 tests); 934 total, Docker-free.
+`tests/test_export_fanout.py` (62 tests); 937 total, Docker-free.
 
 #### Progress on 2026-09-07: the target can be made to choose between paths
 

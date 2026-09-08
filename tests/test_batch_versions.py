@@ -298,8 +298,18 @@ class TestSecondRoundFixes:
         monkeypatch.setattr(bgperf2, 'target_image',
                             lambda *a, **k: order.append('resolve') or 'img')
 
+        # The workload fields are valid: resolution now sits *after* the
+        # guards that read only the command line, so that a mistyped -p or
+        # --path-diversity costs a message rather than a Docker call on a host
+        # that may have neither a daemon nor the image. Those guards record
+        # nothing, so `resolve` is still the first event here -- and the thing
+        # this test is about, that no teardown precedes it, is unchanged.
         args = Namespace(dir='/tmp', bench_name='x', docker_network_name=None,
-                         file=None, target='bird', version='99.9', image=None, repeat=True)
+                         file=None, target='bird', version='99.9', image=None,
+                         repeat=True, neighbor_num=1, prefix_num=1,
+                         tester_type='bird', mrt_file=None, mrt_injector=None,
+                         prefix_scope='per-peer', path_diversity=1,
+                         receivers=0)
         with pytest.raises(Exception):
             bgperf2.bench(args)
         assert order and order[0] == 'resolve', \

@@ -149,11 +149,11 @@ class Receiver(Monitor):
 
     Export fan-out is the third kind of session in a run. A tester is a route
     source and the monitor is the measurement instrument; a receiver is neither
-    -- it announces nothing and is never polled, so what it costs the target is
-    one more copy of the RIB-out and one more set of updates to encode and
-    send. Without it, "how much does a table cost to export" and "how much does
-    it cost to receive" are one number in every result this tool has produced,
-    and decoupled exports are one of the three responsibilities BIRD 3's worker
+    -- it announces nothing, so what it costs the target is one more copy of
+    the RIB-out and one more set of updates to encode and send. Without it,
+    "how much does a table cost to export" and "how much does it cost to
+    receive" are one number in every result this tool has produced, and
+    decoupled exports are one of the three responsibilities BIRD 3's worker
     threads exist to parallelise.
 
     It is a `Monitor` because the two are the same container doing the same
@@ -163,6 +163,10 @@ class Receiver(Monitor):
     wait single-sourced; `stats()` is refused rather than inherited, because a
     receiver polled as though it were the instrument would publish a second,
     unlabelled `recved` series into the same queue the monitor feeds.
+
+    It *is* read -- `accepted_prefixes()` is how the export side of a run is
+    measured at all -- but into a recorder and an artifact section of its own,
+    never into the stats queue the row is built from.
 
     Receivers are deliberately absent from `conf['testers']`, so
     `get_test_counts()` never waits on them for a table they will never send
@@ -180,4 +184,32 @@ class Receiver(Monitor):
     def stats(self, queue, interval=1):
         raise NotImplementedError(
             'a receiver is not an instrument: it announces nothing and is '
-            'never polled. Read the monitor.')
+            'never polled as one. Read the monitor. What the target exported '
+            'to this session is read with accepted_prefixes().')
+
+    def accepted_prefixes(self):
+        """How many prefixes the target has exported to this session so far.
+
+        This is not `stats()` reached by another name, and the difference is
+        the whole reason the fan-out can be measured at all. `stats()` feeds
+        the run's stats queue, whose monitor samples are what `elapsed (s)`,
+        `received` and every published timing are read from; a receiver polled
+        into that queue would be a second, unlabelled `recved` series in it.
+        This returns a count to a caller that keeps it in its own recorder and
+        its own artifact section, where it can never be mistaken for the
+        instrument's.
+
+        An unreadable answer raises. The caller records that poll as unread
+        rather than as a receiver holding nothing -- a session we failed to ask
+        and a session that has been given no routes must not produce the same
+        measurement.
+        """
+        # One `gobgp neighbor -j` per receiver per round: a receiver is its own
+        # container, so unlike a BIRD tester's peers this cannot be collapsed
+        # into a single exec. That cost is what `export_poll_can_stop()` exists
+        # to bound.
+        neighbors = json.loads(self.local('gobgp neighbor -j').decode('utf-8'))
+        state = neighbors[0]['afi_safis'][0]['state']
+        # Absent means zero, exactly as the monitor's own loop reads it: gobgp
+        # omits the field until the session has accepted something.
+        return int(state['accepted']) if 'accepted' in state else 0

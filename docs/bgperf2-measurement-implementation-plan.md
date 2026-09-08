@@ -400,10 +400,18 @@ resume safely, and produce auditable summary statistics.
 
 ### Phase 5A: Add BIRD architecture workload controls
 
-Status: in progress. The peer-scaling workload landed on 2026-09-03, path
-diversity and export fan-out on 2026-09-07, churn bursts and the policy
-reload/recalculation action on 2026-09-08; the one remaining work item below --
-the independent-timing check over all of them -- is untaken.
+Status: complete on 2026-09-08. The peer-scaling workload landed on
+2026-09-03, path diversity and export fan-out on 2026-09-07, churn bursts and
+the policy reload/recalculation action on 2026-09-08, and export timing --
+the last work item, which keeps the parallel work these topologies create from
+collapsing into one end-to-end number -- on 2026-09-08.
+
+Each stage of a run is now measured where it happens: ingress at the
+generators, export at the receivers, convergence at the monitor, and each
+post-convergence workload in its own phase. Table selection is the one thing
+that stays inside the target-side interval, because the only external
+observable is when a session sees the result; that is stated in the artifact's
+documentation rather than published as a number nothing measured.
 
 Decisions and verification for this phase are in the
 [decision log](bgperf2-measurement-decision-log.md#phase-5a-add-bird-architecture-workload-controls).
@@ -420,8 +428,9 @@ Decisions and verification for this phase are in the
   and completion events.
 - ~~Add a loaded-table policy reload/recalculation action and record its start,
   completion, resulting route counts, and CPU interval.~~ Done 2026-09-08.
-- Preserve independent ingress, table-selection, export, and monitor timing so
-  parallel work is not collapsed into one end-to-end number.
+- ~~Preserve independent ingress, table-selection, export, and monitor timing so
+  parallel work is not collapsed into one end-to-end number.~~ Done 2026-09-08,
+  with table selection recorded as not externally separable.
 
 These controls target BIRD 3's documented worker-thread responsibilities:
 BGP protocols, routing-table maintenance, and decoupled exports. They are

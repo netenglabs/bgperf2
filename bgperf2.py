@@ -67,13 +67,14 @@ from contention import (describe_contention, foreign_cpu_percent,
                         free_space_bytes, is_memory_backed, own_process_tree,
                         sample_processes)
 from findings import derive_findings, describe_findings, policy_failure
-from measurements import (ChurnEventRecorder, MonitorEventRecorder,
-                          PolicyReloadEventRecorder, TesterEventRecorder,
-                          event_artifact, monitor_metrics,
+from measurements import (ChurnEventRecorder, ExportEventRecorder,
+                          MonitorEventRecorder, PolicyReloadEventRecorder,
+                          TesterEventRecorder, event_artifact,
+                          export_poll_can_stop, monitor_metrics, natural_key,
                           tester_fleet_metrics, tester_metrics)
 from settings import dckr
 from summary import describe_batch_summary, summarize_batch
-from queue import Queue
+from queue import Empty as QueueEmpty, Queue
 from mako.template import Template
 from packaging import version
 from docker.types import IPAMConfig, IPAMPool
@@ -1673,6 +1674,38 @@ MONITOR_POLL_INTERVAL_S = 1
 # measurement rather than the difference between two instruments.
 TESTER_POLL_INTERVAL_S = MONITOR_POLL_INTERVAL_S
 
+# The receivers are polled at the monitor's cadence too, and for a sharper
+# reason than the generators are: `monitor_delta_s` is the distance between one
+# receiver's poll and one monitor poll, so reading the two sides at different
+# cadences would make that number a property of the instruments rather than of
+# the target. A round is one `docker exec` per receiver and cannot be batched
+# -- each is its own container -- so the loop waits to a deadline measured from
+# the sample and publishes the gap it achieved, exactly as the generator loop
+# does.
+RECEIVER_POLL_INTERVAL_S = MONITOR_POLL_INTERVAL_S
+
+# How long the teardown waits for the receiver poll, as a floor plus an
+# allowance per receiver. It has to scale, because a round is one serialised
+# `docker exec` per receiver and `resolve_receivers()` bounds that count at
+# nothing: a flat wait long enough for six receivers expires on fifty, and what
+# it would drop is the closing round -- exactly the evidence that round exists
+# to collect. Measured: ~0.63s per read on a loaded host (3.8s for six), and
+# the teardown may have to wait out a round in flight *and* the closing one, so
+# ~1.3s per receiver is the expected worst case and this is a wide margin on
+# it. Patience rather than a measurement: it is taken after `total time` has
+# been stopped, so it reaches no published column, and its only job is to stop
+# a `docker exec` that never returns from hanging the teardown for ever.
+EXPORT_POLL_TEARDOWN_WAIT_S = 30
+EXPORT_POLL_TEARDOWN_PER_RECEIVER_S = 5
+
+# One round in this many: a round that overruns the cadence waits at least as
+# long as it took, so the receiver poll can never spend more than half its time
+# inside containers. It is a policy, not a measurement -- the instrument runs
+# during the window `elapsed (s)` and `max cpu %` describe, and `gobgp` is in
+# `contention.BGPERF_PROCESSES`, so nothing in the row would report it. The
+# cost is paid in resolution, which every interval publishes.
+EXPORT_POLL_MAX_DUTY = 2
+
 # The starting value for the free-memory minimum, above any real reading so the
 # first sample can only lower it. An untouched sentinel therefore means the
 # sampler never fired, which host_evidence() reports as "not measured" rather
@@ -1730,6 +1763,295 @@ def tester_lifecycle_summary(recorders, errors, read_failures=None):
             detail['read_failures'] = read_failures[name]
         evidence[name] = detail
     return events, evidence
+
+
+def controller_export_stats(receivers, recorder, state, read_failures, stop,
+                            interval=RECEIVER_POLL_INTERVAL_S,
+                            delivery_stop=None):
+    '''Poll what the target has exported to each receiver, into its recorder.
+
+    Returns the poll thread, so the teardown can wait for a round still in
+    flight.
+
+    **This is the one sampler that does not go through the run's queue**, and
+    the reason is that nothing would reliably take its messages out again.
+    Everything else in that queue is consumed by `bench()`'s monitor loop,
+    which stops the instant convergence is declared; after that the queue is
+    read only by `run_churn_bursts()` and `run_policy_reload()`, which skip
+    anything that is not a monitor sample. So a round completing anywhere near
+    the end of the run -- and a round takes seconds at the fan-out sizes this
+    exists to measure -- would be queued and never observed, publishing a
+    receiver that had been served as one that never was, with the stale count
+    from the previous round beside it. Writing to the recorder here removes the
+    question of who consumes the message: this thread is its only writer, and
+    `finish_bench()` reads it once this thread has stopped.
+
+    `delivery_stop` closes the measurement window. What this measures is the
+    *delivery* of the table -- the window `elapsed (s)`, `max cpu %` and
+    `max mem (GB)` all describe -- so it ends where they end, at convergence,
+    rather than running on into a churn burst or a policy reload and exec'ing
+    into containers throughout the interval whose cost is being measured. It is
+    per run and never cleared, unlike `controller_stop`, which is cleared at
+    the top of every batch cell: a round still in flight when a cell ends would
+    otherwise find that event clear again and poll on against containers that
+    are gone.
+
+    One loop for the whole fan-out rather than one per receiver, and the loop
+    is rate-limited, because this instrument is inside the window it measures.
+    Its execs run during the delivery that `elapsed (s)`, `max cpu %` and
+    `min free mem (GB)` describe -- the very columns a `--receivers 0` against
+    `--receivers N` comparison rests on -- and `max foreign cpu %` cannot
+    report them: `gobgp` is in `contention.BGPERF_PROCESSES`, so the poll's own
+    load is filtered out by name, exactly as `birdc` is for the generator poll.
+
+    Two things bound it. Serialising is self-throttling: a thread per receiver
+    would run N execs every `interval` however long each takes, while a round
+    that takes `r` runs N execs every `r + wait`, which is fewer per second the
+    slower the reads get. And **every** round waits at least its own duration
+    afterwards (`EXPORT_POLL_MAX_DUTY` of 1 in 2), not only one that overran
+    the cadence: four receivers at a 200ms read give a 0.8s round inside a 1s
+    cadence, which is 80% of the window spent inside containers without ever
+    tripping an overrun. `resolve_receivers()` imposes no upper bound on the
+    receiver count, so `--receivers 50` must not become a benchmark of
+    `docker exec`. What that costs is resolution -- the 6-receiver run measured
+    3.8s rounds and now publishes a 7.1s gap -- and resolution is published
+    with every interval it bounds.
+
+    Every receiver in one round shares the round's own timestamp, and the cost
+    of that is bounded rather than hidden. A round takes real time -- 2.8s for
+    six receivers on a loaded box, measured -- so a receiver read late in a
+    round is dated to the round's start and can appear to reach a state up to
+    one round-gap before a receiver read early in it. That is exactly the gap
+    published as the event's `poll_resolution_s`: a receiver whose read shows
+    the state one round later carries that round's gap as its resolution, and
+    `export_spread_s` is compared against the wider of the two. So a fan-out
+    served simultaneously can be off by at most one gap and can never be
+    published as a *resolved* spread -- verified on a 6-receiver 1M-prefix run,
+    which reported a 3.849s spread against a 3.849s resolution and said so.
+    '''
+    def ended():
+        return stop.is_set() or (delivery_stop is not None
+                                 and delivery_stop.is_set())
+
+    def round_of_reads():
+        '''Read every receiver once and record it. Returns the round's counts.'''
+        # Stamped before the round, not after, for the reason both other poll
+        # loops give: the round is a `docker exec` per receiver, and dating it
+        # to when the reads finished would push every export event later by a
+        # whole round while the monitor's stays early -- biasing
+        # `monitor_delta_s`, whose sign is the finding.
+        sampled_at = time.monotonic()
+        accepted = {}
+        errors = {}
+        for receiver in receivers:
+            try:
+                accepted[receiver.name] = receiver.accepted_prefixes()
+            except Exception as e:                      # noqa: BLE001
+                # A read that could not be made is missing evidence, not a
+                # receiver holding nothing, and not a reason to end a run that
+                # is otherwise producing a result. Recorded as None and
+                # counted, so a null export interval can be told apart from one
+                # the instrument simply never resolved.
+                accepted[receiver.name] = None
+                errors[receiver.name] = repr(e)
+        note_export_read_failures(errors, read_failures)
+        observe_export_sample(sampled_at, accepted, recorder, state)
+        return sampled_at, accepted
+
+    def poll():
+        try:
+            poll_rounds()
+        except Exception as e:                          # noqa: BLE001
+            # The narrow catch in `observe_export_sample()` mirrors the
+            # generator poll's, but that one runs in `bench()`'s main loop
+            # where an unexpected exception is loud. This runs on a daemon
+            # thread: anything escaping would end the poll silently, leave
+            # `is_alive()` false so no `poll_incomplete` is written, and
+            # publish the receivers that were never reached as a finding about
+            # the target rather than about a dead instrument.
+            state.setdefault(
+                'observation_error',
+                'the receiver poll raised and stopped: {0!r}'.format(e))
+
+    def poll_rounds():
+        polled = False
+        while not ended():
+            polled = True
+            sampled_at, _ = round_of_reads()
+            # A retired recorder can record nothing more, so polling on is the
+            # instrument charging the run for its own overhead and no longer
+            # collecting anything.
+            if 'observation_error' in state:
+                return
+            # Judged on the recorder's retained view rather than on this
+            # round's dict. `ExportEventRecorder.accepted` keeps what each
+            # receiver was last *seen* holding, which is the whole reason a
+            # failed read is not a receiver holding nothing -- and a transient
+            # exec failure on the round that completes the fan-out would
+            # otherwise keep the loop running for the rest of the delivery
+            # window, at half duty, inside the window whose `max cpu %` and
+            # `min free mem (GB)` the run publishes. The events for that round
+            # have already been recorded from the same reads.
+            if export_poll_can_stop(recorder.accepted,
+                                    recorder.required_prefixes):
+                return
+            # Wait to a deadline measured from the sample rather than piling a
+            # fixed interval on top of the round -- the generator loop's rule,
+            # since a fixed sleep after the read makes the real cadence
+            # `read + interval` while every event claims the nominal one.
+            #
+            # Floored at the round's own duration, on every round rather than
+            # only on one that overran: at four receivers and a 200ms read the
+            # round is 0.8s inside a 1s cadence, which is 80% of the window
+            # spent inside containers without ever tripping an overrun. The
+            # round grows with the receiver count and nothing bounds that
+            # count, so the instrument's share of the window it measures is
+            # capped here instead -- in a load `max foreign cpu %` cannot see.
+            round_s = time.monotonic() - sampled_at
+            remaining = sampled_at + interval - time.monotonic()
+            remaining = max(remaining, round_s * (EXPORT_POLL_MAX_DUTY - 1))
+            waited = delivery_stop if delivery_stop is not None else stop
+            waited.wait(remaining)
+        # One closing round, on whichever event ended the window -- the wait
+        # returning, or `ended()` finding either event set at the top. The gap
+        # between rounds is wider than the window that follows the monitor's
+        # check-point: at six receivers a round plus its floor, against the
+        # five monitor polls between the check-point and convergence. Ending
+        # without a last look would publish a fan-out served in that gap as one
+        # that was never served at all -- the same false conclusion an earlier
+        # round of review found for the churn case, reached from the other
+        # side. The read is stamped when it is taken, after the window closed,
+        # and carries the gap since the previous round as its resolution, which
+        # is the honest statement of when it could have happened.
+        # `finish_bench()` waits for it, after `total time` has been stopped.
+        if polled:
+            round_of_reads()
+
+    t = Thread(target=poll)
+    t.daemon = True
+    t.start()
+    return t
+
+
+def export_poll_teardown_wait_s(receivers):
+    '''How long the teardown waits for the receiver poll, for this fan-out.'''
+    return (EXPORT_POLL_TEARDOWN_WAIT_S
+            + EXPORT_POLL_TEARDOWN_PER_RECEIVER_S * max(0, receivers))
+
+
+def drain_stale_samples(q):
+    '''Discard whatever queued up while nothing was consuming the queue.
+
+    Returns how many messages were dropped.
+
+    The post-convergence workloads date their own start from the monitor sample
+    they are holding when they issue the command -- `ChurnEventRecorder` stamps
+    `churn_burst_started` from the last sample it observed, and the reload does
+    the same -- so a backlog makes the first burst look as though it began
+    seconds before the `birdc` that carried it. `withdraw_s` is published
+    against a 1.0s resolution, so a few seconds of backlog is not a rounding
+    error, it is the whole measurement.
+
+`bench()`'s monitor loop keeps this queue nearly empty, so the backlog is a
+    message or two rather than seconds' worth -- and that is still up to a
+    whole poll of mis-dating on the one measurement whose resolution is a
+    single poll. It is not about the export poll: that is never running when
+    this is called, since a run driving a post-convergence workload does not
+    take the export measurement at all. It was found while removing a wait that
+    *did* make the backlog seconds long, and it outlived that wait because the
+    smaller hazard is real on its own and predates both.
+
+    Everything discarded here is stale by construction: it accumulated after
+    convergence, when the delivery had been measured and no workload had
+    started. The churn baseline is the converged count, which is passed
+    separately, and `run_policy_reload()` already refuses target CPU samples
+    from before its command was issued for the same reason.
+    '''
+    dropped = 0
+    while True:
+        try:
+            q.get_nowait()
+        except QueueEmpty:
+            return dropped
+        dropped += 1
+
+
+def observe_export_sample(monotonic_s, accepted, recorder, state):
+    '''Record one polled round of receiver counts.
+
+    A recorder that rejects a round -- one that went backwards, or one whose
+    receiver set changed -- is retired here with the reason kept for the
+    artifact, exactly as a generator's is: the events it already holds stay
+    usable, and a fault in the measurement wiring never ends a run that is
+    otherwise producing a result.
+    '''
+    if recorder is None or 'observation_error' in state:
+        return False
+    try:
+        recorder.observe(monotonic_s, accepted)
+    except (ValueError, TypeError) as e:
+        state['observation_error'] = str(e)
+        return False
+    return True
+
+
+def note_export_read_failures(errors, failures):
+    '''Count the receivers one round could not read, keeping the first reason.
+
+    Deliberately not the state that retires the recorder, on the rule
+    `note_tester_read_failure()` states: a read can fail once while a container
+    is busy and succeed for the rest of the run, and retiring the whole
+    fan-out's measurement over that would throw away the evidence the poll
+    exists to collect.
+    '''
+    for name, reason in (errors or {}).items():
+        record = failures.setdefault(name, {'polls': 0, 'first_reason': reason})
+        record['polls'] += 1
+    return failures
+
+
+def export_lifecycle_summary(recorder, state, read_failures,
+                             required_prefixes, receiver_names=(),
+                             unmeasured_reason=None):
+    '''Merged receiver events, and the export evidence that is not an event.
+
+    Returns `((), None)` where the run had no fan-out, so a document produced
+    by every command line that predates `--receivers` is unchanged.
+
+    A run that *had* a fan-out and could not measure it says so instead. An
+    absent section on a run whose `run.receivers` is 3 is exactly what an older
+    build wrote, so silence there would be indistinguishable from a build that
+    never took the measurement -- and `unmeasured_reason` is deliberately not
+    `observation_error`, which means a poll that was rejected mid-run. A
+    measurement never started and one abandoned partway are different findings.
+    '''
+    if recorder is None:
+        if not receiver_names:
+            return (), None
+        return (), {
+            'required_prefixes': required_prefixes,
+            'unmeasured_reason': unmeasured_reason or 'no reason recorded',
+            'sessions': {name: {'accepted_prefixes': None}
+                         for name in receiver_names},
+        }
+    accepted = recorder.accepted
+    sessions = {}
+    for name in sorted(recorder.receivers, key=natural_key):
+        # The last count read from each receiver, which is the only thing that
+        # says how far a receiver that never finished actually got -- the event
+        # stream carries counts only for the two events that fired.
+        detail = {'accepted_prefixes': accepted.get(name)}
+        if name in read_failures:
+            # Copied, not referenced. Where the teardown wait expired the poll
+            # thread is still writing these, and a record handed on by
+            # reference can change size between here and `json.dump()`.
+            detail['read_failures'] = dict(read_failures[name])
+        sessions[name] = detail
+    evidence = {'required_prefixes': required_prefixes, 'sessions': sessions}
+    for key in ('observation_error', 'poll_incomplete'):
+        if key in state:
+            evidence[key] = state[key]
+    return tuple(recorder.events), evidence
 
 
 def bench(args):
@@ -2223,6 +2545,84 @@ def bench(args):
         target.stats(q)
         target.neighbor_stats(q)
 
+    # The export side of the run. Without it a `--receivers 20` run and a
+    # `--receivers 0` run differ in exactly one published number -- `elapsed
+    # (s)` -- and what the fan-out cost the target is inside it, indivisible
+    # from a slow daemon. The receivers were established before the clock
+    # started, so a count of 0 on the first round is a session waiting for the
+    # target rather than one still coming up.
+    export_lifecycle = None
+    export_state = {}
+    export_read_failures = {}
+    export_unmeasured = None
+    # Per run and never cleared, unlike `controller_stop`: it closes the
+    # delivery window this measurement covers, and it is what keeps a round
+    # still in flight at the end of a batch cell from finding the controller's
+    # own event clear again at the start of the next one.
+    export_stop = threading.Event()
+    export_thread = None
+    export_required = int(conf['monitor']['check-points'][0])
+    # A second workload run against the converged table and the receiver poll
+    # cannot both be measured in one run, and this is where that was settled
+    # after eight rounds of review kept finding the same seam from new sides.
+    # The poll's window closes at convergence, which is exactly where churn and
+    # the reload begin, so every way of making them coexist costs something
+    # published: letting the poll run on puts N `docker exec`s inside a burst's
+    # 1.0s-resolution withdrawal and the reload's CPU interval; waiting for it
+    # instead puts that wait inside `total time` -- a graphed column, moving
+    # with the *instrument's* fan-out -- and leaves the workload's recorder
+    # dating its first sample across the wait, so a withdrawal resolved to a
+    # second is published as "within the 25.0s poll resolution".
+    #
+    # So the run keeps the fan-out and declines to measure it, on the rule this
+    # phase has already applied twice: `--prefix-scope total` under
+    # `--path-diversity`, and churn beside a policy reload. Measuring export
+    # and a post-convergence workload in one run means fixing an order and
+    # paying for it somewhere published, and choosing that is its own change
+    # set. The receivers still exist, still hold the table and still cost the
+    # target its export work -- only the timing of it is withheld, by name.
+    export_second_workload = bool(churn_prefixes or policy_reload_blocks)
+    if receiver_containers and export_required > 0 \
+            and not export_second_workload:
+        export_lifecycle = ExportEventRecorder(
+            bench_clock_started_s,
+            [r.name for r in receiver_containers],
+            export_required,
+            sample_interval_s=RECEIVER_POLL_INTERVAL_S)
+        export_thread = controller_export_stats(
+            receiver_containers, export_lifecycle, export_state,
+            export_read_failures, controller_stop, RECEIVER_POLL_INTERVAL_S,
+            delivery_stop=export_stop)
+    elif receiver_containers and export_second_workload:
+        export_unmeasured = (
+            'this run also drives a post-convergence workload, whose intervals '
+            'are measured off the same target across the same boundary; '
+            'measuring both in one run is deferred')
+        print('export fan-out: not measured -- {0}'.format(export_unmeasured))
+    elif receiver_containers:
+        # `gen_conf()` takes 99% of the table, so `-p 1` -- the fastest
+        # end-to-end check there is -- gives a check-point of 0, and a
+        # threshold of 0 would stamp every receiver complete on the first round
+        # and publish a table nobody was seen holding. Refused here rather than
+        # inside the recorder, which would raise with the containers already
+        # up: an instrument that cannot measure must cost the measurement, not
+        # the run.
+        #
+        # This is the only *knowable* way the yardstick can be unusable. A
+        # `--filter_test` policy can also put the check-point out of reach, by
+        # dropping enough of the table that nothing re-advertises it -- but
+        # whether it does depends on the policy and the workload, not on the
+        # flag: `--filter_test transit` at 2 peers x 1000 prefixes converged at
+        # the check-point on this host, so refusing here on the flag would
+        # withhold a measurement that can be made. That case is reported from
+        # the evidence instead -- see `describe_export_metrics()`, which reads
+        # whether the *monitor* reached the count before blaming a receiver for
+        # not reaching it.
+        export_unmeasured = (
+            'the run\'s monitor check-point is {0}, so no receiver can be '
+            'observed holding the table'.format(export_required))
+        print('export fan-out: not measured -- {0}'.format(export_unmeasured))
+
 
     # want to launch all the neighbors at the same(ish) time
     # launch them after the test starts because as soon as they start they can send info at least for mrt
@@ -2343,6 +2743,11 @@ def bench(args):
             f.flush() if f else None
 
             if status == ConvergenceTracker.FAILED:
+                # Close the export window here as well as on the converged
+                # path: what a failed run's receivers had been served is worth
+                # publishing, and the poll must not outlive the loop that
+                # feeds its samples to the recorder.
+                export_stop.set()
                 output_stats['recved'] = recved
                 output_stats['fail_msg'] = tracker.fail_msg
                 f.close() if f else None
@@ -2352,9 +2757,35 @@ def bench(args):
                     testers, fail=True, lifecycle_events=lifecycle.events,
                     tester_lifecycles=tester_lifecycles,
                     tester_observation_errors=tester_observation_errors,
-                    tester_read_failures=tester_read_failures)
+                    tester_read_failures=tester_read_failures,
+                    export_lifecycle=export_lifecycle,
+                    export_state=export_state,
+                    export_read_failures=export_read_failures,
+                    export_required=export_required,
+                    export_receiver_names=[r.name for r in receiver_containers],
+                    export_unmeasured_reason=export_unmeasured,
+                    export_thread=export_thread)
 
             if status == ConvergenceTracker.CONVERGED:
+                # Before the post-convergence workloads, which take this queue
+                # over and skip anything that is not a monitor sample: a round
+                # landing during a churn burst or a reload would be dropped,
+                # and a receiver crossing the check-point in it would be
+                # published as one that was never served. The export
+                # measurement covers the delivery of the table, which is what
+                # this sample has just settled.
+                export_stop.set()
+                if churn_prefixes or policy_reload_blocks:
+                    # Whatever is in the queue at this point is stale, and the
+                    # workload about to start dates its own beginning from the
+                    # first sample it takes -- so a backlog makes the first
+                    # burst look as though it began before the `birdc` that
+                    # carried it, against a published 1.0s resolution. The main
+                    # loop keeps this queue nearly empty, so the backlog is a
+                    # message or two; that is still up to a whole poll of
+                    # mis-dating on the one measurement whose resolution is a
+                    # single poll.
+                    drain_stale_samples(q)
                 lifecycle.confirm_convergence(sample_monotonic_s)
                 assurance = tracker.assurance_samples
                 output_stats['recved'] = recved
@@ -2410,6 +2841,13 @@ def bench(args):
                     tester_lifecycles=tester_lifecycles,
                     tester_observation_errors=tester_observation_errors,
                     tester_read_failures=tester_read_failures,
+                    export_lifecycle=export_lifecycle,
+                    export_state=export_state,
+                    export_read_failures=export_read_failures,
+                    export_required=export_required,
+                    export_receiver_names=[r.name for r in receiver_containers],
+                    export_unmeasured_reason=export_unmeasured,
+                    export_thread=export_thread,
                     churn_evidence=churn_evidence,
                     policy_reload_evidence=reload_evidence)
 
@@ -2531,7 +2969,8 @@ def host_evidence(output_stats):
 
 
 def write_event_artifact(args, events, prefix, status, testers=None,
-                         host=None, churn=None, policy_reload=None):
+                         host=None, churn=None, policy_reload=None,
+                         export=None):
     '''Atomically preserve lifecycle evidence before post-run collection.
 
     Returns the document it wrote, so the caller can print the findings it
@@ -2547,7 +2986,14 @@ def write_event_artifact(args, events, prefix, status, testers=None,
         # above it: the fallback is taken only where the caller supplied
         # nothing, so a reload that was driven -- complete or not -- wins.
         policy_reload=(policy_reload
-                       or unrun_policy_reload_evidence(args, status)))
+                       or unrun_policy_reload_evidence(args, status)),
+        # The caller's evidence, or nothing: a run with no receivers gets no
+        # section, because one synthesised there would claim an export
+        # measurement that was never taken. A run that *had* receivers and
+        # could not measure them supplies its own `unmeasured_reason` --
+        # `export_lifecycle_summary()` builds that, so the fallback lives with
+        # the summary rather than here.
+        export=export)
     # Derived from the finished document rather than from the events, so the
     # policy can only ever reason about intervals this artifact published.
     #
@@ -2611,6 +3057,10 @@ def write_event_artifact(args, events, prefix, status, testers=None,
 def finish_bench(args, output_stats, bench_stats, bench_start, target, m, testers=(), fail=False,
                  lifecycle_events=(), tester_lifecycles=None,
                  tester_observation_errors=None, tester_read_failures=None,
+                 export_lifecycle=None, export_state=None,
+                 export_read_failures=None, export_required=None,
+                 export_receiver_names=(), export_unmeasured_reason=None,
+                 export_thread=None,
                  churn_evidence=None, policy_reload_evidence=None):
 
     bench_stop = time.time()
@@ -2624,17 +3074,58 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
         t.stop_monitoring = True
     controller_stop.set()
 
+    # Wait for a receiver round still in flight before reading its recorder --
+    # the poll thread is that recorder's only writer, and the round that
+    # started just before convergence is the one most likely to carry the last
+    # receiver's completion. It is **after** `bench_stop` on purpose, the rule
+    # the tester log scan follows: `total time` is a published column that
+    # `create_batch_graphs()` plots, and a wait that grows with the receiver
+    # count would land in exactly the comparison the fan-out exists to make.
+    #
+    # Bounded because it is teardown patience, not a measurement: the longest
+    # round measured on this host is 3.8s for six receivers on a loaded box,
+    # and a `docker exec` that never returns must cost half a minute rather
+    # than the run. A poll that has not come back is said out loud rather than
+    # waited on further -- the events it holds are still published.
+    export_state = export_state if export_state is not None else {}
+    if export_thread is not None:
+        # The only wait for this thread. An earlier revision also waited for it
+        # before a post-convergence workload, and needed a guard here against
+        # paying the same bound twice; that wait went away with the workload
+        # interaction, and so did the guard -- a guard for a path that cannot
+        # be taken reads as protection the next change would not actually have.
+        wait_s = export_poll_teardown_wait_s(len(export_receiver_names or ()))
+        export_thread.join(timeout=wait_s)
+        if export_thread.is_alive():
+            # Its own key, never `observation_error`. That key means a round
+            # was *rejected* and the recorder retired, which is a different
+            # finding -- and writing this note there would do more than
+            # mislabel it: `observe_export_sample()` treats that key as the
+            # retirement flag, so the still-running thread would silently stop
+            # recording the round this note is about. Into the same dict the
+            # summary reads, because a note that does not reach the artifact is
+            # a note nobody gets.
+            export_state['poll_incomplete'] = (
+                'the receiver poll had not returned {0:.0f}s after the '
+                'delivery window closed; a round still in flight may be '
+                'missing from these events'.format(wait_s))
+
     tester_events, tester_evidence = tester_lifecycle_summary(
         tester_lifecycles or {}, tester_observation_errors or {},
         tester_read_failures or {})
-    lifecycle_events = list(lifecycle_events) + tester_events
+    export_events, export_evidence = export_lifecycle_summary(
+        export_lifecycle, export_state, export_read_failures or {},
+        export_required, export_receiver_names or (),
+        export_unmeasured_reason)
+    lifecycle_events = list(lifecycle_events) + tester_events + list(export_events)
 
     bench_prefix = bench_output_prefix(args)
     artifact = write_event_artifact(
         args, lifecycle_events, bench_prefix,
         status='failed' if fail else 'converged',
         testers=tester_evidence, host=host_evidence(output_stats),
-        churn=churn_evidence, policy_reload=policy_reload_evidence)
+        churn=churn_evidence, policy_reload=policy_reload_evidence,
+        export=export_evidence)
 
     # Scan the tester logs only after the clock has stopped. These used to run
     # in bench() before bench_stop, so walking every tester log line by line --
@@ -2656,6 +3147,9 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
     print_final_stats(args, target_version, output_stats)
     print_tester_metrics(lifecycle_events, tester_evidence)
     for line in describe_churn_metrics(artifact.get('churn')):
+        print(line)
+    for line in describe_export_metrics(artifact.get('export'),
+                                        artifact.get('status')):
         print(line)
     for line in describe_policy_reload_metrics(artifact.get('policy_reload')):
         print(line)
@@ -3008,6 +3502,145 @@ def describe_policy_reload_metrics(reload_section):
     else:
         reason = reload_section.get('incomplete_reason') or 'no reason recorded'
         lines.append('policy reload: not completed; {0}'.format(reason))
+    return lines
+
+
+# How many stalled receivers a line names before it stops counting. The line is
+# printed, not written into the CSV's MSG column, so this is a readability
+# bound rather than the row-shape one `CHURN_FAILURE_NAMES` is.
+EXPORT_INCOMPLETE_NAMES = 5
+
+
+def describe_export_metrics(export, status='converged'):
+    """Report what the target's other export sessions got, and when.
+
+    Printed beside the row rather than folded into it, on the rule the churn
+    and reload sections follow: `elapsed (s)` is the monitor's convergence and
+    must keep meaning that in every row of a CSV, so what a fan-out cost is
+    said here and published in the artifact.
+    """
+    if not export:
+        return []
+    unmeasured = export.get('unmeasured_reason')
+    if unmeasured:
+        # Said once here as well as at the moment it was decided: a run whose
+        # containers scrolled past hours ago has only this block left.
+        return ['export fan-out: {0} receiver(s), not measured -- {1}'.format(
+            export.get('receivers'), unmeasured)]
+    lines = []
+    total = export.get('receivers')
+    complete = export.get('receivers_complete')
+    required = export.get('required_prefixes')
+    incomplete = export.get('incomplete_receivers') or []
+    reached = export.get('table_reached_s')
+    sessions = export.get('sessions') or {}
+    if incomplete:
+        # Named individually with what each was last seen holding: a receiver
+        # that stalled at 3 prefixes and one that stalled 12 short of the
+        # check-point are different findings, and the intervals are all null
+        # either way.
+        held = []
+        for name in incomplete[:EXPORT_INCOMPLETE_NAMES]:
+            accepted = (sessions.get(name) or {}).get('accepted_prefixes')
+            held.append('{0} (last seen holding {1})'.format(
+                name, 'nothing readable' if accepted is None else accepted))
+        if len(incomplete) > EXPORT_INCOMPLETE_NAMES:
+            held.append('and {0} more'.format(
+                len(incomplete) - EXPORT_INCOMPLETE_NAMES))
+        # The window is named in the line, because "2 of 3" on its own reads
+        # as a broken session and the commonest cause is neither: the run ends
+        # at convergence, so a receiver still being served then is reported
+        # here rather than waited for. The count each one last held is what
+        # separates a session that just missed the window from one that
+        # stalled.
+        lines.append(
+            'export fan-out: {0} of {1} receiver(s) had reached {2} prefix(es) '
+            'when the delivery window closed; {3}'.format(
+                complete, total, required, '; '.join(held)))
+        if status != 'converged':
+            # `monitor_reached_required` is false for *every* failed run -- a
+            # stuck target, a lost session, a generator that never sent -- so
+            # the policy explanation below would name a cause that was never
+            # configured, beside a row already marked FAILED with its own
+            # reason. The window closed because the run ended, and that is all
+            # this can say.
+            lines.append(
+                'export fan-out: the run did not converge, so the delivery '
+                'window closed on a table that was never fully delivered')
+        elif export.get('monitor_reached_required') is False:
+            # The check-point was out of reach for every session in the run,
+            # so an incomplete fan-out is not a finding about the receivers.
+            # The commonest cause is a `--filter_test` policy dropping enough
+            # of the table that the target never re-advertises the count --
+            # which depends on the policy and the workload, so it is read off
+            # the monitor here rather than guessed from the flag before the
+            # run.
+            lines.append(
+                'export fan-out: the monitor did not reach that count either, '
+                'so the check-point was unreachable for every session in this '
+                'run -- an import policy that drops part of the table does '
+                'this, and it says nothing about the receivers')
+    else:
+        spread = export.get('export_spread_s')
+        spread_resolution = export.get('export_spread_resolution_s')
+        if spread is None:
+            spread_text = ''
+        elif spread_resolution is not None and spread <= spread_resolution:
+            # Served inside one look of each other. That is what a target
+            # exporting to them in parallel looks like at this cadence; it is
+            # not evidence that it did.
+            spread_text = ('; the sessions were served within the {0:.1f}s '
+                           'poll resolution of each other'.format(
+                               spread_resolution))
+        else:
+            spread_text = ('; {0:.1f}s between the first and last of '
+                           'them'.format(spread))
+        lines.append(
+            'export fan-out: {0} of {1} receiver(s) reached {2} prefix(es), '
+            'the last {3}{4}'.format(
+                complete, total, required,
+                churn_interval_phrase(reached,
+                                      export.get('table_reached_resolution_s')),
+                spread_text))
+
+    delta = export.get('monitor_delta_s')
+    resolution = export.get('monitor_delta_resolution_s')
+    if delta is None:
+        reason = 'a receiver never got the whole table' if incomplete \
+            else 'the monitor never reached the required count'
+        lines.append(
+            'export fan-out: not comparable with the monitor ({0})'.format(
+                reason))
+    elif resolution is not None and abs(delta) <= resolution:
+        # Signed, and read by magnitude: each end could have happened anywhere
+        # inside its own look, so a delta this small is not a short lag, it is
+        # one this cadence cannot resolve in either direction.
+        lines.append(
+            'export fan-out: the last receiver and the monitor reached the '
+            'table within the {0:.1f}s poll resolution of each other'.format(
+                resolution))
+    elif delta < 0:
+        # Ordinary rather than a fault: the monitor is one export session among
+        # several and nothing orders them.
+        lines.append(
+            'export fan-out: the last receiver had the table {0:.1f}s before '
+            'the monitor reached the required count'.format(-delta))
+    else:
+        lines.append(
+            'export fan-out: the last receiver had the table {0:.1f}s after '
+            'the monitor reached the required count'.format(delta))
+
+    error = export.get('observation_error')
+    if error:
+        lines.append(
+            'export fan-out: the receiver poll was retired mid-run; '
+            '{0}'.format(error))
+    truncated = export.get('poll_incomplete')
+    if truncated:
+        # Said apart from the line above, because they are different findings:
+        # a rejected round killed the measurement, one that did not come back
+        # only truncates it.
+        lines.append('export fan-out: {0}'.format(truncated))
     return lines
 
 

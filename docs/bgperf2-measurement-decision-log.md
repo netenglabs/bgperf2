@@ -1459,6 +1459,449 @@ With this, Phase 5 is complete.
 
 ## Phase 5A: Add BIRD architecture workload controls
 
+### Progress on 2026-09-08: the other end of the export is read too
+
+`bench()` polls every receiver at the monitor's own cadence and publishes an
+`export` section into `<prefix>.events.json`: when each session was first given
+prefixes, when it held the run's check-point, how far apart the sessions were
+served, and how that sits against the monitor.
+
+This is the last work item of Phase 5A -- "preserve independent ingress,
+table-selection, export and monitor timing so parallel work is not collapsed
+into one end-to-end number" -- and the gap it closes is that `--receivers`
+added export sessions while nothing measured them. **A `--receivers 20` run and
+a `--receivers 0` run differed in exactly one published number, `elapsed (s)`,
+with whatever the fan-out cost the target inside it and indistinguishable from
+a slow daemon.** Ingress has been measured at the generators since Phase 2 and
+convergence at the monitor since Phase 1; export was measured nowhere, which is
+the collapse this item names.
+
+Eight decisions worth keeping:
+
+- **Reading a receiver is not polling it as an instrument, and the split is
+  structural.** `Receiver.stats()` stays refused -- it feeds the queue the row
+  and every published timing are read from, so a receiver in it would be an
+  unlabelled second `recved` series. `accepted_prefixes()` is a different
+  method answering a different caller: `controller_export_stats()` keeps the
+  count in `ExportEventRecorder` and in a section of its own. `EventPhase.EXPORT`
+  exists for the same reason one level down, the one `CHURN` and `POLICY_RELOAD`
+  already have: a reader grouping the stream by phase must not find several
+  first-prefix intervals under `convergence` with nothing saying which of them
+  the row describes.
+- **The yardstick is the run's own check-point**, not anything derived from
+  what the monitor has seen. The point of reading a receiver is that its answer
+  does not depend on the monitor's, and a threshold taken from the monitor's
+  live count would couple the two instruments in the one number meant to
+  compare them. A policy that makes that count unreachable leaves the receivers
+  incomplete exactly as it already leaves `convergence_s` null.
+- **One loop for the whole fan-out, not a thread per receiver.** A round reads
+  each receiver in turn, so the controller sits inside one container at a time.
+  A thread each would hold the nominal 1s cadence by putting N concurrent
+  `docker exec`s on the host -- and the run that wants this measurement is the
+  one whose host is already loaded, so the instrument would become part of what
+  it reports. Resolution is spent instead, and resolution is published: the
+  6-receiver run below measured a 3.8s round.
+- **A round stamps all its receivers once, and what that costs is bounded
+  rather than hidden.** This was nearly recorded wrongly. The first version of
+  the comment claimed a shared stamp made the spread "a property of the target
+  rather than of how several poll threads interleave", and the 6-receiver
+  verification showed the opposite half of it: a round takes real time, so a
+  receiver read *late* in one is dated to the round's start and can appear to
+  reach a state a whole round-gap **before** one read early in it. In that run
+  receivers 3, 4 and 5 -- read last -- took their first prefix a round earlier
+  than 0, 1 and 2. What makes the shared stamp safe is not the absence of that
+  effect but its bound: a receiver whose read shows the state one round later
+  carries that round's gap as its `poll_resolution_s`, `export_spread_s` is
+  compared against the wider of the two events bounding it, and the discrepancy
+  is exactly one gap. So a simultaneously-served fan-out can never be published
+  as a *resolved* spread -- verified, 3.849s spread against a 3.849s
+  resolution, printed as "within the poll resolution of each other".
+  `test_a_one_round_discrepancy_can_never_be_a_resolved_spread` pins it.
+- **The fan-out is served when its slowest receiver has the table**, and one
+  receiver that never got there leaves every fleet interval null with its name
+  in `incomplete_receivers` -- `tester_fleet_metrics()`'s all-or-nothing rule,
+  reached from the export side. The export *start* is gated separately, on
+  every receiver having been seen taking prefixes rather than on every receiver
+  having finished: a fan-out where one session stalled still has a real start,
+  and that is precisely the run where a reader wants it.
+- **Every configured receiver appears in every round**, with `None` where the
+  read failed -- `TesterEventRecorder.observe()`'s rule, and here it is what
+  stops the receivers that happen to answer from satisfying "the whole fan-out
+  has the table". A failed read does not erase what that receiver was already
+  seen holding, and the last count read from each is published as
+  `accepted_prefixes`: it is the only thing that says how far a receiver that
+  never finished actually got, since the event stream carries counts only for
+  events that fired.
+- **`monitor_delta_s` is signed and is measured against the monitor, not the
+  generators.** Signed for `post_injection_tail_s`'s reason: the monitor is one
+  export session among several, nothing orders them, and clamping at zero would
+  give a run whose receivers beat the instrument the same number as one that
+  finished exactly with it. Against the monitor because a generator-relative
+  export tail is `post_injection_tail_s + monitor_delta_s` -- publishing it here
+  would repeat the fleet's all-or-nothing completion rule in a second place
+  where the two could drift apart, and a reader can add two published intervals.
+- **The poll ends itself once every receiver holds the table.** A round cannot
+  be batched the way a BIRD tester's peers are -- each receiver is its own
+  container -- so polling on to convergence spends an exec per receiver per
+  second on sessions with nothing left to say, and that load is bgperf2's own
+  process tree, which `max foreign cpu %` deliberately cannot see. Nothing is
+  lost: both events fire on or before the round that satisfies the rule, and a
+  receiver's count cannot move past the table the target has to give it.
+
+Nothing in the CSV moves. `elapsed (s)` is the monitor's convergence and must
+keep meaning that in every row, so what the fan-out cost is printed beside the
+row and published in the artifact -- churn's and the reload's rule. There is no
+fallback section of churn's kind either: a run that asked for receivers built
+them or died trying, so there is no "asked and never ran" state to report, and
+a section synthesised for a run with no fan-out would claim a measurement
+nobody took.
+
+**What is still not separable is table selection**, and it is written down
+rather than implied. With this section a run decomposes into ingress (measured
+at the generators), the target's own work, and export (measured at the
+receivers); best-path selection happens inside the target and the only external
+observable is when a session sees its result. No daemon-agnostic instrument can
+split it out of the target-side interval, and inventing one would be a number
+nobody measured -- the rule `LOG_SPACE_FLOOR_GB` and
+`describe_export_fanout_cost()` already follow.
+
+#### Docker verification
+
+All on `bgperf/bird:3.3.2`, `-d /var/tmp/bgperf`, results to a scratch
+directory -- correctness checks on the development host, not measurements, and
+the campaign's rows may not cross hosts.
+
+- `-n 2 -p 100 --receivers 3`: three receivers reached the 198-prefix
+  check-point at 1.004s, spread 0.0s at a 1.0s resolution, `monitor_delta_s`
+  -0.027s at a 1.03s resolution. Both reported in words as unresolved, which is
+  the honest reading of a run that finished inside one look.
+- `-n 4 -p 100000 --receivers 3` (400,000 prefixes): first prefix 1.004s, table
+  reached 3.005s at a 1.0s resolution, `monitor_delta_s` -0.228s at 1.168s --
+  the fan-out was served just before the instrument, unresolvably so. Each
+  receiver held all 400,000.
+- `-n 4 -p 250000 --receivers 6` (1,000,000 prefixes): the round cost became
+  visible. Export resolution 3.849s against the 1s cadence asked for, table
+  reached 11.765s, spread 3.849s, `monitor_delta_s` +1.502s at 3.849s -- so the
+  fan-out finished after the monitor's 10.263s convergence, by less than the
+  instrument can resolve. This is the run that produced the read-order finding
+  above, and the run whose 6 gobgp receivers each held their own copy of the
+  million-route table (`min free mem` 52.1 GB of 61.44).
+- `-n 2 -p 100` with no receivers: the artifact has no `export` key at all and
+  no export line is printed, so a run with no fan-out keeps exactly the
+  document it has always produced. The receiver containers from the previous
+  run were removed.
+- `-n 4 -p 100000 --receivers 3 --churn-prefixes 1000 --churn-bursts 2`: the
+  combination review's first finding was about. Both burst pairs are reported
+  and the fan-out is complete -- three receivers at 396,000 in 4.0s -- so the
+  two workloads are published side by side without either taking the other's
+  samples.
+- `-n 6 -p 250000 --receivers 3` with `docker kill bgperf_receiver1` issued at
+  the first monitor sample: `2 of 3 receiver(s) reached 1485000 prefix(es);
+  bgperf_receiver1 (last seen holding 0)`, every fleet interval withheld, the
+  delta reported as not comparable, and the artifact carrying that receiver's
+  `read_failures` -- 10 polls, first reason the docker 409. No traceback: an
+  unreadable receiver costs its own evidence and not the run. The two receivers
+  that were served keep their own intervals.
+
+  The same experiment found a **pre-existing** defect that is not this change
+  set's: killing a receiver during `wait_established()` ends the run in a
+  raw docker-py traceback, because `monitor.py`'s establishment wait has no
+  guard around its exec. It is shared with the monitor, dying is arguably
+  right, and the shape is not -- filed rather than fixed here.
+- `-n 1 -p 1 --receivers 2`: reports the fan-out as not measured, and does not
+  crash. This is a defect self-review found before the review agent ran, and it
+  would have hit the smoke test this repository documents as the fastest
+  end-to-end check: `gen_conf()` takes 99% of the table, so `-p 1` gives a
+  check-point of **0**, and `ExportEventRecorder` refuses a non-positive
+  threshold -- with the containers already up, so an instrument that could not
+  measure would have cost the whole run. The threshold is now checked in
+  `bench()` before the recorder is built, and a fan-out that could not be
+  measured is published with an `unmeasured_reason` rather than as an absent
+  section: absent is exactly what an older build wrote, so silence there could
+  not be told from a build that never took the measurement. A threshold of 0
+  would have been worse than either -- every receiver stamped complete on the
+  first round, publishing a table nobody was seen holding.
+
+**The export poll is the one sampler that does not go through the run's
+queue**, and that is the second review's finding rather than the first design.
+Every other sampler queues, and `bench()`'s monitor loop takes the messages
+out; but that loop stops the instant convergence is declared, and the only
+readers afterwards -- `run_churn_bursts()` and `run_policy_reload()` -- skip
+anything that is not a monitor sample. A round takes seconds at the fan-out
+sizes this exists to measure, so the round in flight when the window closed
+would be queued and never observed: a receiver that crossed the check-point in
+it would be published as one that was never served, with the *previous*
+round's stale count beside it, and the stated invariant ("both events fire on
+or before the round that satisfies the rule") holds for the recorder only if
+the round reaches it. Writing to the recorder in the poll thread removes the
+question of who consumes the message -- that thread is the recorder's only
+writer, and `finish_bench()` waits `EXPORT_POLL_TEARDOWN_WAIT_S` for a round
+still in flight before reading it. That wait is **after** `bench_stop`, the
+rule the tester log scan already follows: `total time` is a published column
+`create_batch_graphs()` plots, and a wait that grows with the receiver count
+would land in exactly the comparison the fan-out exists to make. It is
+patience rather than an estimate of a round -- the longest measured here is
+3.8s for six receivers on a loaded box -- and a poll that has not come back is
+said out loud instead of waited on further.
+
+**The window's positive side is bounded, and that is said rather than left to
+be discovered.** Convergence is declared five polls after the monitor crosses
+the check-point on every run that reaches the neighbour checkpoint, so
+`monitor_delta_s` can only ever report a lag of about five seconds: a fan-out
+slower than that is published as `incomplete_receivers`, not as a large
+positive delta. A large lag and a stalled session therefore share a shape, and
+what separates them is each receiver's `accepted_prefixes` -- one poll short of
+the check-point is a session that missed the window, a fraction of the table is
+a session that stalled. The printed line names the window for the same reason,
+since "2 of 3 receiver(s)" alone reads as a broken session. Bounding the
+positive side would mean a run phase that waits for the fan-out after
+convergence, with its wait inside `total time`; that is its own change set, like
+`total` under `--path-diversity`, and is not something this section quietly
+assumes.
+
+**The instrument runs inside the window it measures, and the poll is
+rate-limited because of it.** The third review's finding, and the reasoning
+originally written here was half wrong. A round of `docker exec`s runs during
+the delivery that `elapsed (s)`, `max cpu %` and `min free mem (GB)` describe --
+the columns a `--receivers 0` against `--receivers N` comparison rests on -- and
+no published column reports it. The claim that this is because the load is
+"bgperf2's own process tree" is **false**: the read runs inside the receiver
+container, where `own_process_tree()` does not reach. It is invisible because
+`gobgp` is in `contention.BGPERF_PROCESSES`, the by-name allowlist, exactly as
+`birdc` is for the generator poll -- which matters to anyone reasoning from that
+comment, since a generator whose CLI is *not* in that frozenset would have its
+poll charged to `max foreign cpu %` as somebody else's load.
+
+The review also held that serialising the round changes concurrency but not
+work per second. That part is wrong and worth stating: a thread per receiver
+runs N execs every `interval` however slow the reads get, while a serialised
+round runs N execs every `round + wait`, which is *fewer* per second the slower
+they get -- serialising is self-throttling. What was missing is a floor under
+that self-throttling, since `resolve_receivers()` bounds the receiver count at
+nothing: a round that overruns the cadence now waits at least as long as it
+took (`EXPORT_POLL_MAX_DUTY`, one round in two), so the poll can never spend
+more than half its time inside containers whatever the fan-out. That is a
+policy, not a measurement, and what it costs is resolution -- which every
+interval already publishes.
+
+**The duty floor has to apply on every round, and the poll has to take a
+closing one.** Both are the fourth review's, and both are the same shape as
+mistakes this phase has already made once. The floor was written inside the
+overrun branch, so it did nothing below the cadence -- four receivers at a
+200ms read give a 0.8s round inside a 1s cadence, 80% of the window spent
+inside containers without ever tripping an overrun, while the comment beside it
+claimed a ceiling of half. And ending the poll on the stop event without a last
+look reintroduced, from the other side, exactly the false conclusion the first
+review found for the churn case: the gap between rounds is a round plus its
+floor -- 7.1s at six receivers, measured -- against the five monitor polls
+between the check-point and convergence, so a fan-out served inside that gap
+would have been published as one that was never served, with stale counts
+beside it. The loop now takes one closing round when the window shuts; that
+read is stamped when it is taken and carries the gap since the previous round
+as its resolution, which is the honest statement of when it could have
+happened, and `finish_bench()` waits for it after `total time` has been
+stopped. What the floor costs is resolution: the 6-receiver run's rounds were
+3.8s and it now publishes a 7.1s gap, against 3.8s before. That is the trade
+this instrument keeps making -- pay resolution, publish it.
+
+A third finding of that round, smaller: the unreachable-check-point line
+explained itself with an import policy on *any* run where the monitor never
+reached the count, and that is every failed run -- so a run that FAILED because
+the target wedged would have printed a confident cause that was never
+configured, beside a row already marked FAILED with its own reason. The line is
+gated on a converged run now, and a failed one says only that the window closed
+on a table that was never fully delivered.
+
+**The closing round must not land inside the workload that follows it**, and
+the fifth review found that it did. `export_stop.set()` is followed within
+microseconds by `churn_phase()` or `policy_reload_phase()`, so a closing round
+of six `docker exec`s -- 3.8s, measured -- ran inside the first burst's
+withdrawal interval, whose published resolution is 1.0s, or inside the reload's
+CPU interval, which is that workload's whole measurement. The poll's own
+docstring promised the opposite. `bench()` now waits for the poll before
+starting a second workload, and only then: the wait is inside `total time`, and
+it is taken only when a post-convergence workload will run *and* the poll is
+still alive -- which means the fan-out had not been served, since a complete one
+ends the loop itself. A run with no second workload keeps the free wait in
+`finish_bench()`, after the clock has stopped.
+
+Two more from that round. The teardown wait was a flat 30s against a round that
+is one serialised exec per receiver with no bound on the count: at the measured
+~0.63s a read, waiting out a round in flight plus the closing round is ~1.3s per
+receiver, so an ordinary `--receivers 50` run would have expired the wait and
+dropped exactly the evidence the closing round exists to collect. It scales with
+the fan-out now. And the timeout note was written into `observation_error`,
+which is worse than the mislabelling the review reported: that key is the flag
+`observe_export_sample()` reads to decide the recorder has been retired, so the
+note would have silently stopped the still-running thread recording the very
+round it was about. It has its own key, and the evidence structures the summary
+publishes are copied rather than handed on by reference, since a poll that
+outlived the wait is still writing them when `json.dump()` reads them.
+
+**Waiting for that round left a queue nobody had drained, and the next
+workload dated itself from it.** The sixth review's finding, and the fix above
+is what caused it. `ChurnEventRecorder` stamps `churn_burst_started` from the
+last monitor sample it observed while the `birdc` goes out in real time, and
+the reload does the same -- so a backlog of monitor samples means the first
+burst appears to have begun seconds before the command that carried it, against
+a published 1.0s resolution. Before the export poll existed the backlog was a
+message or two, because `bench()`'s loop keeps the queue empty until
+convergence; waiting for a receiver round makes it seconds, and does so
+precisely on the runs the fan-out measurement exists for, since the poll is
+only still alive when the receivers lagged the monitor.
+`drain_stale_samples()` discards it before the workload starts -- everything in
+it accumulated after convergence, when the delivery had been measured and no
+workload had begun, and the churn baseline is the converged count passed
+separately. It runs whether or not a wait happened, since the main loop can
+leave a message there on its own.
+
+Two smaller ones from that round. The poll thread's only guard was the narrow
+`(ValueError, TypeError)` catch that `observe_export_sample()` copies from the
+generator path -- but that one runs in `bench()`'s main loop where an unexpected
+exception is loud, while this runs on a daemon thread: anything escaping would
+end the poll silently, leave `is_alive()` false so no `poll_incomplete` was
+written, and publish the receivers it never reached as a finding about the
+target rather than about a dead instrument. And `incomplete_receivers` was
+sorted lexicographically over unpadded names, so a twenty-receiver run listed
+0, 1, 10, 11, 12 and hid 2 through 9 behind "and N more" -- the printed sample
+has to mean what it reads as, so both the list and the sessions are in
+`natural_key()` order.
+
+**Export timing and a post-convergence workload are not measured in the same
+run, and the eight rounds of review that led there are the reason to write this
+down.** The poll's window closes at convergence, which is exactly where churn
+and the reload begin, and every arrangement of those two was found wanting from
+a new side:
+
+- letting the poll run on put its rounds inside a burst's 1.0s-resolution
+  withdrawal and the reload's CPU interval (fifth review);
+- waiting for it left a queue nobody drained, so the first burst was dated from
+  a stale sample and appeared to begin before the `birdc` that carried it
+  (sixth);
+- draining that queue left the workload's *recorder* still based at the
+  convergence sample, so its first sample's `poll_resolution_s` spanned the
+  whole wait and a withdrawal resolved to a second was published as "within the
+  25.0s poll resolution" (eighth);
+- and the wait itself sat inside `total time`, a graphed column, moving with
+  the **instrument's** fan-out rather than with the workload (eighth).
+
+Each fix was correct and each exposed the next coupling. That is the signal:
+the two measurements share a boundary, and making them coexist means fixing an
+order and paying for it somewhere published. So the run keeps the fan-out and
+declines to time it -- the receivers exist, hold the table and cost the target
+its export work; only the timing is withheld, by name, in
+`unmeasured_reason`. It is the rule this phase has already applied twice, to
+`--prefix-scope total` under `--path-diversity` and to churn beside a policy
+reload, and choosing an order is its own change set.
+
+Three things went away with it: the pre-workload join, the note for a join that
+timed out, and the double teardown wait that note existed to prevent. What
+stayed is `drain_stale_samples()`, which is independently right: the main loop
+can leave a message in the queue without any wait at all, and that is up to a
+whole poll of mis-dating on the one measurement whose resolution is a single
+poll.
+
+The ninth review read the result and found no defect in it -- only two pieces
+of the removed design still asserting themselves in comments: a guard against
+paying the teardown wait twice, for a second wait that no longer exists, and
+the drain justifying itself by the backlog that join used to create rather than
+by the one it actually drains. Both are the failure this repository names in
+its own first paragraph, a document that is confidently out of date, and both
+are the ordinary residue of deleting something: the code went, the reasoning
+for it did not. That is the argument for reviewing a simplification as
+carefully as an addition.
+
+**Four narrower things from the seventh review, and the shape of that round is
+itself the finding.** It reported no crash-level or wrong-number defect, and
+what it did find was the poll's own overhead rather than a number the artifact
+would publish wrongly -- which is where this instrument's remaining risk lives.
+
+- The stop rule read the *round's* dict rather than the recorder's retained
+  view, so a transient exec failure on the round that completed the fan-out
+  kept the loop running for the rest of the delivery window at half duty. The
+  events for that round had already been recorded from the same reads;
+  `ExportEventRecorder.accepted` exists precisely to keep what a receiver was
+  last *seen* holding, and that is what decides the stop now. A retired
+  recorder ends the loop too: it can collect nothing more.
+- The closing round happened only on the path where the wait returned. A
+  shutdown noticed by `ended()` at the top of the loop -- a `controller_stop`
+  that arrived without `export_stop`, which nothing does today and anything
+  might tomorrow -- skipped it. It is taken on whichever event ends the window
+  now.
+- A pre-workload join that *times out* falls through into the workload with the
+  poll live, which is exactly the case the join exists to prevent, and nothing
+  recorded it. The run cannot skip the workload it was asked for, so it says so
+  instead: `poll_incomplete` names the perturbation, and it is the same key
+  `finish_bench()` now reads to know it must not wait out the same stuck thread
+  a second time -- nine minutes of teardown at fifty receivers, against a bound
+  documented as half a minute.
+
+**An unreachable check-point is read off the monitor, not guessed from the
+flag.** The same review found that `--filter_test` can put the check-point out
+of reach -- the count takes no account of a policy that drops routes, which is
+why `ConvergenceTracker` falls back to stability -- so every receiver would be
+named as though it had stalled, on a fan-out that was served in full. The first
+fix refused the measurement up front whenever a filter was set, and running it
+showed that to be wrong in the other direction: `--filter_test transit` at 2
+peers x 1000 prefixes *reached* the check-point on this host, so refusing on the
+flag withholds a measurement that can be made. Whether a policy drops that much
+depends on the policy and the workload, and the run already knows: the section
+publishes `monitor_reached_required`, and a `false` there beside a non-empty
+`incomplete_receivers` prints that the count was out of reach for every session
+in the run and says nothing about the receivers. Verified both ways --
+`transit` measured 2 of 2 receivers normally, `ixp` (which dropped the whole
+table, `received` 0) printed the unreachable-check-point line.
+
+A third finding, smaller: the teardown-timeout note assigned
+`observation_error` unconditionally, so on a run whose recorder had already been
+retired mid-round it replaced the reason the measurement died with the reason it
+was truncated. It appends now, and the retirement reason comes first.
+
+Three things the first review found, and the first is the one that would have
+published a wrong answer:
+
+- **The post-convergence loops would have dropped export rounds, and a
+  receiver served in one of them would have been published as never served.**
+  `run_churn_bursts()` and `run_policy_reload()` take the queue over and skip
+  anything that is not a monitor sample, and the export poll ran until every
+  receiver held the table. So `--receivers 4 --churn-prefixes 1000` on a fleet
+  whose slowest receiver crossed the check-point a round after convergence
+  would report `incomplete_receivers: [bgperf_receiver3]`, three null
+  intervals and "3 of 4 receiver(s) reached" -- for a target that had exported
+  the whole table to all four. The poll would also have been exec'ing into
+  every receiver throughout the burst interval whose cost was being measured.
+  The window is now stated and enforced: it is the **delivery** of the table,
+  the same window `elapsed (s)`, `max cpu %` and `max mem (GB)` describe, and
+  it closes at convergence. A receiver not served by then is incomplete with
+  the count it last held, which is how a session that just missed the window is
+  told from one that stalled.
+- **`controller_stop` was the wrong event to stop it with**, and the fix above
+  is the same fix. That event is *cleared* at the top of every batch cell, so a
+  round still inside its `docker exec`s when a cell ended could find it clear
+  again and poll on against the previous cell's containers -- the leaked
+  sampler failure this repository already has a section about. The delivery
+  event is per run and never cleared.
+- **Two comments described the design as it stood an hour earlier.** Both
+  `write_event_artifact()` and `CLAUDE.md` said the export section had "no
+  fallback of churn's kind"; the `-p 1` fix above had just added exactly such a
+  fallback, and only the measurement dictionary described it. The same slip the
+  export fan-out change set recorded ("a comment ended up documenting the wrong
+  block"), and self-review caught a third instance of it in this diff: the
+  `EXPORT` phase member was inserted under `CHURN`'s comment, leaving that
+  comment describing the wrong member.
+
+The change is otherwise pure and covered by the new `tests/test_export_timing.py`
+(54 tests) plus six in `tests/test_controller_threads.py` for the poll's
+shutdown, its delivery window and its cadence; 1238 total, Docker-free.
+
+Both Docker verifications above were repeated after the poll stopped using the
+queue: the 6-receiver run reported an `export_spread_s` of 4.470s against a
+4.470s resolution -- the one-round bound holding in a live run for the second
+time, at a different round cost -- and the churn and `-p 1` runs were unchanged.
+Two filtered runs were added afterwards, `--filter_test transit` and
+`--filter_test ixp` at 2 peers x 1000 prefixes with two receivers, which are the
+two halves of the unreachable-check-point rule.
+
 ### Progress on 2026-09-08: policy can be changed on a table already held
 
 `--policy-reload-blocks N` (batch: `policy_reload_blocks: N` on a test)

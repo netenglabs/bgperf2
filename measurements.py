@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import json
 import math
+import re
 from types import MappingProxyType
 from typing import Iterable, Mapping, Optional, Tuple
 
@@ -22,6 +23,8 @@ class EventKind(str, Enum):
     TESTER_FIRST_UPDATE = 'tester_first_update'
     TESTER_LAST_UPDATE = 'tester_last_update'
     TESTER_COMPLETE = 'tester_complete'
+    RECEIVER_FIRST_PREFIX = 'receiver_first_prefix'
+    RECEIVER_TABLE_REACHED = 'receiver_table_reached'
     MONITOR_FIRST_PREFIX = 'monitor_first_prefix'
     MONITOR_REQUIRED_REACHED = 'monitor_required_reached'
     MONITOR_LAST_CHANGE = 'monitor_last_change'
@@ -38,6 +41,12 @@ class EventPhase(str, Enum):
     INJECTION = 'injection'
     CONVERGENCE = 'convergence'
     ASSURANCE = 'assurance'
+    # What the target put on its other export sessions. The monitor is one
+    # export session and its events are the run's convergence; a receiver's are
+    # not, and must never be read as it. A reader grouping this stream by phase
+    # would otherwise find several first-prefix intervals under `convergence`
+    # with nothing saying which of them the row's `elapsed (s)` came from.
+    EXPORT = 'export'
     # Everything after the table has been delivered and confirmed. A churn
     # burst is a second workload run against a converged target, so its events
     # must not share a phase with the initial delivery -- a reader grouping by
@@ -60,6 +69,8 @@ EVENT_PHASE = {
     EventKind.TESTER_FIRST_UPDATE: EventPhase.INJECTION,
     EventKind.TESTER_LAST_UPDATE: EventPhase.INJECTION,
     EventKind.TESTER_COMPLETE: EventPhase.INJECTION,
+    EventKind.RECEIVER_FIRST_PREFIX: EventPhase.EXPORT,
+    EventKind.RECEIVER_TABLE_REACHED: EventPhase.EXPORT,
     EventKind.MONITOR_FIRST_PREFIX: EventPhase.CONVERGENCE,
     EventKind.MONITOR_REQUIRED_REACHED: EventPhase.CONVERGENCE,
     EventKind.MONITOR_LAST_CHANGE: EventPhase.CONVERGENCE,
@@ -1142,6 +1153,302 @@ def monitor_metrics(events: Iterable[LifecycleEvent]):
     }
 
 
+def natural_key(name: str):
+    '''Order `x2` before `x10`, which a plain sort does not.
+
+    Receiver containers are `bgperf_receiver0 ... bgperf_receiverN` with no
+    zero padding, so `sorted()` gives 0, 1, 10, 11, 12, 2 -- and the printed
+    line names only the first few `incomplete_receivers`, so at twenty
+    receivers a reader is shown an arbitrary subset while the ones between 2
+    and 9 are hidden behind "and N more". The list and its printed sample have
+    to mean what they read as.
+    '''
+    return tuple(int(part) if part.isdigit() else part
+                 for part in re.split(r'(\d+)', name))
+
+
+def export_poll_can_stop(accepted: Mapping[str, Optional[int]],
+                         required_prefixes: int) -> bool:
+    '''True when every receiver holds the table and one more look adds nothing.
+
+    The export poll otherwise runs until the monitor converges, and unlike the
+    generator poll it cannot be batched: each receiver is its own container, so
+    a round is one `docker exec` per receiver. At a large fan-out that is the
+    instrument spending a measurable share of every second inside containers,
+    during the window the run's own resource columns describe -- and nothing in
+    the row reports it. Not because it is bgperf2's own process tree: the read
+    runs *inside* the receiver container, so `own_process_tree()` does not
+    reach it. It is invisible because `gobgp` is in
+    `contention.BGPERF_PROCESSES`, the by-name allowlist, exactly as `birdc` is
+    for the generator poll. The distinction matters to anyone reasoning from
+    this comment: a generator whose CLI is not in that frozenset would have its
+    poll charged to `max foreign cpu %` as somebody else's load.
+
+    Nothing observable is lost by stopping. Both export events fire on or
+    before the poll that satisfies this, and a receiver's accepted count cannot
+    move past the table the target has to give it.
+    '''
+    values = list(accepted.values())
+    if not values:
+        return False
+    return all(value is not None and value >= required_prefixes
+               for value in values)
+
+
+class ExportEventRecorder:
+    '''Translate polled receiver counts into the export vocabulary.
+
+    A receiver is the *other* end of the target's export work: the monitor is
+    one export session and what it observes is the run's convergence, so
+    without this a `--receivers 20` run and a `--receivers 0` run differ in
+    exactly one published number -- `elapsed (s)` -- and what the fan-out cost
+    is inside it, indistinguishable from a slow target.
+
+    One recorder covers the whole fan-out rather than one per container, because
+    one poll round reads every receiver: the events it produces name the
+    receiver as their producer, and every interval below is derived per
+    receiver from those.
+
+    It deliberately does not stamp `bench_clock_started`. That event is the
+    monitor recorder's, there is exactly one of it in a run, and a second would
+    make every `unique_event()` lookup against the merged stream ambiguous.
+    '''
+
+    def __init__(self, bench_started_s, receivers, required_prefixes,
+                 sample_interval_s=None):
+        receivers = tuple(receivers)
+        if not receivers:
+            raise MeasurementEventError(
+                'an export recorder needs at least one receiver')
+        for name in receivers:
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError('receiver names must be non-empty strings')
+        if len(set(receivers)) != len(receivers):
+            raise ValueError('receiver names must be unique')
+        if not isinstance(required_prefixes, int) \
+                or isinstance(required_prefixes, bool) \
+                or required_prefixes <= 0:
+            raise ValueError('required_prefixes must be a positive integer')
+        self.receivers = frozenset(receivers)
+        # What a receiver has to hold to have been served: the run's own
+        # check-point, which is the same yardstick the monitor is judged by.
+        # Deriving one from what the monitor has seen so far would couple the
+        # two instruments, and the whole point of reading a receiver is that
+        # its answer does not depend on the monitor's.
+        self.required_prefixes = required_prefixes
+        self.sample_interval_s = _validated_interval(sample_interval_s)
+        self._origin_s = float(bench_started_s)
+        self._events = []
+        self._last_sample_s = None
+        self._poll_resolution_s = None
+        self._accepted = {name: None for name in receivers}
+
+    def _details(self):
+        details = {}
+        if self.sample_interval_s is not None:
+            details['sample_interval_s'] = self.sample_interval_s
+        if self._poll_resolution_s is not None:
+            details['poll_resolution_s'] = self._poll_resolution_s
+        return details
+
+    @property
+    def events(self):
+        '''Return the current facts in deterministic monotonic order.'''
+        return ordered_events(self._events)
+
+    @property
+    def accepted(self):
+        '''The last count read from each receiver, None where none ever was.
+
+        Kept across a failed read rather than cleared by one: a receiver that
+        answered and then went unreadable has been observed holding that many
+        prefixes, and replacing it with None would lose evidence that a later
+        poll cannot recover.
+        '''
+        return dict(self._accepted)
+
+    def observe(self, monotonic_s, accepted: Mapping[str, Optional[int]]):
+        '''Record one poll round covering every receiver in the fan-out.'''
+        if not isinstance(monotonic_s, (int, float)) \
+                or isinstance(monotonic_s, bool) \
+                or not math.isfinite(monotonic_s):
+            raise ValueError('monotonic_s must be a finite number')
+        monotonic_s = float(monotonic_s)
+        if monotonic_s < self._origin_s:
+            raise EventOrderError('receiver sample precedes bench_clock_started')
+        if self._last_sample_s is not None and monotonic_s < self._last_sample_s:
+            raise EventOrderError('receiver samples are not monotonic')
+        # Every configured receiver on every poll, with None where the read
+        # failed -- the rule `TesterEventRecorder.observe()` states for a
+        # generator's sessions, and here it is what stops the receivers that
+        # happen to answer from satisfying "the whole fan-out has the table".
+        if frozenset(accepted) != self.receivers:
+            raise MeasurementEventError(
+                'receiver set changed between polls: expected {0}'.format(
+                    sorted(self.receivers)))
+        for name, value in accepted.items():
+            if value is None:
+                continue
+            if not isinstance(value, int) or isinstance(value, bool) \
+                    or value < 0:
+                raise ValueError(
+                    'accepted prefixes for {0} must be a non-negative integer '
+                    'or None'.format(name))
+
+        # Computed before the sample moves and before any event is added, so
+        # every event this poll produces carries the poll's own resolution.
+        self._poll_resolution_s = _resolution_for_poll(
+            monotonic_s,
+            self._origin_s if self._last_sample_s is None
+            else self._last_sample_s,
+            self.sample_interval_s)
+        self._last_sample_s = monotonic_s
+
+        details = self._details()
+        # Sorted so a poll that fires two receivers' events places them in a
+        # deterministic order when they share a timestamp -- and in the same
+        # order the section publishes, since names are unpadded and a plain
+        # sort would emit receiver0, receiver1, receiver10, receiver2 into the
+        # event stream while `sessions` and `incomplete_receivers` list them by
+        # index. Two orders for one fan-out is a reader's problem, not a
+        # tie-break.
+        for name in sorted(accepted, key=natural_key):
+            value = accepted[name]
+            if value is None:
+                continue
+            self._accepted[name] = value
+            counters = {'accepted_prefixes': value,
+                        'required_prefixes': self.required_prefixes}
+            if value > 0 and unique_event(
+                    self._events, EventKind.RECEIVER_FIRST_PREFIX,
+                    name) is None:
+                self._events.append(LifecycleEvent(
+                    EventKind.RECEIVER_FIRST_PREFIX, monotonic_s, name,
+                    EventPhase.EXPORT, counters=counters, details=details))
+            if value >= self.required_prefixes and unique_event(
+                    self._events, EventKind.RECEIVER_TABLE_REACHED,
+                    name) is None:
+                self._events.append(LifecycleEvent(
+                    EventKind.RECEIVER_TABLE_REACHED, monotonic_s, name,
+                    EventPhase.EXPORT, counters=counters, details=details))
+
+
+def export_metrics(events: Iterable[LifecycleEvent], receivers):
+    '''Derive what the target's other export sessions were served, and when.
+
+    The per-receiver sections say which session lagged; the fleet fields say
+    whether the table was exported to all of them at all. Same division of
+    labour as `tester_metrics()` and `tester_fleet_metrics()`, and the same
+    pessimism: the fan-out is served when its *slowest* receiver has the table,
+    and one receiver that never got there leaves every fleet interval null
+    rather than bounded by the ones that did.
+
+    `monitor_delta_s` is the one number that relates this to the published row.
+    It is deliberately measured against the monitor rather than against the
+    generators: an export tail measured from the fleet's completion is
+    `post_injection_tail_s + monitor_delta_s`, and publishing it here would mean
+    repeating `tester_fleet_metrics()`'s all-or-nothing completion rule in a
+    second place, where the two could drift apart.
+    '''
+    events = tuple(events)
+    receivers = sorted(receivers, key=natural_key)
+    if not receivers:
+        raise MeasurementEventError(
+            'an export summary needs at least one receiver')
+    origin = unique_event(events, EventKind.BENCH_CLOCK_STARTED, 'controller')
+    if origin is None:
+        raise MeasurementEventError(
+            'export metrics need the controller bench_clock_started event')
+
+    required = unique_event(events, EventKind.MONITOR_REQUIRED_REACHED)
+    first = {r: unique_event(events, EventKind.RECEIVER_FIRST_PREFIX, r)
+             for r in receivers}
+    reached = {r: unique_event(events, EventKind.RECEIVER_TABLE_REACHED, r)
+               for r in receivers}
+    sessions = {}
+    for name in receivers:
+        sessions[name] = {
+            'first_prefix_s': duration_s(
+                events, EventKind.BENCH_CLOCK_STARTED,
+                EventKind.RECEIVER_FIRST_PREFIX,
+                start_producer='controller', end_producer=name),
+            'first_prefix_resolution_s': _poll_resolution(first[name]),
+            'table_reached_s': duration_s(
+                events, EventKind.BENCH_CLOCK_STARTED,
+                EventKind.RECEIVER_TABLE_REACHED,
+                start_producer='controller', end_producer=name),
+            'table_reached_resolution_s': _poll_resolution(reached[name]),
+        }
+
+    incomplete = [r for r in receivers if reached[r] is None]
+
+    # Gated separately from the intervals below: a fan-out where every receiver
+    # was seen taking prefixes and one never finished has a real, useful export
+    # start, and it is exactly the case where a reader wants it.
+    first_prefix_s = None
+    first_prefix_resolution_s = None
+    if all(event is not None for event in first.values()):
+        earliest = min(first.values(), key=lambda e: e.monotonic_s)
+        first_prefix_s = earliest.monotonic_s - origin.monotonic_s
+        first_prefix_resolution_s = _poll_resolution(earliest)
+
+    table_reached_s = None
+    table_reached_resolution_s = None
+    spread_s = None
+    spread_resolution_s = None
+    slowest = None
+    if not incomplete:
+        # An inverted stream has already been refused: the per-receiver pass
+        # above measures every one of these events with `duration_s()`, which
+        # rejects an endpoint preceding the origin.
+        slowest = max(reached.values(), key=lambda e: e.monotonic_s)
+        fastest = min(reached.values(), key=lambda e: e.monotonic_s)
+        table_reached_s = slowest.monotonic_s - origin.monotonic_s
+        table_reached_resolution_s = _poll_resolution(slowest)
+        # How far apart the fan-out's sessions were served. Zero at or under
+        # the resolution below means they were served within one look of each
+        # other, which is what a target exporting to them in parallel looks
+        # like at this cadence; it is not proof that it did.
+        spread_s = slowest.monotonic_s - fastest.monotonic_s
+        spread_resolution_s = _bounding_resolution(fastest, slowest)
+
+    # Signed, and for the same reason `post_injection_tail_s` is: the monitor is
+    # just another export session, so a receiver reaching the table before it
+    # is ordinary rather than a fault, and clamping at zero would give that run
+    # the same number as one whose fan-out finished exactly with the
+    # instrument.
+    monitor_delta_s = None
+    monitor_delta_resolution_s = None
+    if slowest is not None and required is not None:
+        monitor_delta_s = slowest.monotonic_s - required.monotonic_s
+        monitor_delta_resolution_s = _bounding_resolution(slowest, required)
+
+    return {
+        'receivers': len(receivers),
+        'receivers_complete': len(receivers) - len(incomplete),
+        'incomplete_receivers': incomplete,
+        # Whether the *monitor* got there, which is what says whether an
+        # incomplete fan-out is a finding about the receivers at all. The
+        # check-point takes no account of a `--filter_test` policy, so a policy
+        # that drops enough of the table puts it out of reach for every session
+        # in the run -- and every receiver would then be named as though it had
+        # stalled. Read from the event stream rather than from the flag,
+        # because whether a policy drops that much depends on the workload:
+        # `--filter_test transit` at 2 peers x 1000 prefixes reached the
+        # check-point on the development host.
+        'monitor_reached_required': required is not None,
+        'first_prefix_s': first_prefix_s,
+        'first_prefix_resolution_s': first_prefix_resolution_s,
+        'table_reached_s': table_reached_s,
+        'table_reached_resolution_s': table_reached_resolution_s,
+        'export_spread_s': spread_s,
+        'export_spread_resolution_s': spread_resolution_s,
+        'monitor_delta_s': monitor_delta_s,
+        'monitor_delta_resolution_s': monitor_delta_resolution_s,
+        'sessions': sessions,
+    }
+
+
 class ChurnEventRecorder:
     """Translate a churn burst sequence into the typed lifecycle vocabulary.
 
@@ -1525,7 +1832,7 @@ def policy_reload_metrics(events: Iterable[LifecycleEvent]):
 
 
 def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
-                   churn=None, policy_reload=None):
+                   churn=None, policy_reload=None, export=None):
     '''Build the stable JSON-compatible event artifact document.
 
     `testers` maps a generator's producer name to whatever evidence it holds
@@ -1556,6 +1863,16 @@ def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
         # the one with a null interval, which is exactly the thing a reader
         # skims past.
         artifact['tester_fleet'] = tester_fleet_metrics(events, testers)
+    # Present whenever the run had receivers, and absent otherwise, so a run
+    # with no fan-out keeps exactly the document it has always produced. The
+    # receiver set is the union of the ones the controller named and the ones
+    # that produced events: a receiver observed but not declared is a wiring
+    # fault, and dropping its intervals here would hide it in the one document
+    # that could show it.
+    export_producers = {event.producer for event in events
+                        if event.phase == EventPhase.EXPORT}
+    if export or export_producers:
+        artifact['export'] = _export_section(events, export, export_producers)
     # Present whenever a churn sequence was driven *or* could not be, and
     # absent otherwise, so a run with no churn keeps exactly the document it
     # has always produced. Evidence alone is enough: a sequence refused before
@@ -1575,6 +1892,38 @@ def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
         artifact['policy_reload'] = _policy_reload_section(
             events, policy_reload)
     return artifact
+
+
+def _export_section(events, evidence, observed_receivers=()):
+    """The derived export intervals, plus what the controller alone knows.
+
+    `evidence` carries the run-level facts the event stream cannot show -- the
+    check-point the receivers were judged against, a poll that could not be
+    read -- with the per-receiver half under `sessions`, keyed by container
+    name. Both halves are refused where they would land on a derived name, for
+    the reason `_tester_section()` refuses it: a caller able to overwrite a
+    measured interval with a value the events do not support defeats the point
+    of deriving them.
+    """
+    evidence = dict(evidence or {})
+    sessions = dict(evidence.pop('sessions', None) or {})
+    receivers = set(sessions) | set(observed_receivers)
+    measured = export_metrics(events, receivers)
+    collisions = sorted(set(evidence) & set(measured))
+    if collisions:
+        raise MeasurementEventError(
+            'export evidence would overwrite derived {0}'.format(
+                ', '.join(collisions)))
+    for name, detail in sessions.items():
+        derived = measured['sessions'][name]
+        clashes = sorted(set(detail or {}) & set(derived))
+        if clashes:
+            raise MeasurementEventError(
+                'export evidence for {0} would overwrite derived {1}'.format(
+                    name, ', '.join(clashes)))
+        derived.update(detail or {})
+    measured.update(evidence)
+    return measured
 
 
 def _policy_reload_section(events, evidence):

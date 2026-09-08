@@ -15,7 +15,7 @@ named monotonic phase intervals live in each run's `.events.json` artifact.
 | `peers` | count | Configured number of route-source tester peers. |
 | `prefixes per peer` | count | Configured prefixes per tester peer. For MRT playback this is the configured/scanned workload value, not an independently observed offered count. The table the target ends up holding is `peers x prefixes per peer` only at the default path diversity; under `--path-diversity D` the peers are dealt into groups of `D` that each announce one shared block, so the fleet offers that many paths for `(peers / D) x prefixes per peer` distinct prefixes. The diversity is recorded as `run.path_diversity` in `<prefix>.versions.json` and appears in the artifact stem as `pd<D>`; it is not a CSV column, and a run whose workload came from a scenario file (`-f`) records `null` rather than asserting a diversity bgperf2 did not configure. |
 | `required` | prefixes | Configured monitor accepted-prefix checkpoint. Reaching it shortens the stability-assurance window; stable completion may still be reported below it when target-neighbor completion evidence is available. It is 99% of the configured synthetic total, 99% of the scanned MRT prefix count for bgpdump2, or 93% of that MRT count for GoBGP playback. The synthetic total is the number of **distinct** prefixes, not the number of paths offered: the monitor counts what the target re-advertises, which is one best path per prefix, so it is `(peers / path diversity) x prefixes per peer`. |
-| `received` | prefixes | GoBGP monitor accepted-prefix count in the sample that completed or failed the run. Unaffected by `--receivers`: export fan-out adds sessions the target advertises the same table to, and they announce nothing, so neither this nor `required` moves with the receiver count. The fan-out is recorded as `run.receivers` in both `<prefix>.events.json` and `<prefix>.versions.json` and appears in the artifact stem as `rx<N>`; it is not a CSV column, and a run whose sessions came from a scenario file (`-f`) records `null`. Receivers run the same `bgperf/gobgp` image as the monitor, so the `monitor version` column describes their build too. |
+| `received` | prefixes | GoBGP monitor accepted-prefix count in the sample that completed or failed the run. Unaffected by `--receivers`: export fan-out adds sessions the target advertises the same table to, and they announce nothing, so neither this nor `required` moves with the receiver count. The fan-out is recorded as `run.receivers` in both `<prefix>.events.json` and `<prefix>.versions.json` and appears in the artifact stem as `rx<N>`; it is not a CSV column, and a run whose sessions came from a scenario file (`-f`) records `null`. Receivers run the same `bgperf/gobgp` image as the monitor, so the `monitor version` column describes their build too. What the fan-out was served, and when, is in the artifact's `export` section and in no CSV column. |
 | `monitor (s)` | seconds | Time spent waiting for the monitor's BGP session with the target to become established, before the measured sampling loop starts. |
 | `elapsed (s)` | seconds | Monitor-observed convergence boundary in whole seconds from the tester launch origin. The controller estimates the boundary by subtracting the trailing stability-assurance samples from the final monitor sample. It is not necessarily a literal full-table time or the whole-run time. Unaffected by `--churn-prefixes` and `--policy-reload-blocks`: both run after this boundary has been settled, and what they cost is in the artifact's `churn` and `policy_reload` sections. |
 | `prefix received (s)` | seconds | Whole seconds from tester launch origin to the first monitor sample with a nonzero accepted-prefix count. Zero also represents a run that never observed a prefix, so failure state must be checked. |
@@ -127,6 +127,109 @@ first update to the **slowest** completion, and completion all-or-nothing.
 route when it is handed to the BGP protocol, not when it reaches the wire, so
 the count and the completion fact are trustworthy while the duration is not.
 Do not derive a tester-limited finding from a BIRD 2.19 rate.
+
+## Event artifact: the `export` section
+
+Present only on a run that had receivers (`--receivers N`, batch: `receivers: N`
+on a test), and absent otherwise, so a run with no fan-out keeps the document it
+has always produced. It is the export side of the run: the monitor is one export
+session and what it observes is the run's convergence, so without this a
+`--receivers 20` run and a `--receivers 0` run differ in exactly one published
+number — `elapsed (s)` — with the cost of the fan-out inside it.
+
+Nothing in the CSV moves with it. `elapsed (s)` is the monitor's convergence and
+means that in every row; what the fan-out cost is here, per receiver, and in the
+lines `bench` prints beside the row.
+
+Each receiver is polled by one round-robin loop at the monitor's cadence, and
+the events are `receiver_first_prefix` and `receiver_table_reached` under the
+`export` phase, produced under each receiver's container name.
+
+**The window is the delivery of the table and closes at convergence**, the same
+window `elapsed (s)`, `max cpu %` and `max mem (GB)` describe. A receiver not
+served by then is in `incomplete_receivers` with the count it last held in its
+`sessions` entry, which is how a session that just missed the window is told
+from one that stalled, and the printed line names the window for the same
+reason. The poll is stopped there rather than left running because a churn
+burst or a policy reload takes the queue over afterwards, and because the run
+itself ends there: there is no phase that waits for the fan-out, and adding one
+would put a wait that grows with the receiver count inside `total time`.
+
+**Read `monitor_delta_s` knowing that its positive side is bounded by that
+window.** Convergence is declared `ASSURANCE_SAMPLES_AFTER_CHECKPOINT` (5)
+polls after the monitor crosses the check-point on every run that reaches the
+neighbour checkpoint, so a fan-out served *later* than about five seconds after
+the instrument cannot be reported as a large positive delta — it is reported as
+`incomplete_receivers` instead, with each session's last count. A large lag and
+a stalled session therefore produce the same **shape** of artifact, and what
+separates them is `accepted_prefixes` per receiver: a session one poll short of
+the check-point missed the window, a session holding a fraction of the table
+did not. The negative side has no such bound. Giving the positive side one
+would mean a run phase that waits for the fan-out after convergence, which is
+a separate decision and not one this section quietly assumes.
+
+| Field | Unit/type | Definition and interpretation |
+|---|---|---|
+| `receivers` | count | Receiver sessions in this run — the number of `sessions` entries. |
+| `receivers_complete` | count | How many were seen holding `required_prefixes`. |
+| `monitor_reached_required` | boolean | Whether the **monitor** reached the same check-point. `false` beside a non-empty `incomplete_receivers` means the count was out of reach for every session in the run, so the fan-out's incompleteness is not a finding about the receivers — the usual cause is a `--filter_test` policy dropping enough of the table that the target never re-advertises the count. It is read off the event stream rather than from the flag, because whether a policy drops that much depends on the workload: `--filter_test transit` at 2 peers x 1000 prefixes reached the check-point on the development host, so refusing the measurement on the flag alone would withhold one that can be made. |
+| `incomplete_receivers` | list of strings | The container names that were not, sorted. Non-empty means the table was never exported to the whole fan-out, and `table_reached_s`, `export_spread_s` and `monitor_delta_s` are all `null` as a result — an interval bounded by the receivers that *were* served describes a fan-out that was not. |
+| `required_prefixes` | prefixes | The run's own monitor check-point, which is the yardstick a receiver is judged against. Deriving one from what the monitor has seen so far would couple the two instruments; the point of reading a receiver is that its answer does not depend on the monitor's. A policy that makes this count unreachable leaves the receivers incomplete exactly as it leaves `convergence_s` null. |
+| `first_prefix_s` | seconds | Bench clock origin to the **earliest** receiver seen taking prefixes. Gated separately from the intervals below: `null` only when some receiver was never seen taking any, since a fan-out where one session stalled still has a real export start and that is the run where a reader wants it. |
+| `first_prefix_resolution_s` | seconds | The gap bounding that round, read exactly as the tester and monitor resolutions are. |
+| `table_reached_s` | seconds | Bench clock origin to the **slowest** receiver holding `required_prefixes`. `null` unless every receiver got there. |
+| `table_reached_resolution_s` | seconds | The gap bounding that round. A round is one `docker exec` per receiver and cannot be batched, so this grows with the fan-out and with host load: a 6-receiver 1M-prefix run measured 3.8s. It is the gap the loop *achieved*, floored at the cadence asked for. |
+| `export_spread_s` | seconds | Slowest minus fastest `receiver_table_reached`: how far apart the fan-out's sessions were served. **Read it against `export_spread_resolution_s` and nothing else.** Every receiver in one round shares that round's timestamp, so a receiver read late in a round is dated to its start and can appear to reach the table one round-gap ahead of one read early in it. That gap is each event's own resolution, so a fan-out served simultaneously is off by at most one gap and its spread can never exceed the resolution published beside it — a spread at or under that number says the sessions were served within one look of each other, not that they were served together. `null` unless every receiver was served. |
+| `export_spread_resolution_s` | seconds | The wider of the two rounds bounding the spread. |
+| `monitor_delta_s` | seconds | **Signed.** The slowest receiver's `receiver_table_reached` minus the monitor's `monitor_required_reached`: how much later the fan-out was served than the instrument. Negative is ordinary rather than a fault — the monitor is one export session among several and nothing orders them — and clamping it at zero would give such a run the same number as one whose fan-out finished exactly with the instrument. It is deliberately measured against the monitor rather than against the generators: a generator-relative export tail is `post_injection_tail_s + monitor_delta_s`, and publishing that here would repeat `tester_fleet`'s all-or-nothing completion rule in a second place where the two could drift. `null` when either end is missing. |
+| `monitor_delta_resolution_s` | seconds | The wider of the receiver round and the monitor poll bounding it. A **magnitude** at or under this number says the two landed within one look of each other, in either direction. |
+| `sessions` | object | One entry per receiver, keyed by container name, carrying that receiver's own `first_prefix_s`, `table_reached_s` and their resolutions, plus `accepted_prefixes` — the last count read from it, which is the only thing that says how far a receiver that never finished got, and `null` for one that was never legible. A `read_failures` object (`{"polls": N, "first_reason": ...}`) is present only where a round could not read that receiver at all. |
+| `unmeasured_reason` | string | Present only when the run had receivers and the export measurement was never taken, in which case it is the **only** meaningful field: every interval is `null` and `incomplete_receivers` names them all. Two causes. The run's check-point is not positive — `gen_conf()` takes 99% of the table, so `-p 1` gives 0 — where a threshold of 0 would stamp every receiver complete on the first round and publish a table nobody was seen holding. Or the run also drives a churn or reload workload, whose intervals are measured off the same target across the same boundary; measuring both in one run means fixing an order and paying for it in a published column, and that is deferred. Deliberately not `observation_error`: a measurement never started and one abandoned partway are different findings, and an absent section would be indistinguishable from the document an older build wrote. |
+| `poll_incomplete` | string | Present only when the poll had not returned by the end of the teardown wait, so a round still in flight may be missing from the events. That wait scales with the receiver count, because a round is one serialised `docker exec` per receiver and nothing bounds that count. Deliberately **not** `observation_error`: a rejected round killed the measurement, one that did not come back only truncates it — and that key is the retirement flag the controller reads, so a timeout written there would stop the still-running poll recording the very round the note is about. |
+| `observation_error` | string | Present only when a round was rejected and the export recorder was retired mid-run — a round that went backwards, or one whose receiver set changed. The events recorded before that point are still published. |
+
+Two properties are deliberate. A receiver that could not be read is recorded as
+unread rather than as a receiver holding nothing, so the receivers that happen
+to answer can never satisfy "the whole fan-out has the table". And the poll ends
+itself once every receiver holds the table: a round cannot be batched, so
+polling on to convergence would spend an exec per receiver per second on
+sessions with nothing left to say.
+
+That last cost is worth understanding, because **the instrument runs inside the
+window it measures and no published column reports it**. The read happens
+*inside* the receiver container, so bgperf2's own-process-tree exclusion does
+not reach it; it is invisible to `max foreign cpu %` because `gobgp` is in
+`contention.BGPERF_PROCESSES`, the by-name allowlist, exactly as `birdc` is for
+the generator poll. Two things bound it: the round is serialised, which is
+self-throttling (N execs every `round + wait` rather than N every second), and
+**every** round waits at least as long as it took — not only one that overran
+the cadence, since four receivers at a 200ms read give a 0.8s round inside a 1s
+cadence without ever tripping an overrun. So the poll can never spend more than
+half its time inside containers whatever the receiver count. What that costs is
+resolution: the verified 6-receiver run's 3.8s rounds publish a gap of roughly
+7s, and every interval publishes the resolution that bounds it.
+
+**One closing round is taken when the window shuts**, because the gap between
+rounds is wider than the window that follows the check-point — at six receivers
+a round plus its floor, against the five monitor polls before convergence is
+declared. Without it a fan-out served in that gap would be published as one
+that was never served. That read is stamped when it is taken, after the window
+closed, and carries the gap since the previous round as its resolution. **A run that also drives a churn or reload workload
+is not measured here at all** — the section carries an `unmeasured_reason`
+saying so. The poll's window closes at convergence, which is exactly where
+those workloads begin, so coexisting costs something published either way:
+letting the poll run on puts one `docker exec` per receiver inside a burst's
+1.0s-resolution withdrawal or the reload's CPU interval, and waiting for it
+puts that wait inside `total time` and makes the workload's recorder date its
+first sample across the wait. The receivers still exist and still cost the
+target its export work; only the timing is withheld.
+
+**Table selection is not separable here or anywhere.** With this section a run
+decomposes into ingress (measured at the generators), the target's own work, and
+export (measured at the receivers); best-path selection happens inside the
+target and the only external observable is when a session sees the result, so it
+stays inside the target-side interval rather than being published as a number
+nothing measured.
 
 ## Event artifact: the `churn` section
 

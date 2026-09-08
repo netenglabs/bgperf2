@@ -16,7 +16,7 @@ import time
 
 import bgperf2
 from base import Tester
-from measurements import TesterOffering
+from measurements import ExportEventRecorder, TesterOffering
 
 
 def test_foreign_cpu_thread_samples_then_stops():
@@ -256,3 +256,196 @@ def test_a_raising_describer_costs_the_description_and_not_the_batch(monkeypatch
     assert 'summary unavailable' not in lines[0]
     assert 'describing it raised' in lines[0]
     assert 'KeyError' in lines[0]
+
+
+class UnfinishedReceiver:
+    '''A receiver that never gets the whole table, so its poll cannot stop.
+
+    Mid-run on purpose, for the reason `FakeTester` is: a receiver that
+    answered "I have it all" on the first round would end the loop by itself
+    and make every shutdown assertion below pass without a shutdown.
+    '''
+
+    READ_S = 0.0
+
+    def __init__(self, name='bgperf_receiver0'):
+        self.name = name
+        self.reads = 0
+
+    def accepted_prefixes(self):
+        self.reads += 1
+        time.sleep(self.READ_S)
+        return 1
+
+
+def an_export_recorder(receivers, interval=0.05):
+    return ExportEventRecorder(time.monotonic(), [r.name for r in receivers],
+                               100, sample_interval_s=interval)
+
+
+def wait_for_a_round(receivers, recorder=None, timeout=5):
+    '''Wait for a round to have been read, and recorded when asked.
+
+    The two are not the same instant: a round reads every receiver and only
+    then records, so a test that watched the reads alone would race the write
+    it is about to assert on.
+    '''
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        read = all(r.reads >= 1 for r in receivers)
+        recorded = recorder is None or any(
+            value is not None for value in recorder.accepted.values())
+        if read and recorded:
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def test_export_thread_samples_then_stops():
+    '''The export poll execs into containers too, once per receiver per round,
+    so a loop that outlives its cell keeps doing that for every later one.'''
+    before = threading.active_count()
+    bgperf2.controller_stop.clear()
+    receivers = [UnfinishedReceiver()]
+    export = an_export_recorder(receivers)
+
+    bgperf2.controller_export_stats(
+        receivers, export, {}, {}, bgperf2.controller_stop, 0.05)
+
+    assert wait_for_a_round(receivers, export), 'export poll recorded nothing'
+    assert export.accepted == {'bgperf_receiver0': 1}
+
+    bgperf2.controller_stop.set()
+    deadline = time.time() + 5
+    while threading.active_count() > before and time.time() < deadline:
+        time.sleep(0.01)
+    assert threading.active_count() == before, 'export poll outlived the run'
+
+
+def test_the_export_poll_ends_when_the_delivery_window_closes():
+    """The window is the delivery of the table, and the poll stops with it.
+
+    `churn_phase()` and `policy_reload_phase()` take the queue over after
+    convergence and skip anything that is not a monitor sample, so a round
+    landing during a burst would be dropped -- publishing a receiver that
+    crossed the check-point in it as one that was never served -- while the
+    poll went on exec'ing into containers throughout the interval whose cost
+    was being measured.
+    """
+    before = threading.active_count()
+    bgperf2.controller_stop.clear()
+    delivery = threading.Event()
+    receivers = [UnfinishedReceiver()]
+
+    bgperf2.controller_export_stats(
+        receivers, an_export_recorder(receivers), {}, {},
+        bgperf2.controller_stop, 0.05, delivery_stop=delivery)
+    assert wait_for_a_round(receivers), 'export poll read nothing'
+
+    delivery.set()
+    deadline = time.time() + 5
+    while threading.active_count() > before and time.time() < deadline:
+        time.sleep(0.01)
+    assert threading.active_count() == before, \
+        'export poll outlived the delivery it measures'
+
+
+def test_the_export_poll_survives_a_controller_event_the_next_cell_clears():
+    """`controller_stop` is cleared at the top of every batch cell, so a round
+    still in flight when a cell ends could find it clear again and poll on
+    against containers that are gone. The delivery event is per run and never
+    cleared, which is what closes that window."""
+    before = threading.active_count()
+    bgperf2.controller_stop.clear()
+    delivery = threading.Event()
+    receivers = [UnfinishedReceiver()]
+
+    bgperf2.controller_export_stats(
+        receivers, an_export_recorder(receivers), {}, {},
+        bgperf2.controller_stop, 0.05, delivery_stop=delivery)
+    wait_for_a_round(receivers)
+
+    delivery.set()                          # as bench() does at convergence
+    bgperf2.controller_stop.clear()         # as the next cell does
+    deadline = time.time() + 5
+    while threading.active_count() > before and time.time() < deadline:
+        time.sleep(0.01)
+    assert threading.active_count() == before, \
+        'export poll survived into the next cell'
+
+
+class StampingReceiver(UnfinishedReceiver):
+    '''A receiver whose read costs real time and records when it happened.'''
+
+    READ_S = 0.12
+
+    def __init__(self, name='bgperf_receiver0'):
+        super().__init__(name)
+        self.stamps = []
+
+    def accepted_prefixes(self):
+        self.stamps.append(time.monotonic())
+        return super().accepted_prefixes()
+
+
+def export_poll_gaps(receivers, interval, samples, timeout=10):
+    '''Run the export loop until `samples` rounds land, and return their gaps.'''
+    bgperf2.controller_stop.clear()
+    bgperf2.controller_export_stats(
+        receivers, an_export_recorder(receivers, interval), {}, {},
+        bgperf2.controller_stop, interval)
+    deadline = time.time() + timeout
+    try:
+        while len(receivers[0].stamps) < samples and time.time() < deadline:
+            time.sleep(0.01)
+    finally:
+        bgperf2.controller_stop.set()
+    stamps = receivers[0].stamps[:samples]
+    assert len(stamps) == samples, 'export poll produced too few rounds'
+    return [b - a for a, b in zip(stamps, stamps[1:])]
+
+
+def test_the_export_poll_waits_to_a_deadline_rather_than_after_the_round():
+    '''A round is one exec per receiver, so sleeping a whole interval after it
+    makes the cadence round+interval while every event claims the nominal one
+    -- and that claim is what says whether an export interval was resolved.'''
+    gaps = export_poll_gaps([StampingReceiver()], 0.2, samples=3)
+
+    assert min(gaps) < 0.2 + StampingReceiver.READ_S / 2
+
+
+def test_the_export_poll_duty_is_capped_below_the_cadence_too():
+    """The floor applies on every round, not only on one that overran. Four
+    receivers at a 200ms read give a 0.8s round inside a 1s cadence -- 80% of
+    the window spent inside containers without ever tripping an overrun, in a
+    load `max foreign cpu %` cannot see."""
+    interval = 0.3
+    receivers = [StampingReceiver('bgperf_receiver0'),
+                 StampingReceiver('bgperf_receiver1')]
+    round_s = 2 * StampingReceiver.READ_S      # 0.24s, inside the cadence
+
+    gaps = export_poll_gaps(receivers, interval, samples=3)
+
+    assert round_s < interval, 'this test must not exercise the overrun branch'
+    assert min(gaps) >= round_s * bgperf2.EXPORT_POLL_MAX_DUTY * 0.9
+
+
+def test_an_export_round_that_overruns_waits_at_least_as_long_as_it_took():
+    '''The instrument runs inside the window it measures, in a load
+    `max foreign cpu %` cannot see -- `gobgp` is in `BGPERF_PROCESSES` -- and
+    nothing bounds the receiver count. So a round that overruns the cadence
+    waits at least its own duration: the poll can never spend more than
+    `EXPORT_POLL_MAX_DUTY` of its time inside containers, whatever the fan-out.
+    What that costs is resolution, which every interval publishes.'''
+    interval = 0.05
+    receivers = [StampingReceiver('bgperf_receiver0'),
+                 StampingReceiver('bgperf_receiver1')]
+    round_s = 2 * StampingReceiver.READ_S
+
+    gaps = export_poll_gaps(receivers, interval, samples=3)
+
+    # Round plus a wait at least as long as the round: a duty cycle of 1 in 2,
+    # not the round plus a fixed 0.05s that would leave it at 5 in 6.
+    assert min(gaps) >= round_s * bgperf2.EXPORT_POLL_MAX_DUTY * 0.9
+
+    assert min(gaps) >= interval

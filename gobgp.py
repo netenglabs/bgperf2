@@ -17,6 +17,15 @@ from base import *
 import yaml
 import json
 
+class GoBGPNeighborReadError(Exception):
+    """`gobgp neighbor -j` did not answer with a list of neighbours.
+
+    Its own errors come back JSON-encoded, so a failed read parses cleanly into
+    a `str` and only becomes a TypeError once something indexes it. Naming it
+    here keeps that diagnosis where the evidence is.
+    """
+
+
 class GoBGP(Container):
 
     CONTAINER_NAME = None
@@ -181,8 +190,41 @@ class GoBGPTarget(GoBGP, Target):
         neighbor_received_output = self.local("/root/gobgp neighbor -j")
         if neighbor_received_output:
             neighbor_received_output = json.loads(neighbor_received_output.decode('utf-8'))
+        else:
+            # An empty read is not an empty fleet. Falling through left this as
+            # the original `bytes`, which iterates as nothing, so every peer
+            # silently vanished from the sample for that poll.
+            raise GoBGPNeighborReadError(
+                '{0}: `gobgp neighbor -j` returned nothing'.format(self.name))
+
+        # `gobgp neighbor -j` does not always answer with an array. Under load
+        # it emits its *error* as a JSON string, and a string iterates as
+        # characters -- so `neighbor['state']` two lines down raised
+        # "TypeError: string indices must be integers" from inside a sampler
+        # thread that had no guard, killing it for the rest of the run. What
+        # that cost is in `Container.neighbor_stats()`: the campaign's
+        # `rustybgp default` cell at 50 x 100,000 was published FAILED after
+        # 2194s while the target held all 5,000,000 routes and the monitor had
+        # every one of them. Measured again with the read guarded: the same
+        # cell converges in 133s having hit this exactly once.
+        #
+        # So the shape is checked where it is known, and the failure names
+        # itself and quotes what came back. A parser that lets a bad payload
+        # become a TypeError three frames away is a parser that gets diagnosed
+        # as whatever the caller was doing.
+        if not isinstance(neighbor_received_output, list):
+            raise GoBGPNeighborReadError(
+                '{0}: `gobgp neighbor -j` returned {1}, not a list of '
+                'neighbours: {2!r}'.format(
+                    self.name, type(neighbor_received_output).__name__,
+                    str(neighbor_received_output)[:200]))
 
         for neighbor in neighbor_received_output:
+            if not isinstance(neighbor, dict):
+                raise GoBGPNeighborReadError(
+                    '{0}: `gobgp neighbor -j` returned a {1} where a neighbour '
+                    'was expected: {2!r}'.format(
+                        self.name, type(neighbor).__name__, str(neighbor)[:200]))
             if 'afi_safis' in neighbor and 'accepted' in neighbor['afi_safis'][0]['state']:
                 neighbors_accepted[neighbor['state']['neighbor_address']] = neighbor['afi_safis'][0]['state']['accepted']
             else:

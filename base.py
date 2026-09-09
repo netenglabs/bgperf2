@@ -538,27 +538,75 @@ class Container(object):
         t.daemon = True
         t.start()
 
+    # How many consecutive failed reads before the sampler says so a second
+    # time. The first is always reported; after that a target that is simply
+    # unreachable would otherwise write a line a second for the rest of the run.
+    NEIGHBOR_SAMPLE_REPORT_EVERY = 60
+
+    # Class attributes so they exist on every Container however it was built --
+    # `+=` rebinds onto the instance, so nothing is shared. A run reads these to
+    # say whether the neighbour evidence it converged on was complete.
+    neighbor_sample_failures = 0
+    neighbor_sample_consecutive_failures = 0
+    neighbor_sample_last_error = None
+
     def neighbor_stats(self, queue):
         def stats():
             while True:
                 if self.stop_monitoring:
                     return
-                # Stamped before the read, on the rule both poll loops already
-                # follow: a sample dated to when its read finished is dated
-                # late by the cost of a docker exec, and this one is compared
-                # against a monitor sample stamped the same way.
-                sampled_s = time.monotonic()
-                neighbors_received_full, neighbors_checked, witness = \
-                    self.sample_target_state()
-                # The witness rides on the neighbours message rather than
-                # travelling as one of its own: bench()'s dispatch reads any
-                # message from this producer carrying neither neighbour key as
-                # a cpu/mem sample, so a third shape would be read as one.
-                queue.put({'who': self.name,
-                           'neighbors_checked': neighbors_checked,
-                           'table_witness': witness,
-                           'monotonic_s': sampled_s})
-                queue.put({'who': self.name, 'neighbors_received_full': neighbors_received_full})
+                try:
+                    # Stamped before the read, on the rule both poll loops
+                    # already follow: a sample dated to when its read finished
+                    # is dated late by the cost of a docker exec, and this one
+                    # is compared against a monitor sample stamped the same way.
+                    sampled_s = time.monotonic()
+                    neighbors_received_full, neighbors_checked, witness = \
+                        self.sample_target_state()
+                    # The witness rides on the neighbours message rather than
+                    # travelling as one of its own: bench()'s dispatch reads any
+                    # message from this producer carrying neither neighbour key
+                    # as a cpu/mem sample, so a third shape would be read as one.
+                    queue.put({'who': self.name,
+                               'neighbors_checked': neighbors_checked,
+                               'table_witness': witness,
+                               'monotonic_s': sampled_s})
+                    queue.put({'who': self.name,
+                               'neighbors_received_full': neighbors_received_full})
+                    self.neighbor_sample_consecutive_failures = 0
+                except Exception as exc:
+                    # This loop used to have no guard at all, and one bad read
+                    # ended the thread for the rest of the run -- silently.
+                    # What that costs is not a missing sample: it is the whole
+                    # convergence verdict. `neighbors_checked` freezes at its
+                    # last value, `note_neighbors_checkpoint()` never fires, and
+                    # `ConvergenceTracker`'s CONVERGED gate requires that
+                    # checkpoint -- so the run has no terminating path except
+                    # STUCK_SAMPLES and is published FAILED with a complete,
+                    # stable table in hand. Measured: the 2026-timing-validation
+                    # campaign's `rustybgp default` cell at 50 x 100,000 burned
+                    # 2194s that way while the target held all 5,000,000 routes
+                    # and the monitor had every one of them.
+                    #
+                    # So the thread survives the read, and -- the other half of
+                    # the same lesson -- it is never quiet about it. A sampler
+                    # that fails every time still produces no checkpoint, and
+                    # the only thing that distinguishes that run from a slow
+                    # daemon is this saying so.
+                    self.neighbor_sample_failures += 1
+                    self.neighbor_sample_consecutive_failures += 1
+                    self.neighbor_sample_last_error = '{0}: {1}'.format(
+                        type(exc).__name__, exc)
+                    if (self.neighbor_sample_consecutive_failures == 1
+                            or self.neighbor_sample_consecutive_failures
+                            % self.NEIGHBOR_SAMPLE_REPORT_EVERY == 0):
+                        print('WARNING: {0}: neighbour sample failed '
+                              '({1} consecutive, {2} total): {3}'.format(
+                                  self.name,
+                                  self.neighbor_sample_consecutive_failures,
+                                  self.neighbor_sample_failures,
+                                  self.neighbor_sample_last_error),
+                              file=sys.stderr, flush=True)
                 time.sleep(1)
 
         t = Thread(target=stats)

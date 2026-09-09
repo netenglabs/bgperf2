@@ -14,6 +14,8 @@
 # limitations under the License.
 
 from json.decoder import JSONDecodeError
+import sys
+
 from base import Container
 from gobgp import GoBGP
 import os
@@ -27,7 +29,24 @@ import datetime
 def rm_line():
     print('\x1b[1A\x1b[2K\x1b[1D\x1b[1A')
 
+class MonitorReadError(Exception):
+    """`gobgp neighbor -j` on the monitor did not answer with a neighbour.
+
+    Its own errors come back JSON-encoded, so a failed read parses into a `str`
+    and indexing it yields a character rather than raising. Naming it keeps the
+    diagnosis on the read instead of on whatever indexed the result next.
+    """
+
+
 class Monitor(GoBGP):
+    # The monitor is the instrument, so its read failing is a fact about the
+    # measurement rather than about a target. Counted and reported on the same
+    # rule as `Container.neighbor_stats()`.
+    MONITOR_SAMPLE_REPORT_EVERY = 60
+    monitor_sample_failures = 0
+    monitor_sample_consecutive_failures = 0
+    monitor_sample_last_error = None
+
 
     CONTAINER_NAME = 'bgperf_monitor'
 
@@ -77,11 +96,26 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
 
             neighbor_data = self.local('gobgp neighbor {0} -j'.format(neighbor)).decode('utf-8')
 
+            # The third read of `gobgp neighbor -j` in this run, and it needs
+            # the same guard as the other two for a reason the JSONDecodeError
+            # arm does not cover: gobgp answers with its *error* JSON-encoded,
+            # so `json.loads('"rpc error: code = Unavailable"')` succeeds and
+            # returns a `str`. `neigh['state']` then raises TypeError, and this
+            # one is not in a sampler thread -- it propagates out of `bench()`
+            # before any teardown and kills the whole batch cell.
+            #
+            # This is also the read most likely to meet that payload: it runs
+            # about a second after the container starts, which is exactly when
+            # the RPC endpoint is least likely to be up. A session that is not
+            # answering yet is what this loop is for, so a bad payload is
+            # "not established yet", not an error.
             try:
                 neigh = json.loads(neighbor_data)
             except JSONDecodeError:
+                neigh = None
+            if not isinstance(neigh, dict) or not isinstance(
+                    neigh.get('state'), dict):
                 neigh = {'state': {'session_state': 'failed'}}
-
 
             if ((neigh['state']['session_state'] == 'established') or
                 (neigh['state']['session_state'] == 6)):
@@ -118,25 +152,70 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
                 # the finding. Before the read is a lower bound on when the
                 # count was true.
                 sampled_at = time.monotonic()
+                # Everything that touches the payload is inside the guard, and
+                # the guard is not the one that used to be here.
+                #
+                # `gobgp neighbor -j` answers with its *error* JSON-encoded, so
+                # a failed read parses cleanly into a `str` -- and
+                # `json.loads('"rpc error: ..."')[0]` is `'r'`, which does not
+                # raise. The old `try` therefore caught nothing, and
+                # `info['who'] = ...` on the very next line, outside it, killed
+                # this thread for the rest of the run. That is the same payload
+                # that killed the target's sampler and cost the campaign's
+                # `rustybgp default` cell 2194s -- but here it lands on the
+                # instrument every published timing is read from: `recved`
+                # freezes, and `ConvergenceTracker` fails the run as stuck with
+                # no target-side guard able to save it.
                 try:
-                    info = json.loads(self.local('gobgp neighbor -j').decode('utf-8'))[0]
+                    payload = json.loads(
+                        self.local('gobgp neighbor -j').decode('utf-8'))
+                    if not isinstance(payload, list) or not payload:
+                        raise MonitorReadError(
+                            '`gobgp neighbor -j` returned {0}, not a list of '
+                            'neighbours: {1!r}'.format(
+                                type(payload).__name__, str(payload)[:200]))
+                    info = payload[0]
+                    if not isinstance(info, dict):
+                        raise MonitorReadError(
+                            '`gobgp neighbor -j` returned a {0} where a '
+                            'neighbour was expected: {1!r}'.format(
+                                type(info).__name__, str(info)[:200]))
+                    info['who'] = self.name
+                    state = info['afi_safis'][0]['state']
+                    if 'accepted'in state and len(cps) > 0 and int(cps[0]) <= int(state['accepted']):
+                        #cps.pop(0)
+                        info['checked'] = True
+                    else:
+                        info['checked'] = False
+                    # Keep the wall timestamp for compatibility/debug
+                    # correlation, but durations are calculated from this
+                    # monotonic observation time at the queue boundary.
+                    info['time'] = datetime.datetime.now()
+                    info['monotonic_s'] = sampled_at
+                    queue.put(info)
+                    self.monitor_sample_consecutive_failures = 0
                 except Exception as e:
-                    print(f"Monitoring reading exception {self.monitor_for}: {e} ")
-                    continue
-
-                info['who'] = self.name
-                state = info['afi_safis'][0]['state']
-                if 'accepted'in state and len(cps) > 0 and int(cps[0]) <= int(state['accepted']):
-                    #cps.pop(0)
-                    info['checked'] = True
-                else:
-                    info['checked'] = False
-                # Keep the wall timestamp for compatibility/debug correlation,
-                # but durations are calculated from this monotonic observation
-                # time at the queue boundary.
-                info['time'] = datetime.datetime.now()
-                info['monotonic_s'] = sampled_at
-                queue.put(info)
+                    self.monitor_sample_failures += 1
+                    self.monitor_sample_consecutive_failures += 1
+                    self.monitor_sample_last_error = '{0}: {1}'.format(
+                        type(e).__name__, e)
+                    if (self.monitor_sample_consecutive_failures == 1
+                            or self.monitor_sample_consecutive_failures
+                            % self.MONITOR_SAMPLE_REPORT_EVERY == 0):
+                        print('WARNING: monitor read for {0} failed '
+                              '({1} consecutive, {2} total): {3}'.format(
+                                  self.monitor_for,
+                                  self.monitor_sample_consecutive_failures,
+                                  self.monitor_sample_failures,
+                                  self.monitor_sample_last_error),
+                              file=sys.stderr, flush=True)
+                # Outside the guard, so a failing read waits like a succeeding
+                # one. The old `continue` skipped it, and a persistent failure
+                # then spun `docker exec` as fast as the host allowed -- inside
+                # the container being measured, inflating `max cpu %` and
+                # `min idle%` on the run whose timings are published, and
+                # invisible to `max foreign cpu %` because `gobgp` is in
+                # `contention.BGPERF_PROCESSES`.
                 time.sleep(interval)
 
         t = Thread(target=stats)

@@ -1923,7 +1923,7 @@ def target_table_section(samples, unmeasured_reason=None, witness_rule=None):
 def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
                    churn=None, policy_reload=None, export=None,
                    target_table=None, target_table_unmeasured_reason=None,
-                   target_table_witness_rule=None):
+                   target_table_witness_rule=None, instrument=None):
     '''Build the stable JSON-compatible event artifact document.
 
     `testers` maps a generator's producer name to whatever evidence it holds
@@ -1991,6 +1991,19 @@ def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
         artifact['target_table'] = target_table_section(
             target_table or [], target_table_unmeasured_reason,
             target_table_witness_rule)
+    # Present only when a sampler actually failed a read, so a clean run keeps
+    # exactly the document it has always produced.
+    #
+    # This is the run saying its own evidence was incomplete. Both samplers
+    # read `gobgp neighbor -j`, whose errors come back JSON-encoded and used to
+    # kill the reading thread outright; they now survive, and the whole point
+    # of surviving is lost if the run cannot say it happened. A target sampler
+    # that missed reads may still have reached `note_neighbors_checkpoint()`
+    # late, which moves the assurance window from 5 samples to 20 and shows up
+    # nowhere else; a monitor that missed reads has gaps in the series every
+    # published timing is derived from.
+    if instrument:
+        artifact['instrument'] = dict(instrument)
     return artifact
 
 

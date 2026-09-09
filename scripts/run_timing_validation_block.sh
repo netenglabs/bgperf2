@@ -365,9 +365,28 @@ retract_forced_markers() {
   fi
 }
 
+# Anything after the output directory is a scripts/calibration_case.sh
+# constraint (`--role tester --rate 4mbit`), which starves one role from
+# outside bgperf2 for the duration of the run. It *replaces* the interpreter
+# invocation rather than prefixing it: that script takes bgperf2's arguments
+# after `--` and runs bgperf2 itself, so putting it in front of
+# "$PYTHON_BIN bgperf2.py" would hand bgperf2 its own command line as a
+# positional argument.
+#
+# It exits non-zero when any container of the run went unconstrained, and that
+# is deliberately fatal here rather than counted like an evidence failure: a
+# case that was not controlled says nothing about the role it names, and
+# stamping the block RAN would offer it for review as though it did. Each
+# case's unconstrained companion runs first, so a constraint that fails to
+# bind still leaves the reference it would have been read against on disk.
 run_batch() {
   local key="$1"
   local out_dir="$2"
+  shift 2
+  local -a launch=("${BGPERF_CMD[@]}")
+  if [[ $# -gt 0 ]]; then
+    launch=(scripts/calibration_case.sh "$@" --)
+  fi
   local rendered="$RENDERED_CONFIG_DIR/$key.yaml"
   mkdir -p "$out_dir"
   echo "Running $key -> $out_dir"
@@ -377,13 +396,45 @@ run_batch() {
   # having measured nothing, and the block would then stamp the *old*
   # artifacts with the current revision and ask an operator to accept rows
   # nobody re-measured. The sibling runner drops it for the same reason.
+  #
+  # **A constrained case is never resumed**, for a third reason. The progress
+  # file records that a cell completed and records nothing about whether the
+  # constraint bound; the guard that decides that runs in the watcher, which
+  # cannot observe a cell it did not launch. So resuming one would accept a
+  # cell as controlled on the strength of a marker that says nothing about
+  # control -- and a case whose constraint failed *after* the batch wrote its
+  # progress would be replayed as a skipped cell, leaving the watcher to
+  # report "no container of this run was seen at all", which reads as a naming
+  # bug rather than as the constraint failure it is. Re-measuring costs the
+  # case's own minute.
   local resume_args=(--resume)
-  if [[ $FORCE -eq 1 ]]; then
+  if [[ $FORCE -eq 1 || $# -gt 0 ]]; then
     resume_args=()
   fi
-  "${BGPERF_CMD[@]}" -d "$WORKDIR" batch -c "$rendered" \
+  local status=0
+  "${launch[@]}" -d "$WORKDIR" batch -c "$rendered" \
     --results-dir "$out_dir" "${resume_args[@]}" \
-    > "$LOG_DIR/$key.stdout.log" 2> "$LOG_DIR/$key.stderr.log"
+    > "$LOG_DIR/$key.stdout.log" 2> "$LOG_DIR/$key.stderr.log" || status=$?
+
+  # bgperf2 is never told about the constraint -- provenance never guesses,
+  # and a manifest may not claim something the tool did not do -- so the
+  # harness's own log is the only record that this case was controlled. Keep
+  # it beside the results it qualifies, not only under metadata/logs, and
+  # keep it on the failing path too: a case that went unconstrained is exactly
+  # the one whose record matters.
+  if [[ $# -gt 0 ]]; then
+    cp "$LOG_DIR/$key.stderr.log" "$out_dir/case.log"
+  fi
+
+  if [[ $status -ne 0 ]]; then
+    # Everything this run had to say is in a redirected log, so failing on the
+    # bare exit status under `set -e` would abort the block with nothing on
+    # the terminal -- including the one message the whole design turns on,
+    # "FAILED: tester containers of this run went unconstrained by".
+    echo "$key failed (exit $status); see $LOG_DIR/$key.stderr.log" >&2
+    tail -20 "$LOG_DIR/$key.stderr.log" >&2
+    return "$status"
+  fi
 }
 
 # Every block that runs benchmarks qualifies its own rows before it claims to
@@ -400,10 +451,13 @@ check_evidence() {
   local out_dir="$1"
   local expect="$2"
   local label="$3"
+  shift 3
+  # Anything further is passed to the checker: a calibration case adds what it
+  # was built to produce (--expect-limiting, --expect-egress-mbit).
   local status=0
   mkdir -p "$BLOCK_DIR/evidence"
   "$PYTHON_BIN" scripts/check_timing_evidence.py "$out_dir" \
-    --expect "$expect" --json "$BLOCK_DIR/evidence/$label.json" \
+    --expect "$expect" --json "$BLOCK_DIR/evidence/$label.json" "$@" \
     > "$BLOCK_DIR/evidence/$label.txt" 2>&1 || status=$?
   cat "$BLOCK_DIR/evidence/$label.txt"
   if [[ $status -ne 0 ]]; then
@@ -456,6 +510,80 @@ case "$BLOCK_INDEX" in
 
     check_evidence "$BLOCK_DIR/smoke-synth" 1 "smoke-synth"
     check_evidence "$BLOCK_DIR/smoke-mrt" 1 "smoke-mrt"
+    ;;
+  1)
+    # Generator calibration: four runs from two configs, each config run twice
+    # -- once unconstrained, once with one role starved from outside bgperf2 by
+    # scripts/calibration_case.sh. The plan asks for a controlled slow tester
+    # and a controlled target/observer tail; the two unconstrained companions
+    # are what makes each of those a *controlled* case rather than an observed
+    # one, and one of them is also the block's ambiguous case.
+    #
+    # The pairs are qualified on different evidence, and deliberately so:
+    #
+    #   tail pair    separates on the verdict. Byte-identical inputs give
+    #                `unresolved` unconstrained and `target_or_monitor` with
+    #                the monitor at 0.15 CPU.
+    #   tester pair  may not separate on the verdict at all, so it is not
+    #                qualified on one. 2 x 500,000 unconstrained was attributed
+    #                to `tester` in Phase 6, i.e. to the very component this
+    #                case starves -- so a slow-tester case cleared by its
+    #                verdict would also have been cleared by a constraint that
+    #                bound nothing, which has happened here
+    #                (results/2026/phase6-calibration/interface-probe/, where
+    #                `tc` succeeded on a device the BGP session did not use).
+    #                What qualifies it is the imposed 4 mbit cap being
+    #                recovered from each injector's own `octets_on_wire` and
+    #                `reported_injection_s`. The companion supplies the
+    #                unconstrained rate that is read against, which is why it
+    #                is run even though its own verdict is pinned to nothing.
+    #
+    # Each companion runs before its constrained case, so a constraint that
+    # fails to bind -- which is fatal -- still leaves the reference it would
+    # have been read against on disk.
+    TAIL_CONFIG="benchmarks/2026-calibration-block1-tail.yaml"
+    TESTER_CONFIG="benchmarks/2026-calibration-block1-tester.yaml"
+    # One source config under two snapshot keys, so the two runs of a pair are
+    # recorded as the identical input they are.
+    campaign_render_config "block1-tail-baseline" "$TAIL_CONFIG" \
+      "$RENDERED_CONFIG_DIR/block1-tail-baseline.yaml"
+    campaign_render_config "block1-observer-tail" "$TAIL_CONFIG" \
+      "$RENDERED_CONFIG_DIR/block1-observer-tail.yaml"
+    campaign_render_config "block1-tester-baseline" "$TESTER_CONFIG" \
+      "$RENDERED_CONFIG_DIR/block1-tester-baseline.yaml"
+    campaign_render_config "block1-slow-tester" "$TESTER_CONFIG" \
+      "$RENDERED_CONFIG_DIR/block1-slow-tester.yaml"
+    capture_metadata "$RENDERED_CONFIG_DIR/block1-tail-baseline.yaml" \
+                     "$RENDERED_CONFIG_DIR/block1-observer-tail.yaml" \
+                     "$RENDERED_CONFIG_DIR/block1-tester-baseline.yaml" \
+                     "$RENDERED_CONFIG_DIR/block1-slow-tester.yaml"
+
+    retract_forced_markers
+
+    run_batch "block1-tail-baseline" "$BLOCK_DIR/tail-baseline"
+    # `unresolved` and `inconclusive` are kept apart everywhere else -- one is
+    # a measurement that forbids attribution, the other a measurement never
+    # made -- and both are correct for a run with nothing constrained. What
+    # this rejects is a component named where no cause was imposed.
+    check_evidence "$BLOCK_DIR/tail-baseline" 1 "tail-baseline" \
+      --expect-limiting unresolved,inconclusive
+
+    run_batch "block1-observer-tail" "$BLOCK_DIR/observer-tail" \
+      --role monitor --cpus 0.15
+    check_evidence "$BLOCK_DIR/observer-tail" 1 "observer-tail" \
+      --expect-limiting target_or_monitor
+
+    # No expected component for the tester companion: it is the reference rate,
+    # not a control on the verdict, and pinning one would add a failure mode
+    # the block's exit criterion does not ask about. Its rate is published as a
+    # note either way.
+    run_batch "block1-tester-baseline" "$BLOCK_DIR/tester-baseline"
+    check_evidence "$BLOCK_DIR/tester-baseline" 1 "tester-baseline"
+
+    run_batch "block1-slow-tester" "$BLOCK_DIR/slow-tester" \
+      --role tester --rate 4mbit
+    check_evidence "$BLOCK_DIR/slow-tester" 1 "slow-tester" \
+      --expect-limiting tester --expect-egress-mbit 4
     ;;
   *)
     cat >&2 <<MSG

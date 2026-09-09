@@ -1,0 +1,53 @@
+# Block 1 of the 64 GB timing validation campaign: the ambiguous case and the
+# controlled target/observer tail, from one config.
+#
+# This config is run twice, byte-identically, and the only difference between
+# the two runs is which role was starved from outside bgperf2:
+#
+#   tail-baseline   nothing constrained
+#   observer-tail   scripts/calibration_case.sh --role monitor --cpus 0.15
+#
+# So the difference between their verdicts is the constraint and nothing else.
+# That pair is the block's evidence that the findings policy attributes a limit
+# when one was really imposed and declines to attribute one when it was not --
+# which is exactly the plan's exit criterion for this block.
+#
+# EXPECTED VERDICTS, measured on this host on 2026-09-08
+# (results/2026/phase6-calibration/, decision log Phase 6):
+#
+#   tail-baseline    `unresolved` via `no_dominant_interval`. 200,000 prefixes
+#                    across two injectors is delivered inside the polls, so
+#                    there is no interval to attribute. That is the ambiguous
+#                    case the exit criterion asks to be left unattributed, and
+#                    it is a real verdict rather than a failure -- the block
+#                    accepts `unresolved` or `inconclusive` here and nothing
+#                    that names a component.
+#   observer-tail    `target_or_monitor` via `post_injection_tail`: the run
+#                    continued 9.9s after the generators finished, against a
+#                    1.8s bound.
+#
+# The finding names two components because no interval separates them, and
+# this starves the observer end of that name on purpose. A starved *target* is
+# not a tail at all: it back-pressures the generators through their sockets and
+# the run is attributed to `tester` (bgperf2-bgg).
+#
+# The size is what makes the baseline ambiguous. 2 x 100,000 is small enough
+# that the unconstrained run has no dominant interval; a larger shape would
+# attribute something and the pair would stop being a control. bgpdump2 rather
+# than the BIRD synthetic generator, because a bgpdump2 injector times its own
+# send and its log is read from the host -- starving a BIRD generator starves
+# the `birdc` poll that reads it, which degrades the instrument instead of the
+# role.
+tests:
+  -
+     name: 2026-calibration-block1-tail
+     neighbors: [2]
+     prefixes: [100_000]
+     filter_test: [None]
+     targets:
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000

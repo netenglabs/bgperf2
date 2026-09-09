@@ -11,6 +11,7 @@ the tests -- a Docker call ahead of an argument guard is the failure
 `test_image_resolves_before_containers_are_torn_down` exists for, one level up.
 '''
 import os
+import re
 import subprocess
 
 import pytest
@@ -33,6 +34,41 @@ def block(*args, results_root, workdir=None):
     if workdir is not None:
         argv += ['--workdir', workdir, '--allow-root-workdir']
     return run(argv)
+
+
+def _block_keys():
+    listed = BLOCK_RUNNER.read_text().split('BLOCK_KEYS=(', 1)[1].split(')', 1)[0]
+    return [line.strip() for line in listed.split() if line.strip()]
+
+
+def _built_blocks():
+    """Which block numbers the runner has a `case` branch for.
+
+    Discovered rather than written down, because a guard test that names an
+    unbuilt block by number becomes a *benchmark launcher* the moment that
+    block is built. That is not hypothetical: when block 1 landed, this
+    suite -- whose whole point is that it needs no Docker -- spent two minutes
+    running a real MRT calibration into a temp directory, and would have gone
+    on doing it on every developer's machine.
+    """
+    cases = BLOCK_RUNNER.read_text().split('case "$BLOCK_INDEX" in', 1)[1]
+    return sorted(int(n) for n in re.findall(r'^  (\d+)\)\s*$', cases, re.M))
+
+
+def unbuilt_block():
+    """The lowest block with no branch: the one a guard test may safely run.
+
+    Every test that drives the runner all the way to its `case` uses this, so
+    landing a new block moves them along instead of pointing them at a real
+    matrix.
+    """
+    built = set(_built_blocks())
+    for index, key in enumerate(_block_keys()):
+        if index not in built:
+            return index, key
+    raise AssertionError(
+        'every block is built, so no guard test can reach the refusal branch '
+        'without running a benchmark; give these tests another way in')
 
 
 @pytest.fixture
@@ -84,7 +120,8 @@ def test_a_block_that_is_not_built_yet_says_so_rather_than_inventing_one(roots):
     '''A block that ran the wrong matrix produces rows that look exactly like
     the right ones.'''
     results, work = roots
-    result = block('block-2', results_root=results, workdir=work)
+    index, _ = unbuilt_block()
+    result = block('block-%d' % index, results_root=results, workdir=work)
     assert result.returncode == 2
     assert 'not built yet' in result.stderr
 
@@ -93,7 +130,9 @@ def test_next_selects_block_zero_first_then_advances_only_past_acceptance(roots)
     results, work = roots
     run_root = os.path.join(results, '2026-timing-validation')
     block0 = os.path.join(run_root, 'block0-preflight-and-smoke')
+    block1 = os.path.join(run_root, 'block1-generator-calibration')
     os.makedirs(block0)
+    os.makedirs(block1)
 
     # RAN alone is not acceptance: the review is what completes a block, and a
     # session that died between the batch and the review must not look like
@@ -107,11 +146,16 @@ def test_next_selects_block_zero_first_then_advances_only_past_acceptance(roots)
     assert result.returncode == 0, result.stderr
     assert os.path.exists(os.path.join(block0, 'COMPLETE'))
 
-    # Only now does `next` move on -- and block 1 is not built, which is what
-    # proves it moved rather than re-running block 0.
+    # Only now does `next` move on. It is stopped at block 1 by block 1's own
+    # RAN marker rather than by block 1 being unbuilt: `next` runs whatever it
+    # selects, so a test that proved advancement by letting it reach an
+    # unbuilt block would start a real benchmark the day that block landed --
+    # which is exactly what happened when this one did.
+    open(os.path.join(block1, 'RAN'), 'w').close()
     result = block('next', results_root=results, workdir=work)
-    assert result.returncode == 2
+    assert result.returncode == 1
     assert 'block-1' in result.stderr
+    assert 'waiting to be reviewed' in result.stderr
 
 
 def test_accepting_a_block_that_never_ran_is_refused(roots):
@@ -188,7 +232,8 @@ def test_a_recorded_workdir_wins_over_the_one_invoked_with(roots):
     with open(os.path.join(metadata, 'manifest.json'), 'w') as f:
         json.dump({'workdir': '/data/somewhere-else'}, f)
 
-    result = block('block-2', results_root=results, workdir=work)
+    index, _ = unbuilt_block()
+    result = block('block-%d' % index, results_root=results, workdir=work)
     assert result.returncode != 0
     assert 'recorded under workdir' in result.stderr
 
@@ -268,22 +313,24 @@ def test_a_zero_padded_block_number_is_read_in_base_ten(roots):
 
 def test_a_force_that_replaced_nothing_retracts_nothing(roots):
     '''The retraction belongs where results start being replaced, not beside
-    the marker checks that let --force past them. block-2 is not built, so this
-    run measures nothing -- and deleting the acceptance of results that are
-    still there would leave `status` reporting a block nobody has to redo as
-    one that must be redone.'''
+    the marker checks that let --force past them. An unbuilt block measures
+    nothing -- and deleting the acceptance of results that are still there
+    would leave `status` reporting a block nobody has to redo as one that must
+    be redone.'''
     results, work = roots
     run_root = os.path.join(results, '2026-timing-validation')
-    block2 = os.path.join(run_root, 'block2-synthetic-rep1')
-    os.makedirs(block2)
-    open(os.path.join(block2, 'RAN'), 'w').close()
-    open(os.path.join(block2, 'COMPLETE'), 'w').close()
+    index, key = unbuilt_block()
+    target = os.path.join(run_root, key)
+    os.makedirs(target)
+    open(os.path.join(target, 'RAN'), 'w').close()
+    open(os.path.join(target, 'COMPLETE'), 'w').close()
 
-    result = run([BLOCK_RUNNER, 'block-2', '--force', '--results-root', results,
+    result = run([BLOCK_RUNNER, 'block-%d' % index, '--force',
+                  '--results-root', results,
                   '--workdir', work, '--allow-root-workdir'])
     assert result.returncode == 2
-    assert os.path.exists(os.path.join(block2, 'COMPLETE'))
-    assert os.path.exists(os.path.join(block2, 'RAN'))
+    assert os.path.exists(os.path.join(target, 'COMPLETE'))
+    assert os.path.exists(os.path.join(target, 'RAN'))
 
 
 def test_a_refused_force_does_not_retract_anything(roots):
@@ -291,25 +338,52 @@ def test_a_refused_force_does_not_retract_anything(roots):
     results whose acceptance it would have retracted.'''
     results, _ = roots
     run_root = os.path.join(results, '2026-timing-validation')
-    block2 = os.path.join(run_root, 'block2-synthetic-rep1')
-    os.makedirs(block2)
-    open(os.path.join(block2, 'COMPLETE'), 'w').close()
+    index, key = unbuilt_block()
+    target = os.path.join(run_root, key)
+    os.makedirs(target)
+    open(os.path.join(target, 'COMPLETE'), 'w').close()
 
-    result = run([BLOCK_RUNNER, 'block-2', '--force', '--results-root', results,
+    result = run([BLOCK_RUNNER, 'block-%d' % index, '--force',
+                  '--results-root', results,
                   '--workdir', '/nonexistent-bgperf-campaign-test/work'])
     assert result.returncode != 0
     assert 'on the root filesystem' in result.stderr
-    assert os.path.exists(os.path.join(block2, 'COMPLETE'))
+    assert os.path.exists(os.path.join(target, 'COMPLETE'))
+
+
+def _run_batch_body():
+    body = open(BLOCK_RUNNER).read()
+    return body[body.index('run_batch() {'):body.index('EVIDENCE_FAILURES=0')]
 
 
 def test_a_forced_run_does_not_resume_past_the_cells_it_is_re_measuring():
     """`batch --resume` records every completed cell, so a forced re-run that
     kept --resume would skip all of them, exit 0 having measured nothing, and
     then stamp the old artifacts with the current revision."""
-    body = open(BLOCK_RUNNER).read()
-    run_batch = body[body.index('run_batch() {'):body.index('EVIDENCE_FAILURES=0')]
-    assert 'if [[ $FORCE -eq 1 ]]; then' in run_batch
-    assert 'resume_args=()' in run_batch
+    assert 'FORCE -eq 1' in _run_batch_body()
+    assert 'resume_args=()' in _run_batch_body()
+
+
+def test_a_constrained_case_is_never_resumed():
+    """The progress file says a cell completed and says nothing about whether
+    the constraint bound -- the guard that decides that runs in the watcher,
+    which cannot observe a cell it did not launch. Resuming one accepts a case
+    as controlled on a marker that is silent about control."""
+    assert 'FORCE -eq 1 || $# -gt 0' in _run_batch_body()
+
+
+def test_a_failed_case_puts_its_own_log_on_the_terminal():
+    """Everything a constrained run has to say goes to a redirected log, so
+    failing on the bare exit status would abort the block with nothing
+    printed -- including the one message the design turns on, that a container
+    of this run went unconstrained."""
+    body = _run_batch_body()
+    assert '|| status=$?' in body
+    assert 'tail -20 "$LOG_DIR/$key.stderr.log" >&2' in body
+    # and the case log is kept on the failing path, which is the path whose
+    # record matters most
+    assert body.index('cp "$LOG_DIR/$key.stderr.log" "$out_dir/case.log"') \
+        < body.index('return "$status"')
 
 
 def test_one_failed_evidence_check_does_not_cost_the_block_its_other_evidence():

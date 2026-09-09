@@ -296,3 +296,151 @@ def test_an_unsampled_memory_sentinel_is_not_a_measurement():
     assert statuses(checks)['memory_guardrail'] == check.FAIL
     detail = next(c.detail for c in checks if c.name == 'memory_guardrail')
     assert 'sentinel' in detail
+
+
+def calibrated(doc, expect_limiting=None, expect_mbit=None, tolerance=0.25):
+    return check.qualify(doc, versions(), row(), expect_limiting, expect_mbit,
+                         tolerance)
+
+
+def injectors(zero_mbit=4.0, one_mbit=4.0):
+    '''Two generators whose published numbers give the named wire rates.'''
+    return {
+        'mrt-injector0': {'octets_on_wire': int(zero_mbit * 1e6 / 8.0),
+                          'reported_injection_s': 1.0},
+        'mrt-injector1': {'octets_on_wire': int(one_mbit * 1e6 / 8.0),
+                          'reported_injection_s': 1.0},
+    }
+
+
+def test_a_calibration_case_that_produced_its_component_qualifies():
+    doc = artifact()
+    doc['findings'] = dict(doc['findings'], limiting_component='tester',
+                           decided_by='tester_limited')
+    verdict, checks = calibrated(doc, expect_limiting=['tester'])
+    assert verdict == 'qualified', statuses(checks)
+    assert statuses(checks)['expected_limiting'] == check.OK
+
+
+def test_a_calibration_case_that_produced_another_component_is_rejected():
+    '''The whole point of starving one role is that the policy has to name it;
+    a case that named something else calibrated nothing.'''
+    doc = artifact()
+    doc['findings'] = dict(doc['findings'], limiting_component='tester')
+    verdict, checks = calibrated(doc, expect_limiting=['target_or_monitor'])
+    assert verdict == 'rejected'
+    assert statuses(checks)['expected_limiting'] == check.FAIL
+
+
+def test_an_unconstrained_control_may_decline_to_name_a_component_either_way():
+    '''`unresolved` and `inconclusive` are kept apart everywhere else -- one is
+    a measurement that forbids attribution, the other a measurement never made
+    -- and both are correct where nothing was constrained.'''
+    for component in ('unresolved', 'inconclusive'):
+        doc = artifact()
+        doc['findings'] = dict(doc['findings'], limiting_component=component)
+        verdict, checks = calibrated(
+            doc, expect_limiting=['unresolved', 'inconclusive'])
+        assert verdict == 'qualified', (component, statuses(checks))
+
+
+def test_a_control_that_named_a_component_is_rejected():
+    doc = artifact()
+    doc['findings'] = dict(doc['findings'], limiting_component='tester')
+    verdict, checks = calibrated(doc,
+                                 expect_limiting=['unresolved',
+                                                  'inconclusive'])
+    assert verdict == 'rejected'
+
+
+def test_an_imposed_rate_is_recovered_from_the_generators_own_numbers():
+    doc = artifact(testers=injectors(4.16, 3.95))
+    verdict, checks = calibrated(doc, expect_mbit=4.0)
+    assert verdict == 'qualified', statuses(checks)
+    assert statuses(checks)['generator_egress'] == check.OK
+
+
+def test_a_constraint_that_bound_nothing_is_rejected_on_the_rate_alone():
+    '''`tc` succeeding is not the traffic being shaped: it once succeeded on a
+    device the BGP session did not use, and the run was logged as controlled.
+    At a size where the unconstrained shape is already generator-bound, the
+    verdict would have cleared it.'''
+    doc = artifact(testers=injectors(69.1, 65.3))
+    doc['findings'] = dict(doc['findings'], limiting_component='tester')
+    verdict, checks = calibrated(doc, expect_limiting=['tester'],
+                                 expect_mbit=4.0)
+    assert verdict == 'rejected'
+    assert statuses(checks)['expected_limiting'] == check.OK
+    assert statuses(checks)['generator_egress'] == check.FAIL
+
+
+def test_one_unshaped_generator_of_two_rejects_the_case_and_is_named():
+    doc = artifact(testers=injectors(4.16, 65.3))
+    verdict, checks = calibrated(doc, expect_mbit=4.0)
+    assert verdict == 'rejected'
+    detail = [c.detail for c in checks if c.name == 'generator_egress'][0]
+    assert 'mrt-injector1' in detail
+    assert 'mrt-injector0' not in detail.split('outside')[1]
+
+
+def test_a_rate_that_cannot_be_recovered_at_all_is_rejected_not_skipped():
+    '''A generator with no wire-side count leaves an imposed cap unverifiable,
+    which is not the same as a cap that held.'''
+    verdict, checks = calibrated(artifact(), expect_mbit=4.0)
+    assert verdict == 'rejected'
+    assert statuses(checks)['generator_egress'] == check.FAIL
+
+
+def test_an_unconstrained_companions_rate_is_published_and_never_asserted():
+    '''It is the reference the constrained run is read against, and a number
+    nobody recorded cannot play that part later.'''
+    doc = artifact(testers=injectors(69.1, 65.3))
+    verdict, checks = calibrated(doc)
+    assert verdict == 'qualified', statuses(checks)
+    assert statuses(checks)['generator_egress'] == check.NOTE
+
+
+def test_a_generator_that_timed_its_own_send_at_zero_resolves_no_rate():
+    '''Dividing by it would raise in the middle of qualifying a block.'''
+    doc = artifact(testers={'mrt-injector0': {'octets_on_wire': 1000,
+                                              'reported_injection_s': 0.0}})
+    verdict, checks = calibrated(doc)
+    assert verdict == 'qualified', statuses(checks)
+    assert 'generator_egress' not in statuses(checks)
+
+
+def test_an_ordinary_run_is_unaffected_by_the_calibration_options():
+    verdict, checks = check.qualify(artifact(), versions(), row())
+    assert verdict == 'qualified', statuses(checks)
+    assert 'expected_limiting' not in statuses(checks)
+    assert 'generator_egress' not in statuses(checks)
+
+
+def test_a_generator_that_published_no_rate_cannot_be_dropped_from_the_case():
+    '''Both numbers are withheld rather than guessed, so a generator missing
+    one is a generator this case has no evidence about. Cleared on the two
+    that answered, the case would be qualified while a third ran unshaped.'''
+    doc = artifact(testers=dict(injectors(4.16, 3.95),
+                                **{'mrt-injector2': {'octets_on_wire': None,
+                                                     'reported_injection_s':
+                                                     12.0}}))
+    verdict, checks = calibrated(doc, expect_mbit=4.0)
+    assert verdict == 'rejected'
+    detail = [c.detail for c in checks if c.name == 'generator_egress'][0]
+    assert 'no recoverable rate: mrt-injector2' in detail
+
+
+def test_a_case_with_no_generator_section_cannot_recover_an_imposed_rate():
+    verdict, checks = calibrated(artifact(testers={}), expect_mbit=4.0)
+    assert verdict == 'rejected'
+    assert 'no generator section' in [c.detail for c in checks
+                                      if c.name == 'generator_egress'][0]
+
+
+def test_a_passing_rate_check_says_how_many_generators_it_covered():
+    '''"within 4%" over one injector of ten is the reading this whole check
+    exists to refuse.'''
+    doc = artifact(testers=injectors(4.16, 3.95))
+    _, checks = calibrated(doc, expect_mbit=4.0)
+    assert 'all 2 generators' in [c.detail for c in checks
+                                  if c.name == 'generator_egress'][0]

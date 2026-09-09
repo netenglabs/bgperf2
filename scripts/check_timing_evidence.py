@@ -26,6 +26,13 @@ Three things it deliberately does not do:
   different questions, deliberately two different numbers; the stricter one
   produces a note here rather than silently overriding the artifact's finding.
 
+It has one extra mode, for Block 1. A *calibration* case is a run whose
+bottleneck was chosen in advance by starving one role from outside bgperf2,
+and `--expect-limiting` / `--expect-egress-mbit` say what that case was built
+to produce. Those two are separate conditions on purpose: at a size where the
+unconstrained shape is already generator-bound, a slow-tester case qualified
+on its verdict alone would be cleared by a constraint that bound nothing.
+
 Reads the batch CSV by column name, never by index: that row is positional for
 `create_batch_graphs()` and has drifted by a column once already.
 '''
@@ -46,6 +53,13 @@ from findings import (INCONCLUSIVE, TARGET_OR_MONITOR, TESTER,  # noqa: E402
 CAMPAIGN_FREE_MEMORY_FRACTION = 0.20
 
 LIMITING_COMPONENTS = (TESTER, TARGET_OR_MONITOR, UNRESOLVED, INCONCLUSIVE)
+
+# How far a rate-capped generator may be off the cap imposed on it. Loose on
+# purpose: the question a calibration case asks is whether the cap bound the
+# traffic at all, and the alternative it has to separate is an unshaped
+# session an order of magnitude faster. Measured on this host, both injectors
+# came back within 4%.
+DEFAULT_EGRESS_TOLERANCE = 0.25
 
 # Every run must publish these, whatever the generator or the target.  A
 # missing one is not a slow run, it is a run nobody can qualify.
@@ -400,7 +414,110 @@ def check_findings(artifact):
         component, findings.get('decided_by') or 'no deciding finding'))]
 
 
-def qualify(artifact, versions, row):
+def _generator_egress_mbit(artifact):
+    '''Each generator's own wire-side rate, from its own two published numbers.
+
+    `octets_on_wire` is counted on a successful `write()` and
+    `reported_injection_s` is the generator's own measurement of its send, so
+    the quotient is the rate that generator achieved. bgperf2 publishes no
+    such rate and knows nothing about a constraint applied from outside it, so
+    this is not a second implementation of one of its measurements -- it is
+    the only thing in the artifact that can be compared against a cap the tool
+    was never told about.
+    '''
+    rates = {}
+    for name, section in (artifact.get('testers') or {}).items():
+        octets = (section or {}).get('octets_on_wire')
+        seconds = (section or {}).get('reported_injection_s')
+        # `not seconds` and not `seconds is None`: a generator whose own send
+        # came back 0.0 resolves no rate at all, and dividing by it raises in
+        # the middle of qualifying a block.
+        if octets is None or not seconds:
+            continue
+        rates[name] = octets * 8.0 / 1e6 / seconds
+    return rates
+
+
+def check_calibration(artifact, expect_limiting, expect_mbit, tolerance):
+    '''The extra conditions a *calibration* case has to meet.
+
+    A calibration case is a run whose bottleneck was chosen in advance by
+    starving one role from outside bgperf2, so that the findings policy can be
+    checked against a known cause. Two things are asked of one, and they are
+    separate on purpose:
+
+    - the policy must name the component the constraint was built to produce,
+      or explicitly decline to name one where nothing was constrained;
+    - the constraint must be recoverable from the run's own numbers.
+
+    The second is not decoration. A cap that bound nothing has happened here
+    and reported itself as applied (`tc` succeeded on a device the session did
+    not use), and at a size where the unconstrained shape is already
+    generator-bound the verdict alone would have cleared it.
+    '''
+    checks = []
+    if expect_limiting:
+        component = (artifact.get('findings') or {}).get('limiting_component')
+        wanted = ' or '.join(expect_limiting)
+        if component in expect_limiting:
+            checks.append(Check('expected_limiting', OK,
+                                'limiting_component is {0}, as this case was '
+                                'built to produce'.format(component)))
+        else:
+            checks.append(Check('expected_limiting', FAIL,
+                                'limiting_component is {0!r}; this case was '
+                                'built to produce {1}'.format(component,
+                                                              wanted)))
+
+    generators = sorted((artifact.get('testers') or {}).keys())
+    rates = _generator_egress_mbit(artifact)
+    described = '; '.join('{0} {1:.2f} mbit'.format(name, rates[name])
+                          for name in sorted(rates))
+    if expect_mbit is None:
+        # Always published, never asserted, when no cap was imposed: the
+        # unconstrained companion's rate is what the constrained one is read
+        # against, and a number nobody recorded cannot play that part later.
+        if rates:
+            checks.append(Check('generator_egress', NOTE, described))
+        return checks
+
+    if not generators:
+        checks.append(Check('generator_egress', FAIL,
+                            'no generator section at all, so an imposed rate '
+                            'cannot be recovered from this run'))
+        return checks
+
+    # Every generator, not every generator that happened to answer. Both
+    # numbers are withheld rather than guessed -- `octets_on_wire` unless every
+    # session in the container reported a written count, `reported_injection_s`
+    # for a multi-RIB session -- and a generator dropped for want of one is a
+    # generator this case has no evidence about. Cleared on the ones that did
+    # answer, the case would be qualified while an injector ran unshaped at
+    # 65 mbit: `calibration_case.sh` counts constrained containers rather than
+    # successes for that reason, and this is the same rule on the reading side.
+    silent = [name for name in generators if name not in rates]
+    off = sorted(name for name, rate in rates.items()
+                 if abs(rate - expect_mbit) > tolerance * expect_mbit)
+    detail = '{0} against an imposed {1:.2f} mbit'.format(
+        described or 'no generator published a recoverable rate', expect_mbit)
+    faults = []
+    if off:
+        faults.append('outside +/-{0:.0f}%: {1}'.format(tolerance * 100,
+                                                        ', '.join(off)))
+    if silent:
+        faults.append('published no recoverable rate: ' + ', '.join(silent))
+    if faults:
+        checks.append(Check('generator_egress', FAIL,
+                            '{0}; {1}'.format(detail, '; '.join(faults))))
+    else:
+        checks.append(Check('generator_egress', OK,
+                            '{0} (within +/-{1:.0f}%, all {2} generators)'
+                            .format(detail, tolerance * 100, len(generators))))
+    return checks
+
+
+def qualify(artifact, versions, row, expect_limiting=None,
+            expect_mbit=None, tolerance=DEFAULT_EGRESS_TOLERANCE):
     checks = []
     checks.extend(check_provenance(artifact, versions))
     checks.extend(check_status(artifact, row))
@@ -408,6 +525,8 @@ def qualify(artifact, versions, row):
     checks.extend(check_testers(artifact))
     checks.extend(check_host(artifact, row))
     checks.extend(check_findings(artifact))
+    checks.extend(check_calibration(artifact, expect_limiting, expect_mbit,
+                                    tolerance))
     verdict = 'rejected' if any(c.status == FAIL for c in checks) else 'qualified'
     return verdict, checks
 
@@ -434,7 +553,44 @@ def main(argv=None):
                              'a shortfall is a failure, since a run that '
                              'never happened looks exactly like one nobody '
                              'looked for')
+    parser.add_argument('--expect-limiting', default=None,
+                        help='for a calibration case: the limiting component '
+                             'this run was built to produce, or a '
+                             'comma-separated set of acceptable ones. An '
+                             'unconstrained control takes '
+                             '"unresolved,inconclusive" -- the two ways of '
+                             'declining to name a component, which are kept '
+                             'apart everywhere else and are both correct here')
+    parser.add_argument('--expect-egress-mbit', type=float, default=None,
+                        help='for a calibration case whose generators were '
+                             'rate-capped from outside bgperf2: the cap, in '
+                             'mbit/s. Every generator that published an octet '
+                             'count and its own send duration must recover it')
+    parser.add_argument('--egress-tolerance', type=float,
+                        default=DEFAULT_EGRESS_TOLERANCE,
+                        help='fraction of the imposed rate a generator may be '
+                             'off by (default {0}); see '
+                             'DEFAULT_EGRESS_TOLERANCE'.format(
+                                 DEFAULT_EGRESS_TOLERANCE))
     args = parser.parse_args(argv)
+
+    expect_limiting = None
+    if args.expect_limiting:
+        expect_limiting = [c.strip() for c in args.expect_limiting.split(',')
+                           if c.strip()]
+        if not expect_limiting:
+            # Separators alone, or an empty value from shell quoting. Left
+            # alone it is falsy, so the verdict check is skipped and the
+            # calibration case is qualified with nothing asserted -- which the
+            # typo guard below cannot catch, since there is nothing to reject.
+            parser.error('--expect-limiting names no component')
+        unknown = [c for c in expect_limiting if c not in LIMITING_COMPONENTS]
+        if unknown:
+            # A typo here would silently expect a component nothing can
+            # produce, and every calibration case would fail for a reason that
+            # has nothing to do with the run.
+            parser.error('unknown limiting component(s): '
+                         + ', '.join(unknown))
 
     rows = {}
     for entry in sorted(os.listdir(args.results_dir)):
@@ -453,7 +609,9 @@ def main(argv=None):
             continue
         versions = load_json(path[:-len('.events.json')] + '.versions.json')
         name = row_name_for(artifact)
-        verdict, checks = qualify(artifact, versions, rows.get(name))
+        verdict, checks = qualify(artifact, versions, rows.get(name),
+                                  expect_limiting, args.expect_egress_mbit,
+                                  args.egress_tolerance)
         results.append({'artifact': entry, 'run': name, 'verdict': verdict,
                         'checks': [c.as_dict() for c in checks]})
 
@@ -477,6 +635,9 @@ def main(argv=None):
         with open(args.json_out, 'w', encoding='utf-8') as f:
             json.dump({'results_dir': args.results_dir,
                        'expected_runs': args.expect,
+                       'expected_limiting': expect_limiting,
+                       'expected_egress_mbit': args.expect_egress_mbit,
+                       'egress_tolerance': args.egress_tolerance,
                        'shortfall': shortfall,
                        'qualified': qualified,
                        'runs': results}, f, indent=2, sort_keys=True,

@@ -1,0 +1,52 @@
+# Block 1 of the 64 GB timing validation campaign: the controlled slow tester,
+# and the unconstrained companion the imposed rate is recovered against.
+#
+# This config is run twice, byte-identically:
+#
+#   tester-baseline  nothing constrained
+#   slow-tester      scripts/calibration_case.sh --role tester --rate 4mbit
+#
+# **The verdict cannot be relied on to distinguish this pair, and the rate
+# can.** The unconstrained 2 x 500,000 shape was itself attributed to `tester`
+# in Phase 6 -- to the very component this case starves -- so a slow-tester
+# case cleared by its verdict alone would equally have been cleared by a
+# constraint that bound nothing, which is a failure this harness has actually
+# had (`interface-probe/`, where `tc` succeeded on a device the BGP session did
+# not use, and the run was logged as controlled). What makes this a calibration
+# is that the imposed cap is recovered from the run's own published numbers:
+# each injector's `octets_on_wire` divided by its own `reported_injection_s`.
+# The companion is run for that unconstrained rate, and no component is
+# expected of it.
+#
+# MEASURED ON THIS HOST 2026-09-08 (results/2026/phase6-calibration/):
+#
+#   | injector | unconstrained | at 4 mbit |
+#   |---|---|---|
+#   | mrt-injector0 | 7,493,578 B / 0.867020s = 69.1 mbit | 7,334,208 B / 14.111817s = 4.16 mbit |
+#   | mrt-injector1 | 16,196,887 B / 1.983521s = 65.3 mbit | 16,000,488 B / 32.391424s = 3.95 mbit |
+#
+# Both within 4% of a cap the tool knew nothing about. Fleet injection went
+# 3.0s -> 33.0s and `elapsed (s)` 7 -> 38.
+#
+# Egress rate rather than CPU, deliberately: a bgpdump2 walk is spent blocked
+# on socket writes, so at 0.2 CPU the injectors took longer to become *ready*
+# (reading the MRT file is CPU-bound) and then walked their tables in 0.833s
+# against 0.867s. A case built on `--cpus` here would have been reported as
+# controlled and measured an unconstrained send.
+#
+# The size is Phase 6's. 2 x 500,000 puts enough bytes on the wire that a
+# 4 mbit cap produces tens of seconds of injection, which a 1s poll resolves
+# comfortably.
+tests:
+  -
+     name: 2026-calibration-block1-tester
+     neighbors: [2]
+     prefixes: [500_000]
+     filter_test: [None]
+     targets:
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000

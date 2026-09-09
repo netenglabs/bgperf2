@@ -1,0 +1,118 @@
+# Block 2 of the 64 GB timing validation campaign: repetition 1 of the
+# high-load synthetic workload, all 14 target configurations.
+#
+# The workload is the plan's "Canonical Workloads / High-load synthetic":
+# 50 peers x 100,000 unique IPv4 prefixes per peer, BIRD generator, no policy.
+# `gen_conf()` gives each peer a disjoint block off one shared iterator, so
+# this is 5,000,000 distinct prefixes in the target's table, and the default
+# per-peer `prefix_scope` is what makes `prefixes per peer` in the CSV mean
+# 100,000. Do not add `prefix_scope: total` here: it would divide, and the
+# campaign's canonical cell would silently become a fiftieth of itself.
+#
+# The 14 configurations are the plan's Target Matrix, expanded so that every
+# one of them is its own run name -- `versions:` auto-labels each version, and
+# the entries that differ only in `threads` or in carrying no version at all
+# get an explicit `label`, because a run name is label else target-plus-version
+# and two entries sharing one would share the artifact stem, the CSV `name` and
+# the x label every bar is paired against.
+#
+# ORDER. `order: shuffle` with a stated seed, so the 14 targets do not run in
+# the same sequence in every repetition. The seed rule is fixed in advance and
+# mechanical -- the campaign year with the block number appended, so repetition
+# 1 (block 2) is 20262, repetition 2 (block 3) is 20263, repetition 3 (block 4)
+# is 20264. Stated rather than drawn: a drawn seed is recovered from the
+# progress file on resume, but a seed nobody chose is also a seed nobody can
+# reproduce from this document, and the point of recording one is that the
+# sequence can be rebuilt later. Stated rather than *chosen for its order*:
+# picking the seed after looking at the permutation it produces is choosing the
+# permutation, which is the one thing shuffling exists to stop.
+#
+# REPETITIONS. Exactly one pass here, and the three repetitions are three
+# blocks rather than `repetitions: 3` in one config. That is the campaign's
+# structure ("Review every completed block before starting the next"), and it
+# costs nothing downstream: each block writes into its own results directory,
+# so no artifact stem collides, and Block 9 is where the three passes are read
+# together. It does mean `summary.py` has nothing to summarise within a block
+# -- one observation per cell -- which is correct: dispersion across three
+# passes is Block 9's question, not this block's.
+#
+# What that structure costs, stated rather than discovered later (bgperf2-494):
+# a single-pass test carries `repetition: None`, so every artifact of all three
+# blocks has `run.repetition: null`, the CSV `name` column is byte-identical
+# across the passes and `bench_output_prefix()` builds the same stem. Nothing
+# collides, because each block writes into its own results directory -- but the
+# pass a run belongs to is carried by that directory and by the manifest's
+# `blocks.<key>`, not by anything inside the run's own documents. Block 9 joins
+# the three passes by path, and an artifact copied out of its directory cannot
+# say which pass produced it. Closing that means a way to declare "this
+# single-pass batch is pass N", which moves the cell id and the artifact stem
+# -- the area with the worst record in this repository -- so it is its own
+# change set rather than a rider on this one.
+#
+# NO EXPECTED VERDICT is pinned for these rows, unlike Block 0's smokes and
+# Block 1's calibration cases. Nothing here is a controlled case: the whole
+# point of the matrix is that which component limits a given target at
+# 50 x 100k is the measurement, not the setup. `check_timing_evidence.py`
+# still requires each row to *have* a limiting component that was assigned or
+# explicitly left unresolved -- what it will not accept is a row with no
+# verdict at all.
+#
+# OpenBGPD 8.8 is expected to approach the campaign's 20% free-memory
+# guardrail at this size (plan, "64 GB Safety Contract"). It runs alone like
+# every other cell -- `batch()` runs one cell at a time -- and if it does not
+# complete, the row is preserved with its findings and the block is reviewed
+# before anything is excluded.
+tests:
+  -
+     name: 2026-timing-synth-rep1
+     neighbors: [50]
+     prefixes: [100_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 20262
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (4 threads)
+         threads: 4
+         tester_type: bird
+       -
+         name: bird
+         label: bird default
+         tester_type: bird
+       -
+         name: frr_c
+         versions: [8.5, 9.1, 10.0, 10.7]
+         tester_type: bird
+       -
+         name: frr_c
+         label: frr default
+         tester_type: bird
+       -
+         name: openbgp
+         versions: [8.8, 9.2]
+         tester_type: bird
+       -
+         name: openbgp
+         label: openbgp default
+         tester_type: bird
+       -
+         name: rustybgp
+         version: 2026-02
+         label: rustybgp 2026-02
+         tester_type: bird
+       -
+         name: rustybgp
+         label: rustybgp default
+         tester_type: bird

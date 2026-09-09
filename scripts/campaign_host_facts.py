@@ -19,7 +19,6 @@ because `docker version` was slow.
 '''
 import json
 import os
-import re
 import subprocess
 import sys
 

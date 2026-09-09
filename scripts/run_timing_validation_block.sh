@@ -39,8 +39,11 @@ Options:
                         filesystem; required otherwise.
   --mrt-file PATH       Override every mrt_file: entry in this block's configs
   --note TEXT           Recorded in the COMPLETE marker (accept only)
+  --with-exclusions     Accept a block whose evidence rejected one or more
+                        rows, recording them in the COMPLETE marker as durable
+                        exclusions. Requires --note. (accept only)
   --force               Re-measure a block, discarding its previous results,
-                        markers and batch progress
+                        artifacts, markers and batch progress
   --allow-root-workdir  Proceed with a work directory on the root filesystem
   -h, --help            Show this help
 EOF
@@ -70,6 +73,7 @@ ALLOW_ROOT_WORKDIR=0
 MRT_FILE=""
 NOTE=""
 FORCE=0
+WITH_EXCLUSIONS=0
 ACCEPT_TARGET=""
 
 # `accept 3` takes its block number positionally, before the options.
@@ -86,6 +90,7 @@ while [[ $# -gt 0 ]]; do
     --mrt-file) MRT_FILE="${2:?missing value for --mrt-file}"; shift 2 ;;
     --note) NOTE="${2:?missing value for --note}"; shift 2 ;;
     --force) FORCE=1; shift ;;
+    --with-exclusions) WITH_EXCLUSIONS=1; shift ;;
     --allow-root-workdir) ALLOW_ROOT_WORKDIR=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *)
@@ -95,6 +100,31 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# `--with-exclusions` and `--note` mean something only to `accept`, and are
+# refused elsewhere rather than ignored -- the same rule the flag itself follows
+# on a clean block. It matters more here than it reads: the `next` refusal
+# message prints an `accept N --with-exclusions --note` line for the operator to
+# copy, so leaving the action as `next` is the natural slip, and ignoring the
+# flags would launch a multi-hour benchmark instead of refusing.
+if [[ "$ACTION" != "accept" ]]; then
+  accept_only=()
+  [[ $WITH_EXCLUSIONS -eq 1 ]] && accept_only+=("--with-exclusions")
+  [[ -n "$NOTE" ]] && accept_only+=("--note")
+  if [[ ${#accept_only[@]} -gt 0 ]]; then
+    echo "${accept_only[*]} applies to \`accept\`, not to \`$ACTION\`" >&2
+    echo "did you mean: scripts/run_timing_validation_block.sh accept N ${accept_only[*]} ..." >&2
+    exit 1
+  fi
+elif [[ $FORCE -eq 1 ]]; then
+  # `accept` re-measures nothing, so --force there means nothing -- and a
+  # plausible slip when trying to re-accept a block. Refused on the same rule
+  # the flags above follow: a flag that quietly does nothing is read next time
+  # as one that did something.
+  echo "--force re-measures a block and does not apply to \`accept\`" >&2
+  echo "to replace an acceptance, re-run the block: block-N --force" >&2
+  exit 1
+fi
 
 # The plan's Execution Blocks, in the plan's own order. The key is the
 # directory name under the run root; nothing here may be reordered or renamed
@@ -154,6 +184,110 @@ ORIGINAL_CONFIG_DIR="$CONFIG_SNAPSHOT_DIR/original"
 RENDERED_CONFIG_DIR="$CONFIG_SNAPSHOT_DIR/rendered"
 LOG_DIR="$METADATA_DIR/logs"
 
+# What a block's evidence rejected, read from the verdicts themselves rather
+# than from a count of failed checker invocations.
+#
+# Blocks 2-7 make exactly one `check_evidence` call covering all 14 runs, so a
+# count of failed *calls* is 1 whether one row was rejected or fourteen -- and
+# `check_timing_evidence.py` also exits non-zero on a shortfall, so a block
+# that produced 9 artifacts for 14 configurations reached `accept` under the
+# identical wording. Those are the two things this campaign is required to keep
+# apart everywhere else: a row that failed is a result to investigate, a run
+# that never happened is unfinished work, and only the first can be an
+# exclusion. So both are named, separately, in the marker that outlives the
+# session.
+#
+# Prints one `key: text` line per fact, or nothing when the block has no
+# evidence directory (a block from an older build, or one that never got that
+# far).
+block_exclusion_report() {
+  local dir="$1"
+  [[ -d "$dir/evidence" ]] || return 0
+  EVIDENCE_DIR="$dir/evidence" "$PYTHON_BIN" - <<'PYEV'
+import glob
+import json
+import os
+
+rejected = []
+missing = []
+for path in sorted(glob.glob(os.path.join(os.environ["EVIDENCE_DIR"], "*.json"))):
+    label = os.path.basename(path)[: -len(".json")]
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            document = json.load(f)
+    except (OSError, ValueError) as exc:
+        # An unreadable verdict is not an absent one. Naming it keeps a block
+        # from being accepted as one with nothing to exclude.
+        missing.append("{0}: verdict unreadable ({1})".format(label, exc))
+        continue
+    for run in document.get("runs") or []:
+        verdict = run.get("verdict")
+        if verdict == "qualified":
+            continue
+        name = run.get("run") or run.get("artifact") or "unnamed"
+        # An `unreadable` verdict means the checker could not parse that run's
+        # `.events.json` at all, so its `checks` are empty and nothing was
+        # actually judged. That is not a row that failed a rule -- it is a row
+        # with no evidence, and "explicit durable exclusions *with evidence*"
+        # cannot be satisfied by one. It belongs with the shortfalls, which
+        # make the block unfinished rather than excludable.
+        if verdict == "unreadable":
+            missing.append("{0}: {1} (evidence unreadable)".format(label, name))
+        else:
+            rejected.append("{0}: {1} ({2})".format(
+                label, name, verdict or "no verdict"))
+    shortfall = document.get("shortfall")
+    if shortfall:
+        missing.append("{0}: {1}".format(label, shortfall))
+
+for line in rejected:
+    print("excluded_row: " + line)
+for line in missing:
+    print("missing_runs: " + line)
+if rejected or missing:
+    print("exclusion_counts: {0} rejected row(s), {1} shortfall(s)".format(
+        len(rejected), len(missing)))
+PYEV
+}
+
+# What a block's evidence entitles it to, decided on the parsed verdicts rather
+# than on the wording of a message.
+#
+# Reporting the two apart is not the same as *treating* them apart, and the
+# first version of this got exactly that wrong: `--with-exclusions` proceeded on
+# any non-zero failure count, so a block whose only fault was
+# "9 runs found, 14 expected" was stamped COMPLETE and `next` advanced past five
+# configurations nobody measured. A guard is code and gets the rule as wrong as
+# the code it guards.
+#
+# Sets:
+#   BLOCK_EXCLUSION_CLASS   clean       every check qualified
+#                           excludable  rejected row(s), and every configured
+#                                       run produced a row
+#                           unfinished  at least one run never happened; not an
+#                                       exclusion at any count of rejected rows
+#                                       beside it, because the block is not done
+#                           no-evidence the checks failed and no verdict can be
+#                                       read -- the checker itself died, or the
+#                                       directory is gone. "Explicit durable
+#                                       exclusions *with evidence*" cannot be
+#                                       satisfied by a record with none.
+#   BLOCK_EXCLUSION_DETAIL  the per-row lines, empty when there are none
+classify_block_evidence() {
+  local dir="$1"
+  BLOCK_EXCLUSION_DETAIL=""
+  BLOCK_EXCLUSION_CLASS="clean"
+  grep -q '^evidence: .* check(s) failed$' "$dir/RAN" 2>/dev/null || return 0
+  BLOCK_EXCLUSION_DETAIL="$(block_exclusion_report "$dir")"
+  if grep -q '^missing_runs: ' <<<"$BLOCK_EXCLUSION_DETAIL"; then
+    BLOCK_EXCLUSION_CLASS="unfinished"
+  elif grep -q '^excluded_row: ' <<<"$BLOCK_EXCLUSION_DETAIL"; then
+    BLOCK_EXCLUSION_CLASS="excludable"
+  else
+    BLOCK_EXCLUSION_CLASS="no-evidence"
+  fi
+}
+
 block_state() {
   local index="$1"
   local dir="$RUN_ROOT/${BLOCK_KEYS[$index]}"
@@ -201,12 +335,89 @@ if [[ "$ACTION" == "accept" ]]; then
     cat "$dir/COMPLETE"
     exit 0
   fi
+  # A block whose own evidence rejected a row is exactly the plan's "14
+  # reviewed rows *or* explicit durable exclusions with evidence", and the
+  # second half of that has to be written down or it is not durable. So the
+  # rejection does not block acceptance -- it demands that the acceptance say
+  # so, in the marker, with a reason. Silence here would let a block with a
+  # failed OpenBGPD row be accepted by the same keystroke as a clean one, and
+  # nothing downstream reads the evidence directory.
+  # Re-read the verdicts rather than trusting the marker's copy of them: a block
+  # from a build before this reported anything but a count has no detail in RAN,
+  # and its evidence directory is still on disk.
+  classify_block_evidence "$dir"
+  EXCLUSION_SUMMARY=""
+  EXCLUSION_DETAIL="$BLOCK_EXCLUSION_DETAIL"
+  case "$BLOCK_EXCLUSION_CLASS" in
+    clean)
+      if [[ $WITH_EXCLUSIONS -eq 1 ]]; then
+        # Refused rather than ignored: a flag that quietly does nothing is read
+        # next time as one that did something.
+        echo "block-$index has no rejected rows; --with-exclusions does not apply" >&2
+        exit 1
+      fi
+      ;;
+    unfinished)
+      # Never acceptable, with or without the flag. A configuration that
+      # produced no row is work still to do, and stamping COMPLETE here makes
+      # `next` advance past runs nobody measured -- the one thing the two
+      # markers exist to prevent.
+      cat >&2 <<MSG
+block-$index is unfinished: some configurations produced no row at all.
+
+$EXCLUSION_DETAIL
+
+A "missing_runs" line is not an exclusion. Re-measure:
+  scripts/run_timing_validation_block.sh block-$index --force
+MSG
+      exit 1
+      ;;
+    no-evidence)
+      # The checks failed and no verdict can be read -- the checker died, or the
+      # directory is gone. Accepting here would write a durable exclusion record
+      # naming an evidence path that holds nothing, which is what "explicit
+      # durable exclusions *with evidence*" exists to refuse.
+      cat >&2 <<MSG
+block-$index has failing checks and no readable verdicts under $dir/evidence/.
+
+There is nothing here to exclude a row on. Find out why the checker produced no
+verdict, then re-measure:
+  scripts/run_timing_validation_block.sh block-$index --force
+MSG
+      exit 1
+      ;;
+    excludable)
+      if [[ $WITH_EXCLUSIONS -eq 0 ]]; then
+        cat >&2 <<MSG
+block-$index ran with rejected rows.
+
+$EXCLUSION_DETAIL
+
+Every configured run produced a row, so these may be recorded as durable
+exclusions:
+  scripts/run_timing_validation_block.sh accept $index --with-exclusions --note "why"
+MSG
+        exit 1
+      fi
+      if [[ -z "$NOTE" ]]; then
+        echo "--with-exclusions requires --note: an exclusion with no reason is" >&2
+        echo "a row dropped, not a row excluded" >&2
+        exit 1
+      fi
+      EXCLUSION_SUMMARY="$(sed -n 's/^exclusion_counts: //p' <<<"$EXCLUSION_DETAIL")"
+      ;;
+  esac
   {
     echo "block: ${BLOCK_KEYS[$index]}"
     echo "title: ${BLOCK_TITLES[$index]}"
     echo "accepted_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "accepted_by: ${USER:-unknown}"
     echo "revision: $(git -C . rev-parse HEAD)"
+    if [[ -n "$EXCLUSION_SUMMARY" ]]; then
+      echo "accepted_with_exclusions: $EXCLUSION_SUMMARY"
+      echo "$EXCLUSION_DETAIL"
+      echo "exclusion_evidence: $dir/evidence/"
+    fi
     if [[ -n "$NOTE" ]]; then
       echo "note: $NOTE"
     fi
@@ -230,11 +441,31 @@ if [[ "$ACTION" == "next" ]]; then
   fi
   state="$(block_state "$BLOCK_INDEX")"
   if [[ "$state" == "awaiting-review" && $FORCE -eq 0 ]]; then
+    # A block reaches awaiting-review with rejected rows too, and `accept`
+    # refuses the bare form for exactly those. This message is what an operator
+    # returning in a later session sees -- the end-of-run one is long gone, which
+    # is the whole reason the markers are durable -- so it has to print the
+    # command that will work on *this* block rather than the one that works on a
+    # clean one.
+    # Derived from the same verdict read the gate uses, never from the failure
+    # count alone: a block whose fault is a shortfall must not be pointed at an
+    # `accept` that would mark unmeasured configurations complete -- and that is
+    # what the count-only version printed.
+    classify_block_evidence "$RUN_ROOT/${BLOCK_KEYS[$BLOCK_INDEX]}"
+    case "$BLOCK_EXCLUSION_CLASS" in
+      clean)      next_step="accept $BLOCK_INDEX --note \"...\"" ;;
+      excludable) next_step="accept $BLOCK_INDEX --with-exclusions --note \"...\"" ;;
+      *)          next_step="block-$BLOCK_INDEX --force   # unfinished or unreadable; re-measure" ;;
+    esac
     cat >&2 <<MSG
 block-$BLOCK_INDEX (${BLOCK_TITLES[$BLOCK_INDEX]}) has already run and is waiting to be reviewed.
 
+$(sed -n 's/^evidence: /evidence: /p' "$RUN_ROOT/${BLOCK_KEYS[$BLOCK_INDEX]}/RAN" 2>/dev/null)
+${BLOCK_EXCLUSION_DETAIL:+
+$BLOCK_EXCLUSION_DETAIL
+}
 Read its evidence under $RUN_ROOT/${BLOCK_KEYS[$BLOCK_INDEX]}, then:
-  scripts/run_timing_validation_block.sh accept $BLOCK_INDEX --note "..."
+  scripts/run_timing_validation_block.sh $next_step
 
 Re-running it instead would discard an observation that was already paid for;
 pass --force if that is really what you mean.
@@ -289,6 +520,29 @@ fi
 
 MRT_INPUT="${MRT_FILE:-mrt/rib.20260808.0000}"
 
+# A metadata file is written per *block* when its content exists nowhere else,
+# and per run root when the manifest already carries the same fact under
+# `blocks.<key>`. Five are keyed:
+#
+#   preflight, verify, mrt-validation  no manifest equivalent at all. `verify`
+#       in particular is the only record that no daemon binary in the matrix
+#       carried gcov instrumentation, the defect that made every FRR result
+#       incomparable for years.
+#   free-h, df-h                       `campaign_host_facts.py` records
+#       `memory_total_kb` and `swap_total_kb` -- *totals* -- and nothing about
+#       disk. Free memory, used swap and free space are precisely the figures
+#       the 64 GB Safety Contract asks to preflight "before each ... block" and
+#       to stop a block over ("swap growth"), and growth is a comparison
+#       against the previous block. Unkeyed there was nothing left to compare
+#       against: Block 1 had already overwritten Block 0's.
+#
+# `doctor.txt`, `images.txt`, `uname-a.txt` and the two git files may be
+# overwritten, because the manifest merges the revision, the kernel and every
+# image ID per block and those survive there.
+#
+# Unkeyed, Block 2 would have destroyed Block 0's -- an accepted block whose
+# plan entry cites them -- and a --force re-run would have left the old one
+# beside the new, describing a run that no longer exists.
 capture_metadata() {
   local configs=("$@")
   local config_list
@@ -297,11 +551,11 @@ capture_metadata() {
   git -C . rev-parse HEAD > "$METADATA_DIR/git-rev-parse-head.txt"
   git -C . status --short > "$METADATA_DIR/git-status-short.txt"
   uname -a > "$METADATA_DIR/uname-a.txt"
-  free -h > "$METADATA_DIR/free-h.txt"
+  free -h > "$METADATA_DIR/free-h-$BLOCK_KEY.txt"
   {
     df -h "$WORKDIR"
     df -h "$RUN_ROOT"
-  } > "$METADATA_DIR/df-h.txt"
+  } > "$METADATA_DIR/df-h-$BLOCK_KEY.txt"
   "${BGPERF_CMD[@]}" doctor > "$METADATA_DIR/doctor.txt" 2>&1 || true
   "${BGPERF_CMD[@]}" images > "$METADATA_DIR/images.txt" 2>&1 || true
 
@@ -362,6 +616,13 @@ PY
 retract_forced_markers() {
   if [[ $FORCE -eq 1 ]]; then
     rm -f "$BLOCK_DIR/COMPLETE" "$BLOCK_DIR/RAN"
+    # And the verdicts, for the same reason. `block_exclusion_report` globs
+    # every evidence/*.json, and the labels are hardcoded per block -- so if a
+    # block's set of cases ever changes, the previous measurement's verdict
+    # file survives the forced re-run and is read back as a rejected row of the
+    # new one. `next` would then point at --with-exclusions and `accept` would
+    # write a durable exclusion naming a run that no longer exists.
+    rm -rf "$BLOCK_DIR/evidence"
   fi
 }
 
@@ -388,6 +649,20 @@ run_batch() {
     launch=(scripts/calibration_case.sh "$@" --)
   fi
   local rendered="$RENDERED_CONFIG_DIR/$key.yaml"
+  # A forced run replaces this output, and the previous run's artifacts have to
+  # go with it. `--force` drops `--resume`, which makes `batch()` unlink the
+  # progress file, but nothing removed the `.events.json` / `.versions.json`
+  # left behind -- so a forced re-run under an edited matrix left one artifact
+  # per dropped target beside the new ones, and `check_evidence`, which counts
+  # the artifacts it finds, reported a permanent shortfall against a block that
+  # had measured exactly what it was asked to. Cleared here rather than in
+  # `retract_forced_markers` because this is the one place that knows which
+  # directory is about to be rewritten, and only the directory being rewritten
+  # may be cleared.
+  if [[ $FORCE -eq 1 && -d "$out_dir" ]]; then
+    echo "force: discarding previous results under $out_dir"
+    rm -rf "${out_dir:?}"
+  fi
   mkdir -p "$out_dir"
   echo "Running $key -> $out_dir"
   # --resume is what makes an interrupted block resumable, and it is exactly
@@ -480,29 +755,29 @@ case "$BLOCK_INDEX" in
     scripts/preflight_2026_suite.sh --workdir "$WORKDIR" --run-root "$RUN_ROOT" \
       --config "$RENDERED_CONFIG_DIR/block0-smoke-synth.yaml" \
       --config "$RENDERED_CONFIG_DIR/block0-smoke-mrt.yaml" \
-      | tee "$METADATA_DIR/preflight.txt"
+      | tee "$METADATA_DIR/preflight-$BLOCK_KEY.txt"
 
     # `verify` is the only check that puts a real container in front of each
     # parser, and it is where the version-reporting bugs have been. A campaign
     # whose provenance columns are wrong is a campaign of unattributable rows,
     # so this is fatal rather than captured-and-ignored.
     echo "Verifying built images"
-    "${BGPERF_CMD[@]}" verify > "$METADATA_DIR/verify.txt" 2>&1 || {
-      echo "verify failed; see $METADATA_DIR/verify.txt" >&2
-      tail -20 "$METADATA_DIR/verify.txt" >&2
+    "${BGPERF_CMD[@]}" verify > "$METADATA_DIR/verify-$BLOCK_KEY.txt" 2>&1 || {
+      echo "verify failed; see $METADATA_DIR/verify-$BLOCK_KEY.txt" >&2
+      tail -20 "$METADATA_DIR/verify-$BLOCK_KEY.txt" >&2
       exit 1
     }
-    tail -5 "$METADATA_DIR/verify.txt"
+    tail -5 "$METADATA_DIR/verify-$BLOCK_KEY.txt"
 
     # The pinned RIB, read by bgpdump2 itself. The file's size is in the
     # manifest; this is the only thing that says the injectors can parse it.
     echo "Validating pinned MRT: $MRT_INPUT"
-    scripts/prepare_mrt.sh "$MRT_INPUT" > "$METADATA_DIR/mrt-validation.txt" 2>&1 || {
-      echo "MRT validation failed; see $METADATA_DIR/mrt-validation.txt" >&2
-      tail -20 "$METADATA_DIR/mrt-validation.txt" >&2
+    scripts/prepare_mrt.sh "$MRT_INPUT" > "$METADATA_DIR/mrt-validation-$BLOCK_KEY.txt" 2>&1 || {
+      echo "MRT validation failed; see $METADATA_DIR/mrt-validation-$BLOCK_KEY.txt" >&2
+      tail -20 "$METADATA_DIR/mrt-validation-$BLOCK_KEY.txt" >&2
       exit 1
     }
-    tail -4 "$METADATA_DIR/mrt-validation.txt"
+    tail -4 "$METADATA_DIR/mrt-validation-$BLOCK_KEY.txt"
 
     retract_forced_markers
     run_batch "block0-smoke-synth" "$BLOCK_DIR/smoke-synth"
@@ -585,6 +860,49 @@ case "$BLOCK_INDEX" in
     check_evidence "$BLOCK_DIR/slow-tester" 1 "slow-tester" \
       --expect-limiting tester --expect-egress-mbit 4
     ;;
+  2)
+    # Repetition 1 of the high-load synthetic workload: the plan's 14 target
+    # configurations at 50 peers x 100,000 prefixes per peer, one pass, in the
+    # order seed 20262 fixes. Blocks 3 and 4 are the other two repetitions and
+    # differ only in their seed; the three passes are read together in Block 9.
+    #
+    # `verify` runs here as well as in Block 0, and it is the one check worth
+    # repeating per benchmark block. Blocks are days apart, `prepare` skips a
+    # tag that already exists, and an FRR image rebuilt with --enable-gcov in
+    # between would benchmark an instrumented binary against everyone else's
+    # optimized one -- a distortion that lands in exactly the CPU and memory
+    # columns this block publishes, with nothing looking wrong. Five of the 14
+    # configurations are FRR. It costs about twenty seconds against a block of
+    # roughly ninety minutes, and it is fatal for the reason it is fatal in
+    # Block 0: a campaign whose provenance is wrong is a campaign of
+    # unattributable rows.
+    SYNTH_CONFIG="benchmarks/2026-timing-synth-rep1.yaml"
+    campaign_render_config "block2-synthetic-rep1" "$SYNTH_CONFIG" \
+      "$RENDERED_CONFIG_DIR/block2-synthetic-rep1.yaml"
+    capture_metadata "$RENDERED_CONFIG_DIR/block2-synthetic-rep1.yaml"
+
+    scripts/preflight_2026_suite.sh --workdir "$WORKDIR" --run-root "$RUN_ROOT" \
+      --config "$RENDERED_CONFIG_DIR/block2-synthetic-rep1.yaml" \
+      | tee "$METADATA_DIR/preflight-$BLOCK_KEY.txt"
+
+    echo "Verifying built images"
+    "${BGPERF_CMD[@]}" verify > "$METADATA_DIR/verify-$BLOCK_KEY.txt" 2>&1 || {
+      echo "verify failed; see $METADATA_DIR/verify-$BLOCK_KEY.txt" >&2
+      tail -20 "$METADATA_DIR/verify-$BLOCK_KEY.txt" >&2
+      exit 1
+    }
+    tail -5 "$METADATA_DIR/verify-$BLOCK_KEY.txt"
+
+    retract_forced_markers
+    run_batch "block2-synthetic-rep1" "$BLOCK_DIR/synthetic"
+
+    # 14 runs, every one of them qualified. No --expect-limiting: nothing here
+    # is a controlled case, so which component limits a given target at this
+    # size is the measurement rather than the setup. What the checker still
+    # requires is that each row *has* a verdict, assigned or explicitly left
+    # unresolved.
+    check_evidence "$BLOCK_DIR/synthetic" 14 "synthetic"
+    ;;
   *)
     cat >&2 <<MSG
 block-$BLOCK_INDEX (${BLOCK_TITLES[$BLOCK_INDEX]}) is not built yet.
@@ -598,26 +916,72 @@ MSG
     ;;
 esac
 
-if [[ $EVIDENCE_FAILURES -gt 0 ]]; then
-  cat >&2 <<MSG
-
-block-$BLOCK_INDEX did not meet its exit criterion: $EVIDENCE_FAILURES evidence check(s) failed.
-
-The results and the verdicts are under $BLOCK_DIR; no RAN marker was written,
-so the block is not offered for review. Read
-$BLOCK_DIR/evidence/ and decide whether this is a run to
-investigate or a rule to argue with.
-MSG
-  exit 1
-fi
-
+# RAN records that the block's mechanical work finished, and it is written
+# whether or not the evidence qualified. It used to be written only on the
+# passing path, and that made a rejected block unrecoverable in two ways at
+# once.
+#
+# `accept` refuses a block with no RAN, so the only route past a single
+# rejected row was `--force` -- a full re-measure that reproduces the same
+# rejection. And `next` would not even get there: with no RAN but a directory
+# on disk, `block_state` says `started`, so `next` selects the block again and
+# `run_batch` runs it with `--resume`, which skips every cell already in the
+# progress file *including the failed ones* -- `batch()` records
+# `completed[cell_id] = bench(a)` for a FAILED run exactly as for a converged
+# one. The block re-ran, measured nothing, exited 0, and failed the identical
+# check. The cell that most needed re-measuring was the one resume would never
+# re-run.
+#
+# So the marker states the fact it is named for -- the work ran -- and carries
+# the verdict beside it. What the verdict still controls is the exit status
+# (loud, so nothing looks green) and what `accept` demands: a block whose
+# evidence rejected a row may only be accepted with --with-exclusions and a
+# note, which is the plan's "explicit durable exclusions with evidence"
+# written down where it cannot be forgotten.
 {
   echo "block: $BLOCK_KEY"
   echo "title: ${BLOCK_TITLES[$BLOCK_INDEX]}"
   echo "ran_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "revision: $(git -C . rev-parse HEAD)"
   echo "workdir: $WORKDIR"
+  if [[ $EVIDENCE_FAILURES -gt 0 ]]; then
+    echo "evidence: $EVIDENCE_FAILURES check(s) failed"
+    # Which rows, and which runs never happened -- the count of failed checker
+    # calls is 1 for a block of 14 whether one row was rejected or all of them.
+    block_exclusion_report "$BLOCK_DIR"
+  else
+    echo "evidence: all checks qualified"
+  fi
 } > "$BLOCK_DIR/RAN"
+
+if [[ $EVIDENCE_FAILURES -gt 0 ]]; then
+  cat >&2 <<MSG
+
+block-$BLOCK_INDEX did not meet its exit criterion: $EVIDENCE_FAILURES evidence check(s) failed.
+
+The results and the verdicts are under $BLOCK_DIR. Read
+$BLOCK_DIR/evidence/ and decide whether this is a run to
+investigate or a rule to argue with.
+
+The block is recorded as having run, so nothing here has to be re-measured to
+be looked at.
+
+$(classify_block_evidence "$BLOCK_DIR"; case "$BLOCK_EXCLUSION_CLASS" in
+  excludable) echo "Every configured run produced a row. When the rejected rows are a durable
+exclusion rather than a fault to fix:
+  scripts/run_timing_validation_block.sh accept $BLOCK_INDEX --with-exclusions --note \"...\"" ;;
+  unfinished) echo "Some configurations produced no row at all, so this block is unfinished
+rather than excludable. Re-measure:
+  scripts/run_timing_validation_block.sh block-$BLOCK_INDEX --force" ;;
+  *)          echo "No per-row verdict could be read. Find out why, then re-measure:
+  scripts/run_timing_validation_block.sh block-$BLOCK_INDEX --force" ;;
+esac)
+
+Note that a plain re-run resumes past every cell the progress file already
+holds, failed ones included; only --force re-measures.
+MSG
+  exit 1
+fi
 
 cat <<MSG
 

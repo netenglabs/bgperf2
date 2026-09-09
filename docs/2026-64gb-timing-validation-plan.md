@@ -354,6 +354,27 @@ a session that died between the batch and the review would otherwise leave a
 block that looks exactly like a reviewed one, and the campaign would never come
 back to it.
 
+**`RAN` records that the work ran, whatever the evidence said.** It used to be
+written only when every check qualified, which made a block with one rejected
+row unreachable from both sides: `accept` refuses a block with no `RAN`, and
+`next` re-selected the block and re-ran it with `--resume`, which skips every
+cell already in the progress file *including the failed ones* -- so the block
+measured nothing, exited 0, and failed the identical check, with the one cell
+worth re-measuring the only one resume would never re-run.
+
+**"or explicit durable exclusions with evidence" is a command, not a
+disposition.** A block whose evidence rejected a row is accepted with
+`accept N --with-exclusions --note "why"`, and the `COMPLETE` marker names the
+rejected rows, read from the verdicts rather than from a count of failed
+checker invocations -- Blocks 2-7 make one call covering 14 runs, so that count
+is 1 whether one row was rejected or fourteen. **A run that never happened is
+not an exclusion.** The checker also fails on a shortfall, and a block that
+produced 9 artifacts for 14 configurations is unfinished work; the two are
+reported apart, on the rule this campaign applies at every other level of
+aggregation. Re-measuring is `--force`, which discards that block's previous
+results and artifacts along with its markers and progress -- a single cell
+cannot be re-run on its own.
+
 **A block that has not been built refuses rather than improvising.** Each
 block's configs and procedure are their own change set, written when the
 campaign reaches that block; a runner that guessed at a matrix would produce

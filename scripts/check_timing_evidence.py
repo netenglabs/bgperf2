@@ -80,16 +80,31 @@ class Check(object):
                 'detail': self.detail}
 
 
+# `Mem (GB)` is written by `mem_human()`, which picks its unit from the value:
+# GB above a gibibyte, then MB, KB and a bare B below. The column is named GB
+# and every host this campaign runs on reports GB, so stripping only that
+# suffix worked -- but on any smaller host `total` came back `None` and the
+# memory guardrail failed the row for "does not carry both free and total
+# memory", diagnosing a missing column that was present and populated. Convert
+# instead of stripping: a unit that is dropped rather than applied is worse
+# than one that is not understood.
+_MEM_UNITS = (('GB', 1.0), ('MB', 1.0 / 1024.0), ('KB', 1.0 / (1024.0 ** 2)),
+              ('B', 1.0 / (1024.0 ** 3)))
+
+
 def _row_float(row, column):
     raw = (row.get(column) or '').strip()
     if not raw:
         return None
-    # `Mem (GB)` is written as e.g. "61.44GB"; the rest are bare numbers.
-    for suffix in ('GB', 'gb'):
-        if raw.endswith(suffix):
+    scale = 1.0
+    # Longest suffix first: 'B' is a suffix of 'GB', 'MB' and 'KB'.
+    for suffix, factor in _MEM_UNITS:
+        if raw.upper().endswith(suffix):
             raw = raw[:-len(suffix)]
+            scale = factor
+            break
     try:
-        return float(raw)
+        return float(raw) * scale
     except ValueError:
         return None
 
@@ -516,6 +531,52 @@ def check_calibration(artifact, expect_limiting, expect_mbit, tolerance):
     return checks
 
 
+def check_instrument(artifact):
+    """Did the run's own instruments read cleanly?
+
+    `bench()` publishes an `instrument` section only when a sampler failed a
+    read, and both samplers read `gobgp neighbor -j` -- whose errors come back
+    JSON-encoded and used to kill the reading thread outright. They survive one
+    now, which is what keeps a run alive; it is not what makes the run
+    comparable.
+
+    The monitor is the instrument every published timing is derived from, so a
+    gap in its 1-second series is a gap under `elapsed (s)`, `first_prefix_s`
+    and `convergence_s` alike: that is a FAIL, not a note. A target-side gap is
+    a NOTE -- it costs the neighbour checkpoint, which moves the assurance
+    window from 5 samples to 20 and lengthens the run without corrupting the
+    timings the row publishes.
+
+    A run with no section read cleanly, which is what every run before this
+    section existed also looks like. That is deliberate: absent means "no
+    failures recorded", and an older artifact cannot be told from a clean one,
+    so this may not manufacture a failure from silence.
+    """
+    instrument = artifact.get('instrument')
+    if not instrument:
+        return [Check('instrument_reads', OK,
+                      'no sampler read failures recorded')]
+    checks = []
+    monitor = instrument.get('monitor') or {}
+    if monitor.get('failed_reads'):
+        checks.append(Check(
+            'instrument_reads', FAIL,
+            'the monitor failed {0} read(s) ({1}); every published timing is '
+            'derived from that series'.format(
+                monitor['failed_reads'], monitor.get('last_error'))))
+    target = instrument.get('target_neighbor_sampler') or {}
+    if target.get('failed_reads'):
+        checks.append(Check(
+            'instrument_reads', NOTE,
+            "the target's neighbour sampler failed {0} read(s) ({1}); the "
+            'neighbour checkpoint may have been reached late'.format(
+                target['failed_reads'], target.get('last_error'))))
+    if not checks:
+        checks.append(Check('instrument_reads', OK,
+                            'no sampler read failures recorded'))
+    return checks
+
+
 def qualify(artifact, versions, row, expect_limiting=None,
             expect_mbit=None, tolerance=DEFAULT_EGRESS_TOLERANCE):
     checks = []
@@ -525,6 +586,7 @@ def qualify(artifact, versions, row, expect_limiting=None,
     checks.extend(check_testers(artifact))
     checks.extend(check_host(artifact, row))
     checks.extend(check_findings(artifact))
+    checks.extend(check_instrument(artifact))
     checks.extend(check_calibration(artifact, expect_limiting, expect_mbit,
                                     tolerance))
     verdict = 'rejected' if any(c.status == FAIL for c in checks) else 'qualified'

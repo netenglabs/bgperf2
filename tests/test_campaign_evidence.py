@@ -216,6 +216,25 @@ def test_the_campaign_memory_guardrail_is_twenty_percent_not_findings_five():
     assert verdict == 'qualified', statuses(checks)
 
 
+def test_a_memory_column_is_converted_by_its_unit_not_stripped_of_it():
+    '''`Mem (GB)` is written by `mem_human()`, which picks its unit from the
+    value: GB above a gibibyte, then MB, KB and a bare B below. Stripping only
+    the `GB` suffix left `total` as None on any smaller host, and the guardrail
+    then failed the row for "does not carry both free and total memory" --
+    diagnosing a missing column that was present and populated. A unit dropped
+    rather than applied is worse than one that is not understood.'''
+    assert check._row_float({'c': '61.44GB'}, 'c') == pytest.approx(61.44)
+    assert check._row_float({'c': '61.44gb'}, 'c') == pytest.approx(61.44)
+    assert check._row_float({'c': '512.00MB'}, 'c') == pytest.approx(0.5)
+    assert check._row_float({'c': '1024.00KB'}, 'c') == pytest.approx(1.0 / 1024)
+    assert check._row_float({'c': '1.00B'}, 'c') == pytest.approx(1.0 / 1024 ** 3)
+    # bare numbers and absent values are unchanged
+    assert check._row_float({'c': '2.5'}, 'c') == pytest.approx(2.5)
+    assert check._row_float({'c': ''}, 'c') is None
+    assert check._row_float({}, 'c') is None
+    assert check._row_float({'c': 'not a number'}, 'c') is None
+
+
 def test_unresolved_and_inconclusive_are_answers_not_failures():
     for component in ('tester', 'target_or_monitor', 'unresolved',
                       'inconclusive'):
@@ -444,3 +463,37 @@ def test_a_passing_rate_check_says_how_many_generators_it_covered():
     _, checks = calibrated(doc, expect_mbit=4.0)
     assert 'all 2 generators' in [c.detail for c in checks
                                   if c.name == 'generator_egress'][0]
+
+
+def test_a_monitor_that_missed_reads_rejects_the_row():
+    '''The monitor is the instrument every published timing is derived from, so
+    a gap in its 1-second series is a gap under `elapsed (s)`, `first_prefix_s`
+    and `convergence_s` alike. Surviving the bad read is what keeps the run
+    alive; it is not what makes the row comparable.'''
+    art = artifact()
+    art['instrument'] = {'monitor': {'failed_reads': 3,
+                                     'last_error': 'MonitorReadError: rpc error'}}
+    verdict, checks = check.qualify(art, versions(), row())
+    assert verdict == 'rejected'
+    assert statuses(checks)['instrument_reads'] == check.FAIL
+
+
+def test_a_target_sampler_gap_is_a_note_not_a_rejection():
+    '''It costs the neighbour checkpoint, which moves the assurance window from
+    5 samples to 20 and lengthens the run -- without corrupting the timings the
+    row publishes.'''
+    art = artifact()
+    art['instrument'] = {'target_neighbor_sampler': {
+        'failed_reads': 2, 'last_error': 'TypeError: string indices'}}
+    verdict, checks = check.qualify(art, versions(), row())
+    assert verdict == 'qualified'
+    assert statuses(checks)['instrument_reads'] == check.NOTE
+
+
+def test_an_artifact_with_no_instrument_section_is_not_a_failure():
+    '''Absent means "no failures recorded", and every artifact written before
+    the section existed also looks like that. A checker that manufactured a
+    failure from silence would reject every older run.'''
+    verdict, checks = check.qualify(artifact(), versions(), row())
+    assert verdict == 'qualified'
+    assert statuses(checks)['instrument_reads'] == check.OK

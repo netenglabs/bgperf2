@@ -1672,6 +1672,27 @@ so rather than improvising a matrix, and every benchmark block runs
 `scripts/check_timing_evidence.py` over its own results before it claims to have run -- that is the
 plan's Acceptance Rules as code, reading the published documents and re-deriving no measurement.
 
+**`RAN` states that the work ran, not that it qualified**, and that distinction is what keeps a
+block with one bad row from becoming unreachable. Written only on the passing path -- as it was --
+a single rejected row could be neither accepted nor re-measured: `accept` refuses a block with no
+`RAN`, and `next`, seeing a directory and no marker, re-selected the block and ran it with
+`--resume`, which skips every cell the progress file already holds *including the failed ones*
+(`batch()` records `completed[cell_id] = bench(a)` for a FAILED run exactly as for a converged
+one). The block re-ran, measured nothing, exited 0, and failed the identical check; the cell that
+most needed re-measuring was the one resume would never re-run. So the marker carries the verdict
+beside the fact, and what the verdict controls is the exit status and what `accept` demands.
+
+**A rejected row is accepted only as an explicit exclusion**: `accept N --with-exclusions --note
+"why"`, which is the plan's "14 reviewed rows *or* explicit durable exclusions with evidence"
+written where a later session can still read it. The marker names the rows, from the verdicts
+themselves rather than from a count of failed checker calls -- Blocks 2-7 make one call covering 14
+runs, so that count is 1 whether one row was rejected or all of them. **A missing run is not an
+exclusion.** `check_timing_evidence.py` also exits non-zero on a shortfall, and a block that
+produced 9 artifacts for 14 configurations is unfinished work rather than a result to exclude; the
+two are reported apart (`excluded_row:` against `missing_runs:`), on the same rule `summary.py` and
+`findings.py` follow everywhere else. Re-measuring means `--force`, which discards that block's
+previous results, artifacts, markers and batch progress -- there is no way to re-run a single cell.
+
 **The campaign host is settled: the machine this repository is checked out on** -- 16 vCPU, 61.44
 GiB, AMD EPYC 9R14 (`m7a.4xlarge`), resized into that shape on 2026-09-03. Justin chose it on
 2026-09-08 as the closest available match to the host that produced

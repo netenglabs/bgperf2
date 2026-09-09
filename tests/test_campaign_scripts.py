@@ -393,5 +393,220 @@ def test_one_failed_evidence_check_does_not_cost_the_block_its_other_evidence():
     body = open(BLOCK_RUNNER).read()
     assert 'EVIDENCE_FAILURES=$((EVIDENCE_FAILURES + 1))' in body
     assert 'if [[ $EVIDENCE_FAILURES -gt 0 ]]; then' in body
-    # and the RAN marker is only written after that count is read
-    assert body.index('if [[ $EVIDENCE_FAILURES -gt 0 ]]; then') < body.index('> "$BLOCK_DIR/RAN"')
+
+
+def test_ran_marker_records_that_the_work_ran_whatever_the_verdict():
+    """RAN says the block's mechanical work finished, and carries the evidence
+    verdict beside it rather than being withheld by it.
+
+    Written only on the passing path, a single rejected row made the block
+    unrecoverable in two ways at once: `accept` refuses a block with no RAN, and
+    `next` -- seeing a directory but no marker -- re-selected the block and ran
+    it with `--resume`, which skips every cell the progress file already holds,
+    failed ones included. The block re-ran, measured nothing, exited 0 and
+    failed the identical check.
+
+    This asserts the ordering the old test meant to: the marker is written
+    before the branch that exits non-zero, not after it. Anchored on the failure
+    *message* rather than on `if [[ $EVIDENCE_FAILURES -gt 0 ]]`, which now also
+    appears inside the marker's own heredoc -- the old assertion matched that
+    copy and passed vacuously through exactly this change."""
+    body = open(BLOCK_RUNNER).read()
+    ran_written = body.index('> "$BLOCK_DIR/RAN"')
+    failure_branch = body.index('did not meet its exit criterion')
+    assert ran_written < failure_branch
+    # and it says which of the two happened, either way
+    assert 'echo "evidence: $EVIDENCE_FAILURES check(s) failed"' in body
+    assert 'echo "evidence: all checks qualified"' in body
+
+
+def test_a_rejected_row_may_only_be_accepted_as_an_explicit_exclusion():
+    """The plan's exit criterion is "14 reviewed rows *or* explicit durable
+    exclusions with evidence", and the second half has to be written down or it
+    is not durable. A block whose evidence rejected a row is accepted only with
+    --with-exclusions and a note, and the marker names the rows."""
+    body = open(BLOCK_RUNNER).read()
+    assert '--with-exclusions) WITH_EXCLUSIONS=1' in body
+    assert 'accepted_with_exclusions:' in body
+    # a reason is required: an exclusion with none is a row dropped
+    assert 'if [[ -z "$NOTE" ]]; then' in body
+    # and the flag is refused on a clean block rather than quietly ignored
+    assert 'has no rejected rows; --with-exclusions does not apply' in body
+
+
+def test_rejected_rows_and_runs_that_never_happened_are_named_apart():
+    """The campaign keeps a result to investigate apart from unfinished work at
+    every level of aggregation, and this is the level an operator acts on.
+
+    A count of failed `check_evidence` *calls* cannot do it: Blocks 2-7 make one
+    call covering 14 runs, so that count is 1 whether one row was rejected or
+    fourteen -- and `check_timing_evidence.py` also exits non-zero on a
+    shortfall, so a block that produced 9 artifacts for 14 configurations
+    reached `accept` under identical wording. Only a rejected row may be
+    excluded; a missing run leaves the block unfinished."""
+    body = open(BLOCK_RUNNER).read()
+    assert 'block_exclusion_report() {' in body
+    assert 'print("excluded_row: " + line)' in body
+    assert 'print("missing_runs: " + line)' in body
+    # the helper is defined above the dispatch that calls it, or `accept` would
+    # die on "command not found"
+    assert body.index('block_exclusion_report() {') < body.index(
+        'if [[ "$ACTION" == "accept" ]]; then')
+
+
+def test_metadata_files_with_no_manifest_equivalent_are_keyed_per_block():
+    """`METADATA_DIR` is shared by every block of a run. A file whose content is
+    also merged into `manifest.json` under `blocks.<key>` may be overwritten;
+    one whose content exists nowhere else may not, or a later block destroys an
+    accepted block's evidence.
+
+    `campaign_host_facts.py` records memory and swap *totals* and nothing about
+    disk, so free memory, used swap and free space have no manifest equivalent
+    -- and comparing swap across blocks is what the 64 GB Safety Contract's
+    "stop the active block after ... swap growth" is read from."""
+    body = open(BLOCK_RUNNER).read()
+    for stem in ('preflight', 'verify', 'mrt-validation', 'free-h', 'df-h'):
+        assert '"$METADATA_DIR/{0}.txt"'.format(stem) not in body, stem
+        assert '"$METADATA_DIR/{0}-$BLOCK_KEY.txt"'.format(stem) in body, stem
+
+
+def test_a_forced_run_discards_the_artifacts_it_is_replacing():
+    """`--force` drops `--resume`, which makes `batch()` unlink the progress
+    file, but nothing removed the previous run's `.events.json`. A forced re-run
+    under an edited matrix left one artifact per dropped target beside the new
+    ones, and `check_evidence` -- which counts the artifacts it finds -- reported
+    a permanent shortfall against a block that measured exactly what it was
+    asked to."""
+    body = _run_batch_body()
+    assert 'if [[ $FORCE -eq 1 && -d "$out_dir" ]]; then' in body
+    assert 'rm -rf "${out_dir:?}"' in body
+
+
+def _ran_block(results_root, key, evidence=None, failed=True):
+    """A block on disk that has run, with the verdicts a checker would leave."""
+    import json
+    import os
+    directory = os.path.join(results_root, 'tvtest', key)
+    os.makedirs(os.path.join(directory, 'evidence'), exist_ok=True)
+    line = ('evidence: 1 check(s) failed' if failed
+            else 'evidence: all checks qualified')
+    with open(os.path.join(directory, 'RAN'), 'w') as f:
+        f.write('block: {0}\n{1}\n'.format(key, line))
+    if evidence is not None:
+        with open(os.path.join(directory, 'evidence', 'synthetic.json'),
+                  'w') as f:
+            json.dump(evidence, f)
+    return directory
+
+
+REJECTED_ROW = {'expected_runs': 14, 'shortfall': None,
+                'runs': [{'run': 'openbgp 8.8', 'verdict': 'rejected'},
+                         {'run': 'bird 2.19.2', 'verdict': 'qualified'}]}
+SHORTFALL = {'expected_runs': 14, 'shortfall': '9 runs found, 14 expected',
+             'runs': [{'run': 'bird 2.19.2', 'verdict': 'qualified'}]}
+
+
+def test_a_run_that_never_happened_cannot_be_accepted_as_an_exclusion(tmp_path):
+    """The gate is on the parsed verdicts, not on the wording of a message.
+
+    Reporting a rejected row and a missing run apart is not the same as
+    *treating* them apart, and the first version got exactly that wrong:
+    `--with-exclusions` proceeded on any non-zero failure count, so a block
+    whose only fault was "9 runs found, 14 expected" was stamped COMPLETE and
+    `next` advanced past five configurations nobody measured."""
+    root = str(tmp_path)
+    directory = _ran_block(root, 'block2-synthetic-rep1', SHORTFALL)
+    result = block('accept', '2', '--run-id', 'tvtest', '--with-exclusions',
+                   '--note', 'why', results_root=root)
+    assert result.returncode == 1, result.stdout
+    assert 'unfinished' in result.stderr
+    assert not os.path.exists(os.path.join(directory, 'COMPLETE'))
+
+
+def test_a_shortfall_beside_a_rejected_row_is_still_unfinished(tmp_path):
+    """Unfinished wins over excludable. A block missing a configuration is not
+    made acceptable by also having a row worth excluding."""
+    both = {'expected_runs': 14, 'shortfall': '13 runs found, 14 expected',
+            'runs': [{'run': 'frr_c 9.1', 'verdict': 'rejected'}]}
+    root = str(tmp_path)
+    directory = _ran_block(root, 'block2-synthetic-rep1', both)
+    result = block('accept', '2', '--run-id', 'tvtest', '--with-exclusions',
+                   '--note', 'why', results_root=root)
+    assert result.returncode == 1, result.stdout
+    assert not os.path.exists(os.path.join(directory, 'COMPLETE'))
+
+
+def test_failing_checks_with_no_readable_verdict_cannot_be_excluded(tmp_path):
+    """"Explicit durable exclusions *with evidence*" cannot be satisfied by a
+    record with none. A checker that died leaves failing checks and no verdict,
+    and accepting there writes an exclusion naming an evidence path that holds
+    nothing."""
+    root = str(tmp_path)
+    directory = _ran_block(root, 'block2-synthetic-rep1', None)
+    result = block('accept', '2', '--run-id', 'tvtest', '--with-exclusions',
+                   '--note', 'why', results_root=root)
+    assert result.returncode == 1, result.stdout
+    assert 'no readable verdicts' in result.stderr
+    assert not os.path.exists(os.path.join(directory, 'COMPLETE'))
+
+
+def test_a_rejected_row_is_accepted_and_the_marker_names_it(tmp_path):
+    """The path the campaign actually needs: every configuration produced a row,
+    one of them did not qualify, and it is recorded as an exclusion by name."""
+    root = str(tmp_path)
+    directory = _ran_block(root, 'block2-synthetic-rep1', REJECTED_ROW)
+    result = block('accept', '2', '--run-id', 'tvtest', '--with-exclusions',
+                   '--note', 'openbgp 8.8 hit the guardrail', results_root=root)
+    assert result.returncode == 0, result.stderr
+    marker = open(os.path.join(directory, 'COMPLETE')).read()
+    assert 'accepted_with_exclusions: 1 rejected row(s), 0 shortfall(s)' in marker
+    assert 'excluded_row: synthetic: openbgp 8.8 (rejected)' in marker
+    assert 'note: openbgp 8.8 hit the guardrail' in marker
+
+
+def test_a_rejected_row_needs_the_flag_and_a_reason(tmp_path):
+    root = str(tmp_path)
+    directory = _ran_block(root, 'block2-synthetic-rep1', REJECTED_ROW)
+    bare = block('accept', '2', '--run-id', 'tvtest', results_root=root)
+    assert bare.returncode == 1
+    assert 'openbgp 8.8' in bare.stderr
+    assert not os.path.exists(os.path.join(directory, 'COMPLETE'))
+
+    unreasoned = block('accept', '2', '--run-id', 'tvtest',
+                       '--with-exclusions', results_root=root)
+    assert unreasoned.returncode == 1
+    assert 'requires --note' in unreasoned.stderr
+    assert not os.path.exists(os.path.join(directory, 'COMPLETE'))
+
+
+def test_accept_only_flags_are_refused_rather_than_ignored_elsewhere(tmp_path):
+    """The `next` refusal prints an `accept N --with-exclusions --note` line to
+    copy, so leaving the action as `next` is the natural slip -- and ignoring
+    the flags there launches a multi-hour benchmark instead of refusing."""
+    root = str(tmp_path)
+    for action in ('next', 'block-2'):
+        result = block(action, '--run-id', 'tvtest', '--with-exclusions',
+                       '--note', 'oops', results_root=root)
+        assert result.returncode == 1, (action, result.stdout)
+        assert 'applies to `accept`' in result.stderr, action
+        # and nothing was started
+        assert not os.path.exists(os.path.join(root, 'tvtest',
+                                               'block2-synthetic-rep1'))
+
+
+def test_an_unreadable_verdict_is_not_an_excludable_row(tmp_path):
+    """`unreadable` means the checker could not parse that run's artifact at
+    all, so its checks are empty and nothing was judged. That is a row with no
+    evidence, not a row that failed a rule -- and "explicit durable exclusions
+    *with evidence*" cannot be satisfied by one."""
+    root = str(tmp_path)
+    unreadable = {'expected_runs': 14, 'shortfall': None,
+                  'runs': [{'run': 'bird 2.19.2', 'verdict': 'unreadable'},
+                           {'run': 'frr_c 8.5', 'verdict': 'qualified'}]}
+    directory = _ran_block(root, 'block2-synthetic-rep1', unreadable)
+    result = block('accept', '2', '--run-id', 'tvtest', '--with-exclusions',
+                   '--note', 'why', results_root=root)
+    assert result.returncode == 1, result.stdout
+    assert 'unfinished' in result.stderr
+    assert 'evidence unreadable' in result.stderr
+    assert not os.path.exists(os.path.join(directory, 'COMPLETE'))

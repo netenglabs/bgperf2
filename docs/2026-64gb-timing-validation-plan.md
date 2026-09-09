@@ -245,7 +245,91 @@ for:
   shuffle -- and arrive with Blocks 2-7, whose configs are snapshotted under
   `metadata/configs/`.
 
-### Blocks 1-11
+### Block 1: generator calibration -- **accepted 2026-09-09**
+
+Ran at bgperf2 `ad9c3de` on the campaign host, work directory
+`/data/bgperf-work`. Four runs, one at a time, from two configs, each config
+run twice with **byte-identical rendered input** (verified) and differing only
+in which role `scripts/calibration_case.sh` starved from outside bgperf2.
+bgperf2 is not told about the constraint and records nothing about it, so each
+constrained case keeps the harness's own `case.log` beside its results.
+
+| case | constraint | verdict | `elapsed (s)` |
+|---|---|---|---|
+| `tail-baseline/` | none | `unresolved` / `no_dominant_interval` | 3 |
+| `observer-tail/` | monitor at 0.15 CPU | **`target_or_monitor`** / `post_injection_tail` | 16 |
+| `tester-baseline/` | none | `tester` / `tester_limited` | 7 |
+| `slow-tester/` | generators at 4 mbit egress | **`tester`** / `tester_limited` | 38 |
+
+All four **qualified** against the Acceptance Rules: three-role plus tool
+provenance, converged, ordered and complete event streams, both generators
+complete in every run, no tester error or timeout, peak foreign CPU 5-10%, min
+free memory 95-97% of the host. The pairs' route counts are identical within a
+pair (100,222 against a required 99,000; 501,471 against 495,000), so nothing
+about correctness moved with the constraint.
+
+The block's exit criterion is met, and the two pairs meet it on different
+evidence, which is the part worth keeping:
+
+- **The tail pair separates on the verdict, and the generators prove where the
+  constraint landed.** Fleet injection is 1.000s in both runs and the
+  injectors' own numbers barely move (3,490,412 octets in both; 1,568,321
+  against 1,559,052), while the signed tail goes from **-0.225s** to
+  **+10.713s**. The unconstrained run has no interval to attribute and says so
+  rather than naming a component -- the ambiguous case the criterion asks to be
+  left unattributed -- and the constrained one names the observer end of
+  `target_or_monitor`, which is what it starved.
+- **Starving the observer degrades the instrument that measures it, and the
+  published bound says so.** `post_injection_tail_resolution_s` went 1.032s ->
+  2.096s: a monitor at 0.15 CPU is slower to answer `gobgp neighbor -j`, so its
+  achieved cadence falls and the interval is qualified by the wider bound the
+  loop actually achieved. The tail is still 5x that bound. That degradation is
+  itself independent evidence the cap bound the container it named -- the
+  target's own `max cpu %` cannot show it, since the target was untouched (29
+  against 27).
+- **The tester pair does not separate on the verdict, and was not qualified on
+  one.** Both runs are `tester` via `tester_limited`: at 2 x 500,000 the
+  unconstrained shape is already generator-bound. A slow-tester case cleared by
+  its verdict would equally have been cleared by a constraint that bound
+  nothing, which has happened on this host
+  (`results/2026/phase6-calibration/interface-probe/`, where `tc` succeeded on
+  a device the BGP session did not use). What qualifies it is that the imposed
+  cap is recovered from the run's own numbers:
+
+  | injector | unconstrained | at 4 mbit |
+  |---|---|---|
+  | `mrt-injector0` | 7,296,179 B / 1.290379s = **45.2 mbit** | 7,334,208 B / 14.111164s = **4.16 mbit** |
+  | `mrt-injector1` | 16,196,887 B / 2.021436s = **64.1 mbit** | 16,000,488 B / 32.389886s = **3.95 mbit** |
+
+  Both within 4% of a cap the tool knew nothing about, and reproducing Phase
+  6's constrained numbers to five decimal places (14.111164 against 14.111817,
+  32.389886 against 32.391424) on a run four weeks and one code revision later.
+  The *unconstrained* rate is not reproducible in the same way -- 45.2 mbit
+  here against 69.1 in Phase 6 for the same injector -- which is why it is
+  published as a note and never asserted: it is the order of magnitude that
+  separates a shaped session from an unshaped one, not the value.
+- **Every generator has to recover the cap, not every generator that
+  answered.** `octets_on_wire` is withheld unless every session in the
+  container reported a written count and `reported_injection_s` is withheld for
+  a multi-RIB session, so a generator dropped for want of one is a generator
+  the case has no evidence about -- and clearing the case on the others would
+  qualify it while an injector ran unshaped at 65 mbit. That is
+  `calibration_case.sh`'s "counted per container, not something was
+  constrained", on the reading side.
+- **A constrained case is never resumed.** The progress file records that a
+  cell completed and records nothing about whether the constraint bound, and
+  the watcher that decides that cannot observe a cell it did not launch.
+
+Two things the block cost that are worth stating. The calibration watcher is a
+sibling of bgperf2 rather than a descendant, so its `docker`/`sudo`/`nsenter`
+polling is charged to `max foreign cpu %`: 10% on the slow-tester case against
+5-6% elsewhere, an order of magnitude under the threshold that would withhold a
+verdict, but not nothing. And what stays unresolved is a property of the policy
+rather than of this harness: a generator that is slow and a generator
+back-pressured by a slow target produce the same evidence, and `tester_limited`
+names `tester` for both (`bgperf2-bgg`).
+
+### Blocks 2-11
 
 Not started. Each block's configs and procedure are its own change set.
 

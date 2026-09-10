@@ -64,7 +64,72 @@ def host_facts():
         facts['cpu_threads'] = cores
     except (OSError, IndexError) as exc:
         facts['cpu_error'] = '{0}: {1}'.format(type(exc).__name__, exc)
+
+    facts['instance'] = instance_facts()
     return facts
+
+
+def instance_facts():
+    '''Cloud instance identity, best effort, or None off a cloud host.
+
+    The campaign's host-class rule is "a replacement of the same shape
+    continues the campaign, anything else is a second experiment", and on a
+    spot host replacements are ordinary. Instance *type* is the fact that rule
+    turns on and it is the one fact not visible from the kernel: two
+    `m7a.4xlarge` report the same CPU model, core count and memory as an
+    `m7a.8xlarge` would report a different one, but nothing under /proc names
+    the shape. Recorded so the rule is checkable from the artifact it points
+    at, rather than asserted in a plan nobody can verify against.
+
+    Read from DMI first, which needs no network: EC2 writes the instance ID to
+    `board_asset_tag`. The type needs IMDS, so it is asked for with a short
+    timeout and a token (IMDSv2), and its absence is recorded rather than
+    raised -- a manifest missing the instance type is worth more than a block
+    that refused to start because a link-local address did not answer.
+
+    Returns None only where nothing was learned and nothing failed, which is
+    a machine with neither DMI nor a link-local route. A failure is a fact
+    about the reading and is recorded: **each** leaf keeps its own reason,
+    because one shared slot means the second failure is dropped and an absent
+    availability zone carries no explanation at all.
+    '''
+    facts = {}
+    try:
+        with open('/sys/devices/virtual/dmi/id/board_asset_tag',
+                  'r', encoding='utf-8') as f:
+            tag = f.read().strip()
+        if tag and tag.startswith('i-'):
+            facts['id'] = tag
+    except OSError:
+        pass
+
+    # `-f` is load-bearing: without it curl exits 0 on an HTTP error and hands
+    # back the error body as though it were the answer. An IMDS 401 would then
+    # become the value of the token header on the next two calls, and a 404
+    # would reach `facts['type']` -- or, filtered out for looking like HTML,
+    # would leave `type` simply absent with `error` never set, which reads
+    # identically to a host where IMDS was never asked. Instance type is the
+    # one fact the host-class rule turns on, so "missing" and "missing because
+    # X" must not look the same.
+    base = 'http://169.254.169.254'
+    token, token_error = _run(['curl', '-fsS', '--max-time', '2', '-X', 'PUT',
+                               base + '/latest/api/token',
+                               '-H', 'X-aws-ec2-metadata-token-ttl-seconds: 60'])
+    headers = []
+    if token and token.strip():
+        headers = ['-H', 'X-aws-ec2-metadata-token: ' + token.strip()]
+    elif token_error:
+        facts['token_error'] = token_error
+    for key, leaf in (('type', 'instance-type'),
+                      ('availability_zone', 'placement/availability-zone')):
+        value, error = _run(['curl', '-fsS', '--max-time', '2']
+                            + headers
+                            + [base + '/latest/meta-data/' + leaf])
+        if value and value.strip():
+            facts[key] = value.strip()
+        else:
+            facts['{0}_error'.format(key)] = error or 'no answer from IMDS'
+    return facts or None
 
 
 def docker_facts():

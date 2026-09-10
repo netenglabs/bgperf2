@@ -543,6 +543,18 @@ MRT_INPUT="${MRT_FILE:-mrt/rib.20260808.0000}"
 # Unkeyed, Block 2 would have destroyed Block 0's -- an accepted block whose
 # plan entry cites them -- and a --force re-run would have left the old one
 # beside the new, describing a run that no longer exists.
+#
+# Keying per block is not enough on its own, because a block is entered once
+# per *attempt* and a reclaimed spot host makes several attempts ordinary. The
+# manifest entry is merged rather than replaced (see
+# `campaign_merge_block_facts.py`), so a resumed block still names the host
+# that measured its earlier rows. The two keyed pairs are not: `free-h` and
+# `df-h` are overwritten by the resume and describe the machine that finished
+# the block rather than the one that started it. That is a smaller loss --
+# they are a preflight of the attempt about to run, which is what the Safety
+# Contract asks them for -- but "growth against the previous block" is
+# measured from a file the previous *attempt* may have written, so read them
+# against the manifest's per-attempt host before concluding anything moved.
 capture_metadata() {
   local configs=("$@")
   local config_list
@@ -564,36 +576,35 @@ capture_metadata() {
   # Under one key so the block's facts cannot collide with the manifest's own
   # spine, and per block because images are rebuilt and hosts are resized
   # between them: one shared record would describe whichever block wrote last.
-  local extra
-  extra="$(FACTS="$facts" BLOCK_KEY="$BLOCK_KEY" BLOCK_INDEX="$BLOCK_INDEX" \
+  local entry
+  entry="$(FACTS="$facts" BLOCK_INDEX="$BLOCK_INDEX" \
     BLOCK_TITLE="${BLOCK_TITLES[$BLOCK_INDEX]}" "$PYTHON_BIN" - <<'PY'
 import json
 import os
 facts = json.loads(os.environ["FACTS"])
 facts["block_index"] = int(os.environ["BLOCK_INDEX"])
 facts["block_title"] = os.environ["BLOCK_TITLE"]
-print(json.dumps({"blocks": {os.environ["BLOCK_KEY"]: facts}}))
+print(json.dumps(facts))
 PY
 )"
-  # A manifest already carrying another block's facts must keep them: the
-  # merge is per run ID, and "blocks" is one key.
-  extra="$(EXTRA="$extra" MANIFEST="$METADATA_DIR/manifest.json" "$PYTHON_BIN" - <<'PY'
-import json
-import os
-extra = json.loads(os.environ["EXTRA"])
-path = os.environ["MANIFEST"]
-existing = {}
-if os.path.exists(path):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            existing = json.load(f).get("blocks") or {}
-    except (OSError, ValueError):
-        existing = {}
-merged = dict(existing)
-merged.update(extra["blocks"])
-print(json.dumps({"blocks": merged}))
-PY
-)"
+  # A manifest already carrying another block's facts must keep them -- the
+  # merge is per run ID and "blocks" is one key -- and a block re-entered by a
+  # resume must keep the facts of the entry it supersedes, which is what
+  # `campaign_merge_block_facts.py` is for.
+  #
+  # It always keeps here, `--force` included. This runs before preflight,
+  # `verify` and the MRT validation, every one of which can end the block, so
+  # a forced run that never reached a container would otherwise have thrown
+  # away the history of rows that are all still on disk with their markers --
+  # attributing them to a host that measured none of them, which is the
+  # provenance loss this merge exists to prevent. Forgetting belongs where the
+  # results are actually deleted, and `run_batch` prunes there.
+  local extra
+  extra="$(printf '%s' "$entry" | "$PYTHON_BIN" \
+    scripts/campaign_merge_block_facts.py \
+    --manifest "$METADATA_DIR/manifest.json" \
+    --block-key "$BLOCK_KEY" --results-dir "$BLOCK_DIR" \
+    --keeps-previous-rows)"
 
   SUITE_TEXT="$BLOCK_KEY" CONFIG_TEXT="$config_list" \
   MRT_OVERRIDE_VALUE="$MRT_FILE" MANIFEST_EXTRA_JSON="$extra" \
@@ -660,8 +671,35 @@ run_batch() {
   # directory is about to be rewritten, and only the directory being rewritten
   # may be cleared.
   if [[ $FORCE -eq 1 && -d "$out_dir" ]]; then
+    # Worked out and checked *before* the delete, not after: a guard that runs
+    # afterwards cannot stop the thing it guards against, and the state it was
+    # written to prevent -- results gone, manifest still naming them -- is
+    # exactly what it would leave behind.
+    local prune_under="${out_dir%/}"
+    if [[ "$prune_under" == "${BLOCK_DIR%/}" ]]; then
+      prune_under=.
+    elif [[ "$prune_under" == "${BLOCK_DIR%/}"/* ]]; then
+      prune_under="${prune_under#"${BLOCK_DIR%/}"/}"
+    else
+      echo "run_batch: $out_dir is not under $BLOCK_DIR, so the manifest" >&2
+      echo "cannot say which rows a forced re-run discarded; refusing" >&2
+      exit 1
+    fi
     echo "force: discarding previous results under $out_dir"
     rm -rf "${out_dir:?}"
+    # The manifest stops naming those rows at the moment they stop existing,
+    # not at the moment the block was entered -- see capture_metadata. Scoped
+    # to the directory just removed, because a block is not always one batch:
+    # Block 1 makes four of these calls, and forgetting everything on the
+    # first would drop the host of three directories still on disk.
+    #
+    # Derived in the shell rather than with `realpath`, whose failure inside a
+    # command substitution is an empty argument that `set -e` does not catch --
+    # and an empty --prune-under would once have meant "forget every carried
+    # row".
+    "$PYTHON_BIN" scripts/campaign_merge_block_facts.py \
+      --manifest "$METADATA_DIR/manifest.json" --block-key "$BLOCK_KEY" \
+      --prune-under "$prune_under"
   fi
   mkdir -p "$out_dir"
   echo "Running $key -> $out_dir"

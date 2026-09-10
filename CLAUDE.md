@@ -1697,8 +1697,26 @@ previous results, artifacts, markers and batch progress -- there is no way to re
 GiB, AMD EPYC 9R14 (`m7a.4xlarge`), resized into that shape on 2026-09-03. Justin chose it on
 2026-09-08 as the closest available match to the host that produced
 `benchmarks/baseline/baseline-benchmark.csv`, which is a match on memory (61.44 GiB against 60.74)
-and **not** on CPU. Run Phase 6 calibration and every campaign block on this machine; that is what both plans
-require -- one host for the whole experiment. The cost is paid in exactly one place:
+and **not** on CPU. Run Phase 6 calibration and every campaign block on a host of that class.
+
+**"That machine" is a class, not a machine, because it is an EC2 spot instance and is reclaimed
+without warning.** This said "one host for the whole experiment" until 2026-09-10, which was never
+a rule the campaign could keep: by the time anyone read the manifest it had already recorded three
+hostnames across blocks 0-2, and Block 2 was measured on two of them because a reclaim landed
+between its cells. Do **not** read a two-host block as invalidating and re-measure it -- that
+discards rows that qualified in order to satisfy a rule the hardware cannot honour. The rule is in
+the timing plan's Fixed Campaign Identity and is summarised here: a replacement matching on
+**instance type, CPU model, vCPU count and memory** continues the campaign; kernel, AZ and instance
+ID are recorded and advisory; a host change *between* blocks is expected and recorded, and one
+*within* a block is a finding stated in that block's record, not grounds to discard it. All of it
+is checkable after the fact, per block, under `metadata/manifest.json` -- `blocks.<key>.host` for
+the attempt that finished, `previous_entries` for the ones a reclaim interrupted and the rows each
+measured. Checkable **from block 3 onward**: `host.instance` was added with the rule on 2026-09-10,
+so blocks 0-2 record CPU, cores, memory and hostname and not the instance type the rule turns on. **Only `/data` survives a reclaim** (its own EBS volume, carrying the repo, `results/`,
+Docker's `data-root` and `/home/ubuntu`); the root filesystem is fresh on every replacement, which
+is the harder half of why the work directory is `/data/bgperf-work` and not `/var/tmp`.
+
+The CPU cost against the 2025 baseline is paid in exactly one place:
 **campaign rows may never be read against `benchmarks/baseline/baseline-benchmark.csv`**. That is
 already the campaign's own design (it is not a continuation of `2026-baseline`, it re-runs the
 comparisons under a new run identity), so nothing has to be given up for it -- but nothing refuses

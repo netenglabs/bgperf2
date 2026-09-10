@@ -37,11 +37,69 @@ benchmark. Report the first unmet gate and tell the user to use:
   repository is checked out on**: 16 vCPU, 61.44 GiB, AMD EPYC 9R14
   (`m7a.4xlarge`). It is the closest available match to the host that produced
   `benchmarks/baseline/baseline-benchmark.csv`, matching it on memory (61.44
-  GiB against 60.74) and **not on CPU**. Every block of this campaign runs
-  there; a block run anywhere else is a second experiment. The CPU difference
+  GiB against 60.74) and **not on CPU**. The CPU difference
   costs nothing *within* this campaign, which re-runs its own comparisons under
   a new run identity -- but **no row here may be read against the
   `2026-baseline` CSV**, and nothing downstream refuses that comparison.
+
+  **That machine is an EC2 spot instance, is reclaimed and replaced without
+  warning, and more of the campaign will run on spot than not.** So "every
+  block of this campaign runs there; a block run anywhere else is a second
+  experiment" -- what this entry said until 2026-09-10 -- was never a rule the
+  campaign could keep, and it had already been broken twice in silence when it
+  was found: the manifest records `ip-172-31-23-67` for blocks 0 and 1,
+  `ip-172-31-21-79` for block 2's first ten rows, and `ip-172-31-18-191` for
+  the four rows that finished block 2 after the reclaim. Nothing failed, and
+  nothing said so either. The rule that replaces it is the one the manifest can
+  actually hold the campaign to:
+
+  - **The host class is fixed; the host is recorded per block.** A replacement
+    matching on **instance type, CPU model, vCPU count and memory** continues
+    the campaign; anything else is a second experiment.
+    `scripts/campaign_host_facts.py` writes those four into
+    `metadata/manifest.json` under the block's own key -- instance type from
+    IMDS, since it is the fact the rule turns on and the one fact `/proc`
+    cannot show -- so the rule is checkable against the artifact it names
+    rather than asserted here, which is how the two silent changes above were
+    found at all. **Kernel, availability zone and instance ID are recorded and
+    advisory**, deliberately: the root volume is fresh on every replacement, so
+    a reclaim served from a newer AMI gives a different `uname -r` on identical
+    hardware, and a rule that failed on it would order the whole campaign
+    re-measured over a package update. A kernel change is a thing to *notice*
+    when a block's numbers move, not a thing to refuse a block over.
+
+    **Blocks 0-2 cannot be checked against this rule**, and that is stated
+    rather than left to be discovered: `instance_facts()` landed on 2026-09-10
+    with the rule itself, so `host.instance` is absent from all three of their
+    manifest entries and from Block 2's carried one. What those blocks have is
+    CPU model, vCPU count, memory and hostname, which agree across all four
+    entries; the instance type they ran under is not recorded anywhere and
+    cannot be recovered. Blocks 3 onward record it.
+  - **A host change *between* blocks is expected, recorded, and not a
+    finding.** Blocks 2-4 and 5-7 are repetitions, and dispersion across
+    passes is what the variance rule reads; an identically shaped replacement
+    instance is part of that dispersion rather than a confound hidden inside a
+    single comparison.
+  - **A host change *within* a block is a finding, and belongs in that block's
+    record.** A block's rows are read against each other and
+    `create_batch_graphs()` draws them side by side, so a split there sits
+    inside one comparison. It does not invalidate the block -- rows already
+    measured are real, and discarding them buys one host at the price of an
+    hour of machine time that the next reclaim may take anyway -- but the
+    choice between resuming and re-measuring the block whole is the operator's,
+    made out loud, per block, and the block's entry says which was taken and
+    which rows each host produced.
+  - **Only `/data` survives a reclaim.** It is a separate EBS volume, mounted
+    from `/etc/fstab` by label with `nofail`, and it carries the repository,
+    `results/`, Docker's `data-root` and `/home/ubuntu`. The root volume is
+    fresh on every replacement, which is a second and harder reason the work
+    directory is `/data/bgperf-work`: `/var/tmp` on this host is not merely
+    small and shared with journald, it does not survive the instance. Verified
+    on 2026-09-10 -- see the Block 2 record.
+
+  A reclaim is "host instability" in the sense the 64 GB Safety Contract below
+  means it, so it stops the active block and the block is reviewed before
+  resuming. That review is where the third rule above is applied.
 - MRT input: `mrt/rib.20260808.0000`
 - address family: IPv4
 - concurrent suites: never
@@ -329,7 +387,121 @@ rather than of this harness: a generator that is slow and a generator
 back-pressured by a slow target produce the same evidence, and `tester_limited`
 names `tester` for both (`bgperf2-bgg`).
 
-### Blocks 2-11
+### Block 2: high-load synthetic repetition 1 of 3 -- **ran 2026-09-10, not accepted**
+
+Ran at bgperf2 `4b43ebf`, work directory `/data/bgperf-work`, from
+`benchmarks/2026-timing-synth-rep1.yaml`: 14 target configurations at 50 peers
+x 100,000 prefixes per peer (5,000,000 distinct prefixes), BIRD generator, no
+policy, one cell at a time, `order: shuffle` seed 20262. Every configured run
+produced a row. **12 of 14 qualified**; the block did not meet its exit
+criterion and is recorded here as run rather than accepted.
+
+**It took two attempts on two hosts.** The first measured ten rows on
+`ip-172-31-21-79` and was ended by an EC2 spot reclaim between cells; the
+replacement instance `ip-172-31-18-191` measured the remaining four. Both are
+in `metadata/manifest.json` -- the second under `blocks.block2-synthetic-rep1`,
+the first under its `previous_entries`, with the ten run names it accounts for.
+That merge did not exist when the reclaim happened and the first host's record
+was overwritten by the resume; it was rebuilt from a copy taken before the
+resume and is marked `reconstructed`. From the next block onward
+`campaign_merge_block_facts.py` writes it.
+
+| run | host | `elapsed (s)` | `max cpu %` | `max mem (GB)` | `min free mem (GB)` | verdict |
+|---|---|---|---|---|---|---|
+| bird 2.19.2 | 1st | 91 | 102 | 0.561 | 49.9 | **rejected** -- 1 tester error |
+| bird 3.3.2 (default threads) | 2nd | 117 | 102 | 1.087 | 49.0 | qualified |
+| bird 3.3.2 (4 threads) | 1st | 108 | 200 | 1.110 | 48.9 | qualified |
+| bird default (2.19.0-master) | 1st | 91 | 101 | 0.558 | 50.0 | **rejected** -- 2 tester errors |
+| frr_c 8.5 | 1st | 91 | 112 | 8.254 | 42.5 | qualified |
+| frr_c 9.1 | 1st | 94 | 112 | 8.199 | 42.5 | qualified |
+| frr_c 10.0 | 1st | 90 | 111 | 7.655 | 43.6 | qualified |
+| frr_c 10.7 | 1st | 84 | 112 | 6.284 | 44.3 | qualified |
+| frr default | 2nd | 84 | 113 | 5.733 | 45.1 | qualified |
+| openbgp 8.8 | 1st | 620 | 110 | 37.437 | 12.4 | qualified |
+| openbgp 9.2 | 2nd | 733 | 127 | 18.533 | 33.2 | qualified |
+| openbgp default (9.2) | 1st | 724 | 126 | 18.688 | 33.1 | qualified |
+| rustybgp 2026-02 | 2nd | 65 | 1074 | 12.252 | 38.3 | qualified |
+| rustybgp default | 1st | 154 | 1161 | 16.861 | 37.9 | qualified |
+
+Every row converged, received 5,000,000 against a required 4,950,000, carried
+three-role plus tool provenance, and produced an ordered and complete event
+stream with its generator complete. Every row's verdict is `unresolved` via
+`injection_boundary_unresolved`, which is the expected shape here and not a
+defect: the BIRD 2.19 generator's `Export updates accepted` is queue-side and
+saturates before the first poll, so no run in this block can be attributed to a
+component. That is a property of the generator, recorded in Phase 5A and
+reached again from the campaign side; wire-side evidence needs a BIRD 3
+generator, which the CLI cannot select today.
+
+**What rejected the two rows, and what cannot be said about it.**
+`tester_health` requires no tester error or timeout, and `find_errors()` counts
+BIRD `<RMT>` log lines that are neither `NEXT_HOP` nor `Invalid route ...
+withdrawn` -- so one and two such lines, out of 5,000,000 routes across 50
+sessions, decided both rows. The lines themselves do not survive: `bench()`
+wipes the work directory at the start of every cell, eleven cells ran after
+them, and the host was reclaimed. The review therefore has a count and no text,
+which is an exclusion with a number rather than the exclusion with evidence the
+Acceptance Rules ask for (`bgperf2-7ou`). Both rejected rows are BIRD
+2.19-family targets and both come from the first attempt; a scan of every CSV
+under `results/` finds only one other non-zero `tester errors` value in the
+project's history, so this is sporadic rather than a property of that target.
+
+**A reproduction was attempted and did not reproduce it.** One `bird 2.19.2`
+run at the same 50 x 100,000, outside the campaign tree and with its tester
+logs kept, converged in 95s against the block's 91s with **0 tester errors**
+and 0 timeouts, out of 247 million `<RMT>` lines -- all of them the
+`Invalid route ... withdrawn` that `find_errors()` already excludes, which is
+the target re-advertising to generators running `import none`. That is
+consistent with sporadic and is not evidence that the two rejected rows were
+benign: one negative run cannot be, and the lines that were counted are gone.
+It does bound the cost of the tail -- those logs were **23 GB** for one run,
+against the ~5 GB this repository records for that shape, so a block's work
+directory needs headroom nearer 25 GB per cell than 5.
+
+**An accidental cross-host control, and it is small.** `openbgp default` and
+`openbgp 9.2` are the same upstream release reached through two image tags --
+`bgperf/openbgp:latest` and `:9.2`, different image IDs, both reporting 9.2 --
+and the shuffle put one on each host. They agree to **1.2% on `elapsed (s)`**
+(724 against 733), 0.8% on `max mem (GB)` (18.688 against 18.533) and 0.5% on
+`min free mem (GB)`. That bounds host *plus* image build *plus* shuffled
+position together, not the host alone, so it is an upper bound and not a
+measurement of the replacement's effect -- but it is the only evidence this
+campaign has on the question, and at ~1% it is well inside what the variance
+rule is built to separate. It is not a substitute for reading Block 9's three
+passes.
+
+Three things the block cost, stated rather than left in the artifacts:
+
+- **Two rows carry foreign CPU an order of magnitude above the block's floor,
+  and the cause was the session reviewing it.** `bird 3.3.2 (default threads)`
+  and `openbgp 9.2` report `max foreign cpu %` 9 against 1-4 everywhere else;
+  both ran while this session was editing documents and running `bd` on the
+  same host. Nine percent is 0.09 cores, an order of magnitude under the
+  threshold that would withhold a verdict -- Block 1 recorded the same shape
+  for its calibration watcher -- and `openbgp 9.2` is one half of the cross-host
+  pair above, which agreed to 1.2% while carrying it. It is still contention the
+  benchmark manufactured, and the rule it produces is that a block's review
+  waits for the block.
+- **The rustybgp target lost one `gobgp neighbor -j` read** and the run says so.
+  The evidence is in that run's artifact at
+  `instrument.target_neighbor_sampler` (`failed_reads` 1, with the gRPC error
+  under `last_error`); `instrument_reads` is the *checker's* name for the check
+  that reads it, and is what appears in `evidence/synthetic.txt`. The two are
+  not the same string and neither finds the other. The consequence is that the
+  neighbour checkpoint may have been reached late. That is the guard from
+  `5251847` doing exactly what it was added for (`bgperf2-sl1`) -- before it,
+  the sampler died silently and froze the counts.
+- **OpenBGPD 8.8 approached the memory guardrail and cleared it**, as the
+  config predicted: 37.4 GB peak, `min free mem` 12.4 GB, which is 20.2% of the
+  61.44 GB host against a 20% floor. It ran alone, like every cell. Nothing
+  swapped.
+
+The block's remaining decision is the operator's and is not taken here: accept
+with `accept 2 --with-exclusions` naming the two rows, or re-measure the block
+with `--force`, which would also give it one host and clean contention at the
+cost of discarding twelve rows that qualified.
+
+### Blocks 3-11
 
 Not started. Each block's configs and procedure are its own change set.
 
@@ -540,6 +712,10 @@ The campaign should answer:
 - Broad route-server or route-reflector matrices.
 - Full withdrawal/churn matrices beyond the bounded BIRD architecture screen.
 - Multi-host execution unless needed for a small diagnostic validation.
+  Spreading one campaign over several machines on purpose is what this
+  excludes; being handed a replacement machine of the same shape after a
+  spot reclaim is not, and is governed by the host-class rule under Fixed
+  Campaign Identity.
 - IPv6.
 
 These are not rejected permanently. They require a later plan amendment or

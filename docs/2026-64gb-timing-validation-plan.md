@@ -521,18 +521,117 @@ Three things the block cost, stated rather than left in the artifacts:
   writes ~23 GB into the work directory, against the ~5 GB `CLAUDE.md` records,
   so a block needs headroom nearer 25 GB per cell.
 
-### Block 3: high-load synthetic repetition 2 of 3
+### Block 3: high-load synthetic repetition 2 of 3 -- ran 2026-09-10, awaiting acceptance
 
-Built and running. `benchmarks/2026-timing-synth-rep2.yaml` is repetition 1's
-config with the test `name` and the `seed` changed (20263, from the seed rule
-fixed in that file) and nothing else -- `diff` the two `tests:` mappings. The
-*procedure* is shared rather than copied: `run_synthetic_repetition()` in the
-runner serves Blocks 2 and 3, because the three passes are read together in
-Block 9 as the dispersion of one cell, so a step that drifted between them
+Ran from `benchmarks/2026-timing-synth-rep2.yaml`: the same 14 target
+configurations at 50 peers x 100,000 prefixes per peer, BIRD generator, no
+policy, one cell at a time, `order: shuffle` seed 20263. Work directory
+`/data/bgperf-work`. **All 14 rows qualified**, in one attempt, on one host, at
+one revision (`acb3fa2`) -- `previous_entries` is empty, which is the first
+thing this block has that Block 2 did not.
+
+The config is repetition 1's with the test `name` and the `seed` changed and
+nothing else; `diff` the two `tests:` mappings and that is all that comes back.
+The *procedure* is shared rather than copied -- `run_synthetic_repetition()` in
+the runner serves Blocks 2 and 3 -- because the three passes are read together
+in Block 9 as the dispersion of one cell, so a step that drifted between them
 would be a difference in how the passes were measured arriving inside the
 statistic meant to measure run-to-run noise.
 
-The record of what it measured is written when it has been reviewed.
+**The seed does not fix the order by itself**, which matters for anyone
+rebuilding a pass later. `batch_shuffle_key()` digests
+`<seed>:<batch_cell_id(test_name, cell)>`, so the permutation is a function of
+the seed, the test `name` and every target field. Recovering this pass's
+sequence needs this config, not the number alone; renaming a test while keeping
+its seed re-sequences the block in silence. It is also the second reason
+repetition 2 ran in a different order from repetition 1, so a shared
+permutation was never a risk the seed rule alone had to carry.
+
+| run | `elapsed (s)` | `max cpu %` | `max mem (GB)` | `min free mem (GB)` | `max foreign cpu %` |
+|---|---|---|---|---|---|
+| bird 2.19.2 | 90 | 101 | 0.559 | 49.5 | 2 |
+| bird 3.3.2 (default threads) | 118 | 109 | 1.083 | 49.2 | 2 |
+| bird 3.3.2 (4 threads) | 109 | 210 | 1.117 | 48.9 | 2 |
+| bird default (2.19.0-master) | 91 | 102 | 0.559 | 49.8 | 3 |
+| frr_c 8.5 | 92 | 112 | 8.279 | 42.5 | 2 |
+| frr_c 9.1 | 95 | 112 | 8.197 | 42.5 | 2 |
+| frr_c 10.0 | 91 | 112 | 7.646 | 43.3 | 4 |
+| frr_c 10.7 | 85 | 111 | 5.772 | 45.0 | 2 |
+| frr default | 86 | 113 | 5.719 | 44.9 | 2 |
+| openbgp 8.8 | 624 | 114 | 37.435 | 12.4 | 2 |
+| openbgp 9.2 | 727 | 126 | 18.713 | 33.1 | **51** |
+| openbgp default (9.2) | 737 | 126 | 18.644 | 33.2 | 3 |
+| rustybgp 2026-02 | 68 | 1074 | 12.641 | 37.8 | 2 |
+| rustybgp default | 152 | 1153 | 12.963 | 41.7 | 7 |
+
+Every row converged, received 5,000,000 against a required 4,950,000, carried
+three-role plus tool provenance, and produced an ordered and complete event
+stream with its generator complete and no tester error or timeout. Every
+verdict is `unresolved` via `injection_boundary_unresolved`, exactly as in
+repetition 1 and for the same reason: the BIRD 2.19 generator's `Export updates
+accepted` is queue-side and saturates before the first poll, so no run in this
+block can be attributed to a component. Six rows carry a `host_cpu_saturated`
+note, against seven in repetition 1 and on much the same rows -- that is the
+benchmark's own load, and it is a note rather than a rejection.
+
+**The two passes reproduce on `elapsed (s)` and do not fully reproduce on
+memory**, which is worth stating now even though the dispersion is Block 9's
+question:
+
+| run | rep 1 | rep 2 | `elapsed` | `max mem` |
+|---|---|---|---|---|
+| bird 2.19.2 | 90s / 0.559 GB | 90s / 0.559 GB | 0.0% | 0.0% |
+| frr_c 10.7 | 84s / 6.284 GB | 85s / 5.772 GB | +1.2% | **-8.1%** |
+| rustybgp 2026-02 | 65s / 12.252 GB | 68s / 12.641 GB | +4.6% | +3.2% |
+| rustybgp default | 154s / 16.861 GB | 152s / 12.963 GB | -1.3% | **-23.1%** |
+
+Twelve of the fourteen are within +/-2.4% on `elapsed (s)`, and the outlier is
+`rustybgp 2026-02` at +4.6% -- three seconds on the block's shortest run, which
+the shuffle placed second, on the coldest cache of the pass. `max mem (GB)` is
+the column that moves: `rustybgp default` differs by 3.9 GB between passes and
+`frr_c 10.7` by 0.5 GB, on identical images and identical workloads. Two
+observations cannot say whether that is dispersion or an order effect, and this
+is precisely what the third pass and the variance rule are for -- but a memory
+comparison drawn from a single pass of either daemon would have been reported
+with a confidence neither row supports.
+
+Three things the block cost, stated rather than left in the artifacts:
+
+- **One row carries half a core of foreign CPU that nothing can attribute.**
+  `openbgp 9.2` reports `max foreign cpu %` 51 against 2-7% on the other
+  thirteen. It qualified: `CONTENTION_PERCENT` is one core, so neither
+  `findings.py`'s `foreign_cpu_contention` nor `warn_if_machine_is_busy()`
+  fired -- and because the process names are published **only** as that
+  finding's `evidence.processes`, a peak at half the threshold reaches the CSV
+  as a number with no names at all. By review time the competitor had exited.
+  This session was idle apart from a `tail -f | grep` on the runner's log
+  during that cell, which is not half a core, so the honest answer is that the
+  cause is unknown and unrecoverable. That is the "names travel with the
+  number" rule failing from *below* the threshold rather than at it, and it is
+  filed as `bgperf2-5si`. The row is kept: 51% is 0.51 cores against a 16-core
+  host, its `elapsed (s)` is within 0.8% of repetition 1's, and excluding it
+  would be an exclusion with a number rather than with evidence.
+- **Two rows each lost a single neighbour-sampler read**, and both say so in
+  `instrument.target_neighbor_sampler`. `rustybgp default` lost one to the
+  gRPC error Block 2 also recorded; `openbgp 9.2` lost one to a
+  `UnicodeDecodeError` on a 0x80 byte in `bgpctl -j show neighbor` output,
+  which is new and is filed as `bgperf2-qhx`. Both are one read out of
+  hundreds, both were contained by the guard from `5251847` rather than
+  freezing the counts, and the consequence a lost read carries -- a neighbour
+  checkpoint reached late -- lengthens the assurance window and shortens
+  nothing. Both rows converged on the full 5,000,000.
+- **OpenBGPD 8.8 cleared the memory guardrail by the same margin as before**:
+  37.4 GB peak, `min free mem` 12.4 GB, 20.2% of the 61.44 GB host against a
+  20% floor. Repetition 1 measured 12.4 GB as well. The shuffle put it last
+  here, on the fullest work directory of the pass, and it still cleared.
+  Nothing swapped. Two passes agreeing to within a tenth of a point on the row
+  nearest a hard safety limit is the useful part: the margin is thin and it is
+  also stable.
+
+The block's three leftover containers were removed after the evidence was
+published -- `bench()` leaves the last cell's containers up, and this one held
+an OpenBGPD target with a 5,000,000-route table, i.e. 37 GB of the host tied up
+until whatever ran next. Nothing published depends on them.
 
 ### Blocks 4-11
 

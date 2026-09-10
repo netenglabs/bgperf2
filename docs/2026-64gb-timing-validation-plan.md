@@ -521,7 +521,7 @@ Three things the block cost, stated rather than left in the artifacts:
   writes ~23 GB into the work directory, against the ~5 GB `CLAUDE.md` records,
   so a block needs headroom nearer 25 GB per cell.
 
-### Block 3: high-load synthetic repetition 2 of 3 -- ran 2026-09-10, awaiting acceptance
+### Block 3: high-load synthetic repetition 2 of 3 -- **accepted 2026-09-10**
 
 Ran from `benchmarks/2026-timing-synth-rep2.yaml`: the same 14 target
 configurations at 50 peers x 100,000 prefixes per peer, BIRD generator, no

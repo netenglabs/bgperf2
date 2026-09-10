@@ -959,6 +959,9 @@ case "$BLOCK_INDEX" in
   3)
     run_synthetic_repetition "benchmarks/2026-timing-synth-rep2.yaml"
     ;;
+  4)
+    run_synthetic_repetition "benchmarks/2026-timing-synth-rep3.yaml"
+    ;;
   *)
     cat >&2 <<MSG
 block-$BLOCK_INDEX (${BLOCK_TITLES[$BLOCK_INDEX]}) is not built yet.

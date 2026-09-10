@@ -1,0 +1,161 @@
+# Block 4 of the 64 GB timing validation campaign: repetition 3 of the
+# high-load synthetic workload, all 14 target configurations.
+#
+# The workload is the plan's "Canonical Workloads / High-load synthetic":
+# 50 peers x 100,000 unique IPv4 prefixes per peer, BIRD generator, no policy.
+# `gen_conf()` gives each peer a disjoint block off one shared iterator, so
+# this is 5,000,000 distinct prefixes in the target's table, and the default
+# per-peer `prefix_scope` is what makes `prefixes per peer` in the CSV mean
+# 100,000. Do not add `prefix_scope: total` here: it would divide, and the
+# campaign's canonical cell would silently become a fiftieth of itself.
+#
+# The 14 configurations are the plan's Target Matrix, expanded so that every
+# one of them is its own run name -- `versions:` auto-labels each version, and
+# the entries that differ only in `threads` or in carrying no version at all
+# get an explicit `label`, because a run name is label else target-plus-version
+# and two entries sharing one would share the artifact stem, the CSV `name` and
+# the x label every bar is paired against.
+#
+# ORDER. `order: shuffle` with a stated seed, so the 14 targets do not run in
+# the same sequence in every repetition. The seed rule is fixed in advance and
+# mechanical -- the campaign year with the block number appended, so repetition
+# 1 (block 2) is 20262, repetition 2 (block 3) is 20263, repetition 3 (block 4)
+# is 20264. Stated rather than drawn: a drawn seed is recovered from the
+# progress file on resume, but a seed nobody chose is also a seed nobody can
+# reproduce from this document, and the point of recording one is that the
+# sequence can be rebuilt later. Stated rather than *chosen for its order*:
+# picking the seed after looking at the permutation it produces is choosing the
+# permutation, which is the one thing shuffling exists to stop.
+#
+# The seed does not fix the order by itself. `batch_shuffle_key()` digests
+# `<seed>:<batch_cell_id(test_name, cell)>`, so the permutation is a function
+# of the seed, this test's `name` and every field of every target. Two
+# consequences: rebuilding this pass's sequence later needs this file and not
+# just the number, and renaming the test while keeping the seed re-sequences
+# the block with nothing saying so. It is also the second reason this pass runs
+# in a different order from repetitions 1 and 2 -- the name differs as well as
+# the seed -- so a shared order was never a risk the seed rule alone had to
+# carry.
+#
+# REPETITIONS. Exactly one pass here, and the three repetitions are three
+# blocks rather than `repetitions: 3` in one config. That is the campaign's
+# structure ("Review every completed block before starting the next"), and it
+# costs nothing downstream: each block writes into its own results directory,
+# so no artifact stem collides, and Block 9 is where the three passes are read
+# together. It does mean `summary.py` has nothing to summarise within a block
+# -- one observation per cell -- which is correct: dispersion across three
+# passes is Block 9's question, not this block's.
+#
+# What that structure costs, stated rather than discovered later (bgperf2-494):
+# a single-pass test carries `repetition: None`, so every artifact of all three
+# blocks has `run.repetition: null`, the CSV `name` column is byte-identical
+# across the passes and `bench_output_prefix()` builds the same stem. Nothing
+# collides, because each block writes into its own results directory -- but the
+# pass a run belongs to is carried by that directory and by the manifest's
+# `blocks.<key>`, not by anything inside the run's own documents. Block 9 joins
+# the three passes by path, and an artifact copied out of its directory cannot
+# say which pass produced it. Closing that means a way to declare "this
+# single-pass batch is pass N", which moves the cell id and the artifact stem
+# -- the area with the worst record in this repository -- so it is its own
+# change set rather than a rider on this one.
+#
+# IDENTICAL TO REPETITIONS 1 AND 2 EXCEPT THE SEED, and that is a property to
+# keep rather than a coincidence of how this file was made. Block 9 reads the
+# three passes as the dispersion of one cell, so any drift in the matrix, the
+# workload or the labels between passes is a difference in the thing measured
+# arriving inside the statistic that is supposed to measure run-to-run noise.
+# This is the pass that closes the set, so it is also the last chance to
+# introduce such a drift and the only one that could not be caught by a later
+# comparison. The claim is about the `tests:` mapping, which is where it holds
+# exactly: `diff` this file's against `2026-timing-synth-rep1.yaml`'s and
+# `2026-timing-synth-rep2.yaml`'s, and the test `name` and the `seed` are the
+# whole of what may differ. The header comments do differ -- this paragraph and
+# the OpenBGPD one below are rewritten per pass -- so a whole-file `diff` shows
+# comment hunks and that is not drift. Read the mapping, not the line count.
+#
+# NO EXPECTED VERDICT is pinned for these rows, unlike Block 0's smokes and
+# Block 1's calibration cases. Nothing here is a controlled case: the whole
+# point of the matrix is that which component limits a given target at
+# 50 x 100k is the measurement, not the setup. `check_timing_evidence.py`
+# still requires each row to *have* a limiting component that was assigned or
+# explicitly left unresolved -- what it will not accept is a row with no
+# verdict at all.
+#
+# OpenBGPD 8.8 comes closest to the campaign's 20% free-memory guardrail at
+# this size, and both previous passes have measured how close: 37.4 GB peak and
+# a `min free mem` of 12.4 GB in each, which is 20.2% of the 61.44 GB host
+# against a 20% floor (plan, Block 2 and Block 3 records). Two tenths of a
+# point, on the row nearest a hard safety limit -- so this is the cell to watch
+# rather than one expected to be comfortable. What makes it worth watching
+# rather than worth stopping for is that the two passes agree to within a tenth
+# of a point: the margin is thin and it is also stable.
+#
+# Its position in the shuffle says nothing about that margin, in either
+# direction, and both earlier passes claimed otherwise -- rep2's header and the
+# plan's Block 3 record each read its clearance as having survived "the fullest
+# work directory of the pass" because the shuffle put it last. Nothing
+# accumulates there: `bench()` calls `shutil.rmtree()` on `<--dir>/<bench-name>`
+# at the start of every cell that is not a `--repeat`, and `batch()` never sets
+# `repeat` for these targets, so the fourteenth cell starts on the same empty
+# directory as the first. Its own tester logs are ~23 GB per run of this shape
+# and they go with it. What does accumulate across a block is `results/`, which
+# is a few MB. So a `min free mem` this pass measures is comparable with the
+# other two wherever the shuffle happens to place the cell -- which is the
+# useful half of the correction, since Block 9 reads the three as one cell's
+# dispersion. It runs alone like every other cell -- `batch()` runs one cell at
+# a time -- and if it does not complete, the row is preserved with its findings
+# and the block is reviewed before anything is excluded.
+tests:
+  -
+     name: 2026-timing-synth-rep3
+     neighbors: [50]
+     prefixes: [100_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 20264
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (4 threads)
+         threads: 4
+         tester_type: bird
+       -
+         name: bird
+         label: bird default
+         tester_type: bird
+       -
+         name: frr_c
+         versions: [8.5, 9.1, 10.0, 10.7]
+         tester_type: bird
+       -
+         name: frr_c
+         label: frr default
+         tester_type: bird
+       -
+         name: openbgp
+         versions: [8.8, 9.2]
+         tester_type: bird
+       -
+         name: openbgp
+         label: openbgp default
+         tester_type: bird
+       -
+         name: rustybgp
+         version: 2026-02
+         label: rustybgp 2026-02
+         tester_type: bird
+       -
+         name: rustybgp
+         label: rustybgp default
+         tester_type: bird

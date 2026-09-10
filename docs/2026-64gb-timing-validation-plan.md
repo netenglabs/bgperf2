@@ -622,18 +622,58 @@ Three things the block cost, stated rather than left in the artifacts:
   nothing. Both rows converged on the full 5,000,000.
 - **OpenBGPD 8.8 cleared the memory guardrail by the same margin as before**:
   37.4 GB peak, `min free mem` 12.4 GB, 20.2% of the 61.44 GB host against a
-  20% floor. Repetition 1 measured 12.4 GB as well. The shuffle put it last
-  here, on the fullest work directory of the pass, and it still cleared.
-  Nothing swapped. Two passes agreeing to within a tenth of a point on the row
-  nearest a hard safety limit is the useful part: the margin is thin and it is
-  also stable.
+  20% floor. Repetition 1 measured 12.4 GB as well. Nothing swapped. Two passes
+  agreeing to within a tenth of a point on the row nearest a hard safety limit
+  is the useful part: the margin is thin and it is also stable.
+
+  **Corrected while Block 4 was being built:** this entry originally went on to
+  say "the shuffle put it last here, on the fullest work directory of the pass,
+  and it still cleared", and rep2's own config header made the same claim. It
+  is false, and it was written where it would be read as evidence that the cell
+  nearest the guardrail had survived worst-case pressure. `bench()` calls
+  `shutil.rmtree()` on `<--dir>/<bench-name>` at the start of every cell that is
+  not a `--repeat`, and `batch()` never sets `repeat` for these targets, so the
+  fourteenth cell of a pass starts on the same empty work directory as the
+  first -- the previous cell's ~23 GB of tester logs included. What accumulates
+  across a block is `results/`, a few MB. The measurement is unaffected and the
+  row stands; what changes is that a `min free mem` from this cell is
+  comparable across the three passes wherever the shuffle happens to place it,
+  which is what Block 9 needs of it. The wrong claim is quoted here rather than
+  deleted, on the rule the decision log follows.
+
+  `benchmarks/2026-timing-synth-rep2.yaml` keeps the wrong sentence, and that
+  is deliberate rather than an oversight: `campaign_render_config` `cmp`s a
+  config against its snapshot under `metadata/configs/original/` and refuses on
+  any difference, so a comment-only edit to an accepted block's input would
+  make a later `--force` re-run of Block 3 fail with "run ID already has a
+  different original config". The correction lives here and in
+  `2026-timing-synth-rep3.yaml`, which has not run yet.
 
 The block's three leftover containers were removed after the evidence was
 published -- `bench()` leaves the last cell's containers up, and this one held
 an OpenBGPD target with a 5,000,000-route table, i.e. 37 GB of the host tied up
 until whatever ran next. Nothing published depends on them.
 
-### Blocks 4-11
+### Block 4: high-load synthetic repetition 3 of 3 -- **built, not yet run**
+
+Runs from `benchmarks/2026-timing-synth-rep3.yaml`: the same 14 target
+configurations at 50 peers x 100,000 prefixes per peer, BIRD generator, no
+policy, one cell at a time, `order: shuffle` seed 20264. Work directory
+`/data/bgperf-work`. The config is repetitions 1 and 2's with the test `name`
+and the `seed` changed and nothing else -- `diff` the three `tests:` mappings
+and that is all that comes back -- and the procedure is the same
+`run_synthetic_repetition()` in the runner that served Blocks 2 and 3, for the
+reason given in the Block 3 record: the three passes are read together in
+Block 9 as the dispersion of one cell, so a step that drifted between them
+would be a difference in how the passes were measured arriving inside the
+statistic meant to measure run-to-run noise. This is the pass that closes the
+set, so it is the last one that could introduce such a drift and the only one
+no later comparison could catch.
+
+It also carries the correction to the "fullest work directory" claim recorded
+in the Block 3 entry above.
+
+### Blocks 5-11
 
 Not started. Each block's configs and procedure are its own change set.
 

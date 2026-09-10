@@ -68,13 +68,17 @@ benchmark. Report the first unmet gate and tell the user to use:
     re-measured over a package update. A kernel change is a thing to *notice*
     when a block's numbers move, not a thing to refuse a block over.
 
-    **Blocks 0-2 cannot be checked against this rule**, and that is stated
-    rather than left to be discovered: `instance_facts()` landed on 2026-09-10
-    with the rule itself, so `host.instance` is absent from all three of their
-    manifest entries and from Block 2's carried one. What those blocks have is
-    CPU model, vCPU count, memory and hostname, which agree across all four
-    entries; the instance type they ran under is not recorded anywhere and
-    cannot be recovered. Blocks 3 onward record it.
+    **Blocks 0-2 are only partly checkable against this rule**, and that is
+    stated rather than left to be discovered: `instance_facts()` landed on
+    2026-09-10 with the rule itself, so `host.instance` is absent from Blocks 0
+    and 1 and from both of Block 2's carried `previous_entries`. Block 2's
+    *final* entry does carry it (`m7a.4xlarge`, `i-0de8e1dd0d3dba94d`), because
+    the third attempt -- the two re-measured rows -- ran at `020d7f5`, which is
+    the revision that added it. So the instance type is recorded for the host
+    that finished Block 2 and for nothing before it. What the earlier entries
+    have is CPU model, vCPU count, memory and hostname, which agree across all
+    four; the instance type those hosts ran under cannot be recovered. Blocks 3
+    onward record it throughout.
   - **A host change *between* blocks is expected, recorded, and not a
     finding.** Blocks 2-4 and 5-7 are repetitions, and dispersion across
     passes is what the variance rule reads; an identically shaped replacement
@@ -517,7 +521,20 @@ Three things the block cost, stated rather than left in the artifacts:
   writes ~23 GB into the work directory, against the ~5 GB `CLAUDE.md` records,
   so a block needs headroom nearer 25 GB per cell.
 
-### Blocks 3-11
+### Block 3: high-load synthetic repetition 2 of 3
+
+Built and running. `benchmarks/2026-timing-synth-rep2.yaml` is repetition 1's
+config with the test `name` and the `seed` changed (20263, from the seed rule
+fixed in that file) and nothing else -- `diff` the two `tests:` mappings. The
+*procedure* is shared rather than copied: `run_synthetic_repetition()` in the
+runner serves Blocks 2 and 3, because the three passes are read together in
+Block 9 as the dispersion of one cell, so a step that drifted between them
+would be a difference in how the passes were measured arriving inside the
+statistic meant to measure run-to-run noise.
+
+The record of what it measured is written when it has been reviewed.
+
+### Blocks 4-11
 
 Not started. Each block's configs and procedure are its own change set.
 

@@ -779,6 +779,61 @@ check_evidence() {
   fi
 }
 
+# Blocks 2-4 are one procedure run three times: the plan's 14 target
+# configurations at 50 peers x 100,000 prefixes per peer, one pass, in the
+# order that repetition's seed and test name together fix. The order is *not*
+# a function of the seed alone: `batch_shuffle_key()` digests
+# `<seed>:<batch_cell_id(test_name, cell)>`, so the permutation moves with the
+# test `name` and with every target field as well. Rebuilding a pass's sequence
+# later -- which is the whole reason a seed is recorded -- needs that config,
+# not just the number; and editing a test `name` while keeping its seed
+# re-sequences the block in silence. The three configs differ only in their
+# `name` and `seed` (`diff` their `tests:` mappings), and the *procedure* is shared here rather
+# than copied per block for the same reason the configs are kept diffable: the
+# three passes are read together in Block 9 as the dispersion of one cell, so a
+# step that drifts between them -- a `verify` dropped, a preflight skipped --
+# is a difference in how the passes were measured arriving inside the statistic
+# that exists to measure run-to-run noise. A block whose config has not been
+# written still refuses: the case below only names the ones that exist.
+#
+# `verify` runs here as well as in Block 0, and it is the one check worth
+# repeating per benchmark block. Blocks are days apart, `prepare` skips a tag
+# that already exists, and an FRR image rebuilt with --enable-gcov in between
+# would benchmark an instrumented binary against everyone else's optimized one
+# -- a distortion that lands in exactly the CPU and memory columns these blocks
+# publish, with nothing looking wrong. Five of the 14 configurations are FRR.
+# It costs about twenty seconds against a block of roughly ninety minutes, and
+# it is fatal for the reason it is fatal in Block 0: a campaign whose
+# provenance is wrong is a campaign of unattributable rows.
+run_synthetic_repetition() {
+  local synth_config="$1"
+  local rendered="$RENDERED_CONFIG_DIR/$BLOCK_KEY.yaml"
+
+  campaign_render_config "$BLOCK_KEY" "$synth_config" "$rendered"
+  capture_metadata "$rendered"
+
+  scripts/preflight_2026_suite.sh --workdir "$WORKDIR" --run-root "$RUN_ROOT" \
+    --config "$rendered" \
+    | tee "$METADATA_DIR/preflight-$BLOCK_KEY.txt"
+
+  echo "Verifying built images"
+  "${BGPERF_CMD[@]}" verify > "$METADATA_DIR/verify-$BLOCK_KEY.txt" 2>&1 || {
+    echo "verify failed; see $METADATA_DIR/verify-$BLOCK_KEY.txt" >&2
+    tail -20 "$METADATA_DIR/verify-$BLOCK_KEY.txt" >&2
+    exit 1
+  }
+  tail -5 "$METADATA_DIR/verify-$BLOCK_KEY.txt"
+
+  retract_forced_markers
+  run_batch "$BLOCK_KEY" "$BLOCK_DIR/synthetic"
+
+  # No --expect-limiting: nothing here is a controlled case, so which component
+  # limits a given target at this size is the measurement rather than the
+  # setup. What the checker still requires is that each row *has* a verdict,
+  # assigned or explicitly left unresolved.
+  check_evidence "$BLOCK_DIR/synthetic" 14 "synthetic"
+}
+
 case "$BLOCK_INDEX" in
   0)
     SYNTH_CONFIG="benchmarks/2026-timing-smoke-synth.yaml"
@@ -899,47 +954,10 @@ case "$BLOCK_INDEX" in
       --expect-limiting tester --expect-egress-mbit 4
     ;;
   2)
-    # Repetition 1 of the high-load synthetic workload: the plan's 14 target
-    # configurations at 50 peers x 100,000 prefixes per peer, one pass, in the
-    # order seed 20262 fixes. Blocks 3 and 4 are the other two repetitions and
-    # differ only in their seed; the three passes are read together in Block 9.
-    #
-    # `verify` runs here as well as in Block 0, and it is the one check worth
-    # repeating per benchmark block. Blocks are days apart, `prepare` skips a
-    # tag that already exists, and an FRR image rebuilt with --enable-gcov in
-    # between would benchmark an instrumented binary against everyone else's
-    # optimized one -- a distortion that lands in exactly the CPU and memory
-    # columns this block publishes, with nothing looking wrong. Five of the 14
-    # configurations are FRR. It costs about twenty seconds against a block of
-    # roughly ninety minutes, and it is fatal for the reason it is fatal in
-    # Block 0: a campaign whose provenance is wrong is a campaign of
-    # unattributable rows.
-    SYNTH_CONFIG="benchmarks/2026-timing-synth-rep1.yaml"
-    campaign_render_config "block2-synthetic-rep1" "$SYNTH_CONFIG" \
-      "$RENDERED_CONFIG_DIR/block2-synthetic-rep1.yaml"
-    capture_metadata "$RENDERED_CONFIG_DIR/block2-synthetic-rep1.yaml"
-
-    scripts/preflight_2026_suite.sh --workdir "$WORKDIR" --run-root "$RUN_ROOT" \
-      --config "$RENDERED_CONFIG_DIR/block2-synthetic-rep1.yaml" \
-      | tee "$METADATA_DIR/preflight-$BLOCK_KEY.txt"
-
-    echo "Verifying built images"
-    "${BGPERF_CMD[@]}" verify > "$METADATA_DIR/verify-$BLOCK_KEY.txt" 2>&1 || {
-      echo "verify failed; see $METADATA_DIR/verify-$BLOCK_KEY.txt" >&2
-      tail -20 "$METADATA_DIR/verify-$BLOCK_KEY.txt" >&2
-      exit 1
-    }
-    tail -5 "$METADATA_DIR/verify-$BLOCK_KEY.txt"
-
-    retract_forced_markers
-    run_batch "block2-synthetic-rep1" "$BLOCK_DIR/synthetic"
-
-    # 14 runs, every one of them qualified. No --expect-limiting: nothing here
-    # is a controlled case, so which component limits a given target at this
-    # size is the measurement rather than the setup. What the checker still
-    # requires is that each row *has* a verdict, assigned or explicitly left
-    # unresolved.
-    check_evidence "$BLOCK_DIR/synthetic" 14 "synthetic"
+    run_synthetic_repetition "benchmarks/2026-timing-synth-rep1.yaml"
+    ;;
+  3)
+    run_synthetic_repetition "benchmarks/2026-timing-synth-rep2.yaml"
     ;;
   *)
     cat >&2 <<MSG

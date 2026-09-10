@@ -387,101 +387,120 @@ rather than of this harness: a generator that is slow and a generator
 back-pressured by a slow target produce the same evidence, and `tester_limited`
 names `tester` for both (`bgperf2-bgg`).
 
-### Block 2: high-load synthetic repetition 1 of 3 -- **ran 2026-09-10, not accepted**
+### Block 2: high-load synthetic repetition 1 of 3 -- **accepted 2026-09-10**
 
-Ran at bgperf2 `4b43ebf`, work directory `/data/bgperf-work`, from
-`benchmarks/2026-timing-synth-rep1.yaml`: 14 target configurations at 50 peers
-x 100,000 prefixes per peer (5,000,000 distinct prefixes), BIRD generator, no
-policy, one cell at a time, `order: shuffle` seed 20262. Every configured run
-produced a row. **12 of 14 qualified**; the block did not meet its exit
-criterion and is recorded here as run rather than accepted.
+Ran from `benchmarks/2026-timing-synth-rep1.yaml`: 14 target configurations at
+50 peers x 100,000 prefixes per peer (5,000,000 distinct prefixes), BIRD
+generator, no policy, one cell at a time, `order: shuffle` seed 20262. Work
+directory `/data/bgperf-work`. **All 14 rows qualified.**
 
-**It took two attempts on two hosts.** The first measured ten rows on
-`ip-172-31-21-79` and was ended by an EC2 spot reclaim between cells; the
-replacement instance `ip-172-31-18-191` measured the remaining four. Both are
-in `metadata/manifest.json` -- the second under `blocks.block2-synthetic-rep1`,
-the first under its `previous_entries`, with the ten run names it accounts for.
-That merge did not exist when the reclaim happened and the first host's record
-was overwritten by the resume; it was rebuilt from a copy taken before the
-resume and is marked `reconstructed`. From the next block onward
-`campaign_merge_block_facts.py` writes it.
+**It took three attempts on two hosts**, which is the first thing to know about
+it. The first measured eight of the rows on `ip-172-31-21-79` and was ended by
+an EC2 spot reclaim between cells. The replacement instance
+`ip-172-31-18-191` resumed and measured four more, at which point two rows --
+`bird 2.19.2` and `bird default` -- were rejected on `tester_health`; a third
+attempt re-measured exactly those two and both came back clean. Every attempt
+is in `metadata/manifest.json`: the last under
+`blocks.block2-synthetic-rep1`, the earlier two under its `previous_entries`
+with the rows each measured. The first two were measured at bgperf2 `4b43ebf`
+and the last two rows at `020d7f5`, which changed the campaign scripts and the
+plan documents and **no measurement code** -- the daemon under test, the
+generator, the monitor and every published interval are identical across the
+two revisions, and neither `check_timing_evidence.py` nor `summary.py` requires
+the rows to agree on a revision.
 
-| run | host | `elapsed (s)` | `max cpu %` | `max mem (GB)` | `min free mem (GB)` | verdict |
-|---|---|---|---|---|---|---|
-| bird 2.19.2 | 1st | 91 | 102 | 0.561 | 49.9 | **rejected** -- 1 tester error |
-| bird 3.3.2 (default threads) | 2nd | 117 | 102 | 1.087 | 49.0 | qualified |
-| bird 3.3.2 (4 threads) | 1st | 108 | 200 | 1.110 | 48.9 | qualified |
-| bird default (2.19.0-master) | 1st | 91 | 101 | 0.558 | 50.0 | **rejected** -- 2 tester errors |
-| frr_c 8.5 | 1st | 91 | 112 | 8.254 | 42.5 | qualified |
-| frr_c 9.1 | 1st | 94 | 112 | 8.199 | 42.5 | qualified |
-| frr_c 10.0 | 1st | 90 | 111 | 7.655 | 43.6 | qualified |
-| frr_c 10.7 | 1st | 84 | 112 | 6.284 | 44.3 | qualified |
-| frr default | 2nd | 84 | 113 | 5.733 | 45.1 | qualified |
-| openbgp 8.8 | 1st | 620 | 110 | 37.437 | 12.4 | qualified |
-| openbgp 9.2 | 2nd | 733 | 127 | 18.533 | 33.2 | qualified |
-| openbgp default (9.2) | 1st | 724 | 126 | 18.688 | 33.1 | qualified |
-| rustybgp 2026-02 | 2nd | 65 | 1074 | 12.252 | 38.3 | qualified |
-| rustybgp default | 1st | 154 | 1161 | 16.861 | 37.9 | qualified |
+| run | host | `elapsed (s)` | `max cpu %` | `max mem (GB)` | `min free mem (GB)` |
+|---|---|---|---|---|---|
+| bird 2.19.2 | 2nd | 90 | 101 | 0.559 | 49.4 |
+| bird 3.3.2 (default threads) | 2nd | 117 | 102 | 1.087 | 49.0 |
+| bird 3.3.2 (4 threads) | 1st | 108 | 200 | 1.110 | 48.9 |
+| bird default (2.19.0-master) | 2nd | 92 | 101 | 0.559 | 49.8 |
+| frr_c 8.5 | 1st | 91 | 112 | 8.254 | 42.5 |
+| frr_c 9.1 | 1st | 94 | 112 | 8.199 | 42.5 |
+| frr_c 10.0 | 1st | 90 | 111 | 7.655 | 43.6 |
+| frr_c 10.7 | 1st | 84 | 112 | 6.284 | 44.3 |
+| frr default | 2nd | 84 | 113 | 5.733 | 45.1 |
+| openbgp 8.8 | 1st | 620 | 110 | 37.437 | 12.4 |
+| openbgp 9.2 | 2nd | 733 | 127 | 18.533 | 33.2 |
+| openbgp default (9.2) | 1st | 724 | 126 | 18.688 | 33.1 |
+| rustybgp 2026-02 | 2nd | 65 | 1074 | 12.252 | 38.3 |
+| rustybgp default | 1st | 154 | 1161 | 16.861 | 37.9 |
 
 Every row converged, received 5,000,000 against a required 4,950,000, carried
 three-role plus tool provenance, and produced an ordered and complete event
-stream with its generator complete. Every row's verdict is `unresolved` via
-`injection_boundary_unresolved`, which is the expected shape here and not a
-defect: the BIRD 2.19 generator's `Export updates accepted` is queue-side and
-saturates before the first poll, so no run in this block can be attributed to a
-component. That is a property of the generator, recorded in Phase 5A and
-reached again from the campaign side; wire-side evidence needs a BIRD 3
+stream with its generator complete and no tester error or timeout. Every row's
+verdict is `unresolved` via `injection_boundary_unresolved`, which is the
+expected shape here and not a defect: the BIRD 2.19 generator's `Export updates
+accepted` is queue-side and saturates before the first poll, so **no run in
+this block can be attributed to a component**. That is a property of the
+generator, recorded in Phase 5A and reached again from the campaign side; it
+applies to Blocks 3 and 4 as well, and wire-side evidence would need a BIRD 3
 generator, which the CLI cannot select today.
 
-**What rejected the two rows, and what cannot be said about it.**
+**What the two hosts cost, measured rather than argued.** The re-measurement
+turned the host split into a controlled comparison, because it re-ran two
+configurations that the *first* host had already measured:
+
+| run | 1st host | 2nd host | difference |
+|---|---|---|---|
+| `bird 2.19.2` | 91s / 0.561 GB | 90s / 0.559 GB | 1.1% / 0.4% |
+| `bird default` | 91s / 0.558 GB | 92s / 0.559 GB | 1.1% / 0.2% |
+
+Same image, same configuration, same workload, different instance of the same
+class. Independently, `openbgp default` and `openbgp 9.2` -- the same upstream
+release through two image tags, which the shuffle happened to put one on each
+host -- agree to 1.2% on `elapsed (s)` and 0.8% on `max mem (GB)`. Two
+different constructions, both landing near 1%, which is well inside what the
+variance rule is built to separate and is the campaign's own evidence for the
+host-class rule in Fixed Campaign Identity. It is not a substitute for reading
+Block 9's three passes.
+
+**What rejected the two rows, and why re-measuring was the right answer.**
 `tester_health` requires no tester error or timeout, and `find_errors()` counts
 BIRD `<RMT>` log lines that are neither `NEXT_HOP` nor `Invalid route ...
 withdrawn` -- so one and two such lines, out of 5,000,000 routes across 50
-sessions, decided both rows. The lines themselves do not survive: `bench()`
+sessions, decided both rows. The lines themselves did not survive: `bench()`
 wipes the work directory at the start of every cell, eleven cells ran after
-them, and the host was reclaimed. The review therefore has a count and no text,
-which is an exclusion with a number rather than the exclusion with evidence the
-Acceptance Rules ask for (`bgperf2-7ou`). Both rejected rows are BIRD
-2.19-family targets and both come from the first attempt; a scan of every CSV
-under `results/` finds only one other non-zero `tester errors` value in the
-project's history, so this is sporadic rather than a property of that target.
+them, and the host was reclaimed. Excluding those rows would therefore have
+been an exclusion with a number rather than the exclusion with evidence the
+Acceptance Rules ask for (`bgperf2-7ou`), and re-measuring two cells cost ten
+minutes against the hour and a half a `--force` of the whole block would have
+spent to discard twelve rows that had already qualified.
 
-**A reproduction was attempted and did not reproduce it.** One `bird 2.19.2`
-run at the same 50 x 100,000, outside the campaign tree and with its tester
-logs kept, converged in 95s against the block's 91s with **0 tester errors**
-and 0 timeouts, out of 247 million `<RMT>` lines -- all of them the
-`Invalid route ... withdrawn` that `find_errors()` already excludes, which is
-the target re-advertising to generators running `import none`. That is
-consistent with sporadic and is not evidence that the two rejected rows were
-benign: one negative run cannot be, and the lines that were counted are gone.
-It does bound the cost of the tail -- those logs were **23 GB** for one run,
-against the ~5 GB this repository records for that shape, so a block's work
-directory needs headroom nearer 25 GB per cell than 5.
+Two supporting observations. A separate `bird 2.19.2` run at the same size,
+outside the campaign tree with its tester logs kept, also reported **0** tester
+errors out of 247 million `<RMT>` lines -- all of them the excluded
+`Invalid route ... withdrawn`, which is the target re-advertising to generators
+running `import none`. And a scan of every CSV under `results/` finds one other
+non-zero `tester errors` value in the project's history. Three clean runs of
+these configurations do not prove the two counted lines were benign; what they
+establish is that the condition is sporadic, and the rows in this block were
+measured rather than excused.
 
-**An accidental cross-host control, and it is small.** `openbgp default` and
-`openbgp 9.2` are the same upstream release reached through two image tags --
-`bgperf/openbgp:latest` and `:9.2`, different image IDs, both reporting 9.2 --
-and the shuffle put one on each host. They agree to **1.2% on `elapsed (s)`**
-(724 against 733), 0.8% on `max mem (GB)` (18.688 against 18.533) and 0.5% on
-`min free mem (GB)`. That bounds host *plus* image build *plus* shuffled
-position together, not the host alone, so it is an upper bound and not a
-measurement of the replacement's effect -- but it is the only evidence this
-campaign has on the question, and at ~1% it is well inside what the variance
-rule is built to separate. It is not a substitute for reading Block 9's three
-passes.
+**Re-measuring two cells is not a supported operation**, and what it took is
+recorded because the next person to want it will find the same wall.
+`--force` is the only re-measurement the runner offers and it discards the
+whole block; `--resume` skips every cell the progress file holds, failed ones
+included. The two cells were re-run by deleting their entries from
+`<test>.progress.json` and the block's `RAN` marker, then re-entering through
+`next`, which resumed onto the remaining twelve and ran exactly those two
+through the normal harness -- preflight, `verify`, metadata capture, evidence
+check, new marker. The one thing the harness could not fix afterwards is
+attribution: the first host's carried entry still named the two rows it had
+measured, and that was corrected by hand and marked `reconstructed`.
 
 Three things the block cost, stated rather than left in the artifacts:
 
-- **Two rows carry foreign CPU an order of magnitude above the block's floor,
+- **One row carries foreign CPU an order of magnitude above the block's floor,
   and the cause was the session reviewing it.** `bird 3.3.2 (default threads)`
-  and `openbgp 9.2` report `max foreign cpu %` 9 against 1-4 everywhere else;
-  both ran while this session was editing documents and running `bd` on the
-  same host. Nine percent is 0.09 cores, an order of magnitude under the
-  threshold that would withhold a verdict -- Block 1 recorded the same shape
-  for its calibration watcher -- and `openbgp 9.2` is one half of the cross-host
-  pair above, which agreed to 1.2% while carrying it. It is still contention the
+  reports `max foreign cpu %` 9 against 1-4 elsewhere, from this session
+  editing documents and running `bd` on the same host during that cell. Nine
+  percent is 0.09 cores, an order of magnitude under the threshold that would
+  withhold a verdict -- Block 1 recorded the same shape for its calibration
+  watcher -- and the row qualified on every check. It is still contention the
   benchmark manufactured, and the rule it produces is that a block's review
-  waits for the block.
+  waits for the block. The two re-measured rows were run with the host left
+  alone and came back at 4% and 2%.
 - **The rustybgp target lost one `gobgp neighbor -j` read** and the run says so.
   The evidence is in that run's artifact at
   `instrument.target_neighbor_sampler` (`failed_reads` 1, with the gRPC error
@@ -494,12 +513,9 @@ Three things the block cost, stated rather than left in the artifacts:
 - **OpenBGPD 8.8 approached the memory guardrail and cleared it**, as the
   config predicted: 37.4 GB peak, `min free mem` 12.4 GB, which is 20.2% of the
   61.44 GB host against a 20% floor. It ran alone, like every cell. Nothing
-  swapped.
-
-The block's remaining decision is the operator's and is not taken here: accept
-with `accept 2 --with-exclusions` naming the two rows, or re-measure the block
-with `--force`, which would also give it one host and clean contention at the
-cost of discarding twelve rows that qualified.
+  swapped. Its own tester logs are the other pressure: one run of this shape
+  writes ~23 GB into the work directory, against the ~5 GB `CLAUDE.md` records,
+  so a block needs headroom nearer 25 GB per cell.
 
 ### Blocks 3-11
 

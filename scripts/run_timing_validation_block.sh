@@ -1228,6 +1228,9 @@ case "$BLOCK_INDEX" in
   6)
     run_mrt_repetition "benchmarks/2026-timing-mrt-rep2.yaml"
     ;;
+  7)
+    run_mrt_repetition "benchmarks/2026-timing-mrt-rep3.yaml"
+    ;;
   *)
     cat >&2 <<MSG
 block-$BLOCK_INDEX (${BLOCK_TITLES[$BLOCK_INDEX]}) is not built yet.

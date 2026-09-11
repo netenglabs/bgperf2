@@ -161,6 +161,23 @@ def test_the_stale_witness_bound_is_the_trackers_carry_bound():
         * float(_bgperf2.MONITOR_POLL_INTERVAL_S))
 
 
+def test_the_delivery_age_bound_is_the_trackers_carry_bound():
+    '''`delivery_metrics()` refuses a plateau any of whose readings was
+    carried rather than taken, and the span it allows is the one
+    `ConvergenceTracker` refuses to carry a reading past. Reusing the measured
+    constant is what keeps it from being a staleness bound invented to make a
+    particular run resolve -- and `measurements.py` stays free of project
+    imports, like `summary.py` and the checker, so the two are pinned against
+    each other here.'''
+    import bgperf2 as _bgperf2
+    import convergence
+    import measurements
+
+    assert measurements.DELIVERY_WITNESS_MAX_AGE_S == (
+        convergence.WITNESS_CARRY_SAMPLES
+        * float(_bgperf2.MONITOR_POLL_INTERVAL_S))
+
+
 def test_the_checkers_synthetic_generator_list_matches_bgperf2s():
     '''A generator bgperf2 builds the prefix lists for has a `required` that is
     a statement of fact; an MRT injector's is a guess. A third synthetic

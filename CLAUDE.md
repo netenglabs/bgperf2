@@ -838,6 +838,102 @@ removed, for a reason worth keeping:
   though it had been observed -- with `event_coverage` accepting it in place of
   an event that legitimately cannot fire.
 
+**That measurement is `target_table.delivery`** (`measurements.delivery_metrics()`),
+and it is deliberately *not* a replacement for `convergence_s`. It is the
+earliest reading of the terminal export plateau at or after which the monitor
+holds it: the target stopped exporting at `plateau_start_s`, and the far end had
+it at `complete_s`. Because the series is complete, "and it never changed again"
+is checked rather than assumed -- which is the whole difference from the two
+backed-out rules, both of which decided from the samples in hand.
+
+- **It answers a different question from `convergence_s`, and the recorded runs
+  say so loudly.** The MRT check-point is `0.99 * -p`, the per-injector cap,
+  which is a threshold part-way up the climb: on one recorded 2-injector 500k
+  run the monitor crossed it at 16.85s with 500,171 prefixes visible while the
+  target went on exporting to 501,471 until 36.36s. On a *synthetic* run the
+  check-point is the whole table and the two land on the same poll. Across the
+  34 recorded runs that resolve, `complete_s` lands at or after
+  `monitor_required_reached` and at or before `convergence_confirmed` every
+  time -- **at** poll resolution, not strictly between: in the 5 same-poll runs
+  the two differ by under 500ns in either direction, which is the sample
+  series' 6-place rounding against the event's raw timestamp. Compare them as
+  an ordering at poll resolution; a strict inequality reads the rounding.
+- **Derived for every run with an export gauge**, not only the daemons that lose
+  the event, so the column is comparable across daemons rather than appearing
+  only where there is trouble.
+- **The final reading is the table, not the peak.** 11 of 39 recorded runs end
+  1.35%-1.55% below their peak and every one settles on exactly 1,056,779 --
+  what BIRD and OpenBGPD both converge to on this RIB -- so the peak is a
+  convergence overshoot. Taking it would wait for the monitor to reach a count
+  the target does not hold and withhold every MRT run. A target that delivered
+  and then really lost routes is dated to the loss, and is failed by the
+  tracker's drop rule and rejected by `check_timing_evidence.py` before anyone
+  reads the number.
+- **Whether the table was the right *size* is not judged here.** The function
+  gets samples and no denominator, so a target stalled at a fraction of the RIB
+  has a terminal plateau like any other; that is the checker's call, which
+  knows the check-point. The zero case is refused for a different reason -- the
+  rule degenerates, since `0 >= 0` makes the monitor trivially level -- and
+  that is the line between the two.
+- **Ten refusals, each because the alternative publishes a number that looks
+  measured and is not**: no gauge or no samples; a final count of zero; a
+  truncated series; a plateau of one reading (the run stopped, which is not the
+  target finishing); a withheld poll inside the plateau; a *carried* reading in
+  the plateau; a plateau that cannot be dated at all; a stale reading past the
+  carry bound; a monitor that never drew level; and samples that cannot be
+  dated at all. Five of those ten were added by review of the first version,
+  each having been reproduced against the shipped function, which is why the
+  list is worth reading rather than summarising:
+  - **A final count of zero is not a delivery.** `bench()` writes a FAILED
+    run's artifact with its samples exactly like a converged one's, and an
+    all-zero series satisfies every other rule here -- `0 >= 0` draws the
+    monitor level on the first sample -- so the tracker's "nothing arriving
+    within 15s" failure published a completed delivery at 0.1s. The same guard
+    stops an export count that *collapses* to zero from dating the delivery to
+    the collapse. Churn's "a collapsed count is not a withdrawal" and the
+    tracker's "a monitor count of zero never attests", on a third side.
+  - **A single-reading plateau is checked against the read timestamps, not the
+    ages**, because the age bound does not implement the rule it states: a dead
+    poll thread is re-paired with every later monitor sample, so its ages are
+    1s..5s and all *within* bound. It requires **two distinct** reads and not
+    all-distinct ones: a repeated read is ordinary whenever the target's poll
+    is the slower loop (11 of 39 recorded runs contain one), which is likeliest
+    on the very large-table runs this measurement is for -- so refusing on any
+    duplicate would withhold the answer from the rows that need it while naming
+    a dead sampler that was alive. A first version got this wrong on evidence
+    that only covered the other sign.
+  - **A withheld sum is not a carried one** and the age rule cannot see it:
+    the read stays fresh while the sums are None, so a hole in the plateau
+    left "and it never changed again" unsupported across it. `series_truncated`
+    one step inward. No recorded run reaches it (0 of 1303 post-first-reading
+    samples), so it closes a blind spot rather than explaining a run.
+  - **Undated and stale are named apart**, on `findings.py`'s `inconclusive`
+    vs `unresolved` rule: the five recorded withholdings are four artifacts
+    written before the fields existed (`gauge_undated`) and one frozen sampler
+    (`gauge_carried_across_plateau`), a split the plan used to have to make in
+    prose because the reason string could not.
+  - **The draw-level scan reads every sample from the plateau's start**, not
+    only those carrying a gauge reading: `monitor_accepted` is recorded on
+    every poll, so restricting it made a crossing during a withheld poll
+    invisible and returned `monitor_never_drawn_level` for a session the
+    document's own `monitor_final` disproved. It asks whether the monitor
+    *ever* drew level, not whether it ended there -- a monitor that draws level
+    and then declines has taken delivery, and those declines are ordinary here
+    (the tracker's fourth rule exists for them) -- and the comparison is exact
+    rather than tolerant.
+  - **A resolved section always has an answer in it.** Samples with no
+    `monotonic_s` fell through to a null reason beside a null `complete_s`,
+    contradicting the documented contract and leaving the branch unnameable --
+    the one outcome `_delivery()` exists to prevent. It is `no_sample_times`.
+- **The staleness bound is the tracker's own carry bound**
+  (`WITNESS_CARRY_SAMPLES` polls), pinned in `tests/test_stats_contract.py`
+  rather than imported, since `measurements.py` stays free of project imports.
+  A bound invented here would be one fitted to whichever run was in front of it.
+- **Nothing reads it yet.** It ships one change set before the rule that
+  consumes it, deliberately -- the same reason `target_table` itself did. A rule
+  landed beside the first evidence for it is fitted to that evidence, which is
+  how all three convergence rules were broken.
+
 **`check_timing_evidence.py` judges an MRT row on consistency plus a size
 floor**, never on the absolute alone -- that part stayed. Consistency is the
 monitor's count against the target's own export count; but those are the two

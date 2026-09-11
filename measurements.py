@@ -1847,6 +1847,275 @@ TARGET_TABLE_SERIES = ('monitor_accepted', 'best_paths', 'imported_paths',
 TARGET_TABLE_RESAMPLED = ('best_paths', 'imported_paths', 'exported_to_monitor')
 
 
+# The oldest a witness reading may be and still attest to the sample it is
+# paired with. The same span `ConvergenceTracker` refuses to carry a reading
+# past (`WITNESS_CARRY_SAMPLES` monitor polls at `MONITOR_POLL_INTERVAL_S`),
+# pinned against both by `tests/test_stats_contract.py` rather than imported,
+# because this module stays free of project imports.
+DELIVERY_WITNESS_MAX_AGE_S = 5.0
+
+DELIVERY_RULE = ('the earliest reading of the terminal export plateau at or '
+                 'after which the monitor holds it')
+
+_DELIVERY_FIELDS = ('complete_s', 'resolution_s', 'plateau_start_s',
+                    'plateau_samples', 'monitor_lag_s', 'exported_final',
+                    'monitor_final')
+
+
+def _sample_time(sample):
+    return sample.get('monotonic_s')
+
+
+def _delivery(reason=None, **values):
+    '''Every field present on every path, absent ones null.
+
+    A section whose keys come and go cannot be read by a consumer without
+    knowing which branch produced it, and the branch is exactly what a reader
+    is trying to find out. `unresolved_reason` says which one it was.
+    '''
+    section = {
+        'derived': True,
+        'derived_from': 'target_table.samples',
+        'rule': DELIVERY_RULE,
+        'unresolved_reason': reason,
+    }
+    section.update({field: values.get(field) for field in _DELIVERY_FIELDS})
+    return section
+
+
+def delivery_metrics(samples):
+    '''When the target finished delivering its table, decided in retrospect.
+
+    This is **not** `convergence_s` and must never be published as it.
+    `convergence_s` is the monitor crossing the run's check-point, which for
+    MRT playback is `0.99 * -p` -- a threshold part-way up the climb, not the
+    end of it. Measured on one recorded 2-injector 500k run: the check-point
+    was crossed at 16.85s with 500,171 prefixes visible, and the target went on
+    exporting until 36.36s and 501,471. The two answer different questions and
+    a row carrying both should show them differing.
+
+    What it is for is the daemon that never crosses the check-point at all.
+    `required` for MRT is the per-injector cap and the peers' union is larger
+    and unknowable in advance, so a target exporting a smaller share of one RIB
+    -- every FRR release, at ~961,000 against a 1,039,500 check-point -- emits
+    no `monitor_required_reached`, and with it loses `convergence_s`,
+    `assurance_s` and `post_injection_tail_s`. It is derived for *every* run
+    with an export gauge, not only those rows, so the column is comparable
+    across daemons rather than being a substitute that only the daemons in
+    trouble carry.
+
+    **Retrospective, which is the whole point.** Two online rules for this were
+    built, verified and backed out (see the campaign plan's Block 5 record):
+    both decided from the samples in hand, so a plateau that later resumed
+    climbing had already been stamped, permanently and at a fraction of the
+    table. Here the series is complete, so "and it never changed again" is
+    checkable rather than assumed -- and when it is not checkable the answer is
+    withheld with a reason rather than estimated.
+
+    Ten things are refused, each because the alternative publishes a number
+    that looks like a measurement and is not:
+
+    - **No export gauge, or no samples.** Most daemons publish none; they get
+      `no_export_gauge` and nothing else changes about their document.
+    - **A final count of zero.** Nothing was delivered, so there is no
+      delivery to date. A failed run's artifact carries its samples exactly
+      like a converged one's, and an all-zero series otherwise satisfies every
+      rule here -- the monitor is level at the first sample because `0 >= 0`.
+      Churn's "a collapsed count is not a withdrawal" and the tracker's "a
+      monitor count of zero never attests", on a third side.
+    - **A truncated series.** The witness stopped reporting while the monitor
+      polled on, so the last reading describes the middle of the run and the
+      plateau after it is an absence of evidence.
+    - **A plateau of one reading.** The count was still changing at the last
+      sample there is. Nothing says the target finished; it says the run
+      stopped. A minimum length beyond "more than one" is deliberately not
+      imposed -- there is no measured number to set it to -- so
+      `plateau_samples` is published for the reader to weigh.
+    - **A withheld reading inside the plateau.** A poll whose sums were
+      withheld carries no reading and a fresh timestamp, so the staleness rule
+      cannot see it, and the flatness across the hole is an absence of
+      evidence. `series_truncated`'s rule one step inward.
+    - **A plateau resting on a single reading.** A target poll thread that
+      dies leaves `bench()` appending its last reading to every later monitor
+      sample, which is a perfect plateau made of one observation. The read
+      timestamps say so and the age bound does not: a frozen sampler's ages
+      are 1s..5s and all within bound. Two *distinct* reads are required, not
+      all-distinct ones -- a repeated read is ordinary whenever the target's
+      poll is the slower loop, which is likeliest on the large tables this
+      measurement is for.
+    - **A plateau whose readings cannot be dated**, which is every artifact
+      written before those fields existed. Named apart from staleness: one was
+      never asked, the other answered.
+    - **A stale reading anywhere in the plateau**, past the carry bound.
+    - **A monitor that never drew level.** Delivery is the far end holding what
+      the target sent, so the count has to arrive. The comparison is exact
+      rather than tolerant, and it asks whether the monitor *ever* reached the
+      count, not whether it ended there: a monitor that draws level and then
+      declines has still taken delivery, and such declines are ordinary on
+      these runs -- `ConvergenceTracker`'s fourth rule exists because real
+      10 x 1.05M MRT runs decline 1.18%-1.76% past their peak without losing a
+      route. Reading it as an end-state test would withhold the measurement
+      from exactly those runs. `monitor_final` is published so a later decline
+      is visible rather than absorbed.
+    - **Samples that cannot be dated at all.** `no_sample_times`, rather than
+      a resolved section whose every interval is null -- the contract is that
+      a null `complete_s` always has a reason beside it.
+
+    `monitor_lag_s` is the gap between the target finishing and the monitor
+    holding it, which is the one part of the tail this series can see on its
+    own.
+
+    **`final` is the last reading and deliberately not the series peak**, so a
+    run whose export count settles *below* its peak is dated to where it
+    settled. That shape is the normal one here rather than route loss: 11 of
+    the 39 recorded runs end 1.35%-1.55% under their peak, and every one of
+    them settles on exactly 1,056,779 -- the same count BIRD and OpenBGPD
+    converge to on this RIB -- so the peak is a transient overshoot during
+    convergence and the last reading is the true table. Taking the peak would
+    wait for the monitor to draw level with a count the target does not hold,
+    and withhold the answer for every MRT run there is. The cost is that a
+    target which really did deliver and then *lose* routes is dated to the
+    loss; that run is failed by `ConvergenceTracker`'s drop rule and rejected
+    by `check_timing_evidence.py` before the number is read, and the decline
+    itself is published one key over as `series.exported_to_monitor
+    .decline_from_peak` rather than hidden.
+
+    **What is not judged here is whether the table was the right size.** This
+    function is handed samples and nothing else, so it has no denominator: a
+    target that stalls at a fraction of the RIB and holds there has a terminal
+    plateau like any other, and saying so is `check_timing_evidence.py`'s job,
+    which knows the check-point and what the generators offered. The zero case
+    above is refused not because the run was bad but because the rule itself
+    degenerates -- `0 >= 0` makes the monitor trivially level -- which is a
+    different reason and the line between the two.
+    '''
+    samples = [s for s in (samples or [])]
+    if not samples:
+        return _delivery('no_samples')
+    readings = [(i, s) for i, s in enumerate(samples)
+                if s.get('exported_to_monitor') is not None]
+    if not readings:
+        return _delivery('no_export_gauge')
+
+    last_index, last_reading = readings[-1]
+    final = last_reading['exported_to_monitor']
+    monitor_final = samples[-1].get('monitor_accepted')
+    known = {'exported_final': final, 'monitor_final': monitor_final}
+
+    # A count of zero is not a delivery, and this is the third side of a rule
+    # this project already holds on two others: churn's "a collapsed count is
+    # not a withdrawal", and `ConvergenceTracker`'s "a monitor count of zero
+    # never attests". Without it the cheapest series there is resolves --
+    # `0 >= 0` draws the monitor level on the first sample, every reading is
+    # fresh, and the plateau is the whole run -- so the tracker's "nothing
+    # arriving at all within 15s" failure, whose artifact `bench()` writes
+    # with its samples exactly like a converged one's, would publish a
+    # completed delivery at 0.1s. The same guard covers a *collapse*: an
+    # export count that falls to 0 at the end (the monitor session dropped)
+    # would otherwise date the delivery to the collapse.
+    if not final:
+        return _delivery('nothing_delivered', **known)
+
+    end_s = _sample_time(samples[-1])
+    last_read_s = _sample_time(last_reading)
+    if end_s is not None and last_read_s is not None \
+            and end_s - last_read_s > DELIVERY_WITNESS_MAX_AGE_S:
+        return _delivery('series_truncated', **known)
+
+    position = len(readings) - 1
+    while position > 0 \
+            and readings[position - 1][1]['exported_to_monitor'] == final:
+        position -= 1
+    plateau = readings[position:]
+    known['plateau_samples'] = len(plateau)
+    known['plateau_start_s'] = _sample_time(plateau[0][1])
+    if len(plateau) < 2:
+        return _delivery('still_changing', **known)
+
+    # A withheld sum is not a carried one, and only the carried kind is caught
+    # below. `table_witness()` returns None for a peering that is not
+    # reporting while the read itself stays perfectly fresh, so a poll missing
+    # from the middle of the plateau leaves `witness_age_s` blameless while
+    # "and it never changed again" is unsupported across the hole -- and a
+    # peering dropping *after* convergence is precisely when that doubt
+    # matters, because a partial read looks exactly like a table that shrank.
+    # The same rule as `series_truncated`, one step inward, and it needs no
+    # invented number: it is an absence of evidence, not a threshold.
+    # Deliberately not fitted to an observed failure -- no recorded run on
+    # this host reaches it (0 of 1303 post-first-reading samples withhold an
+    # export sum), so this closes a blind spot rather than explaining a run.
+    if plateau[-1][0] - plateau[0][0] + 1 != len(plateau):
+        return _delivery('gauge_withheld_across_plateau', **known)
+
+    # Absent evidence and bad evidence get different names, on the rule
+    # `findings.py` follows for `inconclusive` against `unresolved` and
+    # `summary.py` for `unreadable` against `failed`. An artifact written
+    # before these fields existed can attest to nothing; one whose sampler
+    # froze was asked and answered staleness.
+    reads = [s.get('witness_monotonic_s') for _, s in plateau]
+    ages = [s.get('witness_age_s') for _, s in plateau]
+    if any(r is None for r in reads) or any(a is None for a in ages):
+        return _delivery('gauge_undated', **known)
+    # The plateau has to rest on more than one *observation*, which the read
+    # timestamps say and the age bound does not: `bench()` re-pairs the last
+    # reading with every later monitor sample, so a target poll thread that
+    # died leaves a plateau of `WITNESS_CARRY_SAMPLES` samples whose ages are
+    # 1s..5s and all within bound -- a perfect plateau made of one reading,
+    # which is `still_changing`'s rule in read-space.
+    #
+    # Counted distinctly rather than required to be all-distinct, and the
+    # difference is load-bearing. A duplicate read is *ordinary*: the target's
+    # poll and the monitor's are independent loops, so whenever the target's
+    # CLI read is the slower of the two a reading spans two monitor samples
+    # and is carried twice -- `TARGET_TABLE_RESAMPLED` says so, and 11 of the
+    # 39 recorded runs on this host contain one somewhere in the series. That
+    # is likeliest on exactly the large-table runs this measurement exists
+    # for, so refusing on any duplicate would withhold the answer from the
+    # rows that need it while naming a dead sampler that was alive. Two
+    # distinct reads plus the age bound below is the honest pair: at least two
+    # independent looks, none of them older than the tracker's own carry
+    # bound.
+    if len(set(reads)) < 2:
+        return _delivery('gauge_carried_across_plateau', **known)
+    if max(ages) > DELIVERY_WITNESS_MAX_AGE_S:
+        return _delivery('gauge_stale_across_plateau', **known)
+
+    # Scanned over every sample from the plateau's start, not only the ones
+    # carrying a reading: `monitor_accepted` is recorded on every poll whatever
+    # the gauge did, so restricting this to readings makes a crossing that
+    # happened during a withheld poll invisible and returns
+    # `monitor_never_drawn_level` for a session the document's own
+    # `monitor_final` disproves -- a refusal naming a disagreement that did
+    # not happen, which sends a reader to the MRT consistency check for a
+    # consistent session.
+    start_index = plateau[0][0]
+    for index in range(start_index, len(samples)):
+        accepted = samples[index].get('monitor_accepted')
+        if accepted is not None and accepted >= final:
+            break
+    else:
+        return _delivery('monitor_never_drawn_level', **known)
+
+    sample = samples[index]
+    complete_s = _sample_time(sample)
+    # Bounded by the poll that found it and the one before, on the rule both
+    # poll loops already follow. The first sample is bounded by the clock
+    # origin instead: nothing before the instrument arrived is visible.
+    previous_s = _sample_time(samples[index - 1]) if index else 0.0
+    # A resolved section with no answer in it is the one outcome `_delivery()`
+    # exists to prevent: `complete_s` is documented as null only when
+    # `unresolved_reason` is set, so a null reason beside a null answer leaves
+    # the branch unnameable. Samples carry `monotonic_s` on every path
+    # `bench()` writes, so this is the undated-artifact case one field over.
+    if complete_s is None or previous_s is None \
+            or known['plateau_start_s'] is None:
+        return _delivery('no_sample_times', **known)
+    known['complete_s'] = complete_s
+    known['resolution_s'] = round(complete_s - previous_s, 6)
+    known['monitor_lag_s'] = round(complete_s - known['plateau_start_s'], 6)
+    return _delivery(None, **known)
+
+
 def target_table_section(samples, unmeasured_reason=None, witness_rule=None):
     """The per-poll witness series, and the peak and final value of each.
 
@@ -1912,7 +2181,13 @@ def target_table_section(samples, unmeasured_reason=None, witness_rule=None):
             'decline_from_peak': (round((peak - final) / peak, 6)
                                   if peak else None),
         }
-    section = {'samples': samples, 'series': series}
+    # Derived here rather than beside `monitor_metrics()`, because it is a
+    # reading of *this* series and nothing else, and putting it next to the
+    # monitor's own intervals is the first step towards being mistaken for
+    # one. `delivery_metrics()` says so itself: `derived` is true, the rule is
+    # named, and it carries the samples it was computed from one key over.
+    section = {'samples': samples, 'series': series,
+               'delivery': delivery_metrics(samples)}
     if unmeasured_reason:
         section['unmeasured_reason'] = unmeasured_reason
     if witness_rule:

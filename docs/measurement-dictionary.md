@@ -428,6 +428,54 @@ summarises each of the four.
 | `series[<name>].max_witness_age_s` | seconds or null | The oldest a carried reading got, for the three target-side series. `null` for `monitor_accepted`, which is read on the poll it is recorded with. No threshold is applied — there is no measured number to put on one. |
 | `series[<name>].decline_from_peak` | fraction | `(peak - final) / peak`, rounded to six places. Against the peak rather than the previous sample because that is the comparison `ConvergenceTracker` makes, and the one that decides whether a run is failed. |
 
+### `target_table.delivery` — when the target finished delivering
+
+Derived from `samples` and from nothing else, which is why it is published one
+key over from them rather than beside the monitor's own intervals.
+
+**It is not `convergence_s` and must never be read as it.** `convergence_s` is
+the monitor crossing the run's check-point; for MRT playback that check-point is
+`0.99 * -p`, the per-injector cap, which is a threshold part-way up the climb
+rather than the end of it. On one recorded 2-injector 500,000-prefix run the
+check-point was crossed at 16.85s with 500,171 prefixes visible and the target
+went on exporting to 501,471 until 36.36s. On a *synthetic* run the check-point
+is the whole table and the two land on the same poll. It is derived for every
+run that has an export gauge, not only for the daemons that lose the event, so
+the column is comparable across daemons instead of appearing only where there
+is trouble.
+
+| Field | Unit/type | Definition and interpretation |
+|---|---|---|
+| `derived` / `derived_from` | boolean / string | Always `true` and `target_table.samples`. The one thing this measurement must never be mistaken for is an observation; two online rules for the event it stands in for were built, verified and backed out for stamping a moment that had not happened yet. |
+| `rule` | string | The rule applied, in words: the earliest reading of the terminal export plateau at or after which the monitor holds it. |
+| `complete_s` | seconds or null | When delivery completed, from the bench clock origin. `null` whenever `unresolved_reason` is set. |
+| `resolution_s` | seconds or null | The gap from the previous sample to the deciding one — the poll that bounds it, on the rule both poll loops already follow. The first sample is bounded by the clock origin. |
+| `plateau_start_s` | seconds or null | When the export count last changed. The target stopped exporting here; every later poll is evidence it stayed stopped. |
+| `plateau_samples` | count or null | How many readings the terminal plateau covers. Published rather than thresholded: there is no measured number to set a minimum length to, beyond "more than one". |
+| `monitor_lag_s` | seconds or null | `complete_s - plateau_start_s`: how long after the target finished the monitor took to hold it. The part of the tail this series can see on its own. |
+| `exported_final` / `monitor_final` | prefixes or null | The last export reading, and the monitor's last count. |
+| `unresolved_reason` | string or null | Why no answer, when there is none. |
+
+`unresolved_reason` is one of:
+
+| Reason | When |
+|---|---|
+| `no_samples` | The section carries no samples at all. |
+| `no_export_gauge` | The daemon publishes none — most of them. Nothing else about their document changes. |
+| `nothing_delivered` | The final export count is zero, so there is no delivery to date. A FAILED run's artifact carries its samples exactly like a converged one's, and an all-zero series otherwise satisfies every rule here because `0 >= 0` draws the monitor level at the first sample. The same guard stops a count that *collapses* to zero from dating the delivery to the collapse. |
+| `series_truncated` | The witness stopped reporting while the monitor polled on, so the flatness after it is an absence of evidence. |
+| `still_changing` | The plateau is one reading, which says the run stopped rather than that the target finished. |
+| `gauge_withheld_across_plateau` | A poll inside the plateau withheld its sums. The read itself was fresh, so the staleness rule cannot see it, and "it never changed again" is unsupported across the hole. `series_truncated` one step inward. |
+| `gauge_carried_across_plateau` | The plateau rests on a single reading — a dead target poll thread makes a perfect plateau out of one observation. Decided on the read timestamps, not the ages: a frozen sampler's ages are 1s..5s and all *within* the bound. Two *distinct* reads are required rather than all-distinct ones, because a repeated read is ordinary whenever the target's poll is the slower loop. |
+| `gauge_stale_across_plateau` | A reading in the plateau was its own read but older than the carry bound (`convergence.WITNESS_CARRY_SAMPLES` polls) when the monitor sample took it — a sampler still alive but too slow to attest to the poll it is paired with. |
+| `gauge_undated` | The plateau carries no `witness_monotonic_s`/`witness_age_s` at all, which is every artifact written before those fields existed. Named apart from the two above on `findings.py`'s `inconclusive`-vs-`unresolved` rule: one was never asked, the others were asked and answered. |
+| `monitor_never_drawn_level` | The monitor never reached the target's own export count — asked as "did it ever draw level", not "did it end there", since a monitor that draws level and then declines has taken delivery and such declines are ordinary on MRT runs — the disagreement the MRT consistency check exists to flag, so absorbing it here would publish a delivery time for a session whose two ends do not agree. Scanned across every sample from the plateau's start, since `monitor_accepted` is recorded on every poll whatever the gauge did. |
+| `no_sample_times` | The samples carry no `monotonic_s`, so nothing can be dated. Named rather than returned as a resolved section with a null answer in it. |
+
+Every field is present on every path, absent ones `null`: a section whose keys
+come and go cannot be read without knowing which branch produced it, and the
+branch is what the reader is trying to find out.
+
 `unmeasured_reason` is present when the target *could* have been asked and no
 sample arrived — its poll thread died on the first read, or the run converged
 before the first target poll landed. A daemon with no gauge at all gets no
@@ -436,7 +484,9 @@ written; without the distinction the two would be byte-identical. Same rule as
 the `export` section's own `unmeasured_reason`.
 
 **No verdict is derived here**, and that has not changed: the rule that reads
-this witness lives in `convergence.py`, where it decides the run.
+this witness lives in `convergence.py`, where it decides the run. `delivery`
+above is a *measurement* and not a verdict — it says when delivery completed or
+why that is not answerable, and it decides nothing about the run.
 `witness_rule` is that tracker's own account of what it did, carried into this
 section rather than recomputed from the series — two derivations of one verdict
 can disagree, and the one that decided the run is the one worth publishing.

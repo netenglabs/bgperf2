@@ -945,6 +945,105 @@ three intervals, and `check_timing_evidence.py` still rejects it on
 for a reason one layer in from where this started: not a bad correctness test
 any more, but four measurements that genuinely are not being taken.
 
+**The derived measurement has since landed: `target_table.delivery`**
+(`measurements.delivery_metrics()`), the first of the two change sets that
+release this hold. It is the earliest reading of the terminal export plateau at
+or after which the monitor holds it -- retrospective, so "and it never changed
+again" is checked against the completed series rather than assumed from the
+samples in hand, which is precisely what both backed-out rules could not do. It
+withholds with a named reason rather than estimating, on ten conditions: no
+gauge or no samples, a final count of zero, a truncated series, a plateau of a
+single reading, a withheld poll inside the plateau, a carried reading in it, a
+plateau that cannot be dated at all, a stale reading past the carry bound, a
+monitor that never drew level with the target's own export count, and samples
+carrying no times.
+
+**Five of those ten came out of review of the first version**, each
+reproduced against the shipped function rather than argued: an all-zero series
+resolved as a completed delivery at its first poll (`0 >= 0` draws the monitor
+level, and `bench()` writes a FAILED run's samples exactly like a converged
+one's); a frozen sampler resolved, because the age bound does not implement the
+rule it states -- a dead poll thread's carried readings are 1s..5s old and all
+*within* bound, so carried is now decided on the read timestamps; a withheld
+poll inside the plateau was invisible to that same age rule; a crossing that
+happened on a withheld poll returned `monitor_never_drawn_level` for a session
+the document's own `monitor_final` disproved; and samples without times fell
+through to a null reason beside a null answer. None of the 34 resolved runs
+moves as a result, which is the point: the refusals added are for shapes the
+recorded evidence does not contain and a failed or interrupted run does.
+
+**And one of those five fixes was itself wrong, which a second review round
+found.** The carried-reading refusal was written strictly -- every sample in
+the plateau had to be its own read -- on the evidence that all 34 resolved runs
+satisfy it. That evidence only covers one sign. The target's poll and the
+monitor's are independent loops, so whenever the target's CLI read is the
+*slower* of the two a reading spans two monitor samples and is carried twice;
+11 of the 39 recorded runs contain such a duplicate somewhere in their series,
+and it is likeliest on precisely the large-table runs this measurement exists
+for. Strictness would therefore have withheld `delivery` from the Block 5 rows
+it was built to rescue, while naming a dead sampler that was alive. The rule is
+now two *distinct* reads -- `still_changing`'s rule in read-space -- with the
+age bound covering staleness. Recorded because the shape of the mistake is the
+reusable part: a bound justified by the runs in front of it, which covered one
+direction of a two-directional race.
+
+Two further findings from that round were declined rather than fixed, with the
+evidence that decided them:
+
+- **The last reading is the table, not the peak.** A run whose export settles
+  below its peak is dated to where it settled. 11 of the 39 recorded runs end
+  1.35%-1.55% under their peak and every one settles on exactly 1,056,779 --
+  what BIRD and OpenBGPD both converge to on this RIB -- so the peak is a
+  convergence overshoot and the last reading is the true table. Taking the peak
+  would wait for the monitor to draw level with a count the target does not
+  hold, withholding every MRT run. A target that delivered and then really lost
+  routes is dated to the loss, and is failed by `ConvergenceTracker`'s drop
+  rule and rejected by the checker before that number is read.
+- **Whether the table was the right size is not judged there.**
+  `delivery_metrics()` is handed samples and no denominator, so a target
+  stalled at a fraction of the RIB has a terminal plateau like any other. That
+  is `check_timing_evidence.py`'s call, which knows the check-point and what
+  the generators offered. The zero case is refused for a different reason --
+  the rule degenerates, since `0 >= 0` makes the monitor trivially level --
+  and that is the line between the two.
+
+Validated against the 39 recorded artifacts on this host that carry a witness
+series. 34 resolve and 5 withhold, and the five now say which of two things
+happened to them rather than sharing one reason: four are pre-`witness_age_s`
+artifacts whose readings cannot be dated at all (`gauge_undated`), and the
+fifth is a calibration MRT run whose target sampler froze and was carried for
+18.1s (`gauge_carried_across_plateau`) -- the frozen-sampler case the rule
+exists for, found in the recorded evidence rather than constructed. In every resolved run `complete_s` lands at or after
+that run's own `monitor_required_reached` and at or before its
+`convergence_confirmed`, which is the invariant a sound answer has to hold.
+
+**Not *strictly* between, and the exception is the ordinary case rather than a
+defect.** An earlier draft of this paragraph claimed strict ordering; 5 of the
+34 resolved runs break it, by 140 to 499 *nanoseconds*. Those are runs where
+the monitor drew level with the target's export count on the very poll that
+crossed the check-point -- the same-poll case described below -- so the two
+numbers are one instant, and which side of it they land on is decided by
+`target_table.samples` storing `monotonic_s` rounded to six places while the
+event carries the raw value. A comparison of the two must therefore be written
+as an ordering at poll resolution, never as a strict inequality; anything
+tighter is reading the rounding.
+
+It is emphatically **not** `convergence_s`, and the same artifacts say why: on a
+synthetic run the check-point is the whole table and the two land on the same
+poll, while on MRT playback the check-point is the per-injector cap and the
+target keeps exporting well past it -- 16.85s against 36.36s on one recorded
+2-injector 500,000-prefix run. Publishing the derived point as `convergence_s`
+would move every MRT row by that gap. It is therefore derived for *every* run
+with an export gauge, so the column is comparable across daemons rather than
+appearing only on the rows that lost the event.
+
+**Nothing reads it yet and the hold stands.** Shipping the measurement one
+change set ahead of the rule that consumes it is deliberate -- the same
+discipline `target_table` itself was shipped under, and the reason all three
+convergence rules were broken was rules fitted to the evidence in front of
+them. The second change set teaches `event_coverage` to accept it in place of
+the event that legitimately cannot fire, and releases `BLOCK_HELD[5]`.
+
 **The block stays held, on the new objection rather than the old one.** The
 `BLOCK_HELD` entry was briefly cleared here -- the question that held it is
 answered -- and that was wrong: `next` would then have selected block 5, spent

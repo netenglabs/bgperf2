@@ -773,3 +773,40 @@ def test_the_held_override_accepts_every_spelling_of_a_block(held_runner,
                             results_root=results, workdir=work)
         assert 'applies to running a block' not in result.stderr, spelling
         assert 'not built yet' in result.stderr, (spelling, result.stderr)
+
+
+def test_the_held_override_is_refused_on_a_block_that_is_not_held(held_runner,
+                                                                  roots):
+    """Same rule as the action guard: a flag that quietly does nothing is read
+    next time as one that did something. The slip that matters is a mistyped
+    block number while overriding a held one, which would otherwise start a
+    full unmarked run of a different block.
+
+    The block chosen must be one that could not run even if the guard failed --
+    an *unbuilt* one, which exits 2 at the "not built yet" branch. Reaching for
+    `index - 1` here launched the real held block 5, because the patched copy
+    carries the repository's own BLOCK_HELD entries as well as the injected
+    one. The refusal is checked by its message, not merely by a non-zero exit,
+    so that shortcut cannot be taken again.
+
+    Those entries are excluded through `_held_blocks()` rather than by picking
+    an unbuilt block and trusting the two sets not to overlap. They only do not
+    overlap today because the one held block happens to be built; a block that
+    was held before its configs were written would land first in `candidates`,
+    take the override path, and exit 2 at "not built yet" -- failing this
+    assertion for a reason that has nothing to do with what it tests.
+    """
+    runner, index = held_runner
+    results, work = roots
+    built = set(_built_blocks())
+    held = _held_blocks()
+    candidates = [i for i in range(len(_block_keys()))
+                  if i not in built and i not in held and i != index]
+    assert candidates, 'no unbuilt, unheld block to test the refusal on'
+    other = candidates[0]
+    result = held_block(runner, 'block-%d' % other, '--run-held-block',
+                        results_root=results, workdir=work)
+    assert result.returncode == 1, result.stdout
+    assert 'is not held, so --run-held-block overrides nothing' in result.stderr
+    assert not os.path.exists(os.path.join(
+        results, '2026-timing-validation', _block_keys()[other]))

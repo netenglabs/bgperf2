@@ -891,9 +891,11 @@ applied to a second case:
   that did not work. See "What was tried and backed out" below.
 - MRT correctness is consistency plus a size floor, not an absolute: the
   monitor's count against the target's own export count, and the target's
-  accepted-path count against what the generators offered. Reaching the
-  check-point stays a *sufficient* floor, so OpenBGPD and RustyBGP rows are
-  judged exactly as they always were.
+  accepted-path count against what the generators offered. The check-point is neither necessary nor
+  sufficient on its own -- it is about 4% below the union the ten peers hold --
+  so the floor applies as well as it wherever there is a gauge, and clearing it
+  is the fallback where there is none, which is how OpenBGPD and RustyBGP rows
+  are still judged.
 
 **Verified on the campaign host**, three targets on the pinned RIB, all
 qualified: `bird 3.3.2` 1,056,779 both ends, `frr_c 10.7` 958,217 both ends

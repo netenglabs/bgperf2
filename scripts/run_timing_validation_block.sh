@@ -228,7 +228,21 @@ Release this entry in the change set that lands it."
 guard_held_block() {
   local index="$1"
   local reason="${BLOCK_HELD[$index]:-}"
-  [[ -z "$reason" ]] && return 0
+  if [[ -z "$reason" ]]; then
+    # Refused rather than ignored, on the rule the action guard above follows:
+    # a flag that quietly does nothing is read next time as one that did
+    # something. The slip that matters is a mistyped block number while
+    # overriding a held one -- that would otherwise start a full unmarked run
+    # of a different block, with no `held_override` line in its RAN marker to
+    # say the operator believed they were overriding anything.
+    if [[ $RUN_HELD_BLOCK -eq 1 ]]; then
+      echo "block-$index is not held, so --run-held-block overrides nothing" >&2
+      echo "run it without the flag, or check which block you meant:" >&2
+      echo "  scripts/run_timing_validation_block.sh status" >&2
+      exit 1
+    fi
+    return 0
+  fi
   if [[ $RUN_HELD_BLOCK -eq 1 ]]; then
     echo "block-$index is held, and --run-held-block was passed:"
     echo "$reason"

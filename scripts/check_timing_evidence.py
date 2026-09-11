@@ -321,14 +321,20 @@ def _series_truncated_s(artifact, series):
     return monitor_final - target_final
 
 
-def _final_witness_age_s(artifact, series):
+def _final_witness_age_s(artifact, series, key='exported_to_monitor'):
     """How old the last export reading was when it was recorded.
 
     `target_table.samples` carries `witness_age_s` per monitor poll; the
     section's `max_witness_age_s` is the maximum across the whole run, which
     answers a different question. Falls back to that maximum when the samples
-    are not there, since an over-strict bound only mutes a check and never
-    invents one.
+    are not there. That fallback overstates staleness -- a run-wide maximum
+    answers "was any reading ever old", not "was the last one" -- so nothing
+    rests a *verdict* on what it returns. On the export cross-check an
+    over-strict bound only mutes a comparison; on the import floor the age
+    only qualifies the message, because a stale reading there is used rather
+    than discarded and what the reading says still decides. An earlier version
+    did discard it, which rejected correct rows on one slow final poll; see the
+    use site.
     """
     samples = (artifact.get('target_table') or {}).get('samples') or []
     for sample in reversed(samples):
@@ -337,7 +343,7 @@ def _final_witness_age_s(artifact, series):
         # carries no `witness_age_s`, which hands back None -- and a None age
         # disables the staleness guard entirely, publishing a frozen sampler as
         # route loss, which is the one thing the guard exists to stop.
-        if sample.get('exported_to_monitor') is not None \
+        if sample.get(key) is not None \
                 and sample.get('witness_age_s') is not None:
             return sample['witness_age_s']
     return series.get('max_witness_age_s')
@@ -385,12 +391,19 @@ def _mrt_route_counts(artifact, received, required, filtered=False,
     # it is checked against what the generators say they offered -- both
     # measured, neither guessed.
     #
-    # Reaching the check-point is *sufficient* and was never the problem: a
-    # daemon that exports more than `0.99 * -p` has demonstrably not shrunk the
-    # table, and those rows are judged exactly as they always were. What was
-    # wrong is treating it as *necessary*, which rejected every FRR row for
-    # exporting a smaller share of one RIB than a number nobody could have set
-    # correctly in advance.
+    # Treating the check-point as *necessary* was the original fault: it
+    # rejected every FRR row for exporting a smaller share of one RIB than a
+    # number nobody could have set correctly in advance.
+    #
+    # It is not *sufficient* either, which took another round to see. For MRT
+    # `required` is `0.99 * -p` -- the per-injector cap -- and the table the
+    # ten peers actually hold is their union, about 4% larger, so a target can
+    # clear the check-point having dropped several percent of the table. The
+    # convergence tracker does not catch that: routes never delivered are not a
+    # decline from the run's own peak. So the import floor below applies as
+    # well as the check-point wherever there is a gauge to apply it with, and
+    # clearing the check-point is the *fallback* for a daemon that publishes
+    # none -- which is how OpenBGPD and RustyBGP rows are still judged.
     # `final`, not `peak`: peak says the table was *ever* there, and the export
     # cross-check below compares two ends of one link that agree whenever the
     # link works -- so a target that imported the whole RIB, lost a large share
@@ -404,55 +417,147 @@ def _mrt_route_counts(artifact, received, required, filtered=False,
     # them, and the floor has no other bound: a mid-delivery reading compared
     # against the whole offered count reports the target as having lost routes
     # it was still being sent.
+    #
+    # Two different ways the series stops describing the end of the run, and
+    # the floor needs both. *Truncated*: the series ends before the monitor's,
+    # because a peering stopped reporting and the sum was withheld from then
+    # on. *Frozen*: the target's sampler died, `bench()` keeps appending the
+    # carried reading to every monitor poll, so the series runs to the end and
+    # `final_monotonic_s` looks perfect while the value is minutes old. The
+    # export cross-check below grew a staleness test for the second case; this
+    # one had only the first, so a dead sampler was published here as "71.43%
+    # short" -- a dead instrument reported as route loss, with
+    # `check_instrument()` only downgrading the sampler failure to a NOTE, so
+    # nothing in the row contradicted it.
     imported_truncated_s = _series_truncated_s(artifact, imported_series)
+    imported_age_s = _final_witness_age_s(artifact, imported_series,
+                                          'imported_paths')
+    imported_withheld_late = False
     if imported is not None and imported_truncated_s is not None \
             and imported_truncated_s > STALE_WITNESS_S:
         imported = None
         imported_withheld_late = True
-    else:
-        imported_withheld_late = False
+    # A stale reading is *used*, not discarded, and the staleness is reported
+    # beside the verdict. Discarding it rejected the row instead, and for an
+    # FRR MRT row this floor is the only rule that can qualify it -- `received`
+    # is always below the check-point -- so one slow final poll cost a correct
+    # cell out of a 14-cell block, with `--force` (which discards the cells
+    # that passed) the only way to re-measure.
+    #
+    # The bound cannot tell a dead sampler from a slow poll on its own, so it
+    # is not asked to. What the reading says still decides: a gauge frozen
+    # early reads far below what the generators offered and fails the floor
+    # anyway, and a gauge read a few seconds late on a table that is flat by
+    # convergence reads correctly and passes. The one case the age does decide
+    # is the failing one, where "the target lost routes" and "the gauge stopped
+    # before the end" are not distinguishable -- so that refusal names both.
+    imported_stale = (imported is not None and imported_age_s is not None
+                      and imported_age_s > STALE_WITNESS_S)
     offered = (artifact.get('tester_fleet') or {}).get('offered_prefixes')
+    cleared = required is not None and received >= required
     if filtered:
         # `imported_paths` is post-import-policy for both daemons that publish
         # it -- FRR's `pfxRcd`, BIRD's `imported` -- so a filtered run is
         # *designed* to accept far less than the fleet offered, and it sits
-        # below the check-point for the same reason. Failing it here would
-        # assert route loss about a policy doing its job, which is the mistake
-        # the whole MRT branch exists to stop, reintroduced one layer down.
+        # below the check-point for the same reason. The floor therefore cannot
+        # be applied here at all, and the export cross-check below compares two
+        # ends of one link and agrees at any size.
         # `benchmarks/2026-filters.yaml` pairs bgpdump2 with policy cells, so
         # this combination is real rather than hypothetical.
-        # `imported_paths` is post-policy, so nothing here bounds the table's
-        # size -- and the export cross-check below compares two ends of one
-        # link and agrees at any size. A row that lost 90% of the RIB for a
-        # reason unrelated to the policy would be indistinguishable from one
-        # the policy trimmed as configured. The unfiltered path rejects
+        #
+        # Two arguments meet here and the split between the branches is how
+        # both are honoured, so neither is deleted. Failing every such row
+        # asserts route loss about a policy doing its job, which is the mistake
+        # the whole MRT branch exists to stop, reintroduced one layer down.
+        # Passing every such row accepts a table that lost 90% of the RIB for a
+        # reason unrelated to the policy, indistinguishable from one the policy
+        # trimmed as configured, when the campaign's acceptance rule asks for
+        # final route state to be *correct* and not merely unchallenged.
+        #
+        # So: the check-point is the only bound left, which is exactly the
+        # position a target publishing no gauge is in, and it is used the same
+        # way -- as the fallback, not as proof. It is a weak bound and the
+        # message says so rather than dressing it up: `0.99 * -p` sits about 4%
+        # below the union the peers hold, so a row can clear it having dropped
+        # several percent. What it does rule out is the failure this check
+        # exists for -- a target that lost the table is not still exporting the
+        # check-point's worth of it. Below the check-point nothing is left to
+        # bound it, and that row is rejected on the unfiltered path's own rule:
         # "below the check-point and no import gauge ... because nothing
-        # vouches for it"; this is the same row with the same evidence, and
-        # the campaign's acceptance rule asks for final route state to be
-        # *correct*, not merely unchallenged.
-        checks.append(Check(
-            'route_counts', FAIL,
-            'received {0} under policy {1}: post-policy counts are not '
-            'comparable with the {2} check-point or the offered count, so '
-            'nothing bounds what the target should have kept'.format(
-                received, (row_filters or '?'), required)))
-    elif required is not None and received >= required:
-        checks.append(Check(
-            'route_counts', OK,
-            'received {0}, at or above the {1} check-point'.format(
-                received, required)))
+        # vouches for it".
+        if cleared:
+            checks.append(Check(
+                'route_counts', OK,
+                'received {0} under policy {1}, at or above the {2} '
+                'check-point; post-policy counts cannot be compared with the '
+                'offered count, so the check-point is the only bound '
+                'available'.format(
+                    received, (row_filters or '?'), required)))
+        else:
+            checks.append(Check(
+                'route_counts', FAIL,
+                'received {0} under policy {1}: post-policy counts are not '
+                'comparable with the {2} check-point or the offered count, so '
+                'nothing bounds what the target should have kept'.format(
+                    received, (row_filters or '?'), required)))
     elif imported is not None and offered:
         shortfall = (offered - imported) / float(offered)
-        if shortfall > WITNESS_AGREEMENT_FRACTION:
+        if shortfall > WITNESS_AGREEMENT_FRACTION and imported_stale:
+            checks.append(Check(
+                'route_counts', FAIL,
+                'the target accepted {0} paths of the {1} its generators '
+                'offered, {2:.2%} short -- and its import gauge went {3:.1f}s '
+                'without being re-read, so this is either route loss or a '
+                'gauge that stopped before the end'.format(
+                    imported, offered, shortfall, imported_age_s)))
+        elif shortfall > WITNESS_AGREEMENT_FRACTION:
             checks.append(Check(
                 'route_counts', FAIL,
                 'the target accepted {0} paths of the {1} its generators '
                 'offered, {2:.2%} short'.format(imported, offered, shortfall)))
+        elif imported_stale:
+            checks.append(Check(
+                'route_counts', OK,
+                'the target accepted {0} paths of the {1} offered, though its '
+                'import gauge was last read {2:.1f}s before the monitor '
+                'stopped'.format(imported, offered, imported_age_s)))
         else:
             checks.append(Check(
                 'route_counts', OK,
                 'the target accepted {0} paths of the {1} offered'.format(
                     imported, offered)))
+    elif cleared:
+        # The monitor cleared the check-point and the floor could not be
+        # applied, so the check-point is the fallback -- which is how OpenBGPD
+        # and RustyBGP rows have always been judged.
+        #
+        # Which half of the run is missing the evidence is named, not
+        # generalised to the target. There are three ways to be here and only
+        # one of them is "this daemon has no gauge": the other two are a gauge
+        # that stopped before the end, and a gauge that reported fine while the
+        # *generators* published no count to compare it against -- `offered` is
+        # None for every gobgp and exabgp_mrtparse injector (neither sets
+        # REPORTS_OFFERING) and is withheld entirely by
+        # `tester_fleet_metrics()` when one injector never completed. Saying
+        # "this target publishes no usable import gauge" about a BIRD row
+        # reporting 10,497,949 accepted paths is a false statement about the
+        # target, and it sends the reader to the wrong half of the run.
+        if imported_withheld_late:
+            detail = ('received {0}, at or above the {1} check-point; this '
+                      'target\'s import gauge stopped reporting {2:.1f}s '
+                      'before the monitor did, so nothing bounds it '
+                      'further').format(received, required,
+                                        imported_truncated_s)
+        elif imported is None:
+            detail = ('received {0}, at or above the {1} check-point; this '
+                      'target publishes no usable import gauge to bound it '
+                      'further').format(received, required)
+        else:
+            detail = ('received {0}, at or above the {1} check-point; the '
+                      'target reports holding {2} paths, and its generators '
+                      'report no offered count to measure that '
+                      'against').format(received, required, imported)
+        checks.append(Check('route_counts', OK, detail))
     else:
         # Below the check-point with nothing to bound the size, which is a row
         # nothing can vouch for: the export cross-check below compares the two
@@ -462,29 +567,23 @@ def _mrt_route_counts(artifact, received, required, filtered=False,
         # has to hold for the shortfall case too, not only for rows that clear
         # the check-point.
         #
-        # The two ways of getting here are named apart, because they send the
-        # reader to opposite sides of the run. A missing import gauge is a
-        # property of the target; a missing offered count is a property of the
-        # generators -- `tester_fleet.offered_prefixes` is absent for an MRT
-        # injector that does not set `REPORTS_OFFERING` (gobgp,
+        # The ways of getting here are named apart, because they send the
+        # reader to opposite sides of the run. A missing or broken import gauge
+        # is a property of the target; a missing offered count is a property of
+        # the generators -- `tester_fleet.offered_prefixes` is absent for an
+        # MRT injector that does not set `REPORTS_OFFERING` (gobgp,
         # exabgp_mrtparse) and is withheld entirely by `tester_fleet_metrics()`
         # when one injector never completed. Blaming the target for a gauge it
         # does publish is the wrong half of the run to go and look at.
-        if offered == 0:
-            # Absent and zero are different findings everywhere else in this
-            # project, and they send the reader to different places: nothing
-            # published against a generator that demonstrably sent nothing.
-            checks.append(Check(
-                'route_counts', FAIL,
-                'received {0} against a {1} check-point, and the generators '
-                'report offering nothing at all'.format(received, required)))
-        elif not offered:
-            checks.append(Check(
-                'route_counts', FAIL,
-                'received {0} against a {1} check-point, and the generators '
-                'report no offered count to measure the shortfall '
-                'against'.format(received, required)))
-        elif imported_withheld_late:
+        #
+        # **All three target-side diagnoses come first**, which took two goes
+        # to get right. `offered` is None for every gobgp and exabgp_mrtparse
+        # run there is, so any generator-side branch tested above a target-side
+        # one answers first on exactly those generators and hides the fault
+        # this code had already detected. Hoisting two of the three left the
+        # third -- a gauge withheld on every sample -- unreachable for the same
+        # injectors, which is the identical mis-attribution one branch over.
+        if imported_withheld_late:
             checks.append(Check(
                 'route_counts', FAIL,
                 'received {0} against a {1} check-point, and this target\'s '
@@ -492,22 +591,22 @@ def _mrt_route_counts(artifact, received, required, filtered=False,
                 'did, so nothing says what it was holding at the end'.format(
                     received, required, imported_truncated_s)))
         elif (artifact.get('target_table') or {}).get('unmeasured_reason'):
-            # The section says why itself -- the poll thread died, or never
-            # landed a sample -- and that is the target's *instrument*, not a
-            # peering that failed to report. Blaming the peers here would name
-            # the nearest rule rather than the fault, with the correct reason
-            # sitting unread in the same document.
             checks.append(Check(
                 'route_counts', FAIL,
                 'received {0} against a {1} check-point, and the target table '
                 'was not measured: {2}'.format(
                     received, required,
                     artifact['target_table']['unmeasured_reason'])))
-        elif artifact.get('target_table'):
+        elif imported is None and artifact.get('target_table'):
             # A run with no witness gets no `target_table` section at all, so
             # the section's presence is what says the daemon has a gauge --
             # `table` above is the *series*, which is empty in exactly the case
-            # being distinguished here.
+            # being distinguished here. `imported is None` is explicit
+            # rather than implied by branch order: above the generator-side
+            # branches, a target whose gauge reported fine can reach here
+            # too (no offered count to compare it against), and telling it
+            # its gauge was withheld would be the same false statement
+            # about the target one branch up.
             #
             # The daemon has the gauge and every sample withheld it, which
             # `table_witness()` does on any poll where a configured peering was
@@ -521,6 +620,20 @@ def _mrt_route_counts(artifact, received, required, filtered=False,
                 'import gauge was withheld on every sample -- either a peering '
                 'was not reporting or the daemon\'s CLI never parsed'.format(
                     received, required)))
+        elif offered == 0:
+            # Absent and zero are different findings everywhere else in this
+            # project, and they send the reader to different places: nothing
+            # published against a generator that demonstrably sent nothing.
+            checks.append(Check(
+                'route_counts', FAIL,
+                'received {0} against a {1} check-point, and the generators '
+                'report offering nothing at all'.format(received, required)))
+        elif not offered:
+            checks.append(Check(
+                'route_counts', FAIL,
+                'received {0} against a {1} check-point, and the generators '
+                'report no offered count to measure the shortfall '
+                'against'.format(received, required)))
         else:
             checks.append(Check(
                 'route_counts', FAIL,

@@ -98,6 +98,16 @@ def table_witness(summary, monitor_address=None, expected_peerings=None):
                 exported_to_monitor = sent
     complete = expected_peerings is not None and measured == expected_peerings
     return {
+        # NOT comparable with BIRD's `peerings`, and the difference is visible
+        # in the artifact. BIRD counts the protocols it is *showing*, so on a
+        # dynamic-neighbour target that number climbs as sessions connect and a
+        # reader watches it approach `peerings_expected`. FRR configures static
+        # neighbours, so every configured peer is in this document from the
+        # first poll whatever its state, and `peerings` equals
+        # `peerings_expected` immediately. Only `peerings_measured` moves --
+        # it counts the Established sessions that reported a count -- so that
+        # is the one to read when `imported_paths` is withheld and the question
+        # is which sessions were not reporting.
         'peerings': len(peers),
         'peerings_expected': expected_peerings,
         'peerings_measured': measured,

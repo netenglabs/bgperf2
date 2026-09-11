@@ -915,3 +915,165 @@ def test_a_truncated_import_series_does_not_bound_the_size():
                and 'stopped reporting' in c.detail for c in checks)
     assert not any('short' in c.detail for c in checks
                    if c.name == 'route_counts')
+
+
+def test_a_frozen_import_gauge_is_not_published_as_route_loss():
+    """The third time this class of fault was missed, so it is pinned here.
+
+    A *truncated* series ends before the monitor's. A *frozen* one does not:
+    the target's sampler dies, `bench()` keeps appending the carried reading to
+    every monitor poll, so the series runs to the end and `final_monotonic_s`
+    looks perfect while the value is minutes old. The truncation test alone
+    published that as "71.43% short" -- a dead instrument reported as route
+    loss, which `check_instrument()` only downgrades to a NOTE, so nothing in
+    the row contradicted it.
+    """
+    doc, r = _mrt(exported=None, received='700000', imported=3000000)
+    doc['target_table'] = {
+        'series': {
+            'imported_paths': {'final': 3000000, 'final_monotonic_s': 600.0},
+            'monitor_accepted': {'final': 700000, 'final_monotonic_s': 600.0},
+        },
+        'samples': [{'imported_paths': 3000000, 'witness_age_s': 300.0}],
+    }
+    doc['tester_fleet'] = dict(doc['tester_fleet'], offered_prefixes=10500000)
+    verdict, checks = check.qualify(doc, versions(), r)
+    detail = [c for c in checks if c.name == 'route_counts']
+    # The reading is still used -- discarding it rejected good rows over one
+    # slow poll -- so what it says decides. Frozen at 3,000,000 of 10,500,000
+    # it fails the floor either way; what the age adds is that "route loss" and
+    # "the gauge stopped" cannot be told apart here, so the refusal says both.
+    assert verdict == 'rejected'
+    assert any(c.status == check.FAIL
+               and 'either route loss or a gauge that stopped' in c.detail
+               for c in detail), [c.detail for c in detail]
+
+
+def test_a_filtered_row_falls_back_to_the_check_point():
+    """Under a policy the floor cannot be applied at all -- `imported_paths` is
+    post-policy for both daemons that publish it -- so the check-point is the
+    only bound left, and it is used as the fallback, exactly as for a target
+    publishing no gauge.
+
+    The message may not claim more than that. `0.99 * -p` sits about 4% below
+    the union the peers hold, so clearing it is consistent with having dropped
+    several percent, and an earlier wording here said a policy "cannot make it
+    insufficient" -- contradicting the finding the rest of this change set
+    rests on. What it does rule out is the failure the check exists for: a
+    target that lost the table is not still exporting the check-point's worth.
+    """
+    doc, r = _mrt(exported=1045000, received='1045000')
+    r = dict(r, filters='drop-some')
+    verdict, checks = check.qualify(doc, versions(), r)
+    detail = [c for c in checks if c.name == 'route_counts']
+    assert verdict == 'qualified', statuses(checks)
+    assert any(c.status == check.OK
+               and 'the only bound available' in c.detail
+               for c in detail), [c.detail for c in detail]
+    assert not any('cannot make insufficient' in c.detail for c in detail)
+
+
+def test_a_cleared_row_names_which_half_of_the_run_lacks_the_evidence():
+    """`elif cleared` is reached whenever the floor could not be applied, which
+    is not the same as "this target has no gauge". `offered` is None for every
+    gobgp and exabgp_mrtparse injector, so a BIRD row reporting 10,497,949
+    accepted paths reached it and was told it publishes no usable import gauge
+    -- a false statement about the target, sending the reader to the wrong half
+    of the run, which is the fault class the rest of this module is about.
+    """
+    doc, r = _mrt(exported=1056779, received='1056779', imported=10497949)
+    doc['tester_fleet'] = dict(doc['tester_fleet'], offered_prefixes=None)
+    verdict, checks = check.qualify(doc, versions(), r)
+    detail = [c for c in checks if c.name == 'route_counts']
+    assert verdict == 'qualified', statuses(checks)
+    assert any(c.status == check.OK and 'no offered count' in c.detail
+               and '10497949' in c.detail for c in detail), \
+        [c.detail for c in detail]
+    assert not any('publishes no usable import gauge' in c.detail
+                   for c in detail)
+
+
+def test_a_gauge_withheld_on_every_sample_is_not_blamed_on_the_generators():
+    """The target-side diagnoses have to come first, all three of them.
+
+    Two were hoisted above the generator-side branches and the third was left
+    below, which for exactly the generators that motivated the hoist -- gobgp
+    and exabgp_mrtparse, where `offered` is None on every run -- made it
+    unreachable: a target whose gauge was withheld on every sample was reported
+    as "the generators report no offered count", the identical mis-attribution
+    one branch over.
+    """
+    doc, r = _mrt(exported=None, received='700000')
+    doc['target_table'] = {'series': {}, 'samples': []}
+    doc['tester_fleet'] = dict(doc['tester_fleet'], offered_prefixes=None)
+    verdict, checks = check.qualify(doc, versions(), r)
+    detail = [c for c in checks if c.name == 'route_counts']
+    assert verdict == 'rejected'
+    assert any(c.status == check.FAIL and 'withheld on every sample' in c.detail
+               for c in detail), [c.detail for c in detail]
+    assert not any('report no offered count' in c.detail for c in detail)
+
+
+def test_clearing_the_check_point_does_not_skip_the_size_floor():
+    """`required` is `0.99 * -p`, and for MRT that is ~96% of the union the ten
+    peers actually hold -- so a target can clear the check-point having dropped
+    several percent of the table. `ConvergenceTracker`'s DROP_FRACTION does not
+    catch it either: routes never delivered are not a decline from the run's
+    own peak. The floor has to apply as well as the check-point, not instead."""
+    doc, r = _mrt(exported=1040000, received='1040000', imported=9000000)
+    doc['tester_fleet'] = dict(doc['tester_fleet'], offered_prefixes=10500000)
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'rejected'
+    assert any(c.name == 'route_counts' and c.status == check.FAIL
+               and 'short' in c.detail for c in checks)
+
+
+def test_a_daemon_with_no_import_gauge_is_still_judged_on_the_check_point():
+    """OpenBGPD and RustyBGP publish no witness; clearing the check-point
+    bounds the size on its own and always has."""
+    doc, r = _mrt(exported=None, received='1056779')
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'qualified', statuses(checks)
+    assert any(c.name == 'route_counts' and c.status == check.OK
+               and 'at or above' in c.detail for c in checks)
+
+
+def test_a_stale_but_healthy_import_gauge_still_qualifies_the_row():
+    """One slow final target poll must not cost a correct cell. For an FRR MRT
+    row this floor is the only rule that can qualify it -- `received` is always
+    below the check-point -- and re-measuring a 14-cell block needs `--force`,
+    which discards the cells that passed. The table is flat by convergence, so
+    a reading a few seconds late is still the right number; the staleness is
+    reported beside the verdict rather than instead of it."""
+    doc, r = _mrt(exported=958217, received='958217', imported=10497949)
+    doc['target_table']['series']['imported_paths']['final_monotonic_s'] = 600.0
+    doc['target_table']['series']['monitor_accepted'] = {
+        'final': 958217, 'final_monotonic_s': 600.0}
+    doc['target_table']['samples'] = [
+        {'imported_paths': 10497949, 'exported_to_monitor': 958217,
+         'witness_age_s': 6.0}]
+    doc['tester_fleet'] = dict(doc['tester_fleet'], offered_prefixes=10500000)
+    verdict, checks = check.qualify(doc, versions(), r)
+    detail = [c for c in checks if c.name == 'route_counts']
+    assert verdict == 'qualified', statuses(checks)
+    assert any(c.status == check.OK and 'last read 6.0s' in c.detail
+               for c in detail), [c.detail for c in detail]
+
+
+def test_a_dead_target_sampler_is_not_blamed_on_the_generators():
+    """`offered_prefixes` is absent for every gobgp and exabgp_mrtparse
+    injector, so testing it first reported a dead target sampler as "the
+    generators report no offered count" on every such run."""
+    doc, r = _mrt(exported=None, received='700000', imported=None)
+    doc['target_table'] = {
+        'series': {
+            'imported_paths': {'final': 3000000, 'final_monotonic_s': 100.0},
+            'monitor_accepted': {'final': 700000, 'final_monotonic_s': 600.0},
+        },
+        'samples': [{'imported_paths': 3000000, 'witness_age_s': 0.4}],
+    }
+    doc['tester_fleet'] = dict(doc['tester_fleet'], offered_prefixes=None)
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'rejected'
+    assert any(c.name == 'route_counts' and c.status == check.FAIL
+               and 'stopped reporting' in c.detail for c in checks)

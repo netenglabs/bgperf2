@@ -497,3 +497,121 @@ def test_an_artifact_with_no_instrument_section_is_not_a_failure():
     verdict, checks = check.qualify(artifact(), versions(), row())
     assert verdict == 'qualified'
     assert statuses(checks)['instrument_reads'] == check.OK
+
+
+def test_a_rejection_quotes_the_line_behind_the_count():
+    '''The count alone sends a reviewer to logs that no longer exist: bench()
+    rmtree's the work directory at the start of the next cell, and a re-run
+    wipes them identically, so a rejected row could be neither diagnosed nor
+    usefully re-measured. Block 4 of the 64 GB campaign lost two rows that way.
+    '''
+    health = {'error_samples': [{'source': 'tester0', 'log': 'bgpdump2.log',
+                                 'line': 412,
+                                 'text': '<RMT> Received: Cease'}],
+              'timeout_samples': []}
+    detail = check.describe_tester_health(health, 2, 0)
+    assert '2 tester errors, 0 timeouts' in detail
+    # The tester is named, not just the file: every MRT injector writes the
+    # same `bgpdump2.log` inside its own host directory.
+    assert 'tester0/bgpdump2.log:412' in detail
+    assert 'Cease' in detail
+
+
+def test_a_missing_capture_states_the_fact_and_not_a_cause():
+    '''A missing file has at least three causes -- an older build, a writer
+    that swallowed an exception, and a `-r/--repeat` run that scans nothing --
+    and this text is the durable record a later session reads. Naming one of
+    them would record a run whose evidence was lost as a run from an old build.
+    '''
+    detail = check.describe_tester_health(None, 2, 0)
+    assert 'no captured lines available' in detail
+    assert 'predates' not in detail
+
+
+def test_a_bounded_capture_says_how_many_it_speaks_for():
+    '''The count is the authority; the capture is capped, so the first line
+    must not be allowed to stand for all of them.'''
+    health = {'error_samples': [{'source': 't', 'log': 'a.log', 'line': i,
+                                 'text': 'x'} for i in range(3)],
+              'timeout_samples': []}
+    assert 'first of 3 captured error line(s)' in check.describe_tester_health(
+        health, 500, 0)
+
+
+def test_the_quoted_line_and_its_count_come_from_the_same_list():
+    '''Summing the two lists and quoting the first error renders "first of 20
+    captured" for a run with one error and nineteen timeouts, which reads as
+    twenty captures backing the single line shown.'''
+    health = {'error_samples': [{'source': 't', 'log': 'a.log', 'line': 1,
+                                 'text': 'the one error'}],
+              'timeout_samples': [{'source': 't', 'log': 'a.log', 'line': i,
+                                   'text': 'timeout'} for i in range(19)]}
+    detail = check.describe_tester_health(health, 1, 19)
+    assert 'first of 1 captured error line(s)' in detail
+    assert 'the one error' in detail
+
+
+def test_a_timeout_only_capture_is_quoted_as_a_timeout():
+    health = {'error_samples': [],
+              'timeout_samples': [{'source': 't', 'log': 'a.log', 'line': 4,
+                                   'text': 'session timeout'}]}
+    detail = check.describe_tester_health(health, 0, 1)
+    assert 'first of 1 captured timeout line(s)' in detail
+    assert 'session timeout' in detail
+
+
+def test_a_clean_row_is_not_described_by_this_at_all():
+    '''tester_health only reaches the describer on a nonzero count.'''
+    verdict, checks = check.qualify(artifact(), versions(), row())
+    assert statuses(checks)['tester_health'] == check.OK
+
+
+def test_a_malformed_capture_costs_its_own_row_and_not_the_block():
+    """The module degrades per run everywhere else -- load_json swallows a
+    parse error and an unreadable artifact becomes one `unreadable` verdict.
+    An exception here escapes main() and costs every other run its verdict."""
+    for bad in ({'error_samples': 'not a list', 'timeout_samples': []},
+                {'error_samples': ['not a dict'], 'timeout_samples': []},
+                {'error_samples': None, 'timeout_samples': None},
+                {}):
+        detail = check.describe_tester_health(bad, 1, 0)
+        assert '1 tester errors' in detail
+
+
+def test_a_repeat_run_is_not_offered_as_a_cause():
+    """It builds no tester objects, so nothing is scanned *and* nothing is
+    counted: the row reports zero and this is never reached. Naming it would
+    send a reviewer of a genuinely lost capture down a cause that cannot
+    produce the state they are looking at."""
+    assert 'repeat' not in check.describe_tester_health(None, 2, 0)
+    assert 'repeat' not in (check.describe_tester_health.__doc__ or '').split(
+        '(`-r/--repeat` is not a third cause')[0]
+
+
+def test_a_trimmed_line_is_not_quoted_as_a_complete_one():
+    '''The writer trims at 300 characters and records that it did. By review
+    time this text is the evidence -- the log is gone -- so a cut line shown
+    without a mark reads as the whole message.'''
+    health = {'error_samples': [{'source': 't', 'log': 'a.log', 'line': 1,
+                                 'text': '<RMT> Received: NOTIFICATION ' + 'x' * 270,
+                                 'truncated': True}],
+              'timeout_samples': []}
+    assert '[trimmed]' in check.describe_tester_health(health, 1, 0)
+
+
+def test_an_untrimmed_line_is_not_marked():
+    health = {'error_samples': [{'source': 't', 'log': 'a.log', 'line': 1,
+                                 'text': 'short', 'truncated': False}],
+              'timeout_samples': []}
+    assert '[trimmed]' not in check.describe_tester_health(health, 1, 0)
+
+
+def test_a_blank_matched_line_says_so():
+    '''Reachable: the MRT and bgpdump2 needles are bare substrings, so a blank
+    line can match. A dangling "a.log:1: " reads as a formatting fault.'''
+    health = {'error_samples': [{'source': 't', 'log': 'a.log', 'line': 1,
+                                 'text': '   ', 'truncated': False}],
+              'timeout_samples': []}
+    detail = check.describe_tester_health(health, 1, 0)
+    assert '(blank line)' in detail
+    assert not detail.rstrip().endswith(':')

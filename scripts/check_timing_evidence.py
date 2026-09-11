@@ -332,7 +332,83 @@ def check_testers(artifact):
     return checks
 
 
-def check_host(artifact, row):
+def describe_tester_health(health, errors, timeouts):
+    '''What the counts were, and -- when the run captured them -- what they said.
+
+    A rejection whose detail is only a number sends the reader to logs that no
+    longer exist: `bench()` rmtree's the work directory at the start of the
+    next cell, so by review time the lines behind the count are gone. Block 4
+    of the 64 GB timing campaign rejected two rows that way, both of which had
+    converged on the full table, and neither could be diagnosed or usefully
+    re-measured.
+
+    A run with no capture is described exactly as it was before, and says that
+    there is nothing to quote rather than implying the run had nothing to say.
+
+    It does **not** say why. Reaching here at all means the count was nonzero,
+    and a nonzero count with no file has two causes this cannot tell apart: a
+    run from a build before the capture existed, and a writer that failed (a
+    full disk during a campaign block is the realistic one). This text lands in
+    `evidence/<label>.json` and `.txt`, which is the durable per-row record a
+    later session reads, so naming one of them would record a run whose
+    evidence was *lost* as a run from an older build. (Not in the `RAN` /
+    `COMPLETE` markers: those carry `evidence: N check(s) failed` and
+    `block_exclusion_report()`'s `excluded_row:` lines, and no check detail.)
+
+    (`-r/--repeat` is not a third cause. It builds no tester objects, so
+    nothing is scanned *and* nothing is counted: the row reports zero and
+    `check_host()` never calls this at all. It matters on the writer side,
+    where a clean row must still remove an earlier run's file, and that is
+    where `write_tester_health_artifact()` accounts for it.)
+    '''
+    detail = '{0} tester errors, {1} timeouts'.format(errors, timeouts)
+    if not isinstance(health, dict):
+        return detail + '; no captured lines available'
+    # Shape-tolerant, because this reads a file off disk and the module
+    # degrades per run everywhere else: `load_json` swallows a parse error and
+    # an unreadable artifact becomes one `unreadable` verdict. An exception
+    # here escapes `main()` and costs every *other* run in the block its
+    # verdict -- one malformed document taking down thirteen good ones.
+    # The quoted line and the number beside it must come from the same list.
+    # Summing the two and quoting the first error gives "first of 20 captured"
+    # for a run with one error and nineteen timeouts, which reads as twenty
+    # captures backing the one line shown.
+    for key, kind in (('error_samples', 'error'),
+                      ('timeout_samples', 'timeout')):
+        value = health.get(key)
+        if not isinstance(value, list):
+            continue
+        found = [s for s in value if isinstance(s, dict)]
+        if found:
+            break
+    else:
+        found = []
+    if not found:
+        return detail + '; capture present but empty'
+    first = found[0]
+    text = str(first.get('text', '')).strip()
+    # The writer trims at base.ERROR_SAMPLE_LINE_CHARS and says so; dropping
+    # that flag here would render a cut line as a complete one, and by review
+    # time this text *is* the evidence -- the log it came from is gone.
+    if text and first.get('truncated'):
+        text += ' [trimmed]'
+    if not text:
+        # Reachable: the MRT and bgpdump2 needles are bare substrings, so a
+        # blank line can match. Saying so beats a dangling "a.log:1: ", which
+        # reads as a formatting fault rather than as what was matched.
+        text = '(blank line)'
+    # `source` names the tester the log belongs to, which is the half a bare
+    # filename cannot supply: every MRT injector writes `bgpdump2.log`.
+    where = '/'.join(str(first[k]) for k in ('source', 'log') if first.get(k))
+    shown = '{0}:{1}: {2}'.format(where, first.get('line'), text)
+    # The count is the authority on how many there were; the capture is bounded
+    # per list (base.ERROR_SAMPLE_LIMIT), so say how many of *that kind* are
+    # quotable rather than letting the first line stand for all of them.
+    return '{0}; first of {1} captured {2} line(s): {3}'.format(
+        detail, len(found), kind, shown)
+
+
+def check_host(artifact, row, health=None):
     '''Contention and memory, from the row and from the run's own findings.
 
     The findings are the run's verdict on itself and are read rather than
@@ -359,8 +435,7 @@ def check_host(artifact, row):
                             'row does not carry tester errors/timeouts'))
     elif errors or timeouts:
         checks.append(Check('tester_health', FAIL,
-                            '{0} tester errors, {1} timeouts'.format(
-                                errors, timeouts)))
+                            describe_tester_health(health, errors, timeouts)))
     else:
         checks.append(Check('tester_health', OK, 'no errors, no timeouts'))
 
@@ -578,13 +653,14 @@ def check_instrument(artifact):
 
 
 def qualify(artifact, versions, row, expect_limiting=None,
-            expect_mbit=None, tolerance=DEFAULT_EGRESS_TOLERANCE):
+            expect_mbit=None, tolerance=DEFAULT_EGRESS_TOLERANCE,
+            health=None):
     checks = []
     checks.extend(check_provenance(artifact, versions))
     checks.extend(check_status(artifact, row))
     checks.extend(check_events(artifact))
     checks.extend(check_testers(artifact))
-    checks.extend(check_host(artifact, row))
+    checks.extend(check_host(artifact, row, health))
     checks.extend(check_findings(artifact))
     checks.extend(check_instrument(artifact))
     checks.extend(check_calibration(artifact, expect_limiting, expect_mbit,
@@ -669,11 +745,15 @@ def main(argv=None):
             results.append({'artifact': entry, 'verdict': 'unreadable',
                             'checks': []})
             continue
-        versions = load_json(path[:-len('.events.json')] + '.versions.json')
+        stem = path[:-len('.events.json')]
+        versions = load_json(stem + '.versions.json')
+        # Written only when a count is nonzero, and by builds from 2026-09-11
+        # onward. None covers both, and the detail says which.
+        health = load_json(stem + '.tester-health.json')
         name = row_name_for(artifact)
         verdict, checks = qualify(artifact, versions, rows.get(name),
                                   expect_limiting, args.expect_egress_mbit,
-                                  args.egress_tolerance)
+                                  args.egress_tolerance, health)
         results.append({'artifact': entry, 'run': name, 'verdict': verdict,
                         'checks': [c.as_dict() for c in checks]})
 

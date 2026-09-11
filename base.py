@@ -1022,15 +1022,91 @@ class Tester(Container):
         return None
 
     @staticmethod
-    def find_errors(log_dirs=()):
+    def find_errors(log_dirs=(), samples=None):
         return 0
 
     @staticmethod
-    def find_timeouts(log_dirs=()):
+    def find_timeouts(log_dirs=(), samples=None):
         return 0
 
 
-def count_matching_lines(log_dirs, needle):
+# What a captured sample costs, and why all three numbers are small.
+#
+# The capture runs after `bench_stop` and after the events artifact is on disk,
+# so it is billed to neither `total time` nor the atomic write -- but it still
+# runs in the controller process, whose own RSS feeds the recorded
+# `min free mem` column. A tester log reaches hundreds of MB on an MRT run and
+# a pathological line (a BGP attribute dump) is unbounded, so a capture that
+# kept every match could hold more than the run it is describing. Twenty lines
+# of at most 300 characters is 6 KB, and errors and timeouts are separate walks
+# with separate lists, so a run carrying both holds at most 12 KB -- which
+# cannot move that column either way, and is enough to say what a count of one
+# or two was. A truncated capture says so rather than looking complete --
+# `sampled` against `count` is the difference, and the limit is published
+# beside them (as `sample_limit_per_list`, because that is what it bounds) so a
+# reader need not know this constant.
+#
+# ERROR_SAMPLE_PER_LOG is the second bound and it exists because the first one
+# alone is spent in `glob` order. A generator writes one log per session -- a
+# BIRD tester one per peer, an MRT fleet one `bgpdump2.log` per injector -- so
+# a global cap can be exhausted by the first session walked while the other
+# forty-nine contribute nothing and the capture still looks complete. Three per
+# log spreads the budget across at least seven sessions before the global cap
+# binds, which is what makes a capture evidence about the *fleet* rather than
+# about whichever file `glob` happened to return first.
+ERROR_SAMPLE_LIMIT = 20
+ERROR_SAMPLE_PER_LOG = 3
+ERROR_SAMPLE_LINE_CHARS = 300
+
+
+def note_error_sample(samples, log_dir, log, lineno, line, taken=0):
+    '''Record one matched line, bounded, if the caller asked for samples.
+
+    `samples is None` is the default everywhere and captures nothing, so a
+    caller that only wants the count -- which is every caller that existed
+    before this -- walks the logs exactly as it did.
+
+    The line is trimmed rather than dropped when it is long: what makes a
+    `tester_health` rejection diagnosable is the shape of the message, and the
+    first 300 characters carry it.
+
+    `taken` is how many this log has already contributed, and the caller keeps
+    it. Returns whether the line was recorded, which is what lets the caller
+    keep that count without this function rescanning `samples` -- it used to,
+    once per matched line, and a log whose needle is the bare substring
+    `error` can match millions of times. That scan sat between `bench_stop()`
+    and `collect_provenance()`, which still has to reach containers that are
+    about to go away, and in a batch it delays the next cell.
+
+    **Both the tester and the log file are recorded, and the basename alone is
+    not enough.** Every MRT injector writes the same `bgpdump2.log` inside its
+    own host directory, so ten injectors produce ten samples reading
+    `bgpdump2.log:1234` with nothing saying which container each came from --
+    and the host directory that would have said is deleted at the start of the
+    next cell, which is the whole reason this record exists. `source` is the
+    tester's own directory name, which is what distinguishes them.
+    '''
+    if samples is None or taken >= ERROR_SAMPLE_PER_LOG:
+        return False
+    if len(samples) >= ERROR_SAMPLE_LIMIT:
+        return False
+    source = os.path.basename(os.path.normpath(log_dir))
+    name = os.path.basename(log)
+    text = line.rstrip('\n')
+    truncated = len(text) > ERROR_SAMPLE_LINE_CHARS
+    if truncated:
+        text = text[:ERROR_SAMPLE_LINE_CHARS]
+    samples.append({
+        'source': source,
+        'log': name,
+        'line': lineno,
+        'text': text,
+        'truncated': truncated,
+    })
+    return True
+
+
+def count_matching_lines(log_dirs, needle, samples=None):
     '''Count lines containing `needle` (case-insensitively) in each *.log
     directly inside each of `log_dirs` -- not recursively, which is all the
     testers need since they write their logs straight into guest_dir.
@@ -1048,12 +1124,18 @@ def count_matching_lines(log_dirs, needle):
     needle = needle.lower()
     count = 0
     for log_dir in log_dirs:
-        for log in glob.glob(os.path.join(log_dir, '*.log')):
+        # Sorted so that which sessions a bounded capture drew from is a
+        # property of the run rather than of the filesystem's `glob` order.
+        for log in sorted(glob.glob(os.path.join(log_dir, '*.log'))):
+            taken = 0
             try:
                 with open(log, errors='replace') as f:
-                    for line in f:
+                    for lineno, line in enumerate(f, 1):
                         if needle in line.lower():
                             count += 1
+                            if note_error_sample(samples, log_dir, log, lineno,
+                                                 line, taken):
+                                taken += 1
             except OSError:
                 continue
     return count

@@ -3348,6 +3348,125 @@ def write_event_artifact(args, events, prefix, status, testers=None,
     return doc
 
 
+def write_tester_health_artifact(args, prefix, errors, error_samples,
+                                 timeouts, timeout_samples):
+    """Preserve the lines behind a nonzero tester error/timeout count.
+
+    `check_timing_evidence.py` rejects a row on any nonzero count, and until
+    this existed the count was the whole of what survived: `bench()` rmtree's
+    the work directory at the start of the next cell, so by the time anyone
+    read the CSV the logs the count was derived from were gone. Block 4 of the
+    64 GB timing campaign lost two rows that way -- both converged on the full
+    5,000,000 -- and no one could say what the one and two matched lines were,
+    or re-measure toward an answer, because a re-run wipes them identically.
+
+    It is a file of its own rather than a section of `<prefix>.events.json`,
+    and that is forced: the events artifact is written *before* the log scan on
+    purpose (a finding is worth less than the atomic write of the evidence it
+    would be derived from), so by here it is already on disk. Appending to it
+    would mean either rewriting a document that is deliberately written once,
+    or moving the scan above the write and putting a walk of every tester log
+    between a converged run and its only durable record.
+
+    Written only when a count is nonzero -- a run with nothing to explain has
+    nothing to write.
+
+    **A run that scanned and found nothing removes the file rather than simply
+    not writing it.** Every other per-run artifact (`.events.json`,
+    `.versions.json`) is rewritten unconditionally, so this is the only one
+    that can be left behind by a previous run of the same name: re-running a
+    configuration into the same `--results-dir` is the ordinary way to
+    re-measure, and returning early would leave a `tester errors: 0` row
+    sitting beside error evidence attributed to it. That is worse than no file
+    at all, because the stale document names the run.
+
+    **A run that did not scan supersedes nothing, and the caller enforces
+    that** -- see the call site, which is deliberately inside the
+    `tester_class is not None` branch. A `-r/--repeat` run reports zeros it
+    never measured, over reused containers still appending to logs the
+    previous capture may well describe.
+
+    It never raises. This runs after the run has converged and after its
+    evidence is safe, and the same rule findings follow applies with more
+    force: losing a run to the writer for the file that explains a rejection
+    would be the failure it was written to fix.
+    """
+    # `results_path()` is inside the try as well, not above it: it does a
+    # `mkdir(parents=True)`, which raises on a read-only or full filesystem,
+    # and "it never raises" has to hold for the whole function or it is not a
+    # promise. Losing a converged run here -- after `bench_stop` and before
+    # `collect_provenance()` -- to the writer of a file that only ever explains
+    # a rejection is the failure this was written to fix.
+    try:
+        path = results_path(args.results_dir, prefix + '.tester-health.json')
+        # Removed before anything is written, and on every path that gets this
+        # far. `atomic_write()` writes a temp file and renames over the target,
+        # so a write that fails would otherwise leave the *previous* run's
+        # document at this name -- and a run that then published nonzero counts
+        # would have `describe_tester_health()` quote another run's lines as
+        # "first of N captured" for a rejection they did not cause. A capture
+        # that could not be written must be indistinguishable from one that was
+        # never taken, which is the "no captured lines available" path.
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        if not errors and not timeouts:
+            return None
+
+        doc = {
+            # This is the one artifact a previous run can deliberately
+            # leave behind -- a `-r/--repeat` run scans nothing and so
+            # supersedes nothing -- and it was the only one with nothing
+            # inside it saying whose it is.
+            #
+            # `run` is the stem, so it identifies the file if it is copied out
+            # of its directory; it does **not** separate a preserved capture
+            # from the run sitting beside it, because `-r` reuses the same
+            # configuration and therefore the same stem. `date` is what does,
+            # and only by its time of day -- the CSV's own `date` column is
+            # date-only, so two runs of one configuration on one day are
+            # otherwise indistinguishable in the published record. That is a
+            # thin thread, and it is the honest extent of it; the underlying
+            # gap is bgperf2-v6x.
+            'run': prefix,
+            'date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'tester_errors': errors,
+            'tester_timeouts': timeouts,
+            # `sampled` against the count is how a reader tells a complete
+            # capture from a truncated one; the limits are published so that
+            # judgement does not need this module. Both of them: a capture that
+            # stopped at six lines under a limit of twenty stopped because two
+            # sessions each hit the per-log cap, and without that second number
+            # the fleet-coverage property it exists to give is invisible.
+            #
+            # `sample_limit` bounds each list, not the pair: errors and
+            # timeouts are separate walks with separate lists, so a run with
+            # both holds up to twice this many lines.
+            'sample_limit_per_list': ERROR_SAMPLE_LIMIT,
+            'sample_limit_per_log': ERROR_SAMPLE_PER_LOG,
+            'error_samples': error_samples,
+            'timeout_samples': timeout_samples,
+            'sampled_errors': len(error_samples),
+            'sampled_timeouts': len(timeout_samples),
+        }
+
+        def write(f):
+            json.dump(doc, f, indent=2, sort_keys=True)
+            f.write('\n')
+
+        atomic_write(path, write)
+    except Exception as e:
+        print('could not write tester health evidence: {0}: {1}'.format(
+            type(e).__name__, e))
+        return None
+    print('tester health evidence: {0} ({1} errors, {2} timeouts; '
+          '{3} of {1} and {4} of {2} lines captured)'.format(
+              path, errors, timeouts,
+              len(error_samples), len(timeout_samples)))
+    return path
+
+
 def finish_bench(args, output_stats, bench_stats, bench_start, target, m, testers=(), fail=False,
                  lifecycle_events=(), tester_lifecycles=None,
                  tester_observation_errors=None, tester_read_failures=None,
@@ -3432,9 +3551,46 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
     # MRT run -- was billed to total_time, a column create_batch_graphs() plots.
     tester_dirs = [t.host_dir for t in testers]
     tester_class = type(testers[0]) if testers else None
+    error_samples = []
+    timeout_samples = []
     if tester_class is not None:
-        output_stats['tester_errors'] = tester_class.find_errors(tester_dirs)
-        output_stats['tester_timeouts'] = tester_class.find_timeouts(tester_dirs)
+        # The matched lines are captured in the same walk that counts them.
+        # Walking twice would be two reads of hundreds of MB for the second
+        # copy of a number we already have, and -- since the logs are being
+        # deleted out from under this by the next cell -- two different reads.
+        output_stats['tester_errors'] = tester_class.find_errors(
+            tester_dirs, error_samples)
+        output_stats['tester_timeouts'] = tester_class.find_timeouts(
+            tester_dirs, timeout_samples)
+        # Inside this branch on purpose, and it was briefly outside it.
+        #
+        # The writer also *removes* a previous run's document, and a re-run
+        # into the same --results-dir must not leave one behind -- so moving
+        # the call out here looks right, and review asked for it once. It is
+        # wrong. A run reaches here with no tester class whenever it built
+        # no testers -- `-r/--repeat`, or a scenario that declares none (see
+        # the `tester_errors` defaults above, "a run with no testers (a remote
+        # target) never gets there") -- and none of those measured anything.
+        # `-r` is the sharp case: `bench()` skips both
+        # `remove_old_containers()` and the `shutil.rmtree(config_dir)` under
+        # it, so the reused tester containers are still running and still
+        # appending to the very logs nobody scanned. The zeros are the
+        # defaults set before the run, not a measurement -- and removing the
+        # file on the strength of them would delete a capture that still
+        # describes lines present in those logs, publishing
+        # `tester errors: 0` over a log that was never read.
+        #
+        # That is this repository's oldest rule twice over: a count of zero is
+        # only published when the log proves the class was on, and a pass that
+        # failed and a pass that never ran are never described by one clause.
+        # A run that scanned and found nothing supersedes an earlier document;
+        # a run that did not scan supersedes nothing. (That a `-r` row reports
+        # `tester errors: 0` at all is a separate, older gap -- bgperf2-v6x --
+        # and it is not made better by deleting the evidence.)
+        write_tester_health_artifact(
+            args, bench_prefix,
+            output_stats.get('tester_errors', 0), error_samples,
+            output_stats.get('tester_timeouts', 0), timeout_samples)
 
     # Read every version before the containers go away -- this is the last
     # moment any of them can be asked.

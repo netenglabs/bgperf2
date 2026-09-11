@@ -86,12 +86,12 @@ class ExaBGPMrtTester(Tester, ExaBGP_MRTParse, MRTTester):
     # between rows of the same batch CSV -- which is the whole reason they are
     # in the row.
     @staticmethod
-    def find_errors(log_dirs=()):
-        return count_matching_lines(log_dirs, 'error')
+    def find_errors(log_dirs=(), samples=None):
+        return count_matching_lines(log_dirs, 'error', samples)
 
     @staticmethod
-    def find_timeouts(log_dirs=()):
-        return count_matching_lines(log_dirs, 'timeout')
+    def find_timeouts(log_dirs=(), samples=None):
+        return count_matching_lines(log_dirs, 'timeout', samples)
 
     def configure_neighbors(self, target_conf):
         tester_mrt_guest_file_path = self.get_mrt_file(self.conf, self.name)
@@ -239,7 +239,7 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1 &
         return startup
 
     @staticmethod
-    def find_errors(log_dirs=()):
+    def find_errors(log_dirs=(), samples=None):
         '''Count expired-session messages across the injector logs.
 
         bench() calls this on the class with the tester host directories, so it
@@ -247,13 +247,13 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1 &
         arguments and glob /tmp/bgperf2 itself, which raised TypeError and
         crashed every MRT run *after* it had already converged.
         '''
-        return count_matching_lines(log_dirs, 'expired')
+        return count_matching_lines(log_dirs, 'expired', samples)
 
     @staticmethod
-    def find_timeouts(log_dirs=()):
+    def find_timeouts(log_dirs=(), samples=None):
         '''gobgp is the default MRT injector, so without this it inherited
         base.Tester's hardcoded 0 while a bgpdump2 run of the same scenario
         reported real counts -- the tester timeouts column was not comparable
         between two rows of the same batch CSV.
         '''
-        return count_matching_lines(log_dirs, 'timeout')
+        return count_matching_lines(log_dirs, 'timeout', samples)

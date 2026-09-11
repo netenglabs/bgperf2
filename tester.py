@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from base import Tester
+from base import Tester, note_error_sample
 from exabgp import ExaBGP
 from bird import (BIRD, CHURN_PROTOCOL, SESSION_MARKER, churn_failures,
                   split_session_output, tester_offering)
@@ -247,7 +247,7 @@ ulimit -n 65536
         return '\n'.join(startup)
 
     @staticmethod
-    def find_errors(log_dirs=()):
+    def find_errors(log_dirs=(), samples=None):
         '''Count real protocol errors across the tester logs.
 
         The target re-advertises everything it learns, including back to the
@@ -261,19 +261,25 @@ ulimit -n 65536
         '''
         errors = 0
         for log_dir in log_dirs:
-            for log in glob.glob(os.path.join(log_dir, '*.log')):
+            # Sorted for the reason count_matching_lines() sorts: which peers
+            # a bounded capture drew from should be a property of the run.
+            for log in sorted(glob.glob(os.path.join(log_dir, '*.log'))):
+                taken = 0
                 # An unreadable log is skipped rather than raised: this runs
                 # once the run has converged but before its stats row is
                 # written, so letting an OSError out discards the whole run
                 # over a log file.
                 try:
                     with open(log, errors='replace') as f:
-                        for line in f:
+                        for lineno, line in enumerate(f, 1):
                             if '<RMT>' not in line:
                                 continue
                             if 'NEXT_HOP' in line or 'Invalid route' in line:
                                 continue
                             errors += 1
+                            if note_error_sample(samples, log_dir, log, lineno,
+                                                 line, taken):
+                                taken += 1
                 except OSError:
                     continue
         return errors

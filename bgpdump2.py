@@ -606,9 +606,9 @@ stdbuf -oL -eL /usr/local/sbin/bgpdump2 --blaster {}{} -p {} -a {} /root/mrt_fil
     # /tmp/bgperf2 themselves, so every bgpdump2 run died with TypeError at the
     # point it had finished converging and was writing its stats row.
     @staticmethod
-    def find_errors(log_dirs=()):
-        return count_matching_lines(log_dirs, 'error')
+    def find_errors(log_dirs=(), samples=None):
+        return count_matching_lines(log_dirs, 'error', samples)
 
     @staticmethod
-    def find_timeouts(log_dirs=()):
-        return count_matching_lines(log_dirs, 'timeout')
+    def find_timeouts(log_dirs=(), samples=None):
+        return count_matching_lines(log_dirs, 'timeout', samples)

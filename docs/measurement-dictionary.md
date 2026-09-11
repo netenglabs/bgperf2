@@ -29,7 +29,7 @@ named monotonic phase intervals live in each run's `.events.json` artifact.
 | `date` | date | Controller-local row creation date in `YYYY-MM-DD` form. |
 | `cores` | count | Logical CPU count reported by the benchmark host. |
 | `Mem (GB)` | string | Total benchmark-host memory formatted by `mem_human()` with binary divisors and a unit suffix. |
-| `tester errors` | count | Tester log lines classified as errors after convergence timing stops. Known benign BIRD messages are excluded by the tester parser. |
+| `tester errors` | count | Tester log lines classified as errors after convergence timing stops. Known benign BIRD messages are excluded by the tester parser. When this or `tester timeouts` is nonzero the run also writes `<prefix>.tester-health.json` holding the matched lines themselves -- see "Tester health evidence" below. The count is the authority; the capture is bounded. |
 | `tester timeouts` | count | Tester log lines classified as timeouts after convergence timing stops. |
 | `failed` | string | `FAILED` when convergence tracking declares failure; otherwise empty. |
 | `MSG` | string | Convergence failure explanation when available; otherwise empty. Also carries a churn sequence that did not complete, with `failed` left blank: the run converged and that measurement stands, but a batch of churn cells whose rows all read as ordinary would say nothing about the second workload. `summary.py` reads this column only for a row marked failed, so no summary is affected. A policy reload that did not complete is carried the same way. |
@@ -43,6 +43,54 @@ The canonical compatibility test for the positional schema and the legacy
 `testers (s)` formula is `tests/test_stats_contract.py`. Historical CSV rows
 must be interpreted with this dictionary; they must not be rewritten to match
 future lifecycle-event semantics.
+
+## Tester health evidence: `<prefix>.tester-health.json`
+
+Written only when `tester errors` or `tester timeouts` is nonzero, and
+**removed** when they are zero. The removal is not a detail: every other
+per-run artifact is rewritten unconditionally, so this is the only one a
+previous run of the same name can leave behind, and re-running a configuration
+into the same `--results-dir` is the ordinary way to re-measure. A stale file
+would sit beside a `tester errors: 0` row as error evidence attributed to it.
+
+A nonzero count with no file means the evidence was not captured, and nothing
+says why, because there are two causes and they are indistinguishable from the
+artifacts: a build older than 2026-09-11, and a writer that failed (a full disk
+during a campaign block). `check_timing_evidence.py` reports it as "no captured
+lines available" for that reason -- its text is the durable record in
+`evidence/<label>.json` and in the campaign's `RAN`/`COMPLETE` markers, and
+naming a cause it cannot establish would record a run whose evidence was lost as
+a run from an older build. (`-r/--repeat` is not one of them: it builds no
+tester objects, so nothing is scanned and nothing is counted, and the row
+reports zero.)
+
+It exists because those two columns are a rejection criterion
+(`scripts/check_timing_evidence.py` fails `tester_health` on any nonzero count)
+whose evidence used to be destroyed before anyone could read it: `bench()`
+rmtree's the work directory at the start of the next cell, so the count reached
+the CSV and the logs behind it did not. Re-measuring does not recover it --
+a re-run wipes the logs identically -- so a rejected row could be neither
+diagnosed nor argued with. Block 4 of the 64 GB timing validation campaign lost
+two rows to exactly that, both of which had converged on the full 5,000,000.
+
+It is a separate file rather than a section of `<prefix>.events.json` because
+the events artifact is written *before* the tester logs are scanned, on
+purpose: a finding is worth less than the atomic write of the evidence it would
+be derived from. By the time the counts exist, that document is already on disk.
+
+| Field | Unit/type | Definition and interpretation |
+|---|---|---|
+| `tester_errors` / `tester_timeouts` | count | The same numbers as the CSV columns. These, not the captures, are the authority on how many there were. |
+| `error_samples` / `timeout_samples` | list | The matched lines, each with `source` (the tester's own directory name), `log` (the file's basename), its 1-based line number, the text, and whether the text was trimmed. Both halves of the location are needed: every MRT injector writes the same `bgpdump2.log` inside its own host directory, so the basename alone cannot say which of ten injectors a line came from -- and the directory that would have said is deleted at the start of the next cell. |
+| | | Capped twice. `base.ERROR_SAMPLE_LIMIT` (20) lines of `ERROR_SAMPLE_LINE_CHARS` (300) characters bounds the whole capture, because it runs in the controller process whose RSS feeds the recorded `min free mem` column, and a tester log reaches hundreds of MB with individually unbounded lines. `ERROR_SAMPLE_PER_LOG` (3) bounds any one session's share, because a global cap alone is spent in `glob` order -- one noisy peer would exhaust it while the other forty-nine contributed nothing and the capture still looked complete. Logs are walked in sorted order so which sessions a bounded capture drew from is a property of the run rather than of the filesystem. |
+| `sampled_errors` / `sampled_timeouts` | count | How many lines were captured. Compare against the counts above to tell a complete capture from a truncated one. |
+| `run` / `date` | string | Which run wrote this and when. Present because this is the one per-run artifact a *previous* run can deliberately leave behind: a `-r/--repeat` run scans nothing, so it supersedes nothing and removes nothing. `run` is the artifact stem, which identifies the document if it is copied out of its directory; it does **not** separate a preserved capture from the row beside it, since `-r` reuses the same configuration and so the same stem. Only `date`'s time of day does that, and the CSV's own `date` column is date-only -- so two runs of one configuration on one day are otherwise indistinguishable in the published record. The underlying gap is `bgperf2-v6x`. |
+| `sample_limit_per_list` | count | The cap on each list (`base.ERROR_SAMPLE_LIMIT`), published so that comparison does not require reading the source. Per list, not per document: errors and timeouts are separate walks with separate lists, so a run carrying both holds up to twice this many lines. |
+| `sample_limit_per_log` | count | The per-session cap (`base.ERROR_SAMPLE_PER_LOG`). Published for the same reason and it is the one that usually binds: a capture holding six lines under a global cap of twenty stopped because two sessions each hit this one, which is what says the capture covers the fleet rather than one noisy log. |
+
+The lines are captured in the same walk that counts them -- walking twice would
+be a second read of hundreds of MB for a number already in hand, and, since the
+logs are being deleted by the next cell, two different reads.
 
 ## Event artifact: the `measurements` section
 

@@ -55,6 +55,19 @@ def _built_blocks():
     return sorted(int(n) for n in re.findall(r'^  (\d+)\)\s*$', cases, re.M))
 
 
+def _held_blocks():
+    """Which blocks the runner refuses to run without an explicit override.
+
+    Discovered from the script for the reason `_built_blocks` is: a test that
+    named block 5 would silently stop testing anything the day block 5 is
+    released, and would be testing the wrong block the day another is held.
+    """
+    table = BLOCK_RUNNER.read_text().split('declare -A BLOCK_HELD=(', 1)
+    if len(table) < 2:
+        return set()
+    return set(int(n) for n in re.findall(r'^\s*\[(\d+)\]=', table[1].split('\n)', 1)[0], re.M))
+
+
 def unbuilt_block():
     """The lowest block with no branch: the one a guard test may safely run.
 
@@ -103,10 +116,91 @@ def test_the_block_order_is_the_plans_order():
 
 
 def test_status_reports_every_block_before_anything_has_run(roots):
+    """Every block accounts for itself before the first one runs.
+
+    Counted as "has a pre-run state" rather than as twelve `not-started`,
+    because a block can also be *held* -- built, reviewed, and waiting on a
+    decision about what its results would mean. Hardcoding the one word made
+    this test fail the moment a block was held, which is a state it has no
+    opinion about.
+    """
     results, _ = roots
     result = block('status', results_root=results)
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count('not-started') == 12
+    states = [line.split()[-1] for line in result.stdout.splitlines()
+              if line.startswith('block-')]
+    assert len(states) == len(_block_keys())
+    # The exact partition, not just the vocabulary. Asserting only that every
+    # state is one of the two words would pass a `block_state` whose held
+    # lookup had degraded to something true of every block -- reporting the
+    # whole campaign as held, which is the one reading that stops `next` dead.
+    held = _held_blocks()
+    expected = ['held' if i in held else 'not-started'
+                for i in range(len(states))]
+    assert states == expected, states
+
+
+def test_a_held_block_is_refused_and_says_what_decision_it_is_waiting_on(roots):
+    """A held block is built and reviewed; what it lacks is a decision.
+
+    It must not be reachable by `next`, because the campaign contract tells an
+    unattended session to run the next block -- and the whole point of holding
+    one is that its rows are already known not to mean what they appear to.
+    """
+    held = _held_blocks()
+    if not held:
+        pytest.skip('no block is currently held')
+    index = sorted(held)[0]
+    results, work = roots
+    result = block('block-%d' % index, results_root=results, workdir=work)
+    assert result.returncode == 2, result.stdout
+    assert 'built but held' in result.stderr
+    # The refusal has to name the decision, not just refuse: an operator who
+    # cannot see why will pass the override.
+    assert len(result.stderr.strip().splitlines()) > 3, result.stderr
+    assert '--run-held-block' in result.stderr
+    assert not os.path.exists(os.path.join(
+        results, '2026-timing-validation', _block_keys()[index]))
+
+
+def test_next_does_not_select_a_held_block(roots):
+    results, work = roots
+    held = _held_blocks()
+    if not held:
+        pytest.skip('no block is currently held')
+    index = sorted(held)[0]
+    root = os.path.join(results, '2026-timing-validation')
+    for key in _block_keys()[:index]:
+        directory = os.path.join(root, key)
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, 'COMPLETE'), 'w') as handle:
+            handle.write('accepted\n')
+    result = block('next', results_root=results, workdir=work)
+    assert result.returncode == 2, result.stdout
+    assert 'built but held' in result.stderr
+
+
+def test_the_held_override_is_refused_by_an_action_that_runs_nothing(roots):
+    """`accept` is the slip that matters: a held block's refusal is about what
+    its rows would mean, which is the judgement `accept` records."""
+    results, _ = roots
+    for action in (['accept', '5', '--note', 'why'], ['status'], ['list']):
+        result = block(*action, '--run-held-block', results_root=results)
+        assert result.returncode == 1, (action, result.stdout)
+        assert '--run-held-block applies to running a block' in result.stderr
+
+
+def test_a_held_block_is_reported_as_held_rather_than_not_started(roots):
+    held = _held_blocks()
+    if not held:
+        pytest.skip('no block is currently held')
+    index = sorted(held)[0]
+    results, _ = roots
+    result = block('status', results_root=results)
+    assert result.returncode == 0, result.stderr
+    line = [l for l in result.stdout.splitlines()
+            if l.startswith('block-%d ' % index)]
+    assert line and line[0].split()[-1] == 'held', result.stdout
 
 
 def test_an_unknown_block_is_refused_by_name(roots):

@@ -44,6 +44,10 @@ Options:
                         exclusions. Requires --note. (accept only)
   --force               Re-measure a block, discarding its previous results,
                         artifacts, markers and batch progress
+  --run-held-block      Run a block that is built but held pending a decision
+                        about what its results would mean. The refusal names
+                        the decision; this records in the RAN marker that it
+                        was overridden.
   --allow-root-workdir  Proceed with a work directory on the root filesystem
   -h, --help            Show this help
 EOF
@@ -74,6 +78,7 @@ MRT_FILE=""
 NOTE=""
 FORCE=0
 WITH_EXCLUSIONS=0
+RUN_HELD_BLOCK=0
 ACCEPT_TARGET=""
 
 # `accept 3` takes its block number positionally, before the options.
@@ -91,6 +96,7 @@ while [[ $# -gt 0 ]]; do
     --note) NOTE="${2:?missing value for --note}"; shift 2 ;;
     --force) FORCE=1; shift ;;
     --with-exclusions) WITH_EXCLUSIONS=1; shift ;;
+    --run-held-block) RUN_HELD_BLOCK=1; shift ;;
     --allow-root-workdir) ALLOW_ROOT_WORKDIR=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *)
@@ -126,6 +132,19 @@ elif [[ $FORCE -eq 1 ]]; then
   exit 1
 fi
 
+# `--run-held-block` overrides a refusal that only a *run* can meet, so it is
+# refused for every action that runs nothing, on the rule directly above: a
+# flag that quietly does nothing is read next time as one that did something.
+# `accept` is the slip that matters -- a held block's refusal is about what its
+# rows would mean, which is exactly the judgement `accept` records, so reaching
+# for the override there is natural and it would accept the block with nothing
+# saying the objection was ever considered.
+if [[ $RUN_HELD_BLOCK -eq 1 && "$ACTION" != next && "$ACTION" != block-* ]]; then
+  echo "--run-held-block applies to running a block, not to \`$ACTION\`" >&2
+  echo "to run one anyway: scripts/run_timing_validation_block.sh block-N --run-held-block" >&2
+  exit 1
+fi
+
 # The plan's Execution Blocks, in the plan's own order. The key is the
 # directory name under the run root; nothing here may be reordered or renamed
 # without renaming a directory some earlier block already wrote into.
@@ -157,6 +176,61 @@ BLOCK_TITLES=(
   "selected repetitions"
   "final report"
 )
+
+# A block can be *built* and still not be the right thing to run, and those are
+# different states from "not built yet". A held block has a config and a
+# procedure that were reviewed and are believed correct; what it lacks is a
+# decision about what its results would mean.
+#
+# This exists because Block 5 reached exactly that state. Its own de-risking
+# probe found that FRR converges on the full-internet workload while
+# advertising ~7.5% fewer prefixes than it holds -- reproducibly, in every
+# version tested -- so `check_timing_evidence.py` rejects all five `frr_c` rows
+# on `received < required`, and Blocks 6 and 7 would reproduce that twice more.
+# Without a gate here the campaign contract's "run exactly one next block"
+# sends the next session to spend hours re-deriving a result that is already
+# written down.
+#
+# It is a refusal rather than a warning for the reason the unbuilt branch is:
+# the work is expensive, unattended, and the wrong outcome looks exactly like
+# the right one. `--run-held-block` is the deliberate way past it, and it is
+# recorded in the RAN marker so a later reader can tell a block run under a
+# known objection from one run without one.
+#
+# Keyed by block index. Removing an entry is how a block is released, and that
+# belongs in the same change set that settles the decision named here.
+declare -A BLOCK_HELD=(
+  [5]="FRR advertises ~7.5% fewer prefixes than it holds on this workload, so
+all five frr_c rows are expected to be rejected on received < required.
+Measured 2026-09-11: frr_c 10.7 961,276 and 961,201, frr_c 8.5 958,234,
+against a required 1,039,500 that bird 3.3.2, openbgp 9.2 and rustybgp
+2026-02 all clear. FRR holds the full 1,080,985-prefix table and its own
+pfxSnt agrees with the monitor exactly -- see bgperf2-cw6 and the plan's
+Block 5 record. Settle what an MRT run's required count means, or decide
+to run and exclude those rows, before spending the block."
+)
+
+# Refuses a held block unless the operator said so on the command line. Runs
+# before anything is created, like every other guard that reads only arguments.
+guard_held_block() {
+  local index="$1"
+  local reason="${BLOCK_HELD[$index]:-}"
+  [[ -z "$reason" ]] && return 0
+  if [[ $RUN_HELD_BLOCK -eq 1 ]]; then
+    echo "block-$index is held, and --run-held-block was passed:"
+    echo "$reason"
+    echo
+    return 0
+  fi
+  cat >&2 <<MSG
+block-$index (${BLOCK_TITLES[$index]}) is built but held.
+
+$reason
+
+Pass --run-held-block to run it anyway; the marker will record that it was.
+MSG
+  exit 2
+}
 
 parse_block_number() {
   local raw="$1"
@@ -297,6 +371,12 @@ block_state() {
     echo "awaiting-review"
   elif [[ -d "$dir" ]]; then
     echo "started"
+  elif [[ -n "${BLOCK_HELD[$index]:-}" ]]; then
+    # Reported apart from "not-started", which reads as work simply not
+    # reached yet -- the one thing a held block is not. It is only said of a
+    # block that has not run: once there are results, what they are is the
+    # more useful fact.
+    echo "held"
   else
     echo "not-started"
   fi
@@ -480,6 +560,7 @@ fi
 BLOCK_KEY="${BLOCK_KEYS[$BLOCK_INDEX]}"
 BLOCK_DIR="$RUN_ROOT/$BLOCK_KEY"
 
+
 if [[ -f "$BLOCK_DIR/COMPLETE" && $FORCE -eq 0 ]]; then
   echo "block-$BLOCK_INDEX is already accepted; pass --force to run it again" >&2
   exit 1
@@ -489,6 +570,16 @@ if [[ -f "$BLOCK_DIR/RAN" && $FORCE -eq 0 ]]; then
   echo "accept it, or pass --force to run it again" >&2
   exit 1
 fi
+
+# After the two "this block already has results" answers and before anything
+# is created. A held block that has been run under the override is awaiting
+# review like any other, and answering it with "built but held -- pass
+# --run-held-block to run it anyway" sends the operator to re-run a block whose
+# results are already on disk. `next` gets this ordering right for free; this
+# is the `block-N` path. Still ahead of the workdir and every directory, so the
+# refusal is reached on the command line alone -- which is what keeps the
+# Docker-free suite able to test it.
+guard_held_block "$BLOCK_INDEX"
 
 campaign_require_workdir "$WORKDIR"
 campaign_guard_workdir "$WORKDIR" "$ALLOW_ROOT_WORKDIR"
@@ -518,7 +609,12 @@ if [[ -n "$MRT_FILE" ]]; then
   echo "MRT override: $MRT_FILE"
 fi
 
-MRT_INPUT="${MRT_FILE:-mrt/rib.20260808.0000}"
+# There is deliberately no MRT_INPUT default here any more. The one that lived
+# at this line was `${MRT_FILE:-mrt/rib.20260808.0000}`, and it was what
+# `prepare_mrt.sh` validated and what the manifest recorded -- neither of which
+# is necessarily the file the batch replays. The files are read out of the
+# rendered configs instead (config_mrt_files), which is the same list in the
+# ordinary case and the right list in every other one.
 
 # A metadata file is written per *block* when its content exists nowhere else,
 # and per run root when the manifest already carries the same fact under
@@ -555,6 +651,53 @@ MRT_INPUT="${MRT_FILE:-mrt/rib.20260808.0000}"
 # Contract asks them for -- but "growth against the previous block" is
 # measured from a file the previous *attempt* may have written, so read them
 # against the manifest's per-attempt host before concluding anything moved.
+
+# The MRT files a block will actually replay, read out of its rendered configs.
+#
+# This replaces an `MRT_INPUT` default of `${MRT_FILE:-mrt/rib.20260808.0000}`:
+# the override when one was passed, and otherwise a constant that agreed with
+# the config only by coincidence. Validating and recording *that* while the
+# batch replays whatever the config's `mrt_file:` entries name is two claims
+# about one run that nothing holds together -- a later MRT block built from a re-downloaded RIB and run
+# without `--mrt-file` would have the old file parsed by `prepare_mrt.sh` and
+# digested into the manifest, so an unparseable new one would reach fourteen
+# rows with the check green and the manifest would attribute the pass to a file
+# the block never opened. Reading the rendered config closes both directions at
+# once: `campaign_render_config` has already applied any override by the time
+# this runs, so the override case and the default case become one case.
+#
+# Prints nothing for a config that names no MRT file, which is what a synthetic
+# block is -- the manifest then carries no `mrt_inputs` key at all, rather than
+# one naming a RIB that block never opened either.
+#
+# Parsed with bgperf2's own `BatchLoader`, not `yaml.safe_load`, because that is
+# the loader the batch itself will use and a config is read here exactly as it
+# will be read there.
+config_mrt_files() {
+  "$PYTHON_BIN" - "$@" <<'PY'
+import os
+import sys
+
+import yaml
+
+sys.path.insert(0, os.getcwd())
+from bgperf2 import BatchLoader
+
+paths = set()
+for config in sys.argv[1:]:
+    with open(config, encoding='utf-8') as handle:
+        document = yaml.load(handle, Loader=BatchLoader) or {}
+    for test in document.get('tests') or []:
+        if not isinstance(test, dict):
+            continue
+        for target in test.get('targets') or []:
+            if isinstance(target, dict) and target.get('mrt_file'):
+                paths.add(str(target['mrt_file']))
+for path in sorted(paths):
+    print(path)
+PY
+}
+
 capture_metadata() {
   local configs=("$@")
   local config_list
@@ -571,8 +714,19 @@ capture_metadata() {
   "${BGPERF_CMD[@]}" doctor > "$METADATA_DIR/doctor.txt" 2>&1 || true
   "${BGPERF_CMD[@]}" images > "$METADATA_DIR/images.txt" 2>&1 || true
 
+  # The files this block will replay, not the default that usually matches
+  # them -- see config_mrt_files. An empty list is passed as no arguments at
+  # all, which is what leaves a synthetic block's facts with no `mrt_inputs`.
+  local mrt_listed
+  mrt_listed="$(config_mrt_files "${configs[@]}")"
+  local -a mrt_inputs=()
+  if [[ -n "$mrt_listed" ]]; then
+    mapfile -t mrt_inputs <<<"$mrt_listed"
+  fi
+
   local facts
-  facts="$("$PYTHON_BIN" scripts/campaign_host_facts.py "$MRT_INPUT")"
+  facts="$("$PYTHON_BIN" scripts/campaign_host_facts.py \
+    ${mrt_inputs[@]+"${mrt_inputs[@]}"})"
   # Under one key so the block's facts cannot collide with the manifest's own
   # spine, and per block because images are rebuilt and hosts are resized
   # between them: one shared record would describe whichever block wrote last.
@@ -834,6 +988,88 @@ run_synthetic_repetition() {
   check_evidence "$BLOCK_DIR/synthetic" 14 "synthetic"
 }
 
+# Every MRT file the block is about to replay, through bgpdump2 itself.
+#
+# This is the only check that says the injectors can parse the RIB, and it is
+# repeated per block rather than trusted from Block 0 for the reason `verify`
+# is: blocks are days apart, the campaign host is a spot instance whose root
+# filesystem is fresh on every replacement, `--mrt-file` can point a block at a
+# file Block 0 never saw, and an unparseable RIB costs the whole block rather
+# than one cell, since every row replays it. Seconds against a block of hours,
+# and fatal on the same grounds `verify` is fatal: a campaign whose inputs are
+# wrong is a campaign of unattributable rows.
+validate_mrt_inputs() {
+  local listed
+  listed="$(config_mrt_files "$@")"
+  if [[ -z "$listed" ]]; then
+    echo "no mrt_file named by this block's configs; refusing to guess" >&2
+    exit 1
+  fi
+  local log="$METADATA_DIR/mrt-validation-$BLOCK_KEY.txt"
+  : > "$log"
+  local mrt
+  while IFS= read -r mrt; do
+    echo "Validating pinned MRT: $mrt"
+    scripts/prepare_mrt.sh "$mrt" >> "$log" 2>&1 || {
+      echo "MRT validation failed for $mrt; see $log" >&2
+      tail -20 "$log" >&2
+      exit 1
+    }
+  done <<<"$listed"
+  tail -4 "$log"
+}
+
+# Blocks 5-7 are the same shape one workload over: the plan's 14 target
+# configurations against the pinned Route Views RIB, ten bgpdump2 injectors,
+# one pass, in the order that repetition's seed and test name together fix.
+# Shared here rather than copied per block for the reason
+# run_synthetic_repetition() is shared -- the three passes are read together in
+# Block 9 as the dispersion of one cell, so a step that drifts between them is
+# a difference in how the passes were measured arriving inside the statistic
+# that exists to measure run-to-run noise. A block whose config has not been
+# written still refuses: the case below only names the ones that exist.
+#
+# One step separates this from the synthetic procedure: the RIB the injectors
+# replay is validated through bgpdump2 before the batch starts. See
+# validate_mrt_inputs for why that is repeated per block and fatal.
+#
+# The manifest's record of that same file is what makes the three MRT passes
+# comparable at all, and it is captured with the config as everywhere else:
+# `capture_metadata` reads the `mrt_file:` entries out of the rendered config
+# and `mrt_facts()` records each one's size and sha256. The digest is the half
+# that matters here -- a re-downloaded RIB of the same length is what a size
+# alone cannot tell from the original.
+run_mrt_repetition() {
+  local mrt_config="$1"
+  local rendered="$RENDERED_CONFIG_DIR/$BLOCK_KEY.yaml"
+
+  campaign_render_config "$BLOCK_KEY" "$mrt_config" "$rendered"
+  capture_metadata "$rendered"
+
+  scripts/preflight_2026_suite.sh --workdir "$WORKDIR" --run-root "$RUN_ROOT" \
+    --config "$rendered" \
+    | tee "$METADATA_DIR/preflight-$BLOCK_KEY.txt"
+
+  echo "Verifying built images"
+  "${BGPERF_CMD[@]}" verify > "$METADATA_DIR/verify-$BLOCK_KEY.txt" 2>&1 || {
+    echo "verify failed; see $METADATA_DIR/verify-$BLOCK_KEY.txt" >&2
+    tail -20 "$METADATA_DIR/verify-$BLOCK_KEY.txt" >&2
+    exit 1
+  }
+  tail -5 "$METADATA_DIR/verify-$BLOCK_KEY.txt"
+
+  validate_mrt_inputs "$rendered"
+
+  retract_forced_markers
+  run_batch "$BLOCK_KEY" "$BLOCK_DIR/mrt"
+
+  # No --expect-limiting, for the reason the synthetic repetitions pin none:
+  # which component limits a given target on a full internet table is the
+  # measurement rather than the setup. The checker still requires each row to
+  # have a verdict, assigned or explicitly left unresolved.
+  check_evidence "$BLOCK_DIR/mrt" 14 "mrt"
+}
+
 case "$BLOCK_INDEX" in
   0)
     SYNTH_CONFIG="benchmarks/2026-timing-smoke-synth.yaml"
@@ -862,15 +1098,12 @@ case "$BLOCK_INDEX" in
     }
     tail -5 "$METADATA_DIR/verify-$BLOCK_KEY.txt"
 
-    # The pinned RIB, read by bgpdump2 itself. The file's size is in the
-    # manifest; this is the only thing that says the injectors can parse it.
-    echo "Validating pinned MRT: $MRT_INPUT"
-    scripts/prepare_mrt.sh "$MRT_INPUT" > "$METADATA_DIR/mrt-validation-$BLOCK_KEY.txt" 2>&1 || {
-      echo "MRT validation failed; see $METADATA_DIR/mrt-validation-$BLOCK_KEY.txt" >&2
-      tail -20 "$METADATA_DIR/mrt-validation-$BLOCK_KEY.txt" >&2
-      exit 1
-    }
-    tail -4 "$METADATA_DIR/mrt-validation-$BLOCK_KEY.txt"
+    # The pinned RIB, read by bgpdump2 itself. The manifest records its size
+    # and digest; this is the only thing that says the injectors can parse it.
+    # Named by the rendered config, so the file checked is the file replayed
+    # -- see config_mrt_files.
+    validate_mrt_inputs "$RENDERED_CONFIG_DIR/block0-smoke-synth.yaml" \
+                        "$RENDERED_CONFIG_DIR/block0-smoke-mrt.yaml"
 
     retract_forced_markers
     run_batch "block0-smoke-synth" "$BLOCK_DIR/smoke-synth"
@@ -962,6 +1195,9 @@ case "$BLOCK_INDEX" in
   4)
     run_synthetic_repetition "benchmarks/2026-timing-synth-rep3.yaml"
     ;;
+  5)
+    run_mrt_repetition "benchmarks/2026-timing-mrt-rep1.yaml"
+    ;;
   *)
     cat >&2 <<MSG
 block-$BLOCK_INDEX (${BLOCK_TITLES[$BLOCK_INDEX]}) is not built yet.
@@ -1003,6 +1239,12 @@ esac
   echo "ran_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "revision: $(git -C . rev-parse HEAD)"
   echo "workdir: $WORKDIR"
+  if [[ -n "${BLOCK_HELD[$BLOCK_INDEX]:-}" ]]; then
+    # Recorded because a block run past a standing objection is not the same
+    # result as one run without one, and the marker outlives the session that
+    # decided it.
+    echo "held_override: --run-held-block"
+  fi
   if [[ $EVIDENCE_FAILURES -gt 0 ]]; then
     echo "evidence: $EVIDENCE_FAILURES check(s) failed"
     # Which rows, and which runs never happened -- the count of failed checker

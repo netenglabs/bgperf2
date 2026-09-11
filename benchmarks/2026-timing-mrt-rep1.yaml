@@ -1,0 +1,216 @@
+# Block 5 of the 64 GB timing validation campaign: repetition 1 of the
+# full-internet MRT workload, all 14 target configurations.
+#
+# The workload is the plan's "Canonical Workloads / Full-internet MRT": 10
+# full-table peers, approximately 1.05 million prefixes per peer from the
+# pinned Route Views RIB, ten bgpdump2 injectors, no policy. This is the
+# campaign's primary realism workload, and the plan requires reports and graph
+# subtitles to call it "10 full-internet peers using bgpdump2" rather than
+# "10 x 1.05M" -- the second phrasing reads as a multiplication that does not
+# happen here.
+#
+# `prefixes: 1_050_000` IS THE WHOLE TABLE, not a per-peer block, and that is
+# the one way this file's axes do not mean what the synthetic passes' mean.
+# `gen_conf()` sets the monitor's check-point straight from `-p` for an MRT
+# injector (1,039,500 after the 0.99 factor) instead of the `n * p` a
+# synthetic run computes, because the ten peers replay one RIB's overlapping
+# views rather than disjoint blocks off a shared iterator. Each injector still
+# gets `count: 1_050_000`, which reaches bgpdump2 as `-T` and caps what that
+# MRT peer offers; what the target ends up holding is the union. Two
+# consequences for anyone reading Block 5-7 rows beside Block 2-4 rows: the
+# CSV's `prefixes per peer` column is the whole table in these blocks, and
+# `required` is ~1.04M here against 4,950,000 there.
+#
+# Do not add `prefix_scope: total` to make that column read the way it does in
+# the synthetic passes. It is refused for an MRT generator at all four entry
+# points and for exactly this reason -- the check-point is already the whole
+# table, so dividing it by the peer count would declare CONVERGED at a tenth
+# of the RIB.
+#
+# THE 14 CONFIGURATIONS are the plan's Target Matrix, the same fourteen the
+# synthetic passes ran, expanded so that every one of them is its own run
+# name: `versions:` auto-labels each version, and the entries that differ only
+# in `threads` or in carrying no version at all get an explicit `label`,
+# because a run name is label else target-plus-version and two entries sharing
+# one would share the artifact stem, the CSV `name` and the x label every bar
+# is paired against.
+#
+# ORDER. `order: shuffle` with a stated seed, under the campaign's fixed
+# mechanical rule -- the campaign year with the block number appended, so this
+# block (5) is 20265, continuing 20262/20263/20264 for the three synthetic
+# passes. Stated rather than drawn: a drawn seed is recovered from the progress
+# file on resume, but a seed nobody chose is also a seed nobody can reproduce
+# from this document. Stated rather than *chosen for its order*: picking the
+# seed after looking at the permutation it produces is choosing the
+# permutation, which is the one thing shuffling exists to stop.
+#
+# The seed does not fix the order by itself. `batch_shuffle_key()` digests
+# `<seed>:<batch_cell_id(test_name, cell)>`, so the permutation is a function
+# of the seed, this test's `name` and every field of every target -- and every
+# target here carries `tester_type` and `mrt_file` fields the synthetic passes
+# do not. So this block's sequence is not the synthetic blocks' sequence even
+# where the seeds are adjacent, rebuilding it later needs this file and not
+# just the number, and renaming the test while keeping the seed re-sequences
+# the block with nothing saying so.
+#
+# REPETITIONS. Exactly one pass here, and the three MRT repetitions are three
+# blocks rather than `repetitions: 3` in one config -- the campaign's structure
+# ("Review every completed block before starting the next"), and the same shape
+# Blocks 2-4 used. Each block writes into its own results directory, so no
+# artifact stem collides, and Block 9 is where the three passes are read
+# together. `summary.py` therefore has nothing to summarise within this block,
+# which is correct: dispersion across passes is Block 9's question. It also
+# means every artifact here carries `run.repetition: null` and the CSV `name`
+# column is byte-identical across the three MRT passes, so the pass a run
+# belongs to is carried by its directory and by the manifest's `blocks.<key>`
+# and by nothing inside the run's own documents (bgperf2-494).
+#
+# TO BE IDENTICAL TO REPETITIONS 2 AND 3 EXCEPT THE SEED. Block 9 reads the
+# three passes as the dispersion of one cell, so any drift in the matrix, the
+# workload, the labels or the MRT file between passes is a difference in the
+# thing measured arriving inside the statistic that exists to measure
+# run-to-run noise. This is the pass that opens the set, so it is what the
+# other two must be diffable against: `diff` this file's `tests:` mapping
+# against theirs and the test `name` and the `seed` should be the whole of what
+# differs. Header comments do differ per pass and that is not drift; read the
+# mapping, not the line count.
+#
+# THE PINNED RIB is `mrt/rib.20260808.0000`, named on every target because
+# `mrt_file` is a target key. It is the same file Block 0's MRT smoke used and
+# the same file the manifest has recorded for every block of this campaign;
+# its size and digest are in `metadata/manifest.json`, and the runner validates
+# that bgpdump2 can parse it before the batch starts. Which MRT peer each
+# injector replays is chosen by `get_index_useful_neighbor()` from the file and
+# the configured count, so peer selection is stable for as long as those two
+# are -- there is nothing to pin here beyond the file itself.
+#
+# NO EXPECTED VERDICT is pinned for these rows, as in Blocks 2-4 and unlike
+# Block 0's smokes and Block 1's calibration cases. Which component limits a
+# given target on a full internet table is the measurement, not the setup.
+# `check_timing_evidence.py` still requires each row to *have* a limiting
+# component that was assigned or explicitly left unresolved; what it will not
+# accept is a row with no verdict at all. Expect more of these rows to carry a
+# real verdict than in the synthetic passes: an MRT injector times its own walk
+# (`reported_injection_s`), which is the second of the two tests that let
+# `findings.py` read the measured interval as the generator's send, and it is
+# the test BIRD 2.19's queue-side counter fails -- every synthetic row of
+# Blocks 2-4 came back `unresolved` via `injection_boundary_unresolved` for
+# that reason.
+#
+# TEN OF THE FOURTEEN ROWS HAVE NO SECOND WITNESS, which is this block's known
+# risk and is stated here because a reader of a FAILED non-BIRD row needs it
+# named in advance rather than reconstructed afterwards. This exact workload --
+# ten bgpdump2 injectors on overlapping full tables -- is the one whose monitor
+# count overshoots while a minority of injectors have finished and then settles
+# 1.2%-1.5% below that peak as the rest complete. A rule with only the monitor
+# to go on reported three of the four recorded runs FAILED, and what made them
+# reproducible is `ConvergenceTracker`'s fourth rule: a monitor decline past
+# `DROP_FRACTION` is not route loss while the target's own `best_paths` is
+# within `DROP_FRACTION` of its peak. That rule needs the target's own table
+# gauge, and only BIRD answers -- `Target.get_table_witness()` returns `None`
+# and `bird.py` is the sole override. Four rows here are BIRD. The other ten
+# (`frr_c` x5, `openbgp` x3, `rustybgp` x2) are judged on the monitor alone.
+#
+# All four recorded series are BIRD 3.3.2, so whether the other daemons
+# overshoot the same way was not known from anything on disk: the dip is the
+# target withdrawing and re-advertising to the monitor as best paths change
+# under ten arriving views, and how a daemon batches that is its own behaviour.
+# It was measured before this block was launched rather than discovered
+# fourteen cells in. The answer is no: none of the three overshot past
+# `DROP_FRACTION`, openbgp 9.2 settled on exactly the 1,056,779 the recorded
+# BIRD runs do, and rustybgp 2026-02 on 1,081,178. The monitor-only rule
+# handles this workload for all three families and this block does not need the
+# gauge extended to them.
+#
+# WHAT THE PROBE FOUND INSTEAD: FRR converges and is 7.5% short of `required`,
+# reproducibly and in every version tested (10.7 twice at 961,276 and 961,201,
+# 8.5 at 958,234, against a required 1,039,500). It is not losing routes --
+# asked directly, it reports 1,080,985 prefixes and 10,497,949 paths held, the
+# same two numbers BIRD's witness reports here, while its own `pfxSnt` to every
+# peer including the monitor is 961,201, agreeing with the monitor exactly. It
+# holds the whole table and withholds ~119,784 prefixes from export, with no
+# export policy in the generated config. See `bgperf2-cw6` and the plan's Block
+# 5 record.
+#
+# So all five `frr_c` rows here are expected to be rejected on `received <
+# required`. That is recorded rather than fixed: `required` is `0.99 * -p`, a
+# proxy taken from the injector cap rather than from the union the RIB holds,
+# and re-defining it to fit would be a rule fitted to the run in front of it --
+# how all three convergence rules were broken. A rejected row is preserved with
+# its findings and excluded under the campaign's exclusion rule; which of those
+# two this block does is an operator decision, not this file's.
+#
+# MEMORY. `openbgp 8.8` is the row nearest the campaign's 20% free-memory
+# guardrail in the synthetic passes (12.4 GB free, 20.2%), but that is a
+# 5,000,000-prefix table and this one is ~1.05M, so the synthetic ranking does
+# not carry over and no row here is expected to approach the floor. The rows to
+# watch instead are the FRR ones, for a disk reason rather than a memory one:
+# `write_config()` sets `log stdout debug` so End-of-RIB is visible, and
+# `bgpd.log` passes 1 GB on a full-table run. Five of the fourteen are `frr_c`.
+# The work directory is `/data/bgperf-work` (~150 GB free), not the 29 GB root,
+# which is why that is in the campaign's Fixed Campaign Identity rather than
+# left to `-d`'s `/var/tmp` default.
+tests:
+  -
+     name: 2026-timing-mrt-rep1
+     neighbors: [10]
+     prefixes: [1_050_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 20265
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (4 threads)
+         threads: 4
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: bird
+         label: bird default
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: frr_c
+         versions: [8.5, 9.1, 10.0, 10.7]
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: frr_c
+         label: frr default
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: openbgp
+         versions: [8.8, 9.2]
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: openbgp
+         label: openbgp default
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: rustybgp
+         version: 2026-02
+         label: rustybgp 2026-02
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: rustybgp
+         label: rustybgp default
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000

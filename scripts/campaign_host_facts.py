@@ -17,6 +17,7 @@ Prints JSON to stdout. Never raises on a fact it cannot collect: a manifest
 missing the Docker version is worth more than a block that refused to start
 because `docker version` was slow.
 '''
+import hashlib
 import json
 import os
 import subprocess
@@ -167,13 +168,54 @@ def tool_facts():
         return {'error': '{0}: {1}'.format(type(exc).__name__, exc)}
 
 
+# 1 MiB, so a 1.35 GB RIB is ~1300 reads rather than one allocation that size.
+MRT_DIGEST_CHUNK = 1 << 20
+
+
+def mrt_digest(path):
+    digest = hashlib.sha256()
+    with open(path, 'rb') as handle:
+        for block in iter(lambda: handle.read(MRT_DIGEST_CHUNK), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def mrt_facts(paths):
+    """What each MRT input was, by content and not only by length.
+
+    The three MRT repetitions are read together as the dispersion of one cell,
+    which is only true if all three replayed the same bytes -- and the RIB is
+    an out-of-band download that lives outside the repository, on a volume that
+    outlives the instance but is not immutable. A size alone cannot settle
+    that: a re-downloaded or substituted RIB of the same length is
+    indistinguishable from the original, and a reviewer checking the manifest
+    for that agreement would read a match that was never tested.
+
+    Hashing 1.35 GB costs a second or two once per block, against blocks of
+    hours. It is not fatal: a digest that could not be read is recorded as the
+    error, because a manifest missing one fact is worth more than a block that
+    refused to start -- and `exists` plus `size_bytes` still say something,
+    where an aborted block says nothing at all.
+    """
     facts = {}
     for path in paths:
         entry = {'path': path, 'exists': os.path.exists(path)}
         if entry['exists']:
             entry['size_bytes'] = os.path.getsize(path)
-        facts[os.path.basename(path)] = entry
+            try:
+                entry['sha256'] = mrt_digest(path)
+            except OSError as exc:
+                entry['digest_error'] = '{0}: {1}'.format(
+                    type(exc).__name__, exc)
+        # Keyed by the path, not the basename. While only one file could ever
+        # be passed a basename was unambiguous; the list now comes from a
+        # block's configs and can hold several, and the natural shape of a
+        # re-download -- `mrt/rib.20260808.0000` beside
+        # `/data/mrt-alt/rib.20260808.0000` -- collides under a basename and
+        # silently records one entry. The manifest would then carry a digest
+        # that appears to cover both files, which is exactly the match that
+        # was never tested this digest exists to rule out.
+        facts[path] = entry
     return facts
 
 

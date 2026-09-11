@@ -755,7 +755,117 @@ empirical form of the correction below.
 **Corrected in this block:** the "fullest work directory" claim in the Block 3
 record and in rep 2's config header. See that entry.
 
-### Blocks 5-11
+### Block 5: full-internet MRT repetition 1 of 3 -- **built, not yet run**
+
+Runs from `benchmarks/2026-timing-mrt-rep1.yaml`: the plan's 14 target
+configurations against the pinned Route Views RIB `mrt/rib.20260808.0000`, ten
+bgpdump2 injectors on 10 full-internet peers, no policy, one pass, one cell at
+a time, `order: shuffle` seed 20265 -- the campaign's mechanical year+block
+rule, continuing 20262/20263/20264. Work directory `/data/bgperf-work`. The
+procedure is `run_mrt_repetition()`, shared by Blocks 5-7 the way
+`run_synthetic_repetition()` is shared by Blocks 2-4 and for the same reason.
+
+**`prefixes: 1_050_000` is the whole table in this block, not a per-peer
+block**, and it is the one axis that does not mean here what it means in Blocks
+2-4. `gen_conf()` takes the monitor's check-point straight from `-p` for an MRT
+injector rather than computing `n * p`, because the ten peers replay one RIB's
+overlapping views instead of disjoint blocks off a shared iterator. So
+`required` is 1,039,500 here against 4,950,000 there, and the CSV's `prefixes
+per peer` column is the whole table in Blocks 5-7. Block 9 must not read the
+two blocks' prefix axes as one scale.
+
+**Ten of the fourteen rows have no second witness, and that is the block's
+known risk.** `ConvergenceTracker`'s fourth rule -- a monitor decline past
+`DROP_FRACTION` is not route loss while the target's own `best_paths` is within
+`DROP_FRACTION` of its peak -- is what made this exact workload reproducible,
+and it needs the target's own table gauge. Only BIRD answers:
+`Target.get_table_witness()` returns `None` and `bird.py` is the sole override.
+The four series `tests/test_convergence_mrt_replay.py` replays are all BIRD
+3.3.2, and three of them were reported FAILED by a monitor-only rule. Whether
+`frr_c` (5 rows), `openbgp` (3) and `rustybgp` (2) overshoot the same way on
+ten overlapping full tables was **not** known from any recorded run, so it was
+measured before the block was launched rather than discovered fourteen cells
+in.
+
+**What the probe found: the witness is not needed here, and something else is
+in the way.** Six runs on the campaign host against the pinned RIB, outside the
+campaign run root (results in a scratchpad, so nothing below is a campaign
+row):
+
+| target | received | vs required 1,039,500 | elapsed |
+|---|---|---|---|
+| bird 3.3.2 (control) | 1,056,779 | clears | 46s |
+| openbgp 9.2 | 1,056,779 | clears | 79s |
+| rustybgp 2026-02 | 1,081,178 | clears | 25s |
+| frr_c 10.7, pass 1 | 961,276 | **short by 78,224** | 103s |
+| frr_c 10.7, pass 2 | 961,201 | **short by 78,299** | 103s |
+| frr_c 8.5 | 958,234 | **short by 81,266** | 103s |
+
+No witness-less target failed the way the BIRD series did: none of them
+overshot and settled past `DROP_FRACTION`, and OpenBGPD settled on exactly the
+1,056,779 the recorded BIRD runs do. So the monitor-only rule handles this
+workload for all three families, and Block 5 does not need the gauge extended
+to them. That was the question; this is the answer.
+
+**FRR is short, reproducibly, and it is not losing routes.** Asked directly
+while a converged run was still up, `show bgp ipv4 unicast statistics` reports
+1,080,985 prefixes and 10,497,949 paths -- the same two numbers BIRD's own
+table witness reports for this workload -- while `show bgp ipv4 unicast summary
+json` reports `pfxSnt` 961,201 to every one of its eleven peers, the monitor
+included. FRR's export counter and the monitor agree exactly. So FRR holds the
+whole table and withholds ~119,784 prefixes from export, identically to every
+peer, with no export policy in the generated `bgpd.conf`. Two FRR versions
+three releases apart do it within 0.3% of each other, so it is version-wide and
+all five `frr_c` rows of each MRT block are affected. The mechanism is not
+identified -- `bgperf2-cw6`.
+
+That is a different blocker from the one this section was written about, and it
+is not a convergence-rule question: the runs converge. It is a correctness
+question, because `check_timing_evidence.py` rejects a row whose `received` is
+below `required`, and `required` here is `0.99 * -p` -- a proxy derived from
+the injector cap, not from the union the RIB actually holds. **It is left
+unanswered rather than answered cheaply.** Lowering the MRT check-point to fit
+would be a rule fitted to the run in front of it, which is how all three
+convergence rules were broken; and the campaign may not silently re-define what
+a correct row is between blocks. Block 5 is therefore built and **held**, and what
+to do with the five FRR rows -- run and exclude them with this evidence, or
+settle an MRT correctness rule first -- is an operator decision recorded before
+any block spends hours reproducing it three times. Justin chose to hold on
+2026-09-11.
+
+"Held" is enforced, not described. `BLOCK_HELD` in the runner refuses block 5
+with the paragraph above and exit 2, `status` reports it as `held` rather than
+`not-started`, and `next` will not select it -- because the campaign contract
+tells an unattended session to run the next block, and a record saying "held"
+that nothing checks is a record that gets overtaken by the contract. Running it
+anyway takes `--run-held-block`, which is recorded in that block's `RAN` marker
+as `held_override`, since a block run past a standing objection is not the same
+result as one run without one. Releasing it means deleting the `BLOCK_HELD`
+entry in the change set that settles the decision.
+
+**Two corrections to the campaign's own inputs landed with this block**, both
+found by review of it and both about a file rather than a measurement:
+
+- `mrt_facts()` recorded a size and no digest, while the runner's comments
+  claimed a digest. The three MRT repetitions are read together as the
+  dispersion of one cell, which is only true if all three replayed the same
+  bytes -- and the RIB is an out-of-band download on a volume that outlives the
+  instance without being immutable, so a re-downloaded or substituted RIB of
+  the same length was indistinguishable. It now records `sha256` beside
+  `size_bytes`. Blocks 0-4 have size only; the digest starts here.
+- The RIB that was validated by `prepare_mrt.sh` and recorded in the manifest
+  was `${MRT_FILE:-mrt/rib.20260808.0000}` -- the `--mrt-file` override, else a
+  constant -- and not the `mrt_file:` entries the batch actually replays. The
+  two agree today and would have agreed only by coincidence in any later block
+  built from a different RIB, where an unparseable file would have reached all
+  fourteen rows with the check green and the manifest would have attributed the
+  pass to a file the block never opened. Both now read the rendered config
+  (`config_mrt_files`), which also folds the override case into the ordinary
+  one, since `campaign_render_config` has already applied it by then. A
+  synthetic block's manifest entry consequently carries no `mrt_inputs` key at
+  all rather than one naming a RIB it never opened.
+
+### Blocks 6-11
 
 Not started. Each block's configs and procedure are its own change set.
 

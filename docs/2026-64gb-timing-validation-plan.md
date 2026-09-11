@@ -1342,7 +1342,135 @@ indistinguishable in these documents. The gcov trap one layer up, and worth a
 digest in `collect_provenance()` rather than this paragraph. Block 7 decides
 whether 89 or 102 is the outlier.
 
-### Blocks 7-11
+### Block 7: full-internet MRT repetition 3 of 3 -- **accepted 2026-09-11**
+
+Runs from `benchmarks/2026-timing-mrt-rep3.yaml`: the same 14 target
+configurations, the same pinned Route Views RIB `mrt/rib.20260808.0000`, ten
+bgpdump2 injectors on 10 full-internet peers, no policy, one pass, one cell at
+a time, `order: shuffle` seed 20267 -- the campaign's year+block rule,
+continuing 20266 and 20265. Work directory `/data/bgperf-work`. Procedure is
+`run_mrt_repetition()`, unchanged from Blocks 5 and 6.
+
+The config's `tests:` mapping differs from both earlier passes' in exactly two
+lines, the test `name` and the `seed`, verified by diff against each. The
+header is rewritten to what Block 6 measured and adds a fifth section naming
+the four two-reading observations this pass exists to settle -- written down so
+the review is a comparison rather than a fresh reading, and explicitly not
+pinned as an expectation.
+
+**Result, 2026-09-11: 14 of 14 rows qualified**, on the same instance Blocks 5
+and 6 ran on (`i-08c8b32e512905f84`, `m7a.4xlarge` / EPYC 9R14 / 16 threads /
+61.44 GiB), one host throughout (`previous_entries` absent), RIB sha256
+`f6c87b21...73d0` -- byte-identical across all three passes, which is what the
+digest was added for. No tester errors, no timeouts, no failed rows, all ten
+injectors complete with 10,500,000 prefixes offered on every row. Peak foreign
+CPU 2-5%, far under the one-core threshold. Lowest `min free mem` 44.63 GB
+(72.6%), on `rustybgp default` as in both earlier passes; no swap.
+
+**The verdict pattern reproduces for the third time**, row for row: `tester
+(tester_limited)` for the four BIRD rows and `rustybgp default`,
+`target_or_monitor (post_injection_tail)` for the three OpenBGPD rows and
+`rustybgp 2026-02`, `inconclusive (missing_timing_evidence)` for the five
+`frr_c` rows. All five `frr_c` rows again carry no `monitor_required_reached`
+and again resolve `delivery` -- plateaus of 20-21 samples, `monitor_lag_s` 0.0,
+`exported_final` equal to `monitor_final` to the route.
+
+| row | elapsed b5/b6/b7 | received b5/b6/b7 | max mem b5/b6/b7 |
+|---|---|---|---|
+| rustybgp 2026-02 | 25/25/25 | 1,081,178 x3 | 2.372/2.336/2.328 |
+| rustybgp default | 26/27/27 | 1,081,180 x3 | **11.472/11.540/11.389** |
+| bird default | 31/31/32 | 1,056,779 x3 | 1.203/1.202/1.202 |
+| bird 2.19.2 | 32/32/**37** | 1,056,779 x3 | 1.207/1.203/1.203 |
+| bird 3.3.2 (4 threads) | 37/40/40 | 1,056,779 x3 | 1.597/1.585/1.590 |
+| bird 3.3.2 (default threads) | 42/45/48 | 1,056,779 x3 | 1.590/1.584/1.581 |
+| openbgp default | 79/81/81 | 1,056,779 x3 | 3.022/3.018/3.024 |
+| openbgp 9.2 | 80/80/82 | 1,056,779 x3 | 3.021/3.021/3.017 |
+| openbgp 8.8 | 122/124/123 | 1,056,779 x3 | 4.969/4.965/4.967 |
+| frr default (10.8.0-dev) | **102/89/88** | 957,260/959,701/957,758 | 5.970/5.952/5.958 |
+| frr_c 8.5 | 103/103/103 | 959,882/961,057/957,395 | 4.996/4.997/4.992 |
+| frr_c 9.1 | 103/103/103 | 960,860/959,309/957,544 | 5.275/5.271/5.273 |
+| frr_c 10.0 | 103/104/103 | 959,306/959,084/960,067 | 5.178/5.174/5.170 |
+| frr_c 10.7 | 103/104/104 | 956,893/960,724/958,513 | 5.956/5.949/5.949 |
+
+**All four of the carried observations now have a third reading.** Block 9
+applies the variance rule; what the three passes say on their own:
+
+- **RustyBGP master holds 4.9x the memory of the 2026-02 build.** 11.472 /
+  11.540 / 11.389 GB against 2.372 / 2.336 / 2.328 GB, on the same 1,081,180
+  and 1,081,178 prefixes every pass and 25-27s either way. Each build's three
+  readings span 1.3% and 1.9%; the ratio is 4.83-4.94x. Not dispersion.
+  `bgperf2-nit`.
+- **BIRD 3.3.2 is slower than 2.19.2 on full-internet playback**, in all three
+  passes: 42/45/48s at its default single worker and 37/40/40s with
+  `threads 4`, against 32/32/37s for 2.19.2 and 31/31/32s for `bird default`
+  (2.19.0+master). The 3.3.2 default-threads row is the slowest BIRD row in
+  every pass and the only one that rises in every pass.
+- **The witness rule fires on `bird 3.3.2 (default threads)` and on nothing
+  else**, three passes for three: 8 excused samples over a 1.64% monitor
+  decline (target within 0.03% of its own peak), then 7 over 1.50% (0.15%),
+  then 2 over 2.31% (0.00%). Three readings make the overshoot a property of
+  that configuration rather than an incident, and a monitor-only rule would
+  have failed that row in all three blocks. The other ten witness-less rows
+  have still never needed it.
+- **`frr default`: Block 5's 102s is the outlier.** 102/89/88s, with
+  `delivery.complete_s` at 93.13/80.51/80.69s moving with it, so the two later
+  passes agree to 1s and 0.18s respectively and Block 5 stands 13-14s above
+  both. The four pinned FRR releases are 103-104s in all three passes, so the
+  dispersion is master's alone. The caveat from Block 6 is unchanged and
+  unresolved: `bgperf/frr_c:latest` is the one unpinned binary of the five,
+  provenance records the image tag and the daemon's `-dev` version string but
+  no digest, and a rebuild between passes would be invisible in these
+  documents. Nothing rebuilt it (image created 2026-09-02, both later passes
+  run from trees that ran no `prepare`), but the argument rests on that rather
+  than on the artifact.
+
+**One row moved that had not moved before, and the move is entirely after the
+check-point.** `bird 2.19.2` came in at 37s against 32/32. Decomposed against
+the same row's two earlier artifacts:
+
+| | b5 | b6 | b7 |
+|---|---|---|---|
+| `monitor_required_reached` | 21.958s | 22.098s | 22.192s |
+| `monitor_last_change` (= `delivery.complete_s`) | 29.280s | 29.443s | **33.859s** |
+| `convergence_confirmed` | 36.544s | 36.787s | 41.147s |
+| `assurance_s` | 14.585s | 14.688s | **18.955s** |
+
+So the monitor crossed the check-point at the same moment in all three passes
+-- 0.23s apart across the series -- and what took 4.4s longer was the last
+~5,500 prefixes of the table arriving after it. The target's own export gauge
+agrees to the millisecond, which is what rules out the instrument: `delivery`
+is derived from the target's series and `monitor_last_change` from the
+monitor's, and they land on the same number. `elapsed (s)` carries it because
+it subtracts the assurance *sample count* and not the window's duration. The
+host was clean for that cell (2% peak foreign CPU, 54.8 GB free), so nothing in
+the row explains it, and one reading of three is not a finding. It is noted
+here because Block 9 will see a 32/32/37 cell whose dispersion is entirely in
+its tail and none of it in delivery, and that is a different thing from a
+target that got slower.
+
+**The MRT series is complete and every daemon family held its export share.**
+Three totals from one RIB, unchanged across three passes: 1,056,779 (BIRD and
+OpenBGPD, identical to the route in all nine rows), ~1,081,178 (RustyBGP), and
+957,395-961,057 (FRR, a 0.38% spread across four releases and master over all
+three passes). FRR's ~8% withholding from export (`bgperf2-cw6`) reproduces
+unchanged and is still unexplained.
+
+**Two review findings were deliberately not applied before this block ran.**
+`/code-review` on the Block 7 change set found nothing in that change set and
+two defects in code already on master: `delivery_metrics()` dates
+`plateau_start_s` to the monitor poll that carried the export reading rather
+than to the witness read, so `complete_s` is biased late by the witness age and
+`monitor_lag_s` collapses to 0.0 structurally (`bgperf2-bq2`); and an MRT row
+accepted on a resolved `delivery` has nothing bounding its exported share
+against the table it holds, so a target exporting half the RIB would qualify
+(`bgperf2-ctm`). Both change how an MRT row is measured or judged, and applying
+either between passes 2 and 3 would judge the third pass of one cell by a rule
+the first two were not judged by -- which is what the Required Measurements
+amendment above forbids. Both are derivable retroactively from the Block 5-7
+artifacts on disk, so the cost of waiting is nothing. Land them before Block 9
+reads the three passes.
+
+### Blocks 8-11
 
 Not started. Each block's configs and procedure are its own change set.
 

@@ -787,7 +787,7 @@ empirical form of the correction below.
 **Corrected in this block:** the "fullest work directory" claim in the Block 3
 record and in rep 2's config header. See that entry.
 
-### Block 5: full-internet MRT repetition 1 of 3 -- **built, not yet run**
+### Block 5: full-internet MRT repetition 1 of 3 -- **ran 2026-09-11, 14/14 qualified, awaiting acceptance**
 
 Runs from `benchmarks/2026-timing-mrt-rep1.yaml`: the plan's 14 target
 configurations against the pinned Route Views RIB `mrt/rib.20260808.0000`, ten
@@ -1174,6 +1174,75 @@ found by review of it and both about a file rather than a measurement:
   one, since `campaign_render_config` has already applied it by then. A
   synthetic block's manifest entry consequently carries no `mrt_inputs` key at
   all rather than one naming a RIB it never opened.
+
+**Result, 2026-09-11: 14 of 14 rows qualified**, on
+`m7a.4xlarge` / EPYC 9R14 / 16 threads / 61.44 GiB, one host throughout
+(`previous_entries` empty), RIB sha256 `f6c87b21...73d0`. `RAN` is written;
+`COMPLETE` is not, so this is the reviewed block boundary and `next` refuses to
+re-run it. No tester errors, no timeouts, no failed rows. Peak foreign CPU 29%
+on one row and 4-15% on the rest, all far under the one-core threshold.
+
+**This is the first MRT block in which the `frr_c` rows qualify**, and the
+mechanism behaved with margin rather than marginally. All five carry no
+`monitor_required_reached` and all five resolved `delivery`: 93.1-94.4s over a
+21-sample plateau that is 21 *distinct* reads, oldest witness age 0.61-0.69s
+against the 5s bound. The review objection that FRR's `vtysh` read against a
+1.05M-prefix `bgpd` might be too slow to sustain a 20-sample plateau is
+answered: it is roughly seven times faster than it would need to be.
+
+The three-path design shows up cleanly in one block: BIRD reaches the
+check-point *and* has a gauge, so it carries both the events and a derived
+`delivery` (the column stays comparable); FRR has a gauge and no event, and
+qualifies on the substitution; OpenBGPD and RustyBGP have the event and no
+gauge, publish no `delivery` section at all, and write exactly the document
+they always did.
+
+| target | received | elapsed (s) | max cpu % | max mem (GB) |
+|---|---|---|---|---|
+| rustybgp default | 1,081,180 | 26 | 826 | **11.472** |
+| rustybgp 2026-02 | 1,081,178 | 25 | 1145 | 2.372 |
+| bird default (2.19.0-master) | 1,056,779 | 31 | 101 | 1.203 |
+| bird 2.19.2 | 1,056,779 | 32 | 101 | 1.207 |
+| bird 3.3.2 (4 threads) | 1,056,779 | 37 | 308 | 1.597 |
+| bird 3.3.2 (default threads) | 1,056,779 | 42 | 170 | 1.590 |
+| openbgp default | 1,056,779 | 79 | 199 | 3.022 |
+| openbgp 9.2 | 1,056,779 | 80 | 198 | 3.021 |
+| openbgp 8.8 | 1,056,779 | 122 | 158 | 4.969 |
+| frr default (10.8.0-dev) | 957,260 | 102 | 133 | 5.970 |
+| frr_c 8.5 | 959,882 | 103 | 203 | 4.996 |
+| frr_c 9.1 | 960,860 | 103 | 203 | 5.275 |
+| frr_c 10.0 | 959,306 | 103 | 203 | 5.178 |
+| frr_c 10.7 | 956,893 | 103 | 135 | 5.956 |
+
+**The export-share finding reproduces exactly**, which matters because the
+release rests on it: three distinct totals from one RIB. BIRD and OpenBGPD
+agree on 1,056,779 to the route across all seven of their rows; RustyBGP holds
+1,081,178/1,081,180; FRR spans 956,893-960,860, a **0.41%** spread across four
+releases and master against the 9% that separates FRR from the others. Every
+prior probe said the same thing, now on campaign rows.
+
+**Two observations for Block 9, both single-pass and neither yet a claim.**
+Blocks 6 and 7 supply the repetitions, and one observation cannot be separated
+from run-to-run variance by the plan's own variance rule:
+
+- **RustyBGP master holds 4.8x the memory of the 2026-02 build for the same
+  table** -- 11.472 GB against 2.372 GB, on 1,081,180 against 1,081,178
+  prefixes and 26s against 25s. Two distinct commits
+  (`v0.2.0-9eeeebbd50` against `v0.2.0-0cc685c882`), so this is a clean
+  version comparison and not an image mix-up. It also pulls `min free mem` to
+  44.58 GB, the lowest in the block, which is worth watching at this table size
+  on a 64 GB host.
+- **BIRD 3.3.2 is slower than 2.19.2 on full-internet playback** -- 42s at its
+  default single worker, 37s with `threads 4`, against 32s for 2.19.2 at 101%
+  CPU. Threading helps 3.3.2 against itself and does not recover the 2.19.2
+  number, at 308% CPU to do it. This is Primary Question 1 territory and the
+  synthetic blocks may not say the same thing.
+
+`findings` reports `inconclusive` for all five FRR rows, as the Required
+Measurements amendment above says it will: `limiting_component` needs
+`convergence_s`, which is measured from the event that cannot fire.
+`bgperf2-rqp` tracks deriving that from `delivery`, back-fillable onto these
+artifacts without re-measuring.
 
 ### Blocks 6-11
 

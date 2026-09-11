@@ -654,24 +654,106 @@ published -- `bench()` leaves the last cell's containers up, and this one held
 an OpenBGPD target with a 5,000,000-route table, i.e. 37 GB of the host tied up
 until whatever ran next. Nothing published depends on them.
 
-### Block 4: high-load synthetic repetition 3 of 3 -- **built, not yet run**
+### Block 4: high-load synthetic repetition 3 of 3 -- **accepted 2026-09-11**
 
-Runs from `benchmarks/2026-timing-synth-rep3.yaml`: the same 14 target
+Ran from `benchmarks/2026-timing-synth-rep3.yaml`: the same 14 target
 configurations at 50 peers x 100,000 prefixes per peer, BIRD generator, no
 policy, one cell at a time, `order: shuffle` seed 20264. Work directory
 `/data/bgperf-work`. The config is repetitions 1 and 2's with the test `name`
-and the `seed` changed and nothing else -- `diff` the three `tests:` mappings
-and that is all that comes back -- and the procedure is the same
-`run_synthetic_repetition()` in the runner that served Blocks 2 and 3, for the
-reason given in the Block 3 record: the three passes are read together in
-Block 9 as the dispersion of one cell, so a step that drifted between them
-would be a difference in how the passes were measured arriving inside the
-statistic meant to measure run-to-run noise. This is the pass that closes the
-set, so it is the last one that could introduce such a drift and the only one
-no later comparison could catch.
+and the `seed` changed and nothing else, and the procedure is the same
+`run_synthetic_repetition()` that served Blocks 2 and 3.
 
-It also carries the correction to the "fullest work directory" claim recorded
-in the Block 3 entry above.
+**All 14 rows qualified, on the second attempt, at revision `5494806`.** One
+host throughout (`i-0de8e1dd0d3dba94d`, `m7a.4xlarge`) for both attempts, so
+`previous_entries` is empty -- the first attempt's rows were pruned from the
+manifest when `--force` deleted them, which is the behaviour that keeps the
+manifest from naming results that no longer exist.
+
+| run | `elapsed (s)` | `max cpu %` | `max mem (GB)` | `min free mem (GB)` | `max foreign cpu %` |
+|---|---|---|---|---|---|
+| bird 2.19.2 | 90 | 101 | 0.559 | 49.6 | 7 |
+| bird 3.3.2 (default threads) | 116 | 110 | 1.086 | 48.9 | 8 |
+| bird 3.3.2 (4 threads) | 109 | 200 | 1.117 | 49.2 | 5 |
+| bird default (2.19.0-master) | 93 | 102 | 0.558 | 49.5 | 6 |
+| frr_c 8.5 | 96 | 108 | 8.273 | 42.3 | 9 |
+| frr_c 9.1 | 95 | 111 | 8.166 | 42.7 | 5 |
+| frr_c 10.0 | 93 | 109 | 7.640 | 43.2 | 9 |
+| frr_c 10.7 | 86 | 110 | 5.717 | 44.7 | 12 |
+| frr default | 86 | 112 | 5.708 | 44.8 | 7 |
+| openbgp 8.8 | 625 | 115 | 37.437 | 12.4 | 13 |
+| openbgp 9.2 | 747 | 126 | 18.536 | 33.0 | 11 |
+| openbgp default (9.2) | 752 | 124 | 18.630 | 33.2 | 10 |
+| rustybgp 2026-02 | 66 | 1149 | 12.572 | 37.8 | 14 |
+| rustybgp default | 148 | 1152 | 13.194 | 39.7 | 7 |
+
+Every row converged, received 5,000,000 against a required 4,950,000, carried
+three-role plus tool provenance, produced an ordered and complete event stream
+with its generator complete, and reported **zero** tester errors and timeouts.
+Every verdict is `unresolved` via `injection_boundary_unresolved`, as in both
+earlier passes and for the same reason. Seven rows carry a `host_cpu_saturated`
+note -- the benchmark's own load -- against six in repetition 2 and seven in
+repetition 1. `max foreign cpu %` is 5-14% across all fourteen, with no repeat
+of repetition 2's unattributable 51% on `openbgp 9.2`. One row, `rustybgp
+default`, lost a single neighbour-sampler read to the same gRPC error Blocks 2
+and 3 recorded (`bgperf2-sl1`); it is one read of hundreds, it was contained by
+the guard rather than freezing the counts, and the row converged on the full
+table.
+
+**The first attempt and why it was discarded.** The block first ran at
+`ce1d814` and produced 14 rows, 12 of which qualified. `rustybgp default` and
+`bird default` were rejected on `tester_health` with 2 and 1 tester errors --
+the first nonzero counts in 28 rows of Blocks 2 and 3 -- and both had converged
+on the full 5,000,000 with complete generator evidence. Nothing could say what
+those three lines were: `bench()` rmtree's the work directory at the start of
+the next cell, so the counts reached the CSV and the logs behind them were gone
+before anyone read the rows, and a re-measure would have destroyed them
+identically. That is `bgperf2-7ou`, and rather than accept an exclusion nobody
+could argue with or re-measure blind, the capture was built first (`5494806`,
+`<prefix>.tester-health.json`) and the block re-run under it. The errors did not
+recur -- all 14 rows clean -- which is itself the useful result: they are
+transient rather than a property of those configurations, and if they appear in
+a later block the lines will now be on disk and quoted in the rejection.
+
+**What the discarded attempt measured, recorded here because nothing else
+holds it.** `--force` deleted its artifacts and pruned its rows from the
+manifest, so these four numbers exist only in this paragraph, and two of them
+decide a question Block 9 would otherwise get wrong:
+
+| run | rep 1 | rep 2 | rep 3 attempt 1 (discarded) | rep 3 accepted |
+|---|---|---|---|---|
+| `frr_c 10.7` `max mem` | 6.284 | 5.772 | **6.268** | 5.717 |
+| `rustybgp default` `max mem` | 16.861 | 12.963 | **13.787** | 13.194 |
+
+`frr_c 10.7` is **bimodal, and neither mode is a host or an order effect**.
+Both rep 3 attempts ran the same image at the same shuffle position (14) on the
+same instance, and came out 9.6% apart -- 6.268 and 5.717 -- landing one in
+each cluster (~6.27-6.28 and ~5.72-5.77). The Block 3 record left this open as
+"dispersion or an order effect"; it is neither, and a three-pass `stdev` will
+describe it as ordinary spread when the underlying distribution has two modes.
+It is worth reading the per-pass observations rather than the summary statistic
+for this row. Note also that both of Block 2's memory outliers (this row and
+`rustybgp default`) were measured on the first of that block's two hosts -- but
+only 2 of that host's 8 rows are outliers and the other 6 agree closely with
+the later passes, and the discarded attempt reproduces `frr_c 10.7`'s high mode
+on the *second* host, so the reclaim does not explain either.
+
+`rustybgp default` is the block's widest cell either way: 16.861 / 12.963 /
+13.194 across the three accepted passes is a 15.3% CV, and the discarded
+13.787 sits inside that range. Three of the four measurements are 12.96-13.79
+and repetition 1's 16.861 stands apart from all of them.
+
+**Everything else reproduces tightly.** `elapsed (s)` CV is at or under 2.8% on
+all fourteen rows and at or under 2% on twelve; `max mem (GB)` CV is at or under
+0.6% on twelve of fourteen, the exceptions being the two rows above.
+`openbgp 8.8` -- the row nearest the 20% free-memory guardrail -- measured
+`min free mem` 12.392, 12.409 and 12.4 GB across the three passes at shuffle
+positions 7, 14 and 4, with the discarded attempt's 12.434 GB as a fourth
+reading. A 42 MB spread over four runs at three positions: the margin is thin
+(20.2%) and it is not moving, and its independence from position is the
+empirical form of the correction below.
+
+**Corrected in this block:** the "fullest work directory" claim in the Block 3
+record and in rep 2's config header. See that entry.
 
 ### Blocks 5-11
 

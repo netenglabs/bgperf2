@@ -1617,8 +1617,24 @@ For each workload and version comparison:
   separate versions/thread settings or expose a CPU-scaling change;
 - write the selection and reason to durable metadata before running more.
 
+Two defects found during Block 7 must land before this block reads the MRT
+passes, and are recorded here rather than only in the Block 7 record because
+this is the section a session building Block 9 reads. `bgperf2-bq2`:
+`delivery_metrics()` dates `plateau_start_s` to the monitor poll that carried
+the export reading rather than to the witness read, so every `complete_s` in
+Blocks 5-7 is biased late by the witness age and `monitor_lag_s` is 0.0
+structurally -- this block compares `complete_s` across daemons, and the bias
+varies with each daemon's CLI read cost, so it does not cancel. `bgperf2-ctm`:
+an MRT row accepted on a resolved `delivery` has nothing bounding its exported
+share against the table it holds, so a row this block would average may be one
+the checker should have rejected. Both are derivable retroactively from the
+artifacts on disk and neither needs a re-measure; `bgperf2-iee.10` depends on
+both, so `bd ready` will not offer this block until they close.
+
 Exit criterion: every optional repetition has a named hypothesis and variance
-reason, or the campaign advances with no optional repeats.
+reason, or the campaign advances with no optional repeats; and both defects
+above are closed, or the block states in its own record which comparisons it
+made anyway and why that is sound.
 
 ### Block 10: selected repetitions
 

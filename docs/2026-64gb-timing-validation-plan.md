@@ -827,7 +827,46 @@ the injector cap, not from the union the RIB actually holds. **It is left
 unanswered rather than answered cheaply.** Lowering the MRT check-point to fit
 would be a rule fitted to the run in front of it, which is how all three
 convergence rules were broken; and the campaign may not silently re-define what
-a correct row is between blocks. Block 5 is therefore built and **held**, and what
+a correct row is between blocks. **Measured next, and it changes the reading above.** Justin's question -- do
+daemons not all advertise different amounts anyway, and does FRR do this across
+versions -- is answered yes twice, which moves the fault from FRR to the
+yardstick. All five FRR configurations, same host, same RIB, same day:
+
+| FRR | advertises | `elapsed (s)` |
+|---|---|---|
+| 8.5 | 958,234 | 103 |
+| 9.1 | 958,962 | 103 |
+| 10.0 | 965,159 | 102 |
+| 10.7 | 961,276 / 961,201 | 103 |
+| default (10.8.0-dev) | 956,337 | 87 |
+
+A **0.91%** spread across four releases and master, against the 9% that
+separates FRR from BIRD and OpenBGPD. So FRR is self-consistent and the five
+`frr_c` rows of an MRT block are doing the same work as each other; what
+differs is FRR against other daemons, which is a real property of best-path
+selection and export rules rather than a fault in any row. Across the four
+daemons the same RIB yields three distinct totals -- 1,081,178 (RustyBGP),
+1,056,779 (BIRD and OpenBGPD, agreeing exactly) and ~961,000 (FRR).
+
+**Every one of this plan's ten Primary Questions is a within-daemon
+comparison**, so none of them is damaged by that. `required` is the only thing
+that objects, and it asks an absolute question -- "did this daemon advertise at
+least 99% of the injector cap" -- that no single number can ask fairly of four
+daemons whose export rules differ. It is a check-point, and it works as one:
+the four other daemons reach it and FRR converges without it, on the neighbour
+checkpoint and stability. It is its use as a *correctness test* in
+`check_timing_evidence.py` that does not carry over to MRT.
+
+What FRR's 9% is remains unexplained and is still worth explaining
+(`bgperf2-cw6`); "daemons differ" covers the 2.3% between RustyBGP and the
+other two comfortably and covers 9% less well. But unexplained is not
+incorrect, and it does not block a within-daemon comparison.
+
+These rows also preview Question 2: 10.7 is not slower than 8.5, 9.1 or 10.0 on
+full-internet playback -- all four are 102-103s -- and master is ~15% faster at
+87s. Preliminary, one pass each, outside the campaign run root.
+
+Block 5 is therefore built and **held**, and what
 to do with the five FRR rows -- run and exclude them with this evidence, or
 settle an MRT correctness rule first -- is an operator decision recorded before
 any block spends hours reproducing it three times. Justin chose to hold on

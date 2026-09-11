@@ -787,7 +787,7 @@ empirical form of the correction below.
 **Corrected in this block:** the "fullest work directory" claim in the Block 3
 record and in rep 2's config header. See that entry.
 
-### Block 5: full-internet MRT repetition 1 of 3 -- **ran 2026-09-11, 14/14 qualified, awaiting acceptance**
+### Block 5: full-internet MRT repetition 1 of 3 -- **accepted 2026-09-11**
 
 Runs from `benchmarks/2026-timing-mrt-rep1.yaml`: the plan's 14 target
 configurations against the pinned Route Views RIB `mrt/rib.20260808.0000`, ten

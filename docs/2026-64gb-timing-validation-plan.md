@@ -1244,7 +1244,105 @@ Measurements amendment above says it will: `limiting_component` needs
 `bgperf2-rqp` tracks deriving that from `delivery`, back-fillable onto these
 artifacts without re-measuring.
 
-### Blocks 6-11
+### Block 6: full-internet MRT repetition 2 of 3 -- **accepted 2026-09-11**
+
+Runs from `benchmarks/2026-timing-mrt-rep2.yaml`: the same 14 target
+configurations, the same pinned Route Views RIB `mrt/rib.20260808.0000`, ten
+bgpdump2 injectors on 10 full-internet peers, no policy, one pass, one cell at
+a time, `order: shuffle` seed 20266 -- the campaign's year+block rule,
+continuing 20265. Work directory `/data/bgperf-work`. Procedure is
+`run_mrt_repetition()`, unchanged from Block 5.
+
+The config's `tests:` mapping differs from repetition 1's in exactly two lines,
+the test `name` and the `seed`, which is the diffability Block 9 depends on.
+The header is rewritten to what Block 5 *measured* rather than what it
+predicted -- rep1's said all five `frr_c` rows were expected to be rejected on
+`received < required`, and they now qualify on a resolved `delivery`. That is
+not drift: the mapping is what must not move between passes.
+
+**Result, 2026-09-11: 14 of 14 rows qualified**, on the same instance Block 5
+ran on (`i-08c8b32e512905f84`, `m7a.4xlarge` / EPYC 9R14 / 16 threads / 61.44
+GiB), one host throughout (`previous_entries` absent), RIB sha256
+`f6c87b21...73d0` -- byte-identical to the file Block 5 replayed, which is what
+the digest was added for. No tester errors, no timeouts, no failed rows. Peak
+foreign CPU 2% on eleven rows, 4%, 7% and 12% on the other three, all far under
+the one-core threshold. Lowest `min free mem` 44.5 GB (72%), on `rustybgp
+default` as in Block 5.
+
+**Every row reproduces, and so does every verdict.** `findings` returns the
+identical `limiting_component` and rule for all fourteen rows -- `tester
+(tester_limited)` for the four BIRD rows and `rustybgp default`,
+`target_or_monitor (post_injection_tail)` for the three OpenBGPD rows and
+`rustybgp 2026-02`, `inconclusive (missing_timing_evidence)` for the five
+`frr_c` rows. `received` is within 0.4% on every row and identical to the route
+on all seven BIRD and OpenBGPD rows (1,056,779) and both RustyBGP rows
+(1,081,178 / 1,081,180).
+
+| row | elapsed b5/b6 | received b5/b6 | max mem b5/b6 |
+|---|---|---|---|
+| rustybgp 2026-02 | 25 / 25 | 1,081,178 / 1,081,178 | 2.372 / 2.336 |
+| rustybgp default | 26 / 27 | 1,081,180 / 1,081,180 | **11.472 / 11.540** |
+| bird default | 31 / 31 | 1,056,779 / 1,056,779 | 1.203 / 1.202 |
+| bird 2.19.2 | 32 / 32 | 1,056,779 / 1,056,779 | 1.207 / 1.203 |
+| bird 3.3.2 (4 threads) | 37 / 40 | 1,056,779 / 1,056,779 | 1.597 / 1.585 |
+| bird 3.3.2 (default threads) | 42 / 45 | 1,056,779 / 1,056,779 | 1.590 / 1.584 |
+| openbgp default | 79 / 81 | 1,056,779 / 1,056,779 | 3.022 / 3.018 |
+| openbgp 9.2 | 80 / 80 | 1,056,779 / 1,056,779 | 3.021 / 3.021 |
+| openbgp 8.8 | 122 / 124 | 1,056,779 / 1,056,779 | 4.969 / 4.965 |
+| frr default (10.8.0-dev) | **102 / 89** | 957,260 / 959,701 | 5.970 / 5.952 |
+| frr_c 8.5 | 103 / 103 | 959,882 / 961,057 | 4.996 / 4.997 |
+| frr_c 9.1 | 103 / 103 | 960,860 / 959,309 | 5.275 / 5.271 |
+| frr_c 10.0 | 103 / 104 | 959,306 / 959,084 | 5.178 / 5.174 |
+| frr_c 10.7 | 103 / 104 | 956,893 / 960,724 | 5.956 / 5.949 |
+
+**Both of Block 5's single-pass observations now have a second reading, and
+both hold.** Neither is a claim until Block 7 supplies the third, per the
+plan's own variance rule, but neither looks like run-to-run noise:
+
+- **RustyBGP master holds 4.9x the memory of the 2026-02 build** -- 11.540 GB
+  against 2.336 GB, on the same 1,081,180/1,081,178 prefixes and 27s against
+  25s. The two readings of each build are 0.6% and 1.5% apart, so the 4.9x is
+  not dispersion. `bgperf2-nit`.
+- **BIRD 3.3.2 is slower than 2.19.2 on full-internet playback** -- 45s at its
+  default single worker and 40s with `threads 4`, against 32s for 2.19.2. Both
+  3.3.2 rows moved *up* by 3s between passes while both 2.19.2-family rows did
+  not move at all, so the gap widened rather than closed.
+
+**The witness rule fired again on the same row**, which turns Block 5's
+observation into a reproducible property: `bird 3.3.2 (default threads)`
+converged only through `ConvergenceTracker`'s fourth rule, 7 excused samples
+over a 1.50% monitor decline while the target's own best-path count stayed
+within 0.15% of its peak (Block 5: 8 samples, 1.64% against 0.03%). No other
+row in either block needed it. So the overshoot this workload produces is
+BIRD 3.3.2's at its default thread count specifically, in both passes, and a
+monitor-only rule would have failed that row twice.
+
+**The FRR substitution behaved as in Block 5, with the same margin.** All five
+rows carry no `monitor_required_reached` and all five resolved `delivery`:
+plateaus of 21 samples, `monitor_lag_s` 0.0 on every one, `exported_final`
+equal to `monitor_final` to the route, at 94.5-95.2s for the four pinned
+releases and 80.5s for master. The export-share finding reproduces to the same
+three totals from one RIB -- 1,056,779 (BIRD and OpenBGPD), ~1,081,178
+(RustyBGP), 959,084-961,057 (FRR, a 0.21% spread across four releases and
+master, tighter than Block 5's 0.41%).
+
+**One row moved, and it moved in both instruments together.** `frr default`
+(10.8.0-dev) came in at 89s against Block 5's 102s, a 12.7% drop, with
+`delivery.complete_s` moving 93.13s -> 80.51s by almost exactly the same
+amount. So this is the run genuinely finishing sooner rather than a measurement
+artefact, and it is the only FRR row with any dispersion -- the four pinned
+releases are 103-104s in both passes. Master is the unpinned build of the five,
+so it is also the only one whose binary could differ between passes. It did
+not: `bgperf/frr_c:latest` was built 2026-09-02 and nothing has rebuilt it
+since, both passes report `FRRouting 10.8.0-dev-my-manual-build`, and both were
+run from a tree that ran no `prepare`. Note what that argument rests on --
+provenance records the image *tag* and the daemon's own version string, not an
+image digest, and a rebuilt `:latest` reporting the same `-dev` string would be
+indistinguishable in these documents. The gcov trap one layer up, and worth a
+digest in `collect_provenance()` rather than this paragraph. Block 7 decides
+whether 89 or 102 is the outlier.
+
+### Blocks 7-11
 
 Not started. Each block's configs and procedure are its own change set.
 

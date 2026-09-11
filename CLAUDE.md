@@ -929,10 +929,25 @@ backed-out rules, both of which decided from the samples in hand.
   (`WITNESS_CARRY_SAMPLES` polls), pinned in `tests/test_stats_contract.py`
   rather than imported, since `measurements.py` stays free of project imports.
   A bound invented here would be one fitted to whichever run was in front of it.
-- **Nothing reads it yet.** It ships one change set before the rule that
-  consumes it, deliberately -- the same reason `target_table` itself did. A rule
-  landed beside the first evidence for it is fitted to that evidence, which is
-  how all three convergence rules were broken.
+- **`check_events()` reads it, and only it.** It shipped one change set before
+  that rule, deliberately -- the same reason `target_table` itself did, since a
+  rule landed beside the first evidence for it is fitted to that evidence,
+  which is how all three convergence rules were broken. The rule accepts a
+  *resolved* `delivery` in place of `monitor_required_reached`, under three
+  limits: **only for an MRT generator** (a synthetic run's check-point is
+  `n * p`, a statement of fact, so a target that misses it lost routes --
+  tested by membership in `MRT_TESTER_TYPES`, because a `-f` run records
+  `tester_type: null` and states its own check-point too); **only for that one
+  event** (the other three are recorded by every run that got that far, so a
+  missing one is a broken run rather than a yardstick that did not fit); and
+  **only when it resolved** (a withheld `delivery` names why, so reading one as
+  a substitute would replace a missing measurement with an absent one).
+  `findings.py` does **not** read it: such a row still reports
+  `limiting_component: inconclusive`, which the checker accepts, and
+  `convergence_s`, `assurance_s` and `post_injection_tail_s` are still not
+  published for it -- they are intervals measured *from* the event. The 64 GB
+  plan's Required Measurements carries the amendment saying so, because the
+  campaign may not silently re-define what a correct row is between blocks.
 
 **`check_timing_evidence.py` judges an MRT row on consistency plus a size
 floor**, never on the absolute alone -- that part stayed. Consistency is the

@@ -189,14 +189,18 @@ BLOCK_TITLES=(
 # procedure that were reviewed and are believed correct; what it lacks is a
 # decision about what its results would mean.
 #
-# This exists because Block 5 reached exactly that state. Its own de-risking
-# probe found that FRR converges on the full-internet workload while
+# This exists because Block 5 reached exactly that state, twice over. Its own
+# de-risking probe found that FRR converges on the full-internet workload while
 # advertising ~7.5% fewer prefixes than it holds -- reproducibly, in every
-# version tested -- so `check_timing_evidence.py` rejects all five `frr_c` rows
-# on `received < required`, and Blocks 6 and 7 would reproduce that twice more.
-# Without a gate here the campaign contract's "run exactly one next block"
-# sends the next session to spend hours re-deriving a result that is already
-# written down.
+# version tested. That first cost it `received < required`, which was settled
+# by judging an MRT row on consistency plus a size floor instead; then it cost
+# it `event_coverage`, because the monitor never crossed the check-point so
+# `monitor_required_reached` never fired. Both are settled now and the entry is
+# gone (see below). The paragraph is kept because the *shape* is what the gate
+# is for: without it, the campaign contract's "run exactly one next block"
+# sends the next session to spend hours re-deriving a result already written
+# down, and re-measuring afterwards needs `--force`, which discards the rows
+# that did qualify.
 #
 # It is a refusal rather than a warning for the reason the unbuilt branch is:
 # the work is expensive, unattended, and the wrong outcome looks exactly like
@@ -206,22 +210,15 @@ BLOCK_TITLES=(
 #
 # Keyed by block index. Removing an entry is how a block is released, and that
 # belongs in the same change set that settles the decision named here.
+# Block 5's entry was released on 2026-09-11, in the change set that taught
+# check_events() to accept target_table.delivery in place of
+# monitor_required_reached for an MRT run. The objection was that FRR ends such
+# a run at ~961,000 against a 1,039,500 check-point, so that event never fired
+# and all five frr_c rows were rejected on event_coverage. The check-point is a
+# guess -- the per-injector cap -- and the derived delivery measurement answers
+# the underlying question off the completed export series instead. See the
+# plan's Block 5 record.
 declare -A BLOCK_HELD=(
-  [5]="FRR ends an MRT run at ~961,000 against a 1,039,500 check-point, so
-info['checked'] never goes true, monitor_required_reached is never recorded,
-and check_events() fails event_coverage on all five frr_c rows. Running the
-block anyway spends hours on 14 full-table cells and rejects 5 of them -- and
-re-running then needs --force, which discards the 9 that qualified, because
---resume skips whatever the progress file already holds.
-
-This is NOT the objection the block was first held on. That one was the
-correctness test, and it is settled: MRT rows are now judged on consistency
-plus a size floor rather than an absolute (see the plan's Block 5 record).
-What is left is that convergence_s, assurance_s and post_injection_tail_s are
-not being taken at all for such a row. A second rule for the event was built,
-verified and backed out -- it could stamp the event mid-delivery -- and the
-sound version is a measurement derived off the completed target_table series.
-Release this entry in the change set that lands it."
 )
 # Refuses a held block unless the operator said so on the command line. Runs
 # before anything is created, like every other guard that reads only arguments.

@@ -1077,3 +1077,99 @@ def test_a_dead_target_sampler_is_not_blamed_on_the_generators():
     assert verdict == 'rejected'
     assert any(c.name == 'route_counts' and c.status == check.FAIL
                and 'stopped reporting' in c.detail for c in checks)
+
+
+def mrt_without_the_checkpoint_event(**delivery):
+    """The real Block 5 `frr_c` shape, built on `_mrt()` so the row is
+    genuinely below its check-point rather than merely missing an event.
+
+    Everything has to hold at once or the test proves nothing: `received`
+    (958,217) under `required` (1,039,500), an import gauge bounding the table
+    against what the generators offered, an export gauge agreeing with the
+    monitor, *and* no `monitor_required_reached`. Built the other way -- a
+    cleared row with a bare `delivery` key -- the row passes
+    `_mrt_route_counts()` through its "cleared the check-point" fallback, and
+    the combination this substitution exists to enable is pinned by nothing.
+    """
+    doc, r = _mrt(exported=958217, received='958217', imported=1046000)
+    doc['events'] = [e for e in doc['events']
+                     if e['event'] != check.MONITOR_REQUIRED_EVENT]
+    doc['tester_fleet'] = {'testers': 10, 'testers_complete': 10,
+                           'incomplete_testers': [],
+                           'offered_prefixes': 1050000}
+    section = {'unresolved_reason': None, 'complete_s': 61.5,
+               'exported_final': 958217, 'monitor_final': 958217}
+    section.update(delivery)
+    doc['target_table']['delivery'] = section
+    return doc, r
+
+
+def test_an_mrt_row_below_the_checkpoint_qualifies_on_the_derived_delivery():
+    """The check-point for MRT playback is `0.99 * -p`, the per-injector cap --
+    a guess, since ten peers replay one RIB's overlapping views. Every FRR
+    release lands near 961,000 against a 1,039,500 check-point while BIRD and
+    OpenBGPD settle on 1,056,779: three distinct totals from one file, because
+    export rules differ. Rejecting such a row asked a daemon to meet a number
+    nobody could have set correctly."""
+    doc, r = mrt_without_the_checkpoint_event()
+    # The row really is below its check-point: that is the whole premise.
+    assert int(r['received']) < int(r['required'])
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'qualified', statuses(checks)
+    assert statuses(checks)['event_coverage'] == check.OK
+
+
+def test_a_synthetic_row_below_the_checkpoint_is_still_rejected():
+    """For a synthetic generator bgperf2 built the prefix lists, so the
+    check-point is `n * p` -- a statement of fact. A target that misses it lost
+    routes, and accepting a substitute there would excuse exactly that."""
+    doc, r = mrt_without_the_checkpoint_event()
+    doc['run'] = dict(doc['run'], tester_type='bird')
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'rejected'
+    assert statuses(checks)['event_coverage'] == check.FAIL
+
+
+def test_a_scenario_run_states_its_own_checkpoint_and_is_still_rejected():
+    """A `-f` run records `tester_type: null` and states its own check-point in
+    the file, so `required` is a fact there too. Tested by membership in
+    MRT_TESTER_TYPES rather than by not-being-synthetic, which would route this
+    third state down the MRT branch."""
+    doc, r = mrt_without_the_checkpoint_event()
+    doc['run'] = dict(doc['run'], tester_type=None)
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'rejected'
+    assert statuses(checks)['event_coverage'] == check.FAIL
+
+
+def test_a_withheld_delivery_is_not_a_substitute():
+    """A withheld `delivery` names why, and its reasons are the cases where the
+    series cannot support an answer. Reading one as a substitute would replace
+    a missing measurement with an absent one."""
+    doc, r = mrt_without_the_checkpoint_event(
+        unresolved_reason='gauge_undated', complete_s=None)
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'rejected'
+    assert statuses(checks)['event_coverage'] == check.FAIL
+
+
+def test_the_substitute_covers_only_the_checkpoint_event():
+    """`bench_clock_started`, `monitor_first_prefix` and
+    `convergence_confirmed` are recorded by every run that got that far,
+    including every FRR MRT run. A missing one is a broken run, not a yardstick
+    that did not fit."""
+    doc, r = mrt_without_the_checkpoint_event()
+    doc['events'] = [e for e in doc['events']
+                     if e['event'] != 'convergence_confirmed']
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'rejected'
+    assert statuses(checks)['event_coverage'] == check.FAIL
+
+
+def test_a_run_that_has_the_event_is_unaffected_by_the_substitute():
+    """Every row that qualified before must still qualify the same way, and say
+    so in the same words."""
+    verdict, checks = check.qualify(artifact(), versions(), row())
+    assert verdict == 'qualified'
+    detail = [c.detail for c in checks if c.name == 'event_coverage']
+    assert detail == ['every required event present']

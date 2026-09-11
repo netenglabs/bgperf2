@@ -61,10 +61,17 @@ LIMITING_COMPONENTS = (TESTER, TARGET_OR_MONITOR, UNRESOLVED, INCONCLUSIVE)
 # came back within 4%.
 DEFAULT_EGRESS_TOLERANCE = 0.25
 
+# Named apart because it is the one of the four that a *correct* run may
+# legitimately never emit: it is keyed on the monitor reaching the run's
+# check-point, and that check-point is a guess for MRT playback. See
+# `_delivery_substitute()`, which is the only thing allowed to stand in for it.
+MONITOR_REQUIRED_EVENT = 'monitor_required_reached'
+
 # Every run must publish these, whatever the generator or the target.  A
-# missing one is not a slow run, it is a run nobody can qualify.
+# missing one is not a slow run, it is a run nobody can qualify -- with the
+# single, named exception above.
 REQUIRED_EVENTS = ('bench_clock_started', 'monitor_first_prefix',
-                   'monitor_required_reached', 'convergence_confirmed')
+                   MONITOR_REQUIRED_EVENT, 'convergence_confirmed')
 
 OK, NOTE, FAIL = 'ok', 'note', 'fail'
 
@@ -727,13 +734,73 @@ def check_events(artifact):
 
     seen = set(e.get('event') for e in events)
     missing = [name for name in REQUIRED_EVENTS if name not in seen]
-    if missing:
+    substitute = _delivery_substitute(artifact, missing)
+    if substitute:
+        checks.append(Check('event_coverage', OK, substitute))
+    elif missing:
         checks.append(Check('event_coverage', FAIL,
                             'no ' + ', '.join(missing)))
     else:
         checks.append(Check('event_coverage', OK,
                             'every required event present'))
     return checks
+
+
+def _delivery_substitute(artifact, missing):
+    """`target_table.delivery` standing in for an event that cannot fire.
+
+    `monitor_required_reached` fires when the monitor's count reaches the run's
+    check-point. For MRT playback that check-point is `0.99 * -p` -- the
+    per-injector cap, a guess, since the ten peers replay one RIB's overlapping
+    views and their union is not knowable in advance. A daemon that exports a
+    smaller share of that RIB never reaches it: every FRR release lands near
+    961,000 against a 1,039,500 check-point, within 0.91% of each other across
+    four releases and master, while BIRD and OpenBGPD settle on 1,056,779 and
+    RustyBGP on 1,081,178. Three distinct totals from one file, because export
+    rules differ. Such a run publishes no `convergence_s`, `assurance_s` or
+    `post_injection_tail_s`, and was rejected here for missing an event no
+    daemon has to emit.
+
+    `delivery` answers the underlying question retrospectively -- when the
+    target finished exporting and the monitor held it -- off the completed
+    series rather than from the samples in hand, which is what the two
+    backed-out online rules could not do. A *resolved* one is therefore
+    accepted in its place.
+
+    Three limits, each load-bearing:
+
+    - **Only for an MRT run.** For a synthetic generator bgperf2 built the
+      prefix lists, so the check-point is `n * p` -- a statement of fact, not a
+      guess -- and a target that misses it lost routes. Accepting a substitute
+      there would excuse exactly that. Tested by membership in
+      `MRT_TESTER_TYPES` rather than by not-being-synthetic, because a `-f`
+      scenario run records `tester_type: null` and states its own check-point
+      in the file, so it is a statement of fact too.
+    - **Only for that one event.** `bench_clock_started`,
+      `monitor_first_prefix` and `convergence_confirmed` are recorded by every
+      run that got that far, including every FRR MRT run; a missing one is a
+      broken run, not a yardstick that did not fit.
+    - **Only when it resolved.** A withheld `delivery` names why, and its
+      reasons are the cases where the series cannot support an answer. Reading
+      one as a substitute would replace a missing measurement with an absent
+      one.
+    """
+    if missing != [MONITOR_REQUIRED_EVENT]:
+        return None
+    run = artifact.get('run') or {}
+    if run.get('tester_type') not in MRT_TESTER_TYPES:
+        return None
+    delivery = ((artifact.get('target_table') or {}).get('delivery') or {})
+    if delivery.get('unresolved_reason') is not None:
+        return None
+    complete_s = delivery.get('complete_s')
+    if complete_s is None:
+        return None
+    return ('no {0} -- the MRT check-point is a guess this daemon\'s export '
+            'share does not meet -- but the target finished delivering at '
+            '{1:.3f}s and the monitor held {2} of its {3}'.format(
+                MONITOR_REQUIRED_EVENT, complete_s,
+                delivery.get('monitor_final'), delivery.get('exported_final')))
 
 
 def check_testers(artifact):

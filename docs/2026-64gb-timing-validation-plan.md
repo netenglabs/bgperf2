@@ -240,6 +240,38 @@ Every accepted row must include:
 - final route/session correctness;
 - structured findings and qualification policy version.
 
+**Amendment, 2026-09-11: what an MRT row below the check-point supplies.**
+"Required route state reached" is keyed on `monitor_required_reached`, which
+fires when the monitor's count reaches the run's check-point. For MRT playback
+that check-point is `0.99 * -p` -- the per-injector cap, a guess, since ten
+peers replay one RIB's overlapping views and their union is unknowable in
+advance. Daemons legitimately export different shares of one RIB: measured on
+the pinned file, RustyBGP 1,081,178, BIRD and OpenBGPD 1,056,779 each, every
+FRR release ~961,000 and within 0.91% of each other across four releases and
+master. So the requirement as written asks a daemon to meet a number nobody
+could have set correctly, and five of each MRT block's fourteen rows cannot.
+
+Such a row is accepted on `target_table.delivery` instead -- when the target
+finished exporting and the monitor held it, derived off the completed series --
+and this is stated here rather than left to the checker, because the campaign
+may not silently re-define what a correct row is between blocks. What such a
+row does **not** publish is `convergence_s`, `assurance_s` and
+`post_injection_tail_s`, all three of which are intervals measured *from* that
+event. It does publish `elapsed (s)`, every CPU, memory, contention and
+correctness measurement, and `delivery`, which is derived for every run with an
+export gauge and so is comparable across all fourteen rows rather than
+appearing only where there is trouble.
+
+The cost is bounded and recoverable. Every one of this plan's ten Primary
+Questions is a within-daemon comparison, and all five FRR rows of a block carry
+the same three absences, so none of those questions is affected; what cannot be
+asked is FRR against BIRD on those three intervals specifically. And because
+the artifacts retain the full per-poll series, an interval derived later off
+`delivery` can be computed from the Block 5-7 artifacts already on disk,
+without re-running a block. That is its own change set and is deliberately not
+folded into this one, on the rule that a measurement ships before the rule that
+consumes it.
+
 The campaign must distinguish:
 
 - tester-limited;
@@ -1036,6 +1068,57 @@ target keeps exporting well past it -- 16.85s against 36.36s on one recorded
 would move every MRT row by that gap. It is therefore derived for *every* run
 with an export gauge, so the column is comparable across daemons rather than
 appearing only on the rows that lost the event.
+
+**The hold is released, and what released it.** `check_events()` now accepts a
+*resolved* `target_table.delivery` in place of `monitor_required_reached`, for
+an MRT run only, and `BLOCK_HELD[5]` is gone. Three limits hold that up: only
+for an MRT generator, since a synthetic run's check-point is `n * p` and a
+target that misses it lost routes -- tested by membership in
+`MRT_TESTER_TYPES`, because a `-f` run records `tester_type: null` and states
+its own check-point too; only for that one event, since the other three are
+recorded by every run that got that far; and only when `delivery` resolved,
+since a withheld one would replace a missing measurement with an absent one.
+The Required Measurements amendment above says what such a row does and does
+not carry.
+
+**Verified on the campaign host before the hold was lifted, and the check was
+not a formality.** Review of the release objected that the premise had never
+been observed: all 39 recorded artifacts carrying a witness series are BIRD
+except one synthetic FRR row, so *no* FRR MRT run had ever been shown to
+produce a `delivery` that resolves. The concern was specific and plausible --
+FRR's witness comes from `vtysh` against a 1.05M-prefix `bgpd`, and because FRR
+never reaches the check-point its assurance window is 20 samples rather than 5,
+so the plateau is long and every sample of it must be freshly read. A stale or
+repeated read anywhere in those 20 would withhold `delivery`, `event_coverage`
+would fail again, and re-measuring would need `--force`, discarding the nine
+rows that did qualify. That is exactly the cost the hold existed to prevent.
+
+So one `frr_c` 10.7 cell was run on the pinned RIB, ten bgpdump2 injectors,
+outside the campaign run root (scratchpad results, so this is not a campaign
+row). It converged at 957,086 against the 1,039,500 check-point -- the Block 5
+shape -- and:
+
+- `delivery` **resolved**: `complete_s` 93.948s, `plateau_samples` 21, and all
+  21 are distinct reads with a maximum age of **0.68s** against the 5s bound.
+  FRR's `vtysh` read is comfortably fast enough at full-table size; the
+  objection was sound and does not materialise.
+- `exported_final` and `monitor_final` agree exactly at 957,086, and the target
+  accepted 10,497,949 of the 10,500,000 paths offered.
+- `check_timing_evidence.py` returns **QUALIFIED**, with `event_coverage`
+  reading "no monitor_required_reached -- the MRT check-point is a guess this
+  daemon's export share does not meet -- but the target finished delivering at
+  93.948s and the monitor held 957086 of its 957086", and with the consistency
+  check and the size floor both passing on their own evidence rather than on
+  the substitution.
+- `findings` stays `inconclusive`, as the amendment above says it will.
+
+One cell is not five, and Blocks 6 and 7 re-run the same shape twice more; what
+this establishes is that the mechanism works on the daemon it was built for,
+which is what the hold was waiting on. A row that does withhold `delivery` is
+handled by `accept --with-exclusions` with this evidence beside it.
+
+**The paragraphs below were written while the hold stood**, and are kept as
+they were:
 
 **Nothing reads it yet and the hold stands.** Shipping the measurement one
 change set ahead of the rule that consumes it is deliberate -- the same

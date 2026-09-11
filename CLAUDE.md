@@ -751,6 +751,23 @@ session the monitor reads).
   second into the container being measured, and -- worse for a number whose only
   job is to be compared against another number -- two different instants. The
   sample is stamped before the read, on the rule both poll loops already follow.
+- **Two daemons answer, with different halves, and a partial answer is not a
+  wrong one.** BIRD publishes all three sums. FRR publishes
+  `exported_to_monitor` and `imported_paths` (`frr.table_witness()`), off the
+  same `sh ip bgp summary json` its neighbour counters already come from -- one
+  exec, one instant, BIRD's rule. `exported_to_monitor` is the monitor
+  session's own `pfxSnt`, and `imported_paths` the per-peer `pfxRcd` sum, which
+  is what the MRT size floor is built on; both need no interpretation.
+
+  It withholds **`best_paths`** deliberately, and only that one: FRR does
+  report a table size, but `ribCount` and `show bgp ipv4 unicast statistics`'
+  `Total Prefixes` disagreed (1,081,000 against 1,080,985 on one measured run)
+  and neither has been established to mean "prefixes holding a selected best
+  path", which is what BIRD's `preferred` sum means and what the convergence
+  rule compares against its own peak. A witness that is subtly wrong is worse
+  than none -- it excuses declines it has no standing to excuse -- and `None`
+  is the documented way to attest to nothing, so adding FRR's halves changed
+  nothing about how an FRR run converges.
 - **A daemon with no gauge reports `None`, never 0**, and a run with no witness
   gets no `target_table` section at all, so every other daemon's artifact and
   progress line are exactly what they were. A sum is withheld when any peering
@@ -786,6 +803,50 @@ what was appended, and:
   checkpoint only via End-of-RIB, missing those lines means the run never converges;
 - the per-poll read is capped, and matching happens on bytes with the decode deferred to lines that
   hit, because this process's own RSS feeds the recorded `min_free` column.
+
+**`monitor_required_reached` is the monitor's count against the check-point,
+and a second rule for it was tried and backed out.** The check-point is `n * p`
+for a synthetic run -- a statement of fact, since bgperf2 generated the prefix
+lists -- and `0.99 * -p` for MRT playback, where `-p` is the per-injector cap
+and the union of ten overlapping peer views cannot be known in advance. Daemons
+legitimately export different shares of one RIB: measured on a single
+routeviews file, RustyBGP 1,081,178, BIRD and OpenBGPD 1,056,779 each, every
+FRR release ~961,000 (0.91% apart across four releases and master). **A daemon
+below that guess emits no `monitor_required_reached` and so publishes no
+`convergence_s`, `assurance_s` or `post_injection_tail_s`** -- a known gap, not
+a bug to patch casually.
+
+The second rule was the target's own account, which is what the blog series
+this project comes from did when filtering raised the identical problem ("we
+don't know what will get filtered"): the target has received everything from
+every neighbour, and has sent it on to the monitor. It was built, verified, and
+removed, for a reason worth keeping:
+
+- **The neighbour checkpoint says every generator has *sent* everything, not
+  that the target has finished *exporting*.** So one poll in which the export
+  count does not advance, with the monitor drained to that same number, stamps
+  the event mid-delivery -- at a fraction of the table, permanently, since the
+  event is recorded once and nothing in the artifact says which rule supplied
+  it. An earlier version that required only `monitor_accepted >= exported` was
+  worse still: the witness is resampled onto the monitor's polls and can be
+  seconds old, so a fast climb lets the monitor overtake a stale export count.
+  That one escaped the measured FRR case only because bgpdump2's injectors were
+  blocked on FRR draining (75s to complete against OpenBGPD's 2.4s).
+- **Whether the target finished exporting is only decidable in retrospect**, so
+  a sound version is a measurement derived off the completed `target_table`
+  series -- named as its own thing, never synthesised into the event stream as
+  though it had been observed -- with `event_coverage` accepting it in place of
+  an event that legitimately cannot fire.
+
+**`check_timing_evidence.py` judges an MRT row on consistency plus a size
+floor**, never on the absolute alone -- that part stayed. Consistency is the
+monitor's count against the target's own export count; but those are the two
+ends of one link and agree whenever the link works, so a target that imported a
+tenth of the RIB would show them agreeing at a tenth. The floor is the target's
+accepted-path count against what the generators report offering. Reaching the
+check-point stays *sufficient*, so rows that meet it are judged as before; only
+its *necessity* was wrong. A row that is below the check-point **and** has no
+import gauge is rejected, because nothing vouches for it.
 
 ### Asking the generator what it sent — tester offering polls
 

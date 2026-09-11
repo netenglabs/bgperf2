@@ -2064,6 +2064,23 @@ def export_lifecycle_summary(recorder, state, read_failures,
     return tuple(recorder.events), evidence
 
 
+def target_holds_suffix(witness):
+    '''The target-side half of the progress line, or empty.
+
+    Every sum is tested against None rather than truthiness: a target with
+    every session up and no routes yet has legitimately measured 0, and
+    collapsing that into the withheld case hides the one the guard is for.
+    '''
+    parts = []
+    for key, label in (('best_paths', '{0} prefixes'),
+                       ('imported_paths', '{0} paths'),
+                       ('exported_to_monitor', '{0} exported to the monitor')):
+        value = (witness or {}).get(key)
+        if value is not None:
+            parts.append(label.format(value))
+    return ', target holds: ' + ' / '.join(parts) if parts else ''
+
+
 def bench(args):
     output_stats = {}
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
@@ -2751,7 +2768,22 @@ def bench(args):
                 seconds=sample_monotonic_s - bench_clock_started_s)
             output_stats['elapsed'] = elapsed
             recved = info['afi_safis'][0]['state']['accepted'] if 'accepted' in info['afi_safis'][0]['state'] else 0
-            lifecycle.observe(sample_monotonic_s, int(recved), info['checked'])
+            # `monitor_required_reached` is the monitor's count against
+            # `conf['monitor']['check-points'][0]`, and stays that and only
+            # that. A second rule keyed on the target's own export count was
+            # built here and backed out: see the plan's Block 5 record. It
+            # could be made to fire mid-delivery -- the neighbour checkpoint
+            # can be set while export is still in progress, and one poll in
+            # which the target's export count does not advance with the
+            # monitor drained to that same number stamps the event at a
+            # fraction of the table. The event is recorded once, so that
+            # mis-dates `convergence_s`, `assurance_s` and
+            # `post_injection_tail_s` permanently and silently. A wrong
+            # headline timing is worse than a missing one, which is why an
+            # MRT run on a daemon that never reaches the check-point still
+            # publishes none of the three rather than three plausible numbers.
+            lifecycle.observe(sample_monotonic_s, int(recved),
+                              info['checked'])
             measured = monitor_metrics(lifecycle.events)
             if measured['first_prefix_s'] is not None:
                 output_stats['first_received_time'] = datetime.timedelta(
@@ -2818,11 +2850,16 @@ def bench(args):
                   # than truthiness: a target with every session up and no
                   # routes yet has legitimately measured 0, and collapsing that
                   # into the withheld case hides the one this guard is for.
-                  + ('' if (latest_witness or {}).get('best_paths') is None
-                     else
-                     ', target holds: {0} prefixes / {1} paths'.format(
-                         latest_witness['best_paths'],
-                         latest_witness['imported_paths'])))
+                  #
+                  # Each half stands on its own, because the two daemons that
+                  # answer answer differently: FRR publishes `imported_paths`
+                  # and `exported_to_monitor` and withholds `best_paths` by
+                  # design, so gating the whole suffix on `best_paths` printed
+                  # nothing target-side for an FRR run while sampling both of
+                  # the numbers it does have once a second -- leaving an
+                  # operator watching a full-table cell unable to tell a
+                  # stalled export from an ongoing import.
+                  + target_holds_suffix(latest_witness))
             if tracker.witness_excused_samples > excused_before \
                     and excused_before == 0:
                 # Once, on the first sample the witness saved, and never again:
@@ -3207,8 +3244,10 @@ def host_evidence(output_stats):
 def target_table_unmeasured(target, samples):
     '''Why a target that could have been asked produced no witness, or None.
 
-    A daemon with no gauge gets no section at all and no reason: that is the
-    document every non-BIRD run has always written. A target that *can* answer
+    A daemon with no gauge gets no section at all and no reason, which is the
+    document every run without a witness has always written. Two daemons
+    answer, with different halves -- BIRD all three sums, FRR everything but
+    `best_paths` -- so "non-BIRD" is no longer the same set. A target that *can* answer
     and did not -- its poll thread died on the first read, or the run converged
     before the first target poll landed -- says so by name, on the rule the
     export section already follows: absent is what an older build wrote, so

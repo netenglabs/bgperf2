@@ -140,63 +140,112 @@ def test_status_reports_every_block_before_anything_has_run(roots):
     assert states == expected, states
 
 
-def test_a_held_block_is_refused_and_says_what_decision_it_is_waiting_on(roots):
+@pytest.fixture
+def held_runner(tmp_path):
+    """A copy of the runner with one block held, beside the real one.
+
+    The mechanism is only exercised while some block is actually held, and
+    blocks are held rarely and released as soon as the question that held them
+    is settled -- Block 5 was held and released the same day. Tests that
+    skipped whenever `BLOCK_HELD` was empty therefore covered it for a few
+    hours and never again, which is no coverage at all for infrastructure the
+    next held block depends on. Patching a copy tests the real guard against a
+    real invocation.
+
+    The copy has to sit in `scripts/`: the runner resolves `SCRIPT_DIR` from
+    `BASH_SOURCE` and sources `lib/campaign_common.sh` relative to it.
+    """
+    # Unique per process: under pytest-xdist a fixed name means two workers
+    # write and unlink the same path, so one can execute a half-written file.
+    # A stray copy after a hard kill is also this test's mess to leave, and a
+    # pid-tagged one is at least identifiable.
+    source = BLOCK_RUNNER
+    target = source.parent / '.test_held_runner_{0}.sh'.format(os.getpid())
+    text = source.read_text()
+    assert 'declare -A BLOCK_HELD=(' in text, 'the held-block table is gone'
+    # The block held for the test is the lowest one with no `case` branch, for
+    # the reason `unbuilt_block()` exists at all: a literal number here becomes
+    # a *benchmark launcher* the day that block is built. These tests hand the
+    # runner `--workdir` and `--allow-root-workdir`, so a guard that regressed
+    # would put a 14-cell full-table MRT batch inside the Docker-free suite
+    # before the `returncode == 2` assertion ever ran.
+    index = unbuilt_block()[0]
+    text = text.replace(
+        'declare -A BLOCK_HELD=(',
+        'declare -A BLOCK_HELD=(\n  [%d]="a reason the operator has to read"'
+        % index,
+        1)
+    target.write_text(text)
+    target.chmod(source.stat().st_mode)
+    try:
+        yield target, index
+    finally:
+        target.unlink(missing_ok=True)
+
+
+def held_block(runner, *args, results_root, workdir=None):
+    argv = [runner, *args, '--results-root', results_root]
+    if workdir is not None:
+        argv += ['--workdir', workdir, '--allow-root-workdir']
+    return run(argv)
+
+
+def test_a_held_block_is_refused_and_says_what_decision_it_is_waiting_on(
+        held_runner, roots):
     """A held block is built and reviewed; what it lacks is a decision.
 
     It must not be reachable by `next`, because the campaign contract tells an
     unattended session to run the next block -- and the whole point of holding
     one is that its rows are already known not to mean what they appear to.
     """
-    held = _held_blocks()
-    if not held:
-        pytest.skip('no block is currently held')
-    index = sorted(held)[0]
+    runner, index = held_runner
     results, work = roots
-    result = block('block-%d' % index, results_root=results, workdir=work)
+    result = held_block(runner, 'block-%d' % index, results_root=results,
+                        workdir=work)
     assert result.returncode == 2, result.stdout
     assert 'built but held' in result.stderr
     # The refusal has to name the decision, not just refuse: an operator who
     # cannot see why will pass the override.
-    assert len(result.stderr.strip().splitlines()) > 3, result.stderr
+    assert 'a reason the operator has to read' in result.stderr
     assert '--run-held-block' in result.stderr
     assert not os.path.exists(os.path.join(
         results, '2026-timing-validation', _block_keys()[index]))
 
 
-def test_next_does_not_select_a_held_block(roots):
+def test_next_does_not_select_a_held_block(held_runner, roots):
+    runner, index = held_runner
     results, work = roots
-    held = _held_blocks()
-    if not held:
-        pytest.skip('no block is currently held')
-    index = sorted(held)[0]
     root = os.path.join(results, '2026-timing-validation')
     for key in _block_keys()[:index]:
         directory = os.path.join(root, key)
         os.makedirs(directory, exist_ok=True)
         with open(os.path.join(directory, 'COMPLETE'), 'w') as handle:
             handle.write('accepted\n')
-    result = block('next', results_root=results, workdir=work)
+    result = held_block(runner, 'next', results_root=results,
+                        workdir=work)
     assert result.returncode == 2, result.stdout
     assert 'built but held' in result.stderr
 
 
-def test_the_held_override_is_refused_by_an_action_that_runs_nothing(roots):
+def test_the_held_override_is_refused_by_an_action_that_runs_nothing(
+        held_runner, roots):
     """`accept` is the slip that matters: a held block's refusal is about what
     its rows would mean, which is the judgement `accept` records."""
+    runner, index = held_runner
     results, _ = roots
-    for action in (['accept', '5', '--note', 'why'], ['status'], ['list']):
-        result = block(*action, '--run-held-block', results_root=results)
+    for action in (['accept', str(index), '--note', 'why'], ['status'],
+                   ['list']):
+        result = held_block(runner, *action, '--run-held-block',
+                            results_root=results)
         assert result.returncode == 1, (action, result.stdout)
         assert '--run-held-block applies to running a block' in result.stderr
 
 
-def test_a_held_block_is_reported_as_held_rather_than_not_started(roots):
-    held = _held_blocks()
-    if not held:
-        pytest.skip('no block is currently held')
-    index = sorted(held)[0]
+def test_a_held_block_is_reported_as_held_rather_than_not_started(
+        held_runner, roots):
+    runner, index = held_runner
     results, _ = roots
-    result = block('status', results_root=results)
+    result = held_block(runner, 'status', results_root=results)
     assert result.returncode == 0, result.stderr
     line = [l for l in result.stdout.splitlines()
             if l.startswith('block-%d ' % index)]
@@ -704,3 +753,23 @@ def test_an_unreadable_verdict_is_not_an_excludable_row(tmp_path):
     assert 'unfinished' in result.stderr
     assert 'evidence unreadable' in result.stderr
     assert not os.path.exists(os.path.join(directory, 'COMPLETE'))
+
+
+def test_the_held_override_accepts_every_spelling_of_a_block(held_runner,
+                                                             roots):
+    """`parse_block_number()` takes `5`, `block5` and `block-5`, and `accept`
+    takes its number bare -- so the bare form is the natural thing to type
+    here. A guard that whitelisted `next` and `block-*` refused it with
+    "applies to running a block, not to `5`", which is false.
+
+    Safe to exercise because the held block is the lowest *unbuilt* one: past
+    the override it reaches the "not built yet" branch and exits, rather than
+    starting a benchmark.
+    """
+    runner, index = held_runner
+    results, work = roots
+    for spelling in (str(index), 'block%d' % index, 'block-%d' % index):
+        result = held_block(runner, spelling, '--run-held-block',
+                            results_root=results, workdir=work)
+        assert 'applies to running a block' not in result.stderr, spelling
+        assert 'not built yet' in result.stderr, (spelling, result.stderr)

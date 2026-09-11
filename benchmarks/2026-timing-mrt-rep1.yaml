@@ -2,12 +2,17 @@
 # full-internet MRT workload, all 14 target configurations.
 #
 # The workload is the plan's "Canonical Workloads / Full-internet MRT": 10
-# full-table peers, approximately 1.05 million prefixes per peer from the
-# pinned Route Views RIB, ten bgpdump2 injectors, no policy. This is the
-# campaign's primary realism workload, and the plan requires reports and graph
-# subtitles to call it "10 full-internet peers using bgpdump2" rather than
-# "10 x 1.05M" -- the second phrasing reads as a multiplication that does not
-# happen here.
+# full-internet peers replaying the pinned Route Views RIB through ten
+# bgpdump2 injectors, no policy. Each injector is capped at 1,050,000 prefixes
+# and the ten peers' views overlap heavily, so the table the target ends up
+# holding is the union -- about 1.08 million -- and NOT ten times anything.
+# See the next paragraph, which is the whole reason this one avoids the words
+# "per peer".
+#
+# This is the campaign's primary realism workload, and the plan requires
+# reports and graph subtitles to call it "10 full-internet peers using
+# bgpdump2" rather than "10 x 1.05M" -- the second phrasing reads as a
+# multiplication that does not happen here.
 #
 # `prefixes: 1_050_000` IS THE WHOLE TABLE, not a per-peer block, and that is
 # the one way this file's axes do not mean what the synthetic passes' mean.

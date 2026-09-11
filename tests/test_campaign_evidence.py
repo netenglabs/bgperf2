@@ -615,3 +615,303 @@ def test_a_blank_matched_line_says_so():
     detail = check.describe_tester_health(health, 1, 0)
     assert '(blank line)' in detail
     assert not detail.rstrip().endswith(':')
+
+
+def _mrt(exported=None, received='961201', required='1039500', imported=39800):
+    """An MRT run's artifact and row, optionally carrying a table witness.
+
+    `imported` defaults to just under the fleet's offered count, because a
+    daemon that publishes an export witness publishes an import one too -- both
+    come off the same read, for BIRD and for FRR alike. A row below the
+    check-point with neither is a row nothing can vouch for, which is its own
+    test below.
+    """
+    doc = artifact(run={'name': 'frr_c 10.7', 'repetition': None, 'peers': 10,
+                        'prefixes_per_peer': 1050000,
+                        'tester_type': 'bgpdump2', 'path_diversity': 1})
+    series = {}
+    if exported is not None:
+        series['exported_to_monitor'] = {'final': exported}
+        if imported is not None:
+            series['imported_paths'] = {'final': imported}
+    if series:
+        doc['target_table'] = {'series': series}
+    return doc, row(name='frr_c 10.7', received=received, required=required)
+
+
+def test_an_mrt_shortfall_against_the_check_point_is_not_route_loss():
+    '''`required` is `0.99 * -p` for an MRT injector -- the per-injector cap,
+    not the size of a union nobody can know in advance -- and daemons
+    legitimately advertise different shares of one RIB. Measured on the same
+    file: RustyBGP 1,081,178, BIRD and OpenBGPD 1,056,779, every FRR release
+    ~961,000. Judged against one absolute, every FRR row is rejected and the
+    rest pass, which says nothing about FRR.'''
+    doc, r = _mrt(exported=961201)
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert statuses(checks)['route_counts'] == check.OK
+    assert verdict == 'qualified', statuses(checks)
+
+
+def test_an_mrt_row_is_rejected_when_the_two_ends_of_the_session_disagree():
+    '''Completeness is not checkable for MRT playback; consistency is. The
+    monitor's count and the target's own count of what it sent that very
+    session are two measurements of one thing.'''
+    doc, r = _mrt(exported=1010000)
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert statuses(checks)['route_counts'] == check.FAIL
+    assert verdict == 'rejected'
+
+
+def test_an_mrt_row_with_no_witness_is_noted_not_passed_or_failed():
+    '''The check could not be made, which is neither a pass nor a failure --
+    the distinction `findings.py` keeps between unresolved and inconclusive.
+    OpenBGPD and RustyBGP publish no export witness today.'''
+    doc, r = _mrt(exported=None, received='1056779')
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert statuses(checks)['route_counts'] == check.NOTE
+    assert verdict == 'qualified', statuses(checks)
+
+
+def test_two_zeros_are_an_absent_session_rather_than_agreement():
+    '''A collapsed count agrees with itself arithmetically and attests to
+    nothing: the session every published timing is read from was not carrying
+    the table.'''
+    doc, r = _mrt(exported=0, received='0')
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert statuses(checks)['route_counts'] == check.FAIL
+    assert verdict == 'rejected'
+
+
+def test_a_synthetic_shortfall_is_still_route_loss():
+    '''The MRT reasoning must not leak into the synthetic blocks, where
+    bgperf2 generated the prefix lists and `required` really is `n * p`.'''
+    verdict, checks = check.qualify(artifact(), versions(),
+                                    row(received='39599'))
+    assert statuses(checks)['route_counts'] == check.FAIL
+    assert verdict == 'rejected'
+
+
+def test_the_check_point_remains_a_sufficient_floor_for_an_mrt_row():
+    '''Reaching `0.99 * -p` was never the problem: a daemon that exports more
+    than that has demonstrably not shrunk the table. Treating it as *necessary*
+    was. OpenBGPD and RustyBGP rows are judged exactly as they always were.'''
+    doc, r = _mrt(exported=None, received='1056779')
+    checks = [c for c in check.check_status(doc, r) if c.name == 'route_counts']
+    assert any(c.status == check.OK and 'check-point' in c.detail
+               for c in checks), [c.detail for c in checks]
+
+
+def test_a_target_that_kept_a_tenth_of_the_rib_is_rejected():
+    '''The size floor, and the reason consistency alone cannot be the whole
+    check: `received` and `exported_to_monitor` are the two ends of one link
+    and agree whenever the link works, so a target that imported a tenth would
+    show them agreeing at a tenth. What bounds the size is the target's own
+    count of what it accepted, against what the generators say they offered.'''
+    doc, r = _mrt(exported=96101, received='96101')
+    doc['tester_fleet'] = dict(doc['tester_fleet'], offered_prefixes=10500000)
+    doc['target_table']['series']['imported_paths'] = {'final': 1049794}
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'rejected'
+    assert any(c.name == 'route_counts' and c.status == check.FAIL
+               and 'short' in c.detail for c in checks)
+
+
+def test_a_full_table_clears_the_size_floor():
+    doc, r = _mrt(exported=961019, received='961019')
+    doc['tester_fleet'] = dict(doc['tester_fleet'], offered_prefixes=10500000)
+    doc['target_table']['series']['imported_paths'] = {'final': 10497949}
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'qualified', statuses(checks)
+
+
+def test_a_synthetic_exabgp_run_is_not_treated_as_mrt_playback():
+    '''`SYNTHETIC_TESTER_TYPES` is ('exa', 'bird'): bgperf2 generates the
+    prefix lists for both, so `required` really is `n * p` and a shortfall is
+    route loss.'''
+    doc = artifact(run={'name': 'bird 2.19.2', 'repetition': None, 'peers': 4,
+                        'prefixes_per_peer': 10000, 'tester_type': 'exa',
+                        'path_diversity': 1})
+    verdict, checks = check.qualify(doc, versions(), row(received='39599'))
+    assert statuses(checks)['route_counts'] == check.FAIL
+    assert verdict == 'rejected'
+
+
+def test_a_shortfall_with_no_gauge_at_all_is_rejected():
+    """The two ends of one link agree whenever the link works, so a daemon
+    publishing neither gauge and finishing below the check-point has nothing
+    vouching for it. The absolute rejected that row before the MRT branch
+    existed, and it still has to: "judged exactly as they always were" covers
+    the shortfall case, not only rows that clear the check-point."""
+    doc, r = _mrt(exported=None, received='700000')
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'rejected'
+    assert any(c.name == 'route_counts' and c.status == check.FAIL
+               and 'no import gauge' in c.detail for c in checks)
+
+
+def test_a_frozen_export_witness_is_not_published_as_route_loss():
+    """The target's witness is resampled onto the monitor's polls, so a target
+    sampler that stalls late in a run leaves `final` at an old value while the
+    monitor climbs past it. Comparing those publishes a dead instrument as
+    route loss -- and `check_instrument()` only downgrades a target-sampler
+    failure to a NOTE, so nothing else would contradict it."""
+    doc, r = _mrt(exported=500000, received='1056779')
+    doc['target_table']['series']['exported_to_monitor']['max_witness_age_s'] = 47.0
+    verdict, checks = check.qualify(doc, versions(), r)
+    detail = [c for c in checks if c.name == 'route_counts']
+    assert any(c.status == check.NOTE and 'without being re-read' in c.detail
+               for c in detail), [c.detail for c in detail]
+    assert not any(c.status == check.FAIL for c in detail)
+
+
+def test_a_fresh_witness_still_catches_a_real_disagreement():
+    doc, r = _mrt(exported=500000, received='1056779')
+    doc['target_table']['series']['exported_to_monitor']['max_witness_age_s'] = 1.0
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'rejected'
+    assert any(c.name == 'route_counts' and c.status == check.FAIL
+               and 'disagreement' in c.detail for c in checks)
+
+
+def test_a_missing_offered_count_is_not_blamed_on_the_target():
+    """`tester_fleet.offered_prefixes` is absent for an MRT injector that does
+    not report its offering, and withheld entirely when one injector never
+    completed. That is the generators' side of the run, not the target's."""
+    doc, r = _mrt(exported=None, received='700000')
+    doc['tester_fleet'] = dict(doc['tester_fleet'], offered_prefixes=None)
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'rejected'
+    assert any(c.name == 'route_counts' and c.status == check.FAIL
+               and 'generators report no offered count' in c.detail
+               for c in checks)
+
+
+def test_freshness_is_the_last_readings_age_not_the_runs_worst():
+    """`max_witness_age_s` is the maximum over the whole run, which answers a
+    different question. One transient slow target poll -- a `vtysh` call
+    blocking on a busy bgpd mid-injection, on the exact daemon and workload
+    this guard was written for -- would otherwise mute the row's only
+    consistency check while the final reading was perfectly fresh."""
+    doc, r = _mrt(exported=961201, received='961201')
+    series = doc['target_table']['series']['exported_to_monitor']
+    series['max_witness_age_s'] = 47.0
+    doc['target_table']['samples'] = [
+        {'exported_to_monitor': 500000, 'witness_age_s': 47.0},
+        {'exported_to_monitor': 961201, 'witness_age_s': 0.9},
+    ]
+    verdict, checks = check.qualify(doc, versions(), r)
+    detail = [c for c in checks if c.name == 'route_counts']
+    assert any(c.status == check.OK and 'apart' in c.detail for c in detail), \
+        [c.detail for c in detail]
+
+
+def test_a_withheld_import_gauge_is_not_a_missing_one():
+    """`table_witness()` withholds the sum on any poll where a configured
+    peering was not reporting. Blaming the target for lacking a capability it
+    has sends the reader to the wrong half of the run."""
+    doc, r = _mrt(exported=None, received='700000')
+    doc['target_table'] = {'series': {}, 'samples': []}
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'rejected'
+    assert any(c.name == 'route_counts' and c.status == check.FAIL
+               and 'withheld on every sample' in c.detail for c in checks)
+
+
+def test_a_scenario_run_keeps_the_strict_absolute():
+    '''A `-f` run records `tester_type: null` and the file states its own
+    check-point, so `required` is a statement of fact there as much as for a
+    synthetic run. Reading "not synthetic" as "MRT playback" let such a row
+    re-advertise 70% of its table and still qualify.'''
+    doc = artifact(run={'name': 'bird 2.19.2', 'repetition': None,
+                        'peers': 4, 'prefixes_per_peer': 10000,
+                        'tester_type': None, 'path_diversity': 1})
+    verdict, checks = check.qualify(doc, versions(), row(received='28000'))
+    assert statuses(checks)['route_counts'] == check.FAIL
+    assert verdict == 'rejected'
+
+
+def test_a_target_whose_witness_never_sampled_is_not_blamed_on_its_peers():
+    """`target_table_unmeasured()` writes the section with an
+    `unmeasured_reason` and no samples when a witness-reporting target's poll
+    thread died. That is the target's instrument, not a peering that failed to
+    report, and the correct reason is sitting in the same document."""
+    doc, r = _mrt(exported=None, received='700000')
+    doc['target_table'] = {'series': {}, 'samples': [],
+                           'unmeasured_reason': 'no sample reached the loop'}
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'rejected'
+    assert any(c.name == 'route_counts' and c.status == check.FAIL
+               and 'no sample reached the loop' in c.detail for c in checks)
+
+
+def test_generators_offering_nothing_is_not_a_missing_offered_count():
+    doc, r = _mrt(exported=None, received='700000')
+    doc['tester_fleet'] = dict(doc['tester_fleet'], offered_prefixes=0)
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'rejected'
+    assert any(c.name == 'route_counts' and c.status == check.FAIL
+               and 'offering nothing at all' in c.detail for c in checks)
+
+
+def test_a_filtered_mrt_row_is_rejected_as_unvouchable_not_as_route_loss():
+    """Two things are true at once and the row loses on the second.
+
+    `imported_paths` is post-import-policy for both daemons that publish it, so
+    a filtered run is *designed* to accept far less than the fleet offered and
+    to sit below the check-point -- failing it for the shortfall would assert
+    route loss about a policy doing its job. But that leaves nothing bounding
+    the table's size, and the export cross-check compares two ends of one link
+    and agrees at any size, so a row that lost 90% of the RIB for an unrelated
+    reason is indistinguishable from one the policy trimmed. The refusal has to
+    name the right fault: unvouchable, not short."""
+    doc, r = _mrt(exported=300000, received='300000', imported=3000000)
+    doc['tester_fleet'] = dict(doc['tester_fleet'], offered_prefixes=10500000)
+    r = dict(r, filters='drop-half')
+    verdict, checks = check.qualify(doc, versions(), r)
+    detail = [c for c in checks if c.name == 'route_counts']
+    assert verdict == 'rejected'
+    assert any(c.status == check.FAIL and 'nothing bounds' in c.detail
+               for c in detail), [c.detail for c in detail]
+    assert not any('short' in c.detail for c in detail), \
+        [c.detail for c in detail]
+
+
+def test_an_unfiltered_mrt_run_still_gets_the_size_floor():
+    doc, r = _mrt(exported=300000, received='300000', imported=3000000)
+    doc['tester_fleet'] = dict(doc['tester_fleet'], offered_prefixes=10500000)
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'rejected'
+    assert any(c.name == 'route_counts' and c.status == check.FAIL
+               and 'short' in c.detail for c in checks)
+
+
+def test_a_truncated_export_series_is_not_published_as_route_loss():
+    """A witness is *withheld* -- not frozen -- whenever a peering stops
+    reporting: the poll keeps running and every reading it does produce is
+    fresh, so the staleness guard sees nothing wrong while `final` is a
+    mid-delivery value and `received` is the monitor's count at convergence."""
+    doc, r = _mrt(exported=500000, received='1056779')
+    doc['target_table']['series']['exported_to_monitor'].update(
+        {'final_monotonic_s': 300.0, 'max_witness_age_s': 0.4})
+    doc['target_table']['series']['monitor_accepted'] = {
+        'final': 1056779, 'final_monotonic_s': 600.0}
+    verdict, checks = check.qualify(doc, versions(), r)
+    detail = [c for c in checks if c.name == 'route_counts']
+    assert any(c.status == check.NOTE and 'same window' in c.detail
+               for c in detail), [c.detail for c in detail]
+    assert not any('disagreement' in c.detail for c in detail)
+
+
+def test_a_truncated_import_series_does_not_bound_the_size():
+    doc, r = _mrt(exported=None, received='700000', imported=3000000)
+    doc['target_table'] = {'series': {
+        'imported_paths': {'final': 3000000, 'final_monotonic_s': 100.0},
+        'monitor_accepted': {'final': 700000, 'final_monotonic_s': 600.0},
+    }}
+    doc['tester_fleet'] = dict(doc['tester_fleet'], offered_prefixes=10500000)
+    verdict, checks = check.qualify(doc, versions(), r)
+    assert verdict == 'rejected'
+    assert any(c.name == 'route_counts' and c.status == check.FAIL
+               and 'stopped reporting' in c.detail for c in checks)
+    assert not any('short' in c.detail for c in checks
+                   if c.name == 'route_counts')

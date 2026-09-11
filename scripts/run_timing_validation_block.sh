@@ -139,7 +139,14 @@ fi
 # rows would mean, which is exactly the judgement `accept` records, so reaching
 # for the override there is natural and it would accept the block with nothing
 # saying the objection was ever considered.
-if [[ $RUN_HELD_BLOCK -eq 1 && "$ACTION" != next && "$ACTION" != block-* ]]; then
+# Named by what does not run, not by the two spellings of what does:
+# `parse_block_number()` deliberately accepts `5` and `block5` as well as
+# `block-5`, and `accept` takes its block number as a bare positional, so the
+# bare form is the natural slip. Whitelisting `next` and `block-*` refused
+# `5 --run-held-block` with "applies to running a block, not to `5`", which is
+# false -- 5 is a block.
+if [[ $RUN_HELD_BLOCK -eq 1 ]] \
+   && [[ "$ACTION" == accept || "$ACTION" == status || "$ACTION" == list ]]; then
   echo "--run-held-block applies to running a block, not to \`$ACTION\`" >&2
   echo "to run one anyway: scripts/run_timing_validation_block.sh block-N --run-held-block" >&2
   exit 1
@@ -200,16 +207,22 @@ BLOCK_TITLES=(
 # Keyed by block index. Removing an entry is how a block is released, and that
 # belongs in the same change set that settles the decision named here.
 declare -A BLOCK_HELD=(
-  [5]="FRR advertises ~7.5% fewer prefixes than it holds on this workload, so
-all five frr_c rows are expected to be rejected on received < required.
-Measured 2026-09-11: frr_c 10.7 961,276 and 961,201, frr_c 8.5 958,234,
-against a required 1,039,500 that bird 3.3.2, openbgp 9.2 and rustybgp
-2026-02 all clear. FRR holds the full 1,080,985-prefix table and its own
-pfxSnt agrees with the monitor exactly -- see bgperf2-cw6 and the plan's
-Block 5 record. Settle what an MRT run's required count means, or decide
-to run and exclude those rows, before spending the block."
-)
+  [5]="FRR ends an MRT run at ~961,000 against a 1,039,500 check-point, so
+info['checked'] never goes true, monitor_required_reached is never recorded,
+and check_events() fails event_coverage on all five frr_c rows. Running the
+block anyway spends hours on 14 full-table cells and rejects 5 of them -- and
+re-running then needs --force, which discards the 9 that qualified, because
+--resume skips whatever the progress file already holds.
 
+This is NOT the objection the block was first held on. That one was the
+correctness test, and it is settled: MRT rows are now judged on consistency
+plus a size floor rather than an absolute (see the plan's Block 5 record).
+What is left is that convergence_s, assurance_s and post_injection_tail_s are
+not being taken at all for such a row. A second rule for the event was built,
+verified and backed out -- it could stamp the event mid-delivery -- and the
+sound version is a measurement derived off the completed target_table series.
+Release this entry in the change set that lands it."
+)
 # Refuses a held block unless the operator said so on the command line. Runs
 # before anything is created, like every other guard that reads only arguments.
 guard_held_block() {
@@ -1010,7 +1023,10 @@ validate_mrt_inputs() {
   local mrt
   while IFS= read -r mrt; do
     echo "Validating pinned MRT: $mrt"
-    scripts/prepare_mrt.sh "$mrt" >> "$log" 2>&1 || {
+    # </dev/null so the loop's here-string is not handed to the validator as
+    # stdin: nothing in prepare_mrt.sh reads it today, but anything that ever
+    # does would swallow the remaining paths and silently skip validating them.
+    scripts/prepare_mrt.sh "$mrt" </dev/null >> "$log" 2>&1 || {
       echo "MRT validation failed for $mrt; see $log" >&2
       tail -20 "$log" >&2
       exit 1

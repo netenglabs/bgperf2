@@ -866,7 +866,94 @@ These rows also preview Question 2: 10.7 is not slower than 8.5, 9.1 or 10.0 on
 full-internet playback -- all four are 102-103s -- and master is ~15% faster at
 87s. Preliminary, one pass each, outside the campaign run root.
 
-Block 5 is therefore built and **held**, and what
+**Settled 2026-09-11, and the answer was already in the blog series this
+project comes from.** The filtering post met the identical problem -- "when
+filtering, we now don't know when all the prefixes that will be sent have been
+received because we don't know what will get filtered" -- and answered it by
+moving the completion criterion off the monitor's absolute count and onto the
+target's own account, in two halves: the target has received everything from
+every neighbour, and the target has sent it on to the monitor. The first half
+has been in the code ever since as the End-of-RIB neighbour checkpoint. The
+second half had no reader, which is why `monitor_required_reached` still keyed
+on an absolute. MRT playback is the same shape one case over.
+
+So the fix was not a new rule but the missing reader plus the existing rule
+applied to a second case:
+
+- `frr.table_witness()` publishes `exported_to_monitor` (the monitor session's
+  own `pfxSnt`) and `imported_paths` (the per-peer `pfxRcd` sum), off the
+  `sh ip bgp summary json` FRR's neighbour counters already come from -- one
+  exec, one instant. It withholds `best_paths` deliberately: FRR's two
+  table-size numbers disagree and neither is established to mean "prefixes
+  holding a selected best path", and `None` is how `convergence.py` is told to
+  attest to nothing, so **how an FRR run converges did not change**.
+- `monitor_required_reached` was **not** changed, and that is the part of this
+  that did not work. See "What was tried and backed out" below.
+- MRT correctness is consistency plus a size floor, not an absolute: the
+  monitor's count against the target's own export count, and the target's
+  accepted-path count against what the generators offered. Reaching the
+  check-point stays a *sufficient* floor, so OpenBGPD and RustyBGP rows are
+  judged exactly as they always were.
+
+**Verified on the campaign host**, three targets on the pinned RIB, all
+qualified: `bird 3.3.2` 1,056,779 both ends, `frr_c 10.7` 958,217 both ends
+with 10,497,949 of 10,500,000 offered paths accepted, `openbgp 9.2` 1,056,779
+at or above the check-point. FRR recovered `convergence_s`, `assurance_s` and
+`post_injection_tail_s` -- the four Required Measurements it had been losing --
+and a real `limiting_component` (`target_or_monitor`) in place of
+`inconclusive`.
+
+**What was tried and backed out: a second rule for
+`monitor_required_reached`.** The event fires when the monitor's count reaches
+the check-point, so a daemon that never reaches it -- FRR, here -- publishes no
+`convergence_s`, `assurance_s` or `post_injection_tail_s` at all. A second rule
+was built on the target's own account (neighbour checkpoint set, plus the
+monitor caught up to an export count that had stopped moving) and verified: all
+three targets qualified and FRR recovered the four measurements and a real
+`limiting_component`. It was then removed, and the two reasons are worth
+keeping because they bound what a correct version has to do:
+
+1. The first version required only `monitor_accepted >= exported`, which is not
+   delivery while the target is still exporting. The witness is resampled onto
+   the monitor's polls and can be seconds old, so a fast climb lets the monitor
+   overtake a stale export count and the event fires near the start of the run.
+   It did not bite the measured FRR case only because bgpdump2's injectors were
+   blocked on FRR draining -- 75s to complete against OpenBGPD's 2.4s -- so
+   End-of-RIB and the checkpoint arrived at the end. Adding "export flat across
+   two consecutive reads" fixed that case.
+2. It did not fix the class. The neighbour checkpoint says every generator has
+   *sent* everything, not that the target has finished *exporting*, so one poll
+   in which the export count does not advance with the monitor drained to that
+   same number still stamps the event mid-delivery -- at a fraction of the
+   table, permanently, since the event is recorded once and nothing in the
+   artifact says which rule supplied it.
+
+A mis-dated headline timing is worse than a missing one, and this rule had two
+design flaws found in two rounds, so it is not being patched a third time under
+a deadline. **The sound version is retrospective**: whether the target finished
+exporting is only decidable once the series is complete, and the artifact is
+written at the end. That means a derived measurement computed off the recorded
+`target_table` series -- named as its own thing, not synthesised into the event
+stream as though it had been observed -- plus `event_coverage` accepting it in
+place of an event that legitimately cannot fire. That is its own change set.
+
+So an MRT row from a daemon below the check-point still publishes none of the
+three intervals, and `check_timing_evidence.py` still rejects it on
+`event_coverage`. **Block 5's five `frr_c` rows are therefore still blocked**,
+for a reason one layer in from where this started: not a bad correctness test
+any more, but four measurements that genuinely are not being taken.
+
+**The block stays held, on the new objection rather than the old one.** The
+`BLOCK_HELD` entry was briefly cleared here -- the question that held it is
+answered -- and that was wrong: `next` would then have selected block 5, spent
+hours on 14 full-table cells, and rejected 5 of them on `event_coverage`, which
+is the outcome the hold exists to prevent. Worse, re-running afterwards needs
+`--force`, which discards the 9 rows that qualified, because `--resume` skips
+whatever the progress file already holds. The entry is restored with its reason
+rewritten to the measurements that are not being taken. Release it in the change
+set that lands the derived measurement above.
+
+Block 5 was built and **held**, and what
 to do with the five FRR rows -- run and exclude them with this evidence, or
 settle an MRT correctness rule first -- is an operator decision recorded before
 any block spends hours reproducing it three times. Justin chose to hold on

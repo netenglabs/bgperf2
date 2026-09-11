@@ -113,3 +113,86 @@ def test_the_variance_rules_resolution_matches_the_monitor_poll_interval():
     '''
     assert summary.METRIC_RESOLUTION[summary.DECISION_METRIC] == max(
         1.0, float(bgperf2.MONITOR_POLL_INTERVAL_S))
+
+
+def test_the_mrt_witness_tolerance_is_the_trackers_drop_fraction():
+    '''The MRT correctness check compares two counts of one session -- the
+    monitor's and the target's own -- and allows the same 1% the convergence
+    tracker allows before it calls a monitor decline route loss. That is
+    deliberate: it is the same kind of comparison one step later, and reusing
+    the measured constant is what keeps it from being a tolerance invented to
+    make a particular block pass.
+
+    `scripts/check_timing_evidence.py` must not import bgperf2 -- it reads
+    published documents and re-derives no measurement, which is what lets it
+    run anywhere -- so the two are pinned against each other here, on the rule
+    `summary.METRIC_RESOLUTION` follows above.
+    '''
+    import importlib.util
+
+    import convergence
+    from conftest import REPO_ROOT
+
+    spec = importlib.util.spec_from_file_location(
+        'check_timing_evidence_contract',
+        REPO_ROOT / 'scripts' / 'check_timing_evidence.py')
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    assert checker.WITNESS_AGREEMENT_FRACTION == convergence.DROP_FRACTION
+
+
+def test_the_stale_witness_bound_is_the_trackers_carry_bound():
+    '''A target reading older than the tracker will carry one is not a
+    cross-check either. Pinned here because the checker must not import
+    bgperf2, on the rule the two constants above follow.'''
+    import importlib.util
+
+    import bgperf2 as _bgperf2
+    import convergence
+    from conftest import REPO_ROOT
+
+    spec = importlib.util.spec_from_file_location(
+        'check_timing_evidence_stale',
+        REPO_ROOT / 'scripts' / 'check_timing_evidence.py')
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    assert checker.STALE_WITNESS_S == (
+        convergence.WITNESS_CARRY_SAMPLES
+        * float(_bgperf2.MONITOR_POLL_INTERVAL_S))
+
+
+def test_the_checkers_synthetic_generator_list_matches_bgperf2s():
+    '''A generator bgperf2 builds the prefix lists for has a `required` that is
+    a statement of fact; an MRT injector's is a guess. A third synthetic
+    generator added to bgperf2 and not to the checker would route its rows down
+    the MRT branch and quietly stop applying `received >= required`.'''
+    import importlib.util
+
+    import bgperf2 as _bgperf2
+    from conftest import REPO_ROOT
+
+    spec = importlib.util.spec_from_file_location(
+        'check_timing_evidence_synthetic',
+        REPO_ROOT / 'scripts' / 'check_timing_evidence.py')
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    assert (tuple(checker.SYNTHETIC_TESTER_TYPES)
+            == tuple(_bgperf2.SYNTHETIC_TESTER_TYPES))
+
+
+def test_the_checkers_mrt_generator_list_matches_bgperf2s():
+    '''`required` is a guess only for a generator that replays a file. A `-f`
+    scenario run records `tester_type: null` and states its own check-point, so
+    reading "not synthetic" as "MRT" would relax its correctness test too.'''
+    import importlib.util
+
+    import bgperf2 as _bgperf2
+    from conftest import REPO_ROOT
+
+    spec = importlib.util.spec_from_file_location(
+        'check_timing_evidence_mrt',
+        REPO_ROOT / 'scripts' / 'check_timing_evidence.py')
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    assert (tuple(checker.MRT_TESTER_TYPES)
+            == tuple(_bgperf2.MRT_TESTER_TYPES))

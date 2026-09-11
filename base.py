@@ -706,7 +706,16 @@ class Container(object):
         None means the daemon has no gauge this project knows how to read, and
         that absence is recorded rather than filled in with a zero: a target
         that could not be asked and a target holding nothing must not produce
-        the same document. Only BIRD answers so far.
+        the same document.
+
+        Two daemons answer, and they answer with different halves. BIRD
+        publishes all three sums. FRR publishes `exported_to_monitor` and
+        `imported_paths` and withholds `best_paths` deliberately -- see
+        `frr.table_witness()` -- so it cross-checks the two ends of the
+        monitor's session and bounds the table's size without attesting to
+        anything the convergence rule reads, which is `best_paths` alone. A
+        daemon that answers partially is not a daemon that answers wrongly;
+        each key stands or falls on its own.
         '''
         return None
 

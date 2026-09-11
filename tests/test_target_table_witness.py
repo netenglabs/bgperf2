@@ -13,7 +13,7 @@ module covers the measurement and the document, not the verdict.
 import pytest
 
 from base import Target
-from bgperf2 import target_table_unmeasured
+from bgperf2 import target_holds_suffix, target_table_unmeasured
 from convergence import ConvergenceTracker
 from bird import BIRDTarget, neighbors_state, table_witness
 from measurements import (
@@ -380,3 +380,35 @@ def test_the_rule_that_decided_a_run_is_published_beside_its_evidence():
     # The rule's own account sits beside the series it was applied to, so a
     # reader can check one against the other.
     assert section['series']['monitor_accepted']['decline_from_peak'] == 0.015
+
+
+class TestTargetHoldsSuffix:
+    '''The target-side half of the per-second progress line.
+
+    It used to be gated on `best_paths`, which FRR withholds by design -- so an
+    FRR run printed nothing target-side while sampling `imported_paths` and
+    `exported_to_monitor` once a second, and an operator watching a full-table
+    cell could not tell a stalled export from an ongoing import.
+    '''
+
+    def test_a_daemon_with_no_gauge_prints_nothing(self):
+        assert target_holds_suffix(None) == ''
+        assert target_holds_suffix(
+            {'best_paths': None, 'imported_paths': None,
+             'exported_to_monitor': None}) == ''
+
+    def test_every_half_a_daemon_publishes_is_shown(self):
+        line = target_holds_suffix(
+            {'best_paths': None, 'imported_paths': 10497949,
+             'exported_to_monitor': 958217})
+        assert '10497949 paths' in line
+        assert '958217 exported to the monitor' in line
+        assert 'prefixes' not in line
+
+    def test_a_measured_zero_is_not_a_withheld_sum(self):
+        '''A target with every session up and no routes yet has legitimately
+        measured 0; collapsing that into the withheld case hides the one the
+        guard exists for.'''
+        line = target_holds_suffix(
+            {'best_paths': 0, 'imported_paths': 0, 'exported_to_monitor': 0})
+        assert '0 prefixes' in line

@@ -18,6 +18,95 @@ import json
 import os
 import re
 
+def neighbors_state(summary):
+    '''The two per-neighbour dicts, from one parsed `sh ip bgp summary json`.
+
+    Pure, so the parsing is covered by a suite that needs no Docker; the read
+    itself is `FRRoutingTarget.summary_json()`. `neighbors_received` is always
+    empty here -- FRR has no received-prefix counter, and whether a neighbour
+    has finished sending is decided from End-of-RIB in `bgpd.log` instead.
+    '''
+    neighbors_accepted = {}
+    neighbors_received = {}
+    if not summary:
+        return neighbors_received, neighbors_accepted
+    peers = (summary.get('ipv4Unicast') or {}).get('peers') or {}
+    for name, peer in peers.items():
+        # Indexed, not `.get()`: FRR keeps `pfxRcd` in the document for a peer
+        # that is not Established and reports it as 0 (measured on 8.5), so a
+        # missing key means the field has been renamed or dropped, not that a
+        # session is down. Skipping it would leave `neighbors_accepted` empty
+        # on every poll with nothing saying so -- the run still converges
+        # through End-of-RIB -- which is exactly how BIRD 3's `RX limit`
+        # regression stayed hidden. Raising reaches `neighbor_stats()`'s guard
+        # and is published as a sampler read failure.
+        neighbors_accepted[name] = peer['pfxRcd']
+    return neighbors_received, neighbors_accepted
+
+
+def table_witness(summary, monitor_address=None, expected_peerings=None):
+    '''What FRR itself says it has sent the monitor.
+
+    Deliberately narrower than `bird.table_witness()`, which also publishes
+    `best_paths` and `imported_paths`. Those two are what
+    `ConvergenceTracker`'s witness rule reads, and this function withholds them
+    on purpose rather than for want of a number: FRR does report a table size
+    (`ribCount` in this summary, `Total Prefixes` in `show bgp ipv4 unicast
+    statistics`), but the two disagree -- 1,081,000 against 1,080,985 on one
+    measured run -- and neither has been established to mean "prefixes holding
+    a selected best path", which is what BIRD's `preferred` sum means and what
+    the rule compares against its own peak. A witness that is subtly wrong is
+    worse than none: it would excuse monitor declines it has no standing to
+    excuse. Supplying `None` is the documented way to attest to nothing
+    (`convergence.py` returns "does not attest" for it), so adding this changes
+    nothing about how an FRR run converges.
+
+    `imported_paths` is published, and means here what it means for BIRD: the
+    paths the target accepted from its peers, summed. `pfxRcd` is FRR's count
+    of prefixes accepted from that peer -- post-policy, which is the useful
+    sense -- so a target discarding most of what it is offered reports a small
+    sum. That is the only size floor an MRT run has: the monitor's count and
+    `exported_to_monitor` are the two ends of one link and agree whenever the
+    link works, so on their own they cannot tell a whole table from a tenth of
+    one.
+
+    `exported_to_monitor` needs no such interpretation. `pfxSnt` on the
+    monitor's own session is the count of prefixes FRR believes it has sent
+    that peer -- the target's end of the very session the monitor reads -- and
+    is the number that says whether the two ends of one session agree. It was
+    measured against a real run: FRR reported 961,201 sent while the monitor
+    reported 961,201 accepted.
+
+    Withheld unless that session is Established and carries an integer count,
+    on `bird.table_witness()`'s rule: a partial read looks exactly like a table
+    that shrank, which is the one thing a witness exists to rule on.
+    '''
+    peers = ((summary or {}).get('ipv4Unicast') or {}).get('peers') or {}
+    exported_to_monitor = None
+    imported_total = 0
+    measured = 0
+    for address, peer in peers.items():
+        if not isinstance(peer, dict) or peer.get('state') != 'Established':
+            continue
+        received = peer.get('pfxRcd')
+        if isinstance(received, int) and not isinstance(received, bool):
+            measured += 1
+            imported_total += received
+        if monitor_address and address == monitor_address:
+            sent = peer.get('pfxSnt')
+            if isinstance(sent, int) and not isinstance(sent, bool):
+                exported_to_monitor = sent
+    complete = expected_peerings is not None and measured == expected_peerings
+    return {
+        'peerings': len(peers),
+        'peerings_expected': expected_peerings,
+        'peerings_measured': measured,
+        'best_paths': None,
+        'imported_paths': imported_total if complete else None,
+        'exported_to_monitor': exported_to_monitor,
+    }
+
+
 class FRRouting(Container):
     '''Shared base for FRR containers.
 
@@ -160,24 +249,60 @@ no bgp ebgp-requires-policy
                 'unexpected output from `vtysh -c "show version"`: {0!r}'.format(ret))
         return m.group(1)
     
-    def get_neighbors_state(self):
-        neighbors_accepted = {}
-        neighbors_received = {}
-        neighbor_received_output = self.local("vtysh -c 'sh ip bgp summary json'")
-        if not neighbor_received_output:
-            # bgpd is not answering yet; polling starts before it is up
-            return neighbors_received, neighbors_accepted
+    # FRR answers with `exported_to_monitor` and withholds the two sums; see
+    # table_witness() above. The flag says "this daemon has a gauge", which is
+    # what lets `target_table_unmeasured()` tell a poll that produced no sample
+    # from a daemon that was never going to produce one -- without it an FRR
+    # run whose target poll thread died would publish the artifact of a daemon
+    # with no witness at all, and the MRT correctness check would read that as
+    # "nothing to cross-check against" and qualify the row.
+    REPORTS_TABLE_WITNESS = True
 
+    def summary_json(self):
+        '''One `sh ip bgp summary json` read, parsed, or None.
+
+        None covers both ways the read can fail to produce a summary, which are
+        the same two the callers always had to tolerate: bgpd is not answering
+        yet, because polling starts before it is up, and vtysh emits plain-text
+        errors while bgpd is still starting. Split out from
+        `get_neighbors_state()` so one read can serve both the neighbour
+        counters and the export witness -- see `sample_target_state()`.
+        '''
+        output = self.local("vtysh -c 'sh ip bgp summary json'")
+        if not output:
+            return None
         try:
-            summary = json.loads(neighbor_received_output.decode('utf-8'))
+            return json.loads(output.decode('utf-8'))
         except json.JSONDecodeError:
-            # vtysh emits plain-text errors when bgpd is still starting
-            return neighbors_received, neighbors_accepted
+            return None
 
-        peers = summary.get('ipv4Unicast', {}).get('peers', {})
-        for n in peers:
-            neighbors_accepted[n] = peers[n]['pfxRcd']
-        return neighbors_received, neighbors_accepted
+    def get_neighbors_state(self):
+        return neighbors_state(self.summary_json())
+
+    def sample_target_state(self):
+        '''The neighbour verdicts and the export witness, off one CLI read.
+
+        FRR is asked for `sh ip bgp summary json` every poll already, and the
+        witness is in the same document, so taking the base implementation
+        would exec twice a second into the container being measured -- and
+        would date the two halves to two different instants, on a number whose
+        only job is to be compared against another number. BIRD's override
+        exists for the same two reasons.
+
+        The End-of-RIB scan stays where it is: it reads `bgpd.log`, not the
+        summary, so it is a second source either way.
+        '''
+        summary = self.summary_json()
+        received, accepted = neighbors_state(summary)
+        full, checked = self.classify_neighbor_counts(received, accepted)
+        assert(all(value == False for value in full.values()))
+        full = self._get_EOR_from_log(full)
+        assert(len(full) == len(checked))
+        return full, checked, table_witness(
+            summary, self.monitor_neighbor_address(),
+            # Every session the scenario configured, BIRD's rule: a sum that
+            # silently loses a peering looks exactly like a table that shrank.
+            expected_peerings=len(self.scenario_neighbors(sort=False)))
 
     # A bytes pattern, matched against the raw log without decoding it first.
     # No leading .* -- this is used with finditer, which scans.
@@ -280,14 +405,12 @@ no bgp ebgp-requires-policy
         return neighbors
 
     def get_neighbor_received_routes(self):
-        # FRR doesn't have a counter to look at to see if all the prefixes have been sent
-        # instead we have to look at the log file and see if End-of-RIB has been sent for the neighbor
-        neighbors_received_full, neighbors_checked = super(FRRoutingTarget, self).get_neighbor_received_routes()
-
-        assert(all(value == False for value in neighbors_received_full.values()))
-        neighbors_received_full = self._get_EOR_from_log(neighbors_received_full)
-
-        assert(len(neighbors_received_full) == len(neighbors_checked))
-
-        return neighbors_received_full, neighbors_checked
+        # FRR has no received-prefix counter, so whether a neighbour has
+        # finished sending is decided from End-of-RIB in bgpd.log. That work
+        # lives in sample_target_state(), which reads the summary once and
+        # serves both halves; this stays as the base class's named entry point
+        # and delegates, rather than keeping a second copy of the sequence for
+        # a later fix to land in.
+        full, checked, _witness = self.sample_target_state()
+        return full, checked
 

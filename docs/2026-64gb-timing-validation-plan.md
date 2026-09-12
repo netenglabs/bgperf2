@@ -1617,24 +1617,30 @@ For each workload and version comparison:
   separate versions/thread settings or expose a CPU-scaling change;
 - write the selection and reason to durable metadata before running more.
 
-Two defects found during Block 7 must land before this block reads the MRT
-passes, and are recorded here rather than only in the Block 7 record because
-this is the section a session building Block 9 reads. `bgperf2-bq2`:
-`delivery_metrics()` dates `plateau_start_s` to the monitor poll that carried
-the export reading rather than to the witness read, so every `complete_s` in
-Blocks 5-7 is biased late by the witness age and `monitor_lag_s` is 0.0
-structurally -- this block compares `complete_s` across daemons, and the bias
-varies with each daemon's CLI read cost, so it does not cancel. `bgperf2-ctm`:
-an MRT row accepted on a resolved `delivery` has nothing bounding its exported
-share against the table it holds, so a row this block would average may be one
-the checker should have rejected. Both are derivable retroactively from the
-artifacts on disk and neither needs a re-measure; `bgperf2-iee.10` depends on
-both, so `bd ready` will not offer this block until they close.
+Two defects found during Block 7 were settled before this block, and are
+recorded here rather than only in the Block 7 record because this is the section
+a session building Block 9 reads.
+
+`bgperf2-bq2` is **fixed** (2026-09-11): `delivery_metrics()` dated
+`plateau_start_s` to the monitor poll that carried the export reading rather
+than to the witness read, which put both ends of `monitor_lag_s` on one clock
+and collapsed it to 0.0 on 25 of the 27 resolved rows of Blocks 5-7. Re-derived
+over all 27, **no `complete_s` moved**, so every number this block compares
+stands as published; `monitor_lag_s` is now signed and carries
+`monitor_lag_resolution_s`, and all 27 rows are inside their own bound. The
+published artifacts keep the values they were written with -- re-derive if this
+block reads the lag.
+
+`bgperf2-ctm` is **closed by design** (2026-09-12): see the Acceptance Rules
+amendment above. The export share is reported, not thresholded, because no
+measured number exists to threshold it with and the daemon that would need the
+bound publishes no denominator. What this block must not do is read `elapsed (s)`
+across daemons with different export shares; within a daemon, which is what
+every Primary Question asks, the share is constant to 0.4% across the three
+passes.
 
 Exit criterion: every optional repetition has a named hypothesis and variance
-reason, or the campaign advances with no optional repeats; and both defects
-above are closed, or the block states in its own record which comparisons it
-made anyway and why that is sound.
+reason, or the campaign advances with no optional repeats.
 
 ### Block 10: selected repetitions
 
@@ -1721,6 +1727,52 @@ A row may support version comparison only when:
 
 Do not delete rejected rows. Preserve them with findings and exclude them only
 from the comparisons they cannot support.
+
+**Amendment, 2026-09-12: how much of one RIB a daemon advertises is a
+measurement, not a validity test.** An MRT run has no external statement of how
+big the table should be -- ten injectors replay one file's overlapping views and
+their union is unknowable in advance -- so a rule that judges the *amount* has
+to judge it against a guess. The guess is `0.99 * -p`, the per-injector cap, and
+three daemons settle on three different counts from the pinned file: 1,081,178
+(RustyBGP), 1,056,779 (BIRD and OpenBGPD), ~958,000 (every FRR release). A row
+is therefore accepted on **the target's own account of having finished**, and
+the amount is reported beside it rather than tested:
+
+- **Ingress is bounded, by measured numbers on both sides.** Every generator
+  must report its walk complete, and the target's own accepted-path count is
+  checked against what the generators say they offered -- 10,499,716 of
+  10,500,000 on one measured `frr_c` row, 0.003% short. Nothing here is a
+  guess.
+- **Egress is flagged, retrospectively.** The target's export gauge must go
+  terminally flat with the monitor level (`target_table.delivery`), and the
+  monitor's count must agree with the target's own count of what it sent on
+  that session.
+- **The share is published, not thresholded** (`export_share`). No measured
+  number exists to threshold it with: FRR ends this workload ~11.4% below what
+  it holds and BIRD withholds 2.24% of its own table on the same RIB, so both
+  constants this project has measured (1%) are too tight and anything above
+  them would be chosen to clear the daemons in front of it -- which is how all
+  three convergence rules were broken. A row whose daemon publishes no
+  best-path gauge says so by name, since an absent check reads as one that
+  passed.
+
+**What this accepts**, stated so it is not discovered later: a daemon that
+imports a whole RIB and advertises half of it qualifies, with the half reported.
+Its `elapsed (s)` is then a convergence time for half a table and is not
+comparable with a full exporter's -- which is already true of FRR against BIRD
+at 11.4% against 2.24%, and is why every one of this plan's Primary Questions is
+a within-daemon comparison. **What it does not cover** is a daemon whose share
+*moves* between versions or passes, which would corrupt a within-daemon
+comparison; that is `bgperf2-yar`, a cross-pass agreement check in
+`summary.py`, and it needs no invented constant because the yardstick is the
+same cell's other passes.
+
+**"The target says it is done" must never mean End-of-RIB.** FRR logs that when
+its *generators* finish sending; it says nothing about FRR having finished
+exporting. A rule built on it stamps completion mid-delivery, permanently and at
+a fraction of the table -- it was built, verified and removed, and the
+retrospective `delivery` is the sound version. See the measurement decision
+log.
 
 ## Continuation Prompt
 

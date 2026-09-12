@@ -3982,3 +3982,60 @@ would have judged the third pass by rules the first two were not judged by, the
 Required Measurements amendment's rule. What changed for those blocks is only
 what a re-derivation now reports, and the re-derivation was run over all 27
 rows as the verification for this change set.
+
+### Decision on 2026-09-12: the export share is the measurement, so `bgperf2-ctm` is closed by design
+
+The entry above left a hole open and a decision unmade: after a resolved
+`delivery` became acceptable in place of `monitor_required_reached`, nothing
+bounded what share of its table an MRT target advertises. A threshold was refused
+for two measured reasons -- no number fits (FRR ~11.4% below what it holds, BIRD
+2.24% below its own on the same RIB, both measured constants here 1%), and the
+daemon that needs the bound publishes no denominator. That left the question of
+whether the campaign should proceed with the hole or wait on an FRR best-path
+gauge that may not exist.
+
+**Settled: the share is a measurement, not a validity test, and the flag is the
+target's own account of having finished.** An MRT run has no external statement
+of how big the table should be, so any rule that judges the amount judges it
+against `0.99 * -p` -- the per-injector cap, a guess. What *is* measured on both
+sides is whether the work finished, and a qualifying `frr_c` row already
+certifies all of it:
+
+- every generator reported its walk complete, 10,500,000 prefixes offered;
+- the target's own accepted-path count against that offered count --
+  10,499,716 of 10,500,000, 0.003% short, measured against measured;
+- the export gauge terminally flat with the monitor level, at 94.692s;
+- the monitor's count and the target's own `pfxSnt` on that session agreeing to
+  0.000%.
+
+So the rule the campaign wanted was already in place, and the only missing piece
+was publishing the amount -- which `export_share` now does, naming the rows that
+have no denominator rather than omitting a check for them. The plan's Acceptance
+Rules carry the amendment, because this changes what a correct row *means* and
+the campaign may not re-define that in a commit message.
+
+**What it accepts, written down rather than discovered.** A daemon importing a
+whole RIB and advertising half of it qualifies, with the half reported. Its
+`elapsed (s)` is then a convergence time for half a table and is not comparable
+with a full exporter's -- already true of FRR against BIRD at 11.4% against
+2.24%, and the reason every Primary Question in the plan is a within-daemon
+comparison.
+
+**What it does not cover, and the one piece worth building.** A share that
+*moves* -- between passes, or between versions of one daemon -- would corrupt
+exactly the within-daemon comparison the plan rests on, and nothing reports it.
+That needs no invented constant, which is what distinguishes it from the
+threshold: the yardstick is the same cell's other passes, and `summary.py`
+already checks that a cell's passes agree about `target image`, `required` and
+the two tester versions. `bgperf2-yar`. It stays a report rather than a
+rejection, for the same reason the threshold was refused -- a version that
+genuinely changed its export policy is a finding about that version, not an
+invalid row.
+
+**And one thing that must not be simplified later.** "The target says it is
+done" is the *retrospective* `delivery`, never FRR's End-of-RIB. End-of-RIB is
+FRR logging that its generators finished sending, which says nothing about FRR
+having finished exporting; a rule built on it stamps completion mid-delivery,
+permanently, at a fraction of the table. That rule was built, verified and
+removed -- see Phase 6's entry on the two backed-out online rules -- and the
+distinction is easy to lose because both are "the target's own account".

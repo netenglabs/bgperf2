@@ -1,0 +1,81 @@
+# Block 8 of the 64 GB timing validation campaign, scenario 3 of 5: export
+# fan-out. See docs/2026-64gb-timing-validation-plan.md, "Block 8: BIRD
+# architecture screen".
+#
+# The plan's scenario: 50 ingress peers feeding 10 receiver sessions, with
+# total selected prefixes capped at 1,000,000. 50 x 20,000 is that cap exactly.
+#
+# WHAT A RECEIVER IS. A session the target advertises its whole table to and
+# which announces nothing back -- a top-level `receivers` key in the scenario,
+# never an entry in `conf['testers']`. So the ingress side does not move with
+# the receiver count: `required` and `received` are the same 1,000,000 they
+# would be with no receivers at all, and no receiver is ever waited on for a
+# table it will never send. Nor is a receiver a second monitor: the monitor is
+# the single instrument every published timing is read from, and `Receiver`
+# refuses `stats()` so it cannot become an unlabelled second `recved` series.
+# What the receivers are read into is the `export` section of the run's
+# artifact.
+#
+# WHY IT IS HERE. Without receivers a run has exactly one export session -- the
+# monitor -- so what a table costs to *send* and what it costs to *receive*
+# have been one number in every result this tool has produced. Decoupled
+# exports are the third thing BIRD 3's worker threads exist to parallelise.
+#
+# THE MEMORY THE CAP IS FOR, measured on the campaign host before this config
+# was written rather than estimated: a GoBGP receiver holds about 195 MiB at
+# 200,000 prefixes, so ten of them at 1,000,000 is roughly 9.5 GB on top of the
+# monitor, the target and 50 generator daemons. That is comfortably inside the
+# campaign's 20% free-memory guardrail on 61.44 GiB, and it is why the plan
+# capped this scenario at a million rather than reusing the canonical 5,000,000
+# -- ten receivers there would be ~48 GB of receivers alone. Each receiver's
+# copy lands in `min free mem (GB)`, and a low value there becomes
+# `findings.py`'s `low_free_memory`, which withholds `limiting_component`: a
+# run can be told its intervals include page pressure caused by memory it
+# consumed on purpose.
+#
+# WHAT THE WINDOW IS. The export poll's window is the delivery of the table and
+# closes at convergence, the same window `elapsed (s)`, `max cpu %` and
+# `max mem (GB)` describe. A receiver not served by then is reported incomplete
+# with the count it last held, which `scripts/check_timing_evidence.py` rejects
+# by name -- so a fan-out this host cannot serve inside that window fails
+# loudly rather than being published as a served one. At ten receivers a round
+# is serialised across all of them, so the published `poll_resolution_s` is
+# seconds rather than the monitor's 1.0s; read every export interval against
+# the resolution beside it.
+#
+# NO POST-CONVERGENCE WORKLOAD IS COMBINED WITH THIS, and that is settled
+# rather than an omission: the export poll's window closes exactly where churn
+# and the policy reload begin, so a run asking for both keeps the fan-out and
+# withholds the export *timing* by name. Scenarios 4 and 5 are their own runs
+# for that reason.
+#
+# THE THREE CONFIGURATIONS and the labelling rule are scenario 1's; see
+# benchmarks/2026-timing-bird-peers.yaml.
+#
+# ORDER. `order: shuffle` with the block's seed, 20268.
+tests:
+  -
+     name: 2026-timing-bird-fanout
+     neighbors: [50]
+     prefixes: [20_000]
+     filter_test: [None]
+     receivers: 10
+     order: shuffle
+     seed: 20268
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (4 threads)
+         threads: 4
+         tester_type: bird

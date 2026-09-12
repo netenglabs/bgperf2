@@ -1,0 +1,94 @@
+# Block 8 of the 64 GB timing validation campaign, scenario 4 of 5: loaded
+# policy recalculation. See docs/2026-64gb-timing-validation-plan.md, "Block 8:
+# BIRD architecture screen".
+#
+# The plan's scenario: reload a nontrivial import policy with 50 peers x 50,000
+# prefixes already present. That is a 2,500,000-prefix table, converged and
+# measured, and only then does the run install an import policy rejecting whole
+# prefix blocks and apply it with the daemon's own reload command. The daemon
+# re-reads its config, re-evaluates its import policy against routes it already
+# holds, and withdraws the rejected ones from every export session, with the
+# sessions staying up.
+#
+# WHY THIS AND NOT A BIGGER INITIAL TABLE. Churn makes a converged table move;
+# this makes the *policy over* a converged table move, which is the thing an
+# operator does most often and the thing nothing in this campaign has measured.
+# Every other row here measures a table arriving at a daemon that has never
+# seen it.
+#
+# HOW MANY BLOCKS. `policy_reload_blocks: 10` rejects the last 10 of the
+# fleet's 50 prefix blocks -- one block per peer at the default diversity, so
+# ten peers' worth, 500,000 prefixes, a fifth of the table. Whole blocks are
+# rejected rather than parts of one: rejecting part of a shared block would
+# leave the prefix behind a surviving path, so the monitor's count would not
+# move and the reload could never be observed to complete. Ten is chosen to be
+# unambiguously above the instrument's resolution while leaving four fifths of
+# the table in place -- the work being measured is re-evaluating everything,
+# not withdrawing everything. Rejecting *every* block is refused up front, for
+# the reason a collapsed count is not an applied policy: an empty table cannot
+# be told from an empty session.
+#
+# THE SET IS THE TAIL, SO THERE IS NO SEED for it. It is rebuildable from the
+# peer count, the diversity and the block count alone, and is published as
+# `rejected_peer_asns` so nobody has to; the peers are ordered by AS, since a
+# YAML mapping's order is not part of what the file means.
+#
+# WHAT BIRD ACTUALLY DOES, measured on 2.19.2 and 3.3.2 rather than assumed:
+# `birdc configure` holds the sessions up, but neither series re-evaluates
+# purely locally -- both answer a changed import filter by asking their peers
+# for a route refresh. So `reload_s` covers re-import as well as re-decision,
+# and these rows are not comparable with a daemon that re-filters from its own
+# stored routes. It is recorded in the artifact as `mechanism` and
+# `session_preserving` rather than hidden. `command_s` is published beside
+# `reload_s` and never as it: the command returns in about 20ms while the table
+# drains over the following polls.
+#
+# WHAT IS REFUSED ALONGSIDE, so nothing here grows a rider: `--filter_test`
+# (the target's import filter would then be the policy under test *and* the
+# place the reload is written, so the run would change two policies at once),
+# a churn workload (both run against the converged table off the same monitor
+# samples, so running both means fixing an order and nothing would record
+# which ran first), an MRT generator, and `-r/--repeat`. Scenario 5 is churn's
+# own run for that reason.
+#
+# WHAT THE ROW SAYS. `elapsed (s)`, `received` and the resource columns are all
+# settled before the reload command is issued, so they describe the delivery of
+# the table exactly as every other row in this campaign does. What the reload
+# cost is in the artifact's `policy_reload` section; a reload that did not
+# apply goes into `MSG` without marking the row FAILED, and
+# `scripts/check_timing_evidence.py` rejects the run on that section rather
+# than on the row.
+#
+# THE THREE CONFIGURATIONS and the labelling rule are scenario 1's; see
+# benchmarks/2026-timing-bird-peers.yaml. BIRD is the only daemon with a reload
+# mechanism today, which is read through `Target.SUPPORTS_POLICY_RELOAD` rather
+# than a list of names -- so this scenario being BIRD-only is a property of the
+# daemons, not a shortcut taken here.
+#
+# ORDER. `order: shuffle` with the block's seed, 20268.
+tests:
+  -
+     name: 2026-timing-bird-reload
+     neighbors: [50]
+     prefixes: [50_000]
+     filter_test: [None]
+     policy_reload_blocks: 10
+     order: shuffle
+     seed: 20268
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (4 threads)
+         threads: 4
+         tester_type: bird

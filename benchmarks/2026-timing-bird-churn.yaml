@@ -1,0 +1,90 @@
+# Block 8 of the 64 GB timing validation campaign, scenario 5 of 5: churn. See
+# docs/2026-64gb-timing-validation-plan.md, "Block 8: BIRD architecture
+# screen".
+#
+# The plan's scenario: withdraw and reannounce a deterministic 10% of a
+# 50 x 50,000 table. `churn_prefixes` is per peer, so 5,000 is 10% of each
+# peer's own 50,000 and 250,000 prefixes move per burst out of a 2,500,000
+# table. The block is the *tail* of each peer's list, which is what makes it
+# deterministic without a seed -- a sampled block would need one, and a seed is
+# a fourth dimension in the cell identity, the artifact stem and the manifest.
+#
+# WHY THIS IS THE WORKLOAD A ROUTER ACTUALLY HAS. Every run this tool has
+# published measures a table arriving at a daemon that has never seen it, and a
+# router spends almost none of its life doing that -- it spends it holding a
+# table while parts of it move: removing routes from a loaded table, re-running
+# best-path selection for every prefix that had a competing path, and
+# withdrawing and re-advertising on every export session.
+#
+# HOW MANY BURSTS. Three. One burst measures the transition once, with nothing
+# to say whether it repeats, and the two halves of a burst are timed separately
+# -- `withdraw_s` and `reannounce_s` -- so three bursts give six intervals per
+# run at a cost of a few seconds each. It is deliberately not a sweep: the
+# burst count is not a matrix axis here, because what this scenario compares is
+# the three BIRD configurations, not one configuration against itself.
+#
+# HOW A BURST IS ISSUED, because it constrains what the numbers mean. The block
+# goes into a `protocol static churn` of its own in each peer's generator
+# config, and a burst is `birdc disable churn` / `enable churn` -- one
+# `docker exec` for the whole fleet. A `configure` would re-read the whole file,
+# 50,000 static routes per peer here, so the interval measured would be BIRD
+# parsing its own config rather than the target reacting to a withdrawal.
+#
+# WHAT THE MONITOR SEES. `groups * C` distinct prefixes, which at the default
+# diversity is 50 * 5,000 = 250,000 -- the same as the offered count, since
+# every peer's block is its own. Both counts are published, because reporting
+# only the monitor-visible one understates a diversity-grouped fleet's work.
+#
+# AN INTERVAL OF ONE POLL IS AN UPPER BOUND, not a duration: both halves of a
+# burst are bounded below by one poll by construction, since the command is
+# issued just after a sample and the soonest it can be seen is the next. At
+# 250,000 prefixes a burst should resolve well past that, which is why the
+# table is 2,500,000 rather than something smaller -- but read every burst
+# interval against the resolution published beside it.
+#
+# WHAT IS REFUSED ALONGSIDE, so nothing here grows a rider: any generator but
+# synthetic `bird` (the handle is BIRD's own `birdc`), `--filter_test` (a policy
+# that drops part of the block makes the burst's completion count unreachable,
+# so a correctly filtered run would be published as a stalled one), a policy
+# reload (see scenario 4), and `-r/--repeat`.
+#
+# WHAT THE ROW SAYS. `elapsed (s)` is settled before the first burst and the
+# churn loop drains every other producer's queue messages without acting on
+# them, so `max cpu %`, `max mem (GB)` and `min free mem (GB)` do not move with
+# a burst's peak. `total time` does include churn, since it is wall clock. What
+# a burst cost is in the artifact's `churn` section, per burst; a sequence that
+# did not complete goes into `MSG` without marking the row FAILED, and
+# `scripts/check_timing_evidence.py` rejects the run on that section rather
+# than on the row.
+#
+# THE THREE CONFIGURATIONS and the labelling rule are scenario 1's; see
+# benchmarks/2026-timing-bird-peers.yaml.
+#
+# ORDER. `order: shuffle` with the block's seed, 20268.
+tests:
+  -
+     name: 2026-timing-bird-churn
+     neighbors: [50]
+     prefixes: [50_000]
+     filter_test: [None]
+     churn_prefixes: 5_000
+     churn_bursts: 3
+     order: shuffle
+     seed: 20268
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (4 threads)
+         threads: 4
+         tester_type: bird

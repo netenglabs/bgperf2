@@ -1,0 +1,71 @@
+# Block 8 of the 64 GB timing validation campaign, scenario 2 of 5: competing
+# paths. See docs/2026-64gb-timing-validation-plan.md, "Block 8: BIRD
+# architecture screen".
+#
+# The plan's scenario: 50 peers advertising competing paths for the same
+# 100,000 prefixes -- 5,000,000 paths offered, 100,000 selected prefixes.
+# `--path-diversity D` deals the peers into groups of D and gives each group
+# one shared prefix block, so `path_diversity: 50` at 50 peers is a single
+# group: every peer offers the same 100,000 prefixes and the target has to run
+# best-path selection 50 ways for each one.
+#
+# WHY THIS IS NOT THE CANONICAL CELL WITH A KEYWORD ADDED. Every other
+# synthetic run in this campaign gives each peer a disjoint block, so every
+# route the target learns is the only path it holds for that prefix: the run
+# measures reception and re-advertisement and publishes it as convergence.
+# Best-path selection is one of the three things BIRD 3's worker threads exist
+# to parallelise, and until this scenario nothing here made the target do any.
+# The path count is deliberately the canonical block's 5,000,000, so the
+# ingress work matches Blocks 2-4 and what differs is the selection work.
+#
+# WHAT THE MONITOR IS JUDGED AGAINST. The monitor reads what the target
+# re-advertises, which is one best path per prefix, so the check-point is
+# `groups * p` -- 100,000 here, not the 5,000,000 offered -- and `required` in
+# the CSV is 99% of that. Per-neighbour `count` stays 100,000: a peer still
+# offers its whole list and the target still accepts all of them, since BGP
+# holds the losers. A `received` of ~100,000 against 5,000,000 offered is
+# therefore the correct shape for this scenario and not a lost table; the
+# offered side is in `tester_fleet` and the held side in `target_table`, whose
+# `imported_paths` is the sum that should reach 5,000,000 while `best_paths`
+# stays at 100,000.
+#
+# `--prefix-scope total` IS REFUSED ALONGSIDE THIS, deliberately and at every
+# entry point, so do not add it: "the whole table" would have two readings
+# differing by exactly 50 -- paths offered against distinct prefixes held --
+# and the reading would decide the `prefixes per peer` column, the cell
+# identity and every artifact name.
+#
+# THE THREE CONFIGURATIONS and the labelling rule are scenario 1's; see
+# benchmarks/2026-timing-bird-peers.yaml for why the default-threads entry is
+# not a duplicate and why each needs an explicit label.
+#
+# ORDER. `order: shuffle` with the block's seed, 20268 -- the campaign's
+# mechanical rule, the year with the block number appended. Three cells rather
+# than nine, but the three are the comparison this scenario publishes, so the
+# order they run in is exactly the drift that would be read as the result.
+tests:
+  -
+     name: 2026-timing-bird-diversity
+     neighbors: [50]
+     prefixes: [100_000]
+     filter_test: [None]
+     path_diversity: 50
+     order: shuffle
+     seed: 20268
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (4 threads)
+         threads: 4
+         tester_type: bird

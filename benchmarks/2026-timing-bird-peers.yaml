@@ -1,0 +1,92 @@
+# Block 8 of the 64 GB timing validation campaign, scenario 1 of 5: peer
+# scaling. See docs/2026-64gb-timing-validation-plan.md, "Block 8: BIRD
+# architecture screen".
+#
+# The plan's scenario: 50, 250 and then 500 peers with 2,000 unique prefixes
+# per peer. The default per-peer `prefix_scope` is what makes `prefixes per
+# peer` in the CSV mean 2,000, so the tables are 100,000, 500,000 and
+# 1,000,000 -- the point being that the *session* count moves by 10x while the
+# table moves by the same factor from a deliberately modest base, rather than
+# the campaign's canonical 50 x 100,000 where session count and table size are
+# one axis. Do not add `prefix_scope: total`: it would divide, and the axis
+# this scenario exists to sweep would become a constant table cut three ways.
+#
+# THE THREE CONFIGURATIONS are the plan's BIRD architecture screen: 2.19.2,
+# 3.3.2 at its own default, and 3.3.2 with `threads: 4`. BIRD 3 runs one worker
+# unless the config says otherwise, so the middle entry is not a duplicate of
+# the third -- benching 3.x against 2.x without the thread setting measures
+# nothing, and without the default-threads entry there is nothing to say what
+# the setting bought. Each carries an explicit `label` because a run name is
+# label else target-plus-version, and the two 3.3.2 entries differ only in
+# `threads`: unlabelled they would share the artifact stem, the CSV `name` and
+# the x label every bar is paired against.
+#
+# WHAT THE PEER AXIS ALSO MOVES, stated rather than discovered in the results.
+# With `tester_type: bird` the generator runs one `bird` per neighbour in a
+# single container, so the 500-peer cell runs 500 generator daemons against the
+# 50-peer cell's 50, on the same box. No published column can separate that
+# from the target's own session load: `bird` and `birdc` are in
+# `contention.BGPERF_PROCESSES`, so `max foreign cpu %` cannot report it by
+# construction, and `min idle%` is host-wide and cannot attribute it. Read
+# `tester_fleet` beside the timings, which is the closest thing to evidence
+# about whether the load was delivered. This is the same confound
+# `benchmarks/2026-peer-scaling.yaml` records, and it is accepted here for the
+# same reason: the alternative is 10x the routes, which is the confound this
+# scenario exists to remove.
+#
+# THE INSTRUMENT THAT READS THE GENERATORS SCALES WITH THE AXIS TOO, and that
+# is the second half of the same confound. `Tester.offering_stats()` polls the
+# generator once a second in a single `docker exec` that runs one `birdc` per
+# peer -- 500 of them per poll in the largest cell, against 50 in the smallest.
+# The poll waits to a deadline measured from its own sample, so an overrun
+# degrades the published `injection_resolution_s` rather than making any number
+# wrong, and it ends itself as soon as the generator reports the whole table
+# offered, which for a BIRD 2.19 queue-side counter is early. What it does cost
+# is CPU inside the generator container, and that lands in `min idle%` and is
+# invisible to `max foreign cpu %`, because `birdc` is in
+# `contention.BGPERF_PROCESSES` -- on the one scenario whose whole purpose is
+# to be read as a trend across the peer axis. Read the per-cell
+# `injection_resolution_s` before reading a CPU difference across it.
+#
+# 500 PEERS WAS PROBED BEFORE THIS CONFIG WAS WRITTEN, at `-n 500 -p 10` on
+# the campaign host: all 500 sessions established, the target converged in 6s,
+# and the generator container carried its 500 `bird` daemons without complaint.
+# What the probe does not settle is 500 x 2,000, which is this cell.
+#
+# ORDER. `order: shuffle` with the campaign's mechanical seed rule -- the year
+# with the block number appended, so Block 8 is 20268. All five of this block's
+# configs state that same seed and draw different permutations, because
+# `batch_shuffle_key()` digests `<seed>:<batch_cell_id(test_name, cell)>` and
+# the test names differ. Shuffling matters more here than in a single-cell
+# scenario: nine cells run back to back over the axis whose whole purpose is to
+# be read as a trend, and matrix order would put any thermal or page-cache
+# drift onto that axis as though it were peer scaling.
+#
+# ONE PASS, like every other block of this campaign. Dispersion across passes
+# is Block 9's question; Block 10 is where a comparison that needs more
+# observations gets them.
+tests:
+  -
+     name: 2026-timing-bird-peers
+     neighbors: [50, 250, 500]
+     prefixes: [2_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 20268
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (4 threads)
+         threads: 4
+         tester_type: bird

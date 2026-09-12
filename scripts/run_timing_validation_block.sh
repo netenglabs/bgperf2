@@ -1097,6 +1097,118 @@ run_mrt_repetition() {
   check_evidence "$BLOCK_DIR/mrt" 14 "mrt"
 }
 
+# Block 8 is five bounded scenarios rather than one matrix, and each runs into
+# a results directory of its own.
+#
+# That is not tidiness. `check_timing_evidence.py` pairs an artifact with its
+# CSV row by the cell's identity -- run name plus peers, prefixes per peer and
+# filter -- and the workload controls are deliberately none of those: they are
+# in the artifact stem and in `run`, and no CSV column carries them. Scenarios
+# 4 and 5 are both 50 x 50,000 with the same three run names, so in one
+# directory their six rows would be three ambiguous pairs and the checker would
+# reject all six rather than qualify any against the wrong one. Separate
+# directories also mean a scenario that proves infeasible on 64 GB is excluded
+# by name, which is what the plan's exit criterion offers instead of a row.
+#
+# Shared setup runs once for the block -- one preflight, one `verify`, one
+# metadata capture over all five rendered configs -- because they are one
+# block's worth of work on one host and five `verify` runs would say the same
+# thing five times. `verify` is fatal here as everywhere: all fifteen runs are
+# BIRD, and an image rebuilt with gcov instrumentation between blocks would
+# land in exactly the CPU and memory columns this screen publishes.
+#
+# No MRT validation: every scenario here is synthetic, and `validate_mrt_inputs`
+# refuses a config naming no `mrt_file` rather than guessing one.
+run_bird_architecture_screen() {
+  # Scenario key -> config, in the plan's own order. The key is the rendered
+  # config's name, the results directory and the evidence label, so all three
+  # agree by construction.
+  local -a scenarios=(
+    "peers:benchmarks/2026-timing-bird-peers.yaml:9"
+    "diversity:benchmarks/2026-timing-bird-diversity.yaml:3"
+    "fanout:benchmarks/2026-timing-bird-fanout.yaml:3"
+    "reload:benchmarks/2026-timing-bird-reload.yaml:3"
+    "churn:benchmarks/2026-timing-bird-churn.yaml:3"
+  )
+
+  local -a rendered=()
+  # `--config <path>` is two words. Built as pairs rather than with a prefix
+  # expansion over the path array, which produces one word per element and
+  # hands the preflight a single argument it cannot parse.
+  local -a preflight_args=()
+  local entry key config
+  for entry in "${scenarios[@]}"; do
+    key="${entry%%:*}"
+    config="${entry#*:}"
+    config="${config%:*}"
+    campaign_render_config "$BLOCK_KEY-$key" "$config" \
+      "$RENDERED_CONFIG_DIR/$BLOCK_KEY-$key.yaml"
+    rendered+=("$RENDERED_CONFIG_DIR/$BLOCK_KEY-$key.yaml")
+    preflight_args+=(--config "$RENDERED_CONFIG_DIR/$BLOCK_KEY-$key.yaml")
+  done
+  capture_metadata "${rendered[@]}"
+
+  scripts/preflight_2026_suite.sh --workdir "$WORKDIR" --run-root "$RUN_ROOT" \
+    "${preflight_args[@]}" \
+    | tee "$METADATA_DIR/preflight-$BLOCK_KEY.txt"
+
+  echo "Verifying built images"
+  "${BGPERF_CMD[@]}" verify > "$METADATA_DIR/verify-$BLOCK_KEY.txt" 2>&1 || {
+    echo "verify failed; see $METADATA_DIR/verify-$BLOCK_KEY.txt" >&2
+    tail -20 "$METADATA_DIR/verify-$BLOCK_KEY.txt" >&2
+    exit 1
+  }
+  tail -5 "$METADATA_DIR/verify-$BLOCK_KEY.txt"
+
+  retract_forced_markers
+
+  # Each scenario is checked as soon as it has run, and a scenario that fails
+  # does not take the other four with it.
+  #
+  # `check_evidence` already counts rather than raises, but that only covers a
+  # run whose *evidence* did not qualify. `run_batch` ends with `return
+  # $status` on a non-zero batch exit, and under this script's `set -e` that
+  # aborts the block where it stands -- before the remaining scenarios run and
+  # before the RAN marker is written. Block 8 is the one block whose job is to
+  # find out what this host cannot do, and the infeasible cases most likely to
+  # surface as a non-zero exit (a container that cannot be created, an
+  # exception out of `bench()`) are exactly the ones that must not cost the
+  # four scenarios that would have worked. The no-RAN-with-a-directory state
+  # is also the one the two markers exist to prevent: `block_state` reports
+  # `started`, `next` re-selects the block, and `run_batch` re-runs it with
+  # `--resume`, which skips every cell already in the progress file including
+  # the failed ones.
+  #
+  # So the batch's own exit is caught and counted like an evidence failure.
+  # Note what catching it costs: `set -e` is suspended for the whole of
+  # `run_batch`'s body while it runs on the left of `||`, so a failure inside
+  # it no longer aborts either -- which is why every failure path in that
+  # function reports for itself rather than relying on the shell.
+  #
+  # `check_evidence` still runs afterwards, on purpose: a batch that died part
+  # way through leaves some artifacts, and the checker is what says which rows
+  # exist and which are missing. Both failures are counted, and
+  # `block_exclusion_report` names the rows in the RAN marker.
+  local expect batch_status
+  for entry in "${scenarios[@]}"; do
+    key="${entry%%:*}"
+    expect="${entry##*:}"
+    batch_status=0
+    run_batch "$BLOCK_KEY-$key" "$BLOCK_DIR/$key" || batch_status=$?
+    if [[ $batch_status -ne 0 ]]; then
+      echo "scenario $key: batch exited $batch_status; the remaining" >&2
+      echo "scenarios still run and the block is recorded as having run" >&2
+      EVIDENCE_FAILURES=$((EVIDENCE_FAILURES + 1))
+    fi
+    # No --expect-limiting: nothing here is a controlled case. Which component
+    # limits a given BIRD configuration under competing paths or export
+    # fan-out is the measurement, not the setup -- the same reason Blocks 2-7
+    # pin none. What the checker still requires is a verdict, and now also the
+    # post-convergence workload evidence the scenario asked for.
+    check_evidence "$BLOCK_DIR/$key" "$expect" "$key"
+  done
+}
+
 case "$BLOCK_INDEX" in
   0)
     SYNTH_CONFIG="benchmarks/2026-timing-smoke-synth.yaml"
@@ -1230,6 +1342,9 @@ case "$BLOCK_INDEX" in
     ;;
   7)
     run_mrt_repetition "benchmarks/2026-timing-mrt-rep3.yaml"
+    ;;
+  8)
+    run_bird_architecture_screen
     ;;
   *)
     cat >&2 <<MSG

@@ -1858,7 +1858,8 @@ DELIVERY_RULE = ('the earliest reading of the terminal export plateau at or '
                  'after which the monitor holds it')
 
 _DELIVERY_FIELDS = ('complete_s', 'resolution_s', 'plateau_start_s',
-                    'plateau_samples', 'monitor_lag_s', 'exported_final',
+                    'plateau_samples', 'monitor_lag_s',
+                    'monitor_lag_resolution_s', 'exported_final',
                     'monitor_final')
 
 
@@ -1965,6 +1966,20 @@ def delivery_metrics(samples):
     holding it, which is the one part of the tail this series can see on its
     own.
 
+    **Both ends are dated to the instrument that produced them**, and getting
+    that wrong once made this interval meaningless. The target's gauge is read
+    on its own poll loop, so `bench()` pairs each monitor sample with the
+    freshest reading it has and records how old that reading was
+    (`witness_age_s`, bounded at `DELIVERY_WITNESS_MAX_AGE_S`). Dating the
+    plateau's start to the monitor poll that *carried* the reading therefore
+    put both ends of `monitor_lag_s` on the monitor's clock, and the interval
+    collapsed to exactly 0.0 whenever the monitor was already level at that
+    poll -- which is one clock's reading subtracted from itself, not a
+    measurement of simultaneity. **25 of the 27 resolved rows of the three
+    64 GB MRT blocks published 0.0 that way**, including 10 of the 12 BIRD
+    rows; only two rows escaped it. The start is the witness read; the
+    completion is the monitor sample; `resolution_s` bounds the second.
+
     **`final` is the last reading and deliberately not the series peak**, so a
     run whose export count settles *below* its peak is dated to where it
     settled. That shape is the normal one here rather than route loss: 11 of
@@ -2028,7 +2043,24 @@ def delivery_metrics(samples):
         position -= 1
     plateau = readings[position:]
     known['plateau_samples'] = len(plateau)
-    known['plateau_start_s'] = _sample_time(plateau[0][1])
+    # Dated to when the target was *read*, not to the monitor poll that carried
+    # the reading. The two are different instants and the gap between them is
+    # `witness_age_s`: the target's poll is its own loop, so `bench()` pairs
+    # each monitor sample with the freshest reading it has, which can be up to
+    # `DELIVERY_WITNESS_MAX_AGE_S` old. Using the monitor's stamp made this
+    # field -- documented as "the target stopped exporting here" -- late by
+    # that age, and `monitor_lag_s` is the difference of the two, so it
+    # collapsed to exactly 0.0 whenever the monitor was already level at the
+    # carrying poll. That is not a measurement of simultaneity; it is one
+    # clock's reading subtracted from itself. 25 of the 27 resolved rows of
+    # the three 64 GB MRT blocks published 0.0 that way, 10 of them BIRD rows
+    # -- the reading at the plateau start was between 0.415s *newer* than the
+    # carrying poll and 0.600s older than it, across those 27.
+    # `None` when the reading is undated, which is every artifact written
+    # before these fields existed -- the resolved path cannot reach that, since
+    # `gauge_undated` below refuses it, and the unresolved branches would
+    # rather say nothing than quote the wrong clock.
+    known['plateau_start_s'] = plateau[0][1].get('witness_monotonic_s')
     if len(plateau) < 2:
         return _delivery('still_changing', **known)
 
@@ -2088,7 +2120,28 @@ def delivery_metrics(samples):
     # `monitor_final` disproves -- a refusal naming a disagreement that did
     # not happen, which sends a reader to the MRT consistency check for a
     # consistent session.
+    # Anchored on the witness read as well, for the same reason: the first
+    # monitor sample at or after the target was read is the earliest poll that
+    # can attest to holding what the target had finished sending. Anchoring on
+    # the *carrying* poll instead skipped any sample taken inside the witness
+    # age, so a monitor already level when the target was read was dated to
+    # whichever later poll happened to carry the reading.
+    #
+    # The walk back is bounded by that age and cannot reach the convergence
+    # overshoot. A monitor on these runs crosses `final` on the way up and
+    # settles back onto it -- 11 of 39 recorded runs peak 1.35%-1.55% above
+    # where they end -- so a scan free to start anywhere earlier would date
+    # delivery to the climb. Every sample considered here was taken at or after
+    # the read that showed the target's terminal count, so the target had
+    # already sent `final` by then and the monitor holding it is genuine.
     start_index = plateau[0][0]
+    plateau_start_s = known['plateau_start_s']
+    if plateau_start_s is not None:
+        while start_index > 0:
+            earlier_s = _sample_time(samples[start_index - 1])
+            if earlier_s is None or earlier_s < plateau_start_s:
+                break
+            start_index -= 1
     for index in range(start_index, len(samples)):
         accepted = samples[index].get('monitor_accepted')
         if accepted is not None and accepted >= final:
@@ -2112,7 +2165,38 @@ def delivery_metrics(samples):
         return _delivery('no_sample_times', **known)
     known['complete_s'] = complete_s
     known['resolution_s'] = round(complete_s - previous_s, 6)
+    # Signed, and nothing clamps it -- the rule `post_injection_tail_s` and the
+    # export section's `monitor_delta_s` already follow, and which
+    # `witness_age_s` itself follows one layer down. The two ends come from
+    # independent poll loops, so the monitor can be *seen* holding the table
+    # before the target is next read showing it finished, and that is ordinary
+    # rather than a wiring fault: 1019 of 2892 recorded samples under
+    # `results/` carry a negative age. Clamping would give such a run the same number as one
+    # where the two genuinely coincided, which is the distinction this interval
+    # exists to make.
     known['monitor_lag_s'] = round(complete_s - known['plateau_start_s'], 6)
+    # And it is published with the width of the looks that bound it, because
+    # most of them are smaller than one. `resolution_s` bounds only the monitor
+    # end; the other end is a witness read, on its own loop and its own
+    # cadence. A magnitude at or under this is the two instruments agreeing
+    # within their resolution, and must be read as "within one look of each
+    # other" rather than as a duration -- the rule `first_prefix_s` and
+    # `injection_s` are qualified by, and the reason this was worth publishing
+    # rather than left to a reader who would see only a signed number. The
+    # first plateau read is bounded by the clock origin, as the first monitor
+    # sample is: nothing before the instruments arrived is visible.
+    probe = position - 1
+    previous_read_s = 0.0
+    while probe >= 0:
+        earlier_read_s = readings[probe][1].get('witness_monotonic_s')
+        if earlier_read_s is not None \
+                and earlier_read_s < known['plateau_start_s']:
+            previous_read_s = earlier_read_s
+            break
+        probe -= 1
+    known['monitor_lag_resolution_s'] = round(
+        max(known['resolution_s'],
+            known['plateau_start_s'] - previous_read_s), 6)
     return _delivery(None, **known)
 
 

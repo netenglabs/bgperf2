@@ -3865,3 +3865,120 @@ in that case the run has failed anyway and "this is not a controlled case" is
 the *correct* verdict, not a spurious one. Machinery to distinguish it would
 be machinery to soften a true answer. Written down because a later reader
 finding that path should know it was seen and left.
+
+### Correction on 2026-09-11: both ends of `monitor_lag_s` were on one clock, and a qualifying MRT row's export share was unbounded
+
+Found by `/code-review` on the Block 7 change set (the review cleared that
+change set and flagged two defects in code already released). Both are recorded
+here because both were shipped in Phase 6's final change sets and both had
+already reached three blocks of published campaign results.
+
+**`plateau_start_s` was dated to the monitor poll that carried the reading.**
+`delivery_metrics()` took `_sample_time(plateau[0][1])` -- the monitor sample's
+own stamp -- for the moment the target stopped exporting. But the target's gauge
+is read on its own poll loop and `bench()` pairs each monitor sample with the
+freshest reading it has, recording how stale that pairing was as
+`witness_age_s`. So the field documented as "the target stopped exporting here"
+was the monitor's clock, and `monitor_lag_s = complete_s - plateau_start_s`
+subtracted two readings of the same clock. It collapsed to exactly 0.0 whenever
+the monitor was already level at the carrying poll, which is **25 of the 27
+resolved rows of Blocks 5, 6 and 7** -- published as "the monitor kept up
+perfectly". The start is now the witness read.
+
+**That count was wrong twice in this entry's first draft, and the corrections
+are the useful part.** It said "every `frr_c` row -- 15 rows", and it said the
+witness was "0.6-0.7s old". Measured over the artifacts instead: the collapse
+covers **10 of the 12 BIRD rows as well**, every row of both `openbgp`- and
+`rustybgp`-free families that resolves, and only Block 7's two `bird_3.3.2` rows
+escape it (1.45s and 1.55s, the two largest real lags in the campaign). And the
+witness age *at the plateau start* runs **-0.415s to +0.600s, negative on 13 of
+the 27** -- so for over half the rows the reading was taken *after* the poll
+that carried it and the bias ran the other way, which is why the corrected lags
+are negative on exactly those rows. The 0.6-0.7s figure was lifted from the
+Block 6 record, where it is the plateau's *oldest* witness age across all 21
+samples -- a different quantity from the age at its first one, and quoting it
+here would have told a later session the bias was one-directional and FRR-only.
+Both were caught by `/code-review` re-deriving the series rather than reading
+the prose.
+
+**Two things were measured rather than assumed, and one of them contradicted
+the review.**
+
+- **`complete_s` did not move, on any of the 27 recorded rows.** The review
+  expected it to, and the scan start *was* wrong for the same reason -- it
+  began at the carrying poll, so a monitor already level on an intervening
+  sample was dated to whichever later poll happened to carry the reading. It is
+  now anchored on the witness read, walking back only through samples taken at
+  or after it. That walk is bounded by the witness age and so cannot reach the
+  convergence overshoot these runs produce (the monitor crosses the final count
+  on the way up and settles back onto it, 11 of 39 recorded runs); every sample
+  it may consider was taken after the target was read holding `final`. It fires
+  only when the witness age exceeds the monitor's poll gap, which no recorded
+  row does -- ages run -0.45s to +1.10s against gaps of ~1.4s. So this corrects
+  a case the campaign has not exhibited, pinned by a test, and **every
+  `complete_s` in the Block 5-7 records stands exactly as published** -- the
+  93.13s -> 80.51s comparison the Block 6 and 7 records turn on included.
+- **`monitor_lag_s` had to become signed, which was not foreseen.** 162 of 585
+  recorded samples of Block 7 -- and 1019 of 2892 across all of `results/` --
+  carry a *negative* `witness_age_s`: the two poll loops are
+  independent, so a target read taken just after a monitor sample is ordinary,
+  and `bgperf2.py` already documents the field as signed and unclamped for that
+  reason. Re-dating the start therefore produces negative lags -- 11 of the 27
+  recorded rows -- and clamping them would give a run where the monitor was
+  seen level first the same number as one where the two genuinely coincided.
+  Signed, on `post_injection_tail_s`'s and `export.monitor_delta_s`'s rule.
+- **So it needed a resolution, and that is the real finding.** A signed
+  sub-second number published bare is the defect this project already names for
+  `first_prefix_s`. `monitor_lag_resolution_s` is the wider of the two looks
+  bounding it: the monitor's gap at completion and the witness read gap at the
+  plateau start. **All 27 recorded rows are inside their own bound** -- lags
+  -0.40s to +1.15s against bounds of 1.38s to 2.43s. So the honest statement
+  about every MRT row this campaign has measured is that the target finishing
+  and the monitor holding it happened within one look of each other, which is
+  what two 1s loops can say. The old 0.0 was not merely biased; it asserted
+  simultaneity at a precision no instrument here has.
+
+**A qualifying MRT row's export share is bounded by nothing, and it still is --
+on purpose.** The second defect: after a resolved `delivery` became acceptable
+in place of `monitor_required_reached`, nothing bounds what share of its table
+the target advertises. The import floor bounds ingress, the consistency check
+bounds the link, and between them sits the target's own decision about what to
+export -- so a daemon importing a whole RIB and exporting half of it clears
+both, agrees with the monitor at the half, and publishes `elapsed (s)` as a
+convergence time for half a table.
+
+Two things were measured before writing a rule, and both say a threshold would
+be invented:
+
+- **No measured number fits.** FRR ends this workload ~11.4% below what it
+  holds (`bgperf2-cw6`, reproducible across four releases and master in three
+  blocks) and **BIRD withholds 2.24% of its own table on the same RIB** --
+  1,056,779 exported of 1,080,985 held, identical in all twelve recorded BIRD
+  rows. The two constants this project has measured are both 1%
+  (`WITNESS_AGREEMENT_FRACTION`, `DROP_FRACTION`), so both are too tight, and
+  anything above them would be picked to clear the daemons in front of it. That
+  is how all three convergence rules were broken.
+- **The daemon that needs the bound cannot supply the denominator.**
+  `best_paths` is the count of prefixes holding a selected best path and
+  `frr.table_witness()` withholds it deliberately: `ribCount` and `show bgp
+  ipv4 unicast statistics` disagreed (1,081,000 against 1,080,985) and neither
+  was established to mean that. Every row accepted through the substitution
+  today is an `frr_c` row. So the share is computable for exactly the rows that
+  already clear the check-point and not for the rows that do not.
+
+So the check **reports and does not reject**, on `plateau_samples`' rule --
+published rather than thresholded, because there is no measured number to set a
+threshold to. A row with no denominator says so by name rather than carrying no
+check at all, since an absent check reads as one that passed; that is the only
+place a reader learns a row's export share is unbounded by its own artifact.
+`bgperf2-ctm` stays open for the rejection half, which needs an FRR best-path
+gauge that can be trusted, and it is a dependency of the campaign's Block 9.
+
+**Neither fix re-writes an artifact.** The published Block 5-7 documents keep
+the numbers they were written with; both corrections are derivable from the
+per-poll series those artifacts retain, which is why they were deliberately
+**not** applied between passes 2 and 3 of one repetition series -- doing so
+would have judged the third pass by rules the first two were not judged by, the
+Required Measurements amendment's rule. What changed for those blocks is only
+what a re-derivation now reports, and the re-derivation was run over all 27
+rows as the verification for this change set.

@@ -44,7 +44,11 @@ def test_the_point_is_the_start_of_the_terminal_plateau():
     got = measurements.delivery_metrics(climb_then_settle())
     assert got['unresolved_reason'] is None
     assert got['complete_s'] == 10.0
-    assert got['plateau_start_s'] == 10.0
+    # The witness read, not the monitor poll that carried it: `sample()` ages
+    # every reading by 0.1s, so the target was read at 9.9 and the poll that
+    # paired it landed at 10.0. `complete_s` stays on the monitor's clock
+    # because it is the monitor's own count that drew level.
+    assert got['plateau_start_s'] == 9.9
     assert got['plateau_samples'] == 4
     assert got['exported_final'] == 1000
 
@@ -70,9 +74,67 @@ def test_the_monitor_has_to_draw_level_and_the_point_waits_for_it():
              sample(11.0, monitor=960, exported=1000),
              sample(12.0, monitor=1000, exported=1000)]
     got = measurements.delivery_metrics(rows)
-    assert got['plateau_start_s'] == 10.0
+    assert got['plateau_start_s'] == 9.9
     assert got['complete_s'] == 12.0
-    assert got['monitor_lag_s'] == 2.0
+    # 2.1, not 2.0: the lag runs from when the target was read to when the
+    # monitor was seen holding it, and those are two instruments.
+    assert got['monitor_lag_s'] == 2.1
+
+
+def test_a_carried_reading_does_not_date_the_delivery_to_the_poll_that_carried_it():
+    """The shape every `frr_c` row of the 64 GB MRT campaign took, and the one
+    that made `monitor_lag_s` meaningless.
+
+    The target's gauge is read on its own loop, so a reading can be paired with
+    a monitor sample taken up to `DELIVERY_WITNESS_MAX_AGE_S` later. Here the
+    terminal count was read at 9.3 and carried by the poll at 10.0, where the
+    monitor was already holding the whole table. Dating the plateau's start to
+    that carrying poll put both ends of the lag on the monitor's clock and
+    produced exactly 0.0 -- which looks like "the monitor kept up perfectly"
+    and is one timestamp minus itself. The honest answer is 0.7s: how long
+    after the target was read the monitor was seen holding it, an upper bound
+    rather than zero.
+    """
+    rows = climb_then_settle(final=1000, settled=0)
+    rows += [sample(10.0, age=0.7, monitor=1000, exported=1000),
+             sample(11.0, age=0.2, monitor=1000, exported=1000)]
+    # The plateau's first reading was taken well before the poll carrying it,
+    # and the second is its own look -- so the plateau rests on two distinct
+    # reads and `gauge_carried_across_plateau` is not what is under test here.
+    assert rows[-2]['witness_monotonic_s'] == 9.3
+    assert rows[-1]['witness_monotonic_s'] == 10.8
+    got = measurements.delivery_metrics(rows)
+    assert got['unresolved_reason'] is None
+    assert got['plateau_start_s'] == 9.3
+    assert got['complete_s'] == 10.0
+    assert got['monitor_lag_s'] == 0.7
+
+
+def test_the_monitor_may_have_drawn_level_before_the_poll_that_carried_the_read():
+    """The completion scan starts at the witness read, not at the carrying
+    poll, so a monitor already level on an intervening sample is dated to that
+    sample.
+
+    The walk back is bounded by the witness age and so cannot reach the
+    convergence overshoot these runs produce -- the monitor crosses the final
+    count on the way up and settles back onto it, and a scan free to start
+    anywhere earlier would date delivery to the climb. Every sample it may
+    consider was taken at or after the read that showed the target's terminal
+    count, so the target had already sent that count by then.
+    """
+    rows = climb_then_settle(final=1000, settled=0)
+    rows += [
+        # The monitor is level here, and this poll carries an older reading.
+        sample(9.5, age=0.3, monitor=1000, exported=900),
+        # The terminal reading was taken at 9.3 and is not paired until now.
+        sample(10.0, age=0.7, monitor=1000, exported=1000),
+        sample(11.0, age=0.2, monitor=1000, exported=1000),
+    ]
+    got = measurements.delivery_metrics(rows)
+    assert got['unresolved_reason'] is None
+    assert got['plateau_start_s'] == 9.3
+    assert got['complete_s'] == 9.5
+    assert got['monitor_lag_s'] == 0.2
 
 
 def test_a_monitor_that_never_draws_level_is_refused():
@@ -345,7 +407,7 @@ def test_the_monitor_may_draw_level_on_a_poll_whose_gauge_was_withheld():
     assert got['unresolved_reason'] is None
     assert got['complete_s'] == 12.0
     assert got['monitor_final'] == 1000
-    assert got['plateau_start_s'] == 10.0
+    assert got['plateau_start_s'] == 9.9
 
 
 def test_samples_with_no_times_are_named_rather_than_resolved_emptily():

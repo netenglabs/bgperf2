@@ -703,10 +703,95 @@ def _mrt_route_counts(artifact, received, required, filtered=False,
                       'received {0} but the target says it sent {1} on that '
                       'session, a {2:.2%} disagreement'.format(
                           received, exported, drift))]
-    return checks + [Check('route_counts', OK,
+    return checks + _export_share(table, exported) + [Check('route_counts', OK,
                   'received {0} and the target says it sent {1} on that '
                   'session ({2:.3%} apart); the MRT check-point was {3}'.format(
                       received, exported, drift, required))]
+
+
+def _export_share(table, exported):
+    """What share of the table the target holds it actually exports.
+
+    Nothing else here bounds this. The import floor bounds *ingress* -- the
+    target's accepted-path count against what the generators offered, both path
+    counts and tight (one measured BIRD row: 10,497,949 of 10,500,000, 0.02%
+    short). The consistency check bounds the *link* -- the monitor's count
+    against the target's own `pfxSnt` on that session, which are two ends of one
+    link and agree whenever the link works, at any size. Between them sits the
+    target's own decision about what to advertise, and a daemon that imports a
+    whole RIB and exports half of it clears both: the monitor sees the half, the
+    target agrees it sent the half, and since `monitor_required_reached` can be
+    stood in for by a resolved `delivery`, the check-point no longer bounds it
+    either. That row would publish `elapsed (s)` as a convergence time for half
+    a table.
+
+    **This reports the share and deliberately sets no threshold on it**, and
+    that is not timidity -- no measured number exists to set one to. The
+    withholding is real and reproducible and nobody knows why: FRR ends this
+    workload ~11% below what it holds (`bgperf2-cw6`), and BIRD withholds 2.24%
+    of its own table on the same RIB (1,056,779 exported of 1,080,985 held, in
+    all twelve recorded BIRD rows). So the two constants this project already
+    measured are both too tight -- `WITNESS_AGREEMENT_FRACTION` and
+    `DROP_FRACTION` are 1% -- and any number above them would be chosen to fit
+    the daemons in front of it, which is how all three convergence rules were
+    broken. `plateau_samples` is published rather than thresholded for the same
+    reason.
+
+    **And the daemon that most needs the bound is the one with no denominator.**
+    `best_paths` is the count of prefixes holding a selected best path, and
+    `frr.table_witness()` withholds it on purpose: `ribCount` and `show bgp
+    ipv4 unicast statistics` disagreed (1,081,000 against 1,080,985 on one
+    measured run) and neither was established to mean that, so `None` is its
+    way of attesting to nothing. Every row accepted through the `delivery`
+    substitution today is an `frr_c` row. So the share is computable for
+    exactly the rows that already clear the check-point, and not for the rows
+    that do not -- which is stated in the check rather than left as a silent
+    hole, because a row nothing bounds must say so.
+    """
+    if not exported:
+        return []
+    held = (table.get('best_paths') or {}).get('final')
+    if held is None:
+        # Named, not omitted. An absent check reads as a check that passed, and
+        # this is the one place a reader can learn that a row's export share is
+        # unbounded by anything in its own artifact.
+        return [Check('export_share', NOTE,
+                      'the target says it sent {0} prefixes, and publishes no '
+                      'best-path gauge to say what share of its table that '
+                      'is'.format(exported))]
+    if not held:
+        # Absent and zero are different findings, which this function already
+        # says 150 lines up about the offered count -- and the difference here
+        # is not a nicety. A target cannot export prefixes it does not hold, so
+        # the two numbers cannot both be true and one of its gauges is broken.
+        # `exported_to_monitor` is the one already cross-checked against the
+        # monitor, agreeing to 0.000% on every recorded row, so the broken one
+        # is the best-path count.
+        #
+        # This repo has had exactly that bug: `bird.parse_protocols()` read a
+        # BIRD 3 stats table positionally, BIRD 3 inserted two columns, and
+        # every BIRD 3 target reported its counter as 0 -- silently, for as long
+        # as nothing compared it with anything. A rename that zeroes
+        # `preferred` while the export count stays right would otherwise be
+        # published as "this daemon has no best-path gauge", which sends the
+        # reader to FRR's documented and deliberate withholding instead of to a
+        # parser, and the zero would be swallowed by the divide guard below.
+        #
+        # Failed rather than noted, unlike the absent case, and deliberately
+        # stronger: a witness that is wrong is worse than none, because it
+        # excuses what it has no standing to excuse -- and this same gauge is
+        # what `ConvergenceTracker`'s fourth rule reads to excuse a monitor
+        # decline as not-route-loss. "A zero on either end is an absent
+        # session, not agreement", one pair of counters over.
+        return [Check('export_share', FAIL,
+                      'the target says it sent {0} prefixes while reporting it '
+                      'holds none: those cannot both be true, so its best-path '
+                      'gauge is broken rather than absent'.format(exported))]
+    share = exported / float(held)
+    return [Check('export_share', NOTE,
+                  'the target exported {0} of the {1} prefixes it holds '
+                  '({2:.2%}); no threshold is applied to this -- see '
+                  'bgperf2-cw6'.format(exported, held, share))]
 
 
 def check_events(artifact):

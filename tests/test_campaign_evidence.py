@@ -652,6 +652,88 @@ def test_an_mrt_shortfall_against_the_check_point_is_not_route_loss():
     assert verdict == 'qualified', statuses(checks)
 
 
+def test_an_mrt_row_reports_the_share_of_its_table_it_exported():
+    """Nothing else in a qualifying MRT row bounds this.
+
+    The import floor bounds ingress (accepted paths against offered paths) and
+    the consistency check bounds the link (the monitor's count against the
+    target's own `pfxSnt`, two ends of one link that agree at any size). What
+    neither touches is the target's own decision about what to advertise -- so a
+    daemon importing a whole RIB and exporting half of it clears both, and since
+    a resolved `delivery` can stand in for `monitor_required_reached`, the
+    check-point no longer bounds it either.
+    """
+    doc, r = _mrt(exported=1056779, received='1056779')
+    doc['target_table']['series']['best_paths'] = {'final': 1080985}
+    verdict, checks = check.qualify(doc, versions(), r)
+    share = [c for c in checks if c.name == 'export_share']
+    assert len(share) == 1
+    assert share[0].status == check.NOTE
+    assert '97.76%' in share[0].detail
+    assert verdict == 'qualified', statuses(checks)
+
+
+def test_an_export_share_with_no_denominator_is_named_rather_than_omitted():
+    """The daemon that most needs this bound is the one that cannot supply it.
+
+    `frr.table_witness()` withholds `best_paths` on purpose -- `ribCount` and
+    `show bgp ipv4 unicast statistics` disagreed and neither was established to
+    mean "prefixes holding a selected best path" -- and every row accepted
+    through the `delivery` substitution today is an `frr_c` row. An omitted
+    check reads as a check that passed, so the row says out loud that nothing in
+    its own artifact bounds its export share.
+    """
+    doc, r = _mrt(exported=961201)
+    assert 'best_paths' not in doc['target_table']['series']
+    verdict, checks = check.qualify(doc, versions(), r)
+    share = [c for c in checks if c.name == 'export_share']
+    assert len(share) == 1
+    assert share[0].status == check.NOTE
+    assert 'no best-path gauge' in share[0].detail
+    assert verdict == 'qualified', statuses(checks)
+
+
+def test_a_best_path_gauge_reporting_zero_is_broken_rather_than_absent():
+    """Absent and zero are different findings, and this repo has had the zero.
+
+    `bird.parse_protocols()` read a BIRD 3 stats table positionally, BIRD 3
+    inserted two columns, and every BIRD 3 target reported its counter as 0 --
+    silently, because nothing compared it with anything. A target cannot export
+    prefixes it does not hold, so reporting both is a broken gauge, not a
+    daemon without one; calling it absent would send the reader to FRR's
+    deliberate withholding instead of to a parser. Failed rather than noted,
+    unlike the absent case: this is the gauge `ConvergenceTracker`'s fourth rule
+    reads to excuse a monitor decline, and a wrong witness is worse than none.
+    """
+    doc, r = _mrt(exported=1056779, received='1056779')
+    doc['target_table']['series']['best_paths'] = {'final': 0}
+    verdict, checks = check.qualify(doc, versions(), r)
+    share = [c for c in checks if c.name == 'export_share']
+    assert len(share) == 1
+    assert share[0].status == check.FAIL
+    assert 'broken rather than absent' in share[0].detail
+    assert verdict == 'rejected'
+
+
+def test_no_threshold_is_applied_to_the_export_share():
+    """Deliberate, and recorded so it is not quietly added later. No measured
+    number exists to set one to: FRR ends this workload ~11% below what it
+    holds and BIRD withholds 2.24% of its own table on the same RIB, so the two
+    constants this project measured -- `WITNESS_AGREEMENT_FRACTION` and
+    `DROP_FRACTION`, both 1% -- are both too tight, and anything above them
+    would be chosen to fit the daemons in front of it. `bgperf2-cw6`.
+    """
+    doc, r = _mrt(exported=540000, received='540000')
+    doc['target_table']['series']['best_paths'] = {'final': 1080985}
+    verdict, checks = check.qualify(doc, versions(), r)
+    share = [c for c in checks if c.name == 'export_share']
+    assert share[0].status == check.NOTE
+    assert '49.95%' in share[0].detail
+    # Stated, not rejected -- and that remaining hole is what `bgperf2-ctm`
+    # stays open for.
+    assert verdict == 'qualified', statuses(checks)
+
+
 def test_an_mrt_row_is_rejected_when_the_two_ends_of_the_session_disagree():
     '''Completeness is not checkable for MRT playback; consistency is. The
     monitor's count and the target's own count of what it sent that very

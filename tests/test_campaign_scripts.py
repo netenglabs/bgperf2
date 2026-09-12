@@ -269,6 +269,55 @@ def test_a_block_that_is_not_built_yet_says_so_rather_than_inventing_one(roots):
     assert 'not built yet' in result.stderr
 
 
+def test_an_unbuilt_blocks_refusal_leaves_no_directory_behind(roots):
+    """`status` must not report a block nobody can run as interrupted work.
+
+    The block directory is created for every invocation, well before the
+    `case` that finds out whether this block has a procedure. Left behind,
+    `block_state()` reads a bare directory as `started` -- which is the one
+    state an unbuilt block is not, and it reads to the next session as work
+    somebody stopped half way through. Removed only while empty, so nothing
+    that holds results is ever touched by that path.
+    """
+    results, work = roots
+    index, key = unbuilt_block()
+    result = block('block-%d' % index, results_root=results, workdir=work)
+    assert result.returncode == 2
+    assert not os.path.exists(
+        os.path.join(results, '2026-timing-validation', key)), (
+            'the refusal left a directory, so `status` now calls it started')
+    listed = block('status', results_root=results, workdir=work)
+    line = [row for row in listed.stdout.splitlines() if key in row]
+    assert line and 'not-started' in line[0], listed.stdout
+
+
+def test_a_block_that_measures_nothing_is_not_told_to_re_measure(roots):
+    """The failure guidance has to be true of the block that produced it.
+
+    A review block writes no `evidence/`, has no rows to exclude and has no
+    progress file for a plain re-run to resume past -- so the shared failure
+    message sent the operator to read a directory that is never created and to
+    re-measure a block that measures nothing, while the real cause was printed
+    far above it.
+
+    Safe in a suite that needs no Docker because this is the one block that
+    starts no container: it reads documents that earlier blocks published, and
+    against a scratch results root it finds none of them and says so.
+    """
+    results, work = roots
+    index = [n for n, key in enumerate(_block_keys())
+             if 'variance-review' in key][0]
+    result = block('block-%d' % index, results_root=results, workdir=work)
+    assert result.returncode == 1
+    assert 'This block measures nothing' in result.stderr
+    assert 'evidence/' not in result.stderr, (
+        'sent to read a directory this block never creates')
+    assert 'resumes past every cell' not in result.stderr, (
+        'a block with no progress file cannot resume past a cell')
+    assert 'no selection document' in result.stdout, (
+        'the real cause must still be reported')
+
+
 def test_next_selects_block_zero_first_then_advances_only_past_acceptance(roots):
     results, work = roots
     run_root = os.path.join(results, '2026-timing-validation')

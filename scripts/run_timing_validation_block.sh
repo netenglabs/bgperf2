@@ -1209,6 +1209,57 @@ run_bird_architecture_screen() {
   done
 }
 
+# Block 9 reviews; it measures nothing. Every number it reads was published
+# by a block that has already been accepted, so this runs no preflight, no
+# `verify` and no container -- and it deliberately depends on no Docker daemon
+# at all, which is what lets the review be re-derived anywhere the artifacts
+# are.
+#
+# What it does check is that the passes may be read together: that each input
+# block carries a COMPLETE marker (a statistic over an unreviewed pass carries
+# that pass's unread problems into a verdict about a daemon), that the passes
+# of a cell agree about the image and the tester and monitor versions, and
+# that each tag was the same image id in every block. That last one is the only
+# thing in this campaign that can answer the question the Block 6 and 7 records
+# had to argue: provenance records an image *tag* and the daemon's own version
+# string, and a rebuilt `:latest` reporting the same `-dev` string is invisible
+# in a stats row.
+#
+# It writes no `evidence/` directory, and that is deliberate rather than an
+# omission. `block_exclusion_report` reads those documents as *rows* a block
+# excluded, and `accept --with-exclusions` turns them into durable exclusions
+# -- which is exactly the wrong thing to be able to do with a failed review. A
+# review that did not qualify is a block to re-run once the fault is fixed, so
+# it lands in `classify_block_evidence`'s `no-evidence` class, where
+# `--with-exclusions` is refused.
+run_variance_review() {
+  local out_dir="$BLOCK_DIR/review"
+  # The selection lives under `metadata/`, outside the block directory, and
+  # that placement is load-bearing: it is written by the operator *between* a
+  # first reading of the statistics and the run that validates them, and a
+  # `--force` re-run of this block must not delete the decision it is about to
+  # check. `--force` deletes markers here and nothing else.
+  local selection="$METADATA_DIR/block10-selection.json"
+
+  capture_metadata
+
+  retract_forced_markers
+  # The review is regenerated whole from documents that cannot change, so a
+  # leftover series document from an earlier build would be a statistic nobody
+  # computed sitting beside the ones somebody did.
+  rm -rf "$out_dir"
+
+  local status=0
+  "$PYTHON_BIN" scripts/timing_variance_review.py \
+    --run-root "$RUN_ROOT" --out "$out_dir" --selection "$selection" \
+    > "$METADATA_DIR/variance-review-$BLOCK_KEY.txt" 2>&1 || status=$?
+  cat "$METADATA_DIR/variance-review-$BLOCK_KEY.txt"
+  if [[ $status -ne 0 ]]; then
+    EVIDENCE_FAILURES=$((EVIDENCE_FAILURES + 1))
+    echo "the variance review did not qualify; read $out_dir" >&2
+  fi
+}
+
 case "$BLOCK_INDEX" in
   0)
     SYNTH_CONFIG="benchmarks/2026-timing-smoke-synth.yaml"
@@ -1346,6 +1397,9 @@ case "$BLOCK_INDEX" in
   8)
     run_bird_architecture_screen
     ;;
+  9)
+    run_variance_review
+    ;;
   *)
     cat >&2 <<MSG
 block-$BLOCK_INDEX (${BLOCK_TITLES[$BLOCK_INDEX]}) is not built yet.
@@ -1355,6 +1409,12 @@ campaign reaches it -- see docs/2026-64gb-timing-validation-plan.md, section
 "Execution Blocks". Nothing here should invent one: a block that ran the wrong
 matrix would produce rows that look exactly like the right ones.
 MSG
+    # The block directory is created for every run, before the case that finds
+    # out whether this one exists. Left behind, `block_state()` reports the
+    # unbuilt block `started` -- which reads as work someone interrupted, and
+    # is the one state it is not. Removed only while empty, so a directory
+    # holding anything at all is never touched by this path.
+    rmdir "$BLOCK_DIR" 2>/dev/null || true
     exit 2
     ;;
 esac
@@ -1402,6 +1462,31 @@ esac
     echo "evidence: all checks qualified"
   fi
 } > "$BLOCK_DIR/RAN"
+
+if [[ $EVIDENCE_FAILURES -gt 0 && ! -d "$BLOCK_DIR/evidence" ]]; then
+  # A block that measures nothing has no per-row verdicts, so every clause of
+  # the message below is false for it: there is no `evidence/` to read, there
+  # is nothing to re-*measure*, and there is no progress file for a plain
+  # re-run to resume past. Block 9 is the first such block, and the failure it
+  # actually produces -- a missing or malformed selection document, a pass
+  # whose rows were never accepted -- is printed by the checker itself, above.
+  cat >&2 <<MSG
+
+block-$BLOCK_INDEX did not meet its exit criterion: $EVIDENCE_FAILURES check(s) failed.
+
+This block measures nothing, so there are no rows to exclude and nothing to
+re-measure: what failed is printed above, and the documents it read are still
+exactly as they were.
+
+Fix what it named, then run it again:
+  scripts/run_timing_validation_block.sh block-$BLOCK_INDEX --force
+
+--force here retracts this block's markers and regenerates its review. It
+touches no results, and it does not touch the selection document, which lives
+under metadata/ for that reason.
+MSG
+  exit 1
+fi
 
 if [[ $EVIDENCE_FAILURES -gt 0 ]]; then
   cat >&2 <<MSG

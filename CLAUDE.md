@@ -230,7 +230,7 @@ claims.
 - No call that asks the world may run before the guards that read only the command line.
 
 **`docs/invariants/batch-passes.md`** — `bgperf2.py`'s `expand_batch_cells()`/`batch_report_rows()`/
-`create_batch_graphs()`, `summary.py`, `graphs.py`.
+`create_batch_graphs()`, `summary.py`, `graphs.py`, `scripts/timing_variance_review.py`.
 
 - A repetition repeats the whole matrix, not each cell, and is part of a run's *name*, never a
   column beside it.

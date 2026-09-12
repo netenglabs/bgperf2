@@ -1576,7 +1576,7 @@ evidence.
 Exit criterion per block: 14 reviewed rows or explicit durable exclusions with
 evidence.
 
-### Block 8: BIRD architecture screen -- **ran 2026-09-12, 18/21 qualified, awaiting acceptance**
+### Block 8: BIRD architecture screen -- **accepted 2026-09-12, 18/21 qualified, 3 excluded**
 
 The baseline's initial-table cells do not reproduce the workload BIRD 3 was
 designed to scale. BIRD's documented worker group runs BGP protocols,
@@ -1615,6 +1615,16 @@ against the offered table, and 5,000,000 paths held for exactly 100,000 selected
 prefixes in the diversity cells. No failed rows, no timeouts. Peak foreign CPU
 0-7%, far under the one-core threshold. Lowest `min free mem` 48.65 GB (79%),
 on the fan-out rows where ten GoBGP receivers each hold the table; no swap.
+
+**Three rows carry a `host_cpu_saturated` note** -- the benchmark's own load,
+and a note rather than a rejection, as in Blocks 5-7 (seven, six and seven
+rows). Here they are *exactly* the three fan-out rows and no others, which is
+the scenario itself rather than a property of the host: the target, the
+generator and ten GoBGP receivers share 16 threads, and no other scenario in
+this block runs more than one consumer. It confounds attribution, which costs
+this block nothing -- every row is already `unresolved` on the generator, and
+the fan-out bullet below reads only the spread between three rows measured
+under the same condition.
 
 #### What the five scenarios measured
 
@@ -1666,7 +1676,10 @@ arriving over 10 or 50 sessions, where 3.3.2 is slower in every pass.
 - **Export fan-out follows the canonical result rather than reversing it.** All
   ten receivers held 990,000 prefixes in every run. 3.3.2 default's fan-out
   shows a 12.2s spread across the ten against 0.0s for the other two, and its
-  slowest receiver reached the table at 35.32s against 2.19.2's 19.67s.
+  slowest receiver reached the table at 35.32s against 2.19.2's 19.67s. These
+  are the three `host_cpu_saturated` rows, so the receiver intervals are a
+  comparison between the three configurations under one shared condition and
+  not a figure to read against another block's export timings.
 
 #### Every row is `unresolved`, and that is the generator, not the runs
 

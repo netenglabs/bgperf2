@@ -268,9 +268,9 @@ def test_a_short_row_costs_its_own_run_and_is_named_as_such(tmp_path):
     csv_path.write_text('name, required, received, failed\n'
                         'bird 2.19.2, 10\n')
     rows = check.load_rows(str(csv_path))
-    assert '__short_row__' in rows['bird 2.19.2']
-    verdict, checks = check.qualify(artifact(), versions(),
-                                    rows['bird 2.19.2'])
+    assert len(rows) == 1
+    assert '__short_row__' in rows[0]
+    verdict, checks = check.qualify(artifact(), versions(), rows[0])
     assert verdict == 'rejected'
     assert statuses(checks)['stats_row'] == check.FAIL
 
@@ -1255,3 +1255,393 @@ def test_a_run_that_has_the_event_is_unaffected_by_the_substitute():
     assert verdict == 'qualified'
     detail = [c.detail for c in checks if c.name == 'event_coverage']
     assert detail == ['every required event present']
+
+
+# --- Row identity -----------------------------------------------------------
+#
+# A run name is label, else target plus version, and carries none of the matrix
+# axes. Until Block 8 every block ran exactly one cell per name, so keying the
+# CSV by name alone never collided; the peer-scaling scenario sweeps
+# `neighbors` and is the campaign's first multi-valued axis.
+
+def indexed(*csv_rows):
+    index = check.RowIndex()
+    index.add_rows(list(csv_rows))
+    return index
+
+
+def cell_row(name='bird 2.19.2', peers='4', prefixes='10000', filters='',
+             **overrides):
+    doc = row(name=name)
+    doc.update({'peers': peers, 'prefixes per peer': prefixes,
+                'filters': filters})
+    doc.update(overrides)
+    return doc
+
+
+def cell_artifact(peers=4, prefixes=10000, filter_test=None, **overrides):
+    doc = artifact()
+    doc['run'] = dict(doc['run'], peers=peers, prefixes_per_peer=prefixes,
+                      filter_test=filter_test)
+    doc.update(overrides)
+    return doc
+
+
+def test_two_cells_of_one_name_are_told_apart_by_their_axes():
+    '''The defect this exists for: a `neighbors: [50, 250, 500]` sweep writes
+    three rows called `bird 3.3.2`, and the name-keyed mapping kept the last.
+    Every artifact of that name was then qualified against one arbitrary cell.
+    '''
+    index = indexed(cell_row(peers='50', received='5000'),
+                    cell_row(peers='500', received='50000'))
+    small, problem = index.lookup(cell_artifact(peers=50))
+    assert problem is None
+    assert small['received'] == '5000'
+    large, problem = index.lookup(cell_artifact(peers=500))
+    assert problem is None
+    assert large['received'] == '50000'
+
+
+def test_the_prefix_axis_separates_two_cells_of_one_name():
+    index = indexed(cell_row(prefixes='2000', received='8000'),
+                    cell_row(prefixes='100000', received='400000'))
+    found, problem = index.lookup(cell_artifact(prefixes=100000))
+    assert problem is None and found['received'] == '400000'
+
+
+def test_the_filter_axis_separates_two_cells_of_one_name():
+    '''`filters` is `args.filter_test` or the empty string, and the artifact
+    records the same value -- so an unfiltered run's null and the column's
+    empty string are one cell, not two.'''
+    index = indexed(cell_row(filters='', received='40000'),
+                    cell_row(filters='ixp', received='12000'))
+    unfiltered, problem = index.lookup(cell_artifact(filter_test=None))
+    assert problem is None and unfiltered['received'] == '40000'
+    filtered, problem = index.lookup(cell_artifact(filter_test='ixp'))
+    assert problem is None and filtered['received'] == '12000'
+
+
+def test_rows_the_documents_cannot_separate_yield_no_row_at_all():
+    '''Two workload scenarios in one results directory differ only in keys
+    that are deliberately not CSV columns. Choosing one of them would qualify
+    a run against a different run's measurements, which is what the old
+    mapping did silently.'''
+    index = indexed(cell_row(received='40000'), cell_row(received='39000'))
+    found, problem = index.lookup(cell_artifact())
+    assert found is None
+    assert '2 CSV rows share' in problem
+    assert 'own results directory' in problem
+
+
+def test_a_third_row_sharing_the_cell_is_still_ambiguous():
+    index = indexed(cell_row(), cell_row(), cell_row())
+    found, problem = index.lookup(cell_artifact())
+    assert found is None and '3 CSV rows share' in problem
+
+
+def test_an_ambiguous_cell_rejects_the_run_and_says_why():
+    index = indexed(cell_row(), cell_row())
+    found, problem = index.lookup(cell_artifact())
+    verdict, checks = check.qualify(cell_artifact(), versions(), found,
+                                    row_problem=problem)
+    assert verdict == 'rejected'
+    assert statuses(checks)['stats_row'] == check.FAIL
+    detail = {c.name: c.detail for c in checks}['stats_row']
+    assert 'CSV rows share' in detail
+
+
+def test_a_missing_row_names_the_cell_it_looked_for():
+    '''Distinct from ambiguity: nothing wrote a row for this cell at all.'''
+    index = indexed(cell_row(peers='50'))
+    found, problem = index.lookup(cell_artifact(peers=500))
+    assert found is None
+    assert "peers '500'" in problem
+
+
+def test_an_artifact_without_the_axes_falls_back_to_the_name():
+    '''Nothing in this campaign predates those fields, but a checker that
+    raised on one could not read the evidence it exists to re-examine.'''
+    doc = artifact()
+    doc['run'] = {'name': 'bird 2.19.2', 'repetition': None}
+    found, problem = indexed(cell_row()).lookup(doc)
+    assert problem is None and found['name'] == 'bird 2.19.2'
+
+
+def test_the_name_fallback_refuses_to_choose_between_cells():
+    doc = artifact()
+    doc['run'] = {'name': 'bird 2.19.2', 'repetition': None}
+    found, problem = indexed(cell_row(peers='50'),
+                             cell_row(peers='500')).lookup(doc)
+    assert found is None
+    assert 'records no' in problem and 'cannot be identified' in problem
+
+
+# --- Post-convergence workload evidence -------------------------------------
+#
+# None of these reaches the CSV row: `elapsed (s)` and `received` are settled
+# before the first burst or the reload command, and an incomplete sequence goes
+# into `MSG` without setting the `failed` flag. So a churn cell that issued no
+# burst was, to every other check here, an ordinary qualified row.
+
+def churn_artifact(**section):
+    doc = cell_artifact()
+    doc['run'] = dict(doc['run'], churn_prefixes=1000, churn_bursts=3)
+    published = {'sequence_complete': True, 'completed_bursts': 3,
+                 'requested_bursts': 3, 'distinct_withdrawals': 50000,
+                 'incomplete_reason': None}
+    published.update(section)
+    doc['churn'] = published
+    return doc
+
+
+def test_a_completed_churn_sequence_is_evidence():
+    checks = check.check_workload(churn_artifact())
+    assert statuses(checks)['churn'] == check.OK
+
+
+def test_a_churn_sequence_that_did_not_complete_rejects_the_run():
+    doc = churn_artifact(sequence_complete=False, completed_bursts=1,
+                         incomplete_reason='burst 2/3 stalled')
+    checks = check.check_workload(doc)
+    assert statuses(checks)['churn'] == check.FAIL
+    assert 'burst 2/3 stalled' in {c.name: c.detail for c in checks}['churn']
+
+
+def test_a_run_that_asked_for_churn_and_published_none_is_rejected():
+    '''Keyed on what the run asked for, never on which sections are present:
+    an absent section is exactly the failure worth catching.'''
+    doc = churn_artifact()
+    del doc['churn']
+    checks = check.check_workload(doc)
+    assert statuses(checks)['churn'] == check.FAIL
+
+
+def test_a_run_that_asked_for_no_churn_is_not_asked_about_it():
+    assert 'churn' not in statuses(check.check_workload(cell_artifact()))
+
+
+def reload_artifact(**section):
+    doc = cell_artifact()
+    doc['run'] = dict(doc['run'], policy_reload_blocks=10)
+    published = {'reload_complete': True, 'complete': True,
+                 'rejected_blocks': 10, 'accepted_before': 2500000,
+                 'accepted_after': 2000000, 'incomplete_reason': None}
+    published.update(section)
+    doc['policy_reload'] = published
+    return doc
+
+
+def test_a_completed_policy_reload_is_evidence():
+    assert statuses(check.check_workload(
+        reload_artifact()))['policy_reload'] == check.OK
+
+
+def test_a_policy_reload_that_did_not_apply_rejects_the_run():
+    doc = reload_artifact(reload_complete=False,
+                          incomplete_reason='the reload stalled at 2400000')
+    checks = check.check_workload(doc)
+    assert statuses(checks)['policy_reload'] == check.FAIL
+    assert '2400000' in {c.name: c.detail for c in checks}['policy_reload']
+
+
+def test_the_reload_verdict_reads_reload_complete_not_the_derived_complete():
+    '''`policy_reload_metrics()` derives a `complete` off the event stream and
+    the evidence key is the other one; landing on the derived name is what
+    `_policy_reload_section()` refuses a caller for.'''
+    doc = reload_artifact(reload_complete=False, complete=True,
+                          incomplete_reason='did not apply')
+    assert statuses(check.check_workload(doc))['policy_reload'] == check.FAIL
+
+
+def test_a_run_that_asked_to_reject_no_blocks_is_not_asked_about_a_reload():
+    assert 'policy_reload' not in statuses(
+        check.check_workload(cell_artifact()))
+
+
+def export_artifact(receivers=10, **section):
+    doc = cell_artifact()
+    doc['run'] = dict(doc['run'], receivers=receivers)
+    published = {'receivers': receivers, 'receivers_complete': receivers,
+                 'incomplete_receivers': [], 'required_prefixes': 990000,
+                 'monitor_reached_required': True, 'export_spread_s': 1.5}
+    published.update(section)
+    doc['export'] = published
+    return doc
+
+
+def test_a_fully_served_fan_out_is_evidence():
+    assert statuses(check.check_workload(
+        export_artifact()))['export_fanout'] == check.OK
+
+
+def test_a_receiver_never_served_rejects_the_run_and_is_named():
+    doc = export_artifact(receivers_complete=9,
+                          incomplete_receivers=['bgperf_receiver7'])
+    checks = check.check_workload(doc)
+    assert statuses(checks)['export_fanout'] == check.FAIL
+    assert 'bgperf_receiver7' in {c.name: c.detail
+                                  for c in checks}['export_fanout']
+
+
+def test_export_timing_withheld_by_name_is_a_note_not_a_failure():
+    '''The fan-out happened -- the receivers hold the table and cost the
+    target its export work -- and only the timing was withheld.'''
+    doc = export_artifact(unmeasured_reason='a churn workload ran in this run')
+    checks = check.check_workload(doc)
+    assert statuses(checks)['export_fanout'] == check.NOTE
+    verdict, all_checks = check.qualify(doc, versions(), cell_row())
+    assert statuses(all_checks)['export_fanout'] == check.NOTE
+
+
+def test_a_run_that_asked_for_receivers_and_published_none_is_rejected():
+    doc = export_artifact()
+    del doc['export']
+    assert statuses(check.check_workload(doc))['export_fanout'] == check.FAIL
+
+
+def test_a_run_with_no_receivers_is_not_asked_about_a_fan_out():
+    assert 'export_fanout' not in statuses(
+        check.check_workload(cell_artifact()))
+
+
+# --- What review of the first version of the two checks above found ----------
+
+def test_a_short_row_still_pairs_with_its_artifact_through_the_index():
+    '''The `__short_row__` diagnostic is only reached by a row an artifact can
+    be paired with. A row written before a column was appended still pairs:
+    the missing fields are at the end, and the identity columns are 1, 4 and 5.
+    '''
+    short = {'name': 'bird 2.19.2', 'peers': '4', 'prefixes per peer': '10000',
+             '__short_row__': '20 fields against 29 columns'}
+    found, problem = indexed(short).lookup(cell_artifact())
+    assert problem is None
+    verdict, checks = check.qualify(cell_artifact(), versions(), found)
+    assert verdict == 'rejected'
+    assert statuses(checks)['stats_row'] == check.FAIL
+
+
+def test_a_row_shifted_by_a_comma_is_reported_as_malformed_not_missing():
+    '''`name` and `filters` are unquoted in the CSV, so a comma in a batch
+    label shifts every field right and `peers` is then read out of `version`.
+    Nothing can pair that row -- but reporting it as a row nobody wrote sends
+    the reader looking for a run that did happen.'''
+    shifted = {'name': 'bird 3.3.2 (a', 'peers': '3.3.2',
+               'prefixes per peer': '50',
+               '__short_row__': '30 fields against 29 columns'}
+    found, problem = indexed(shifted).lookup(cell_artifact())
+    assert found is None
+    assert 'not the header width' in problem
+
+
+def test_a_missing_row_with_no_malformed_rows_says_only_that():
+    found, problem = indexed(cell_row(peers='50')).lookup(
+        cell_artifact(peers=500))
+    assert found is None
+    assert 'header width' not in problem
+
+
+def test_an_unreachable_check_point_does_not_blame_the_receivers():
+    '''`--filter_test` and `--receivers` are a valid pair, and the check-point
+    takes no account of the policy: a policy that drops enough of the table
+    puts it out of reach for every session in the run. Naming the receivers
+    there sends the reader to the sessions rather than to the policy.'''
+    doc = export_artifact(receivers_complete=0,
+                          monitor_reached_required=False,
+                          incomplete_receivers=['bgperf_receiver%d' % i
+                                                for i in range(10)])
+    checks = check.check_workload(doc)
+    assert statuses(checks)['export_fanout'] == check.NOTE
+    assert 'the monitor did not reach' in {c.name: c.detail
+                                           for c in checks}['export_fanout']
+
+
+def test_a_stalled_receiver_is_still_a_failure_when_the_monitor_got_there():
+    doc = export_artifact(receivers_complete=9, monitor_reached_required=True,
+                          incomplete_receivers=['bgperf_receiver7'])
+    assert statuses(check.check_workload(doc))['export_fanout'] == check.FAIL
+
+
+def test_a_receiver_observed_but_not_declared_is_its_own_failure():
+    '''`_export_section()` counts the union of declared and observed receivers
+    so a wiring fault shows up in the one document that could show it. Read
+    against the requested count instead, an extra receiver that *was* served
+    fails a sound run and one that was *not* served passes.'''
+    doc = export_artifact(receivers=3)
+    doc['export'].update({'receivers': 4, 'receivers_complete': 4,
+                          'incomplete_receivers': []})
+    checks = check.check_workload(doc)
+    assert statuses(checks)['export_fanout'] == check.FAIL
+    detail = {c.name: c.detail for c in checks}['export_fanout']
+    assert 'asked for 3' in detail and 'describes 4' in detail
+
+
+def test_an_extra_receiver_that_stalled_does_not_look_complete():
+    doc = export_artifact(receivers=3)
+    doc['export'].update({'receivers': 4, 'receivers_complete': 3,
+                          'incomplete_receivers': ['bgperf_receiver3']})
+    assert statuses(check.check_workload(doc))['export_fanout'] == check.FAIL
+
+
+def test_a_churn_sequence_refused_before_its_first_burst_names_the_count():
+    '''`churn_metrics()` reads `requested_bursts` from the first burst-started
+    event, so a sequence refused before any burst publishes None -- which is
+    exactly the case this check exists to catch.'''
+    doc = churn_artifact(sequence_complete=False, completed_bursts=None,
+                         requested_bursts=None,
+                         incomplete_reason='no generator in this run can churn')
+    checks = check.check_workload(doc)
+    detail = {c.name: c.detail for c in checks}['churn']
+    assert statuses(checks)['churn'] == check.FAIL
+    assert 'None' not in detail
+    assert '0 of 3 burst(s)' in detail
+
+
+def diversity_artifact(peers=50, prefixes=100000, diversity=50,
+                       imported=5000000, best=100000, gauge=True):
+    doc = cell_artifact(peers=peers, prefixes=prefixes)
+    doc['run'] = dict(doc['run'], path_diversity=diversity)
+    if gauge:
+        doc['target_table'] = {'series': {
+            'imported_paths': {'final': imported},
+            'best_paths': {'final': best}}}
+    return doc
+
+
+def test_competing_paths_are_witnessed_by_the_targets_own_gauge():
+    checks = check.check_workload(diversity_artifact())
+    assert statuses(checks)['competing_paths'] == check.OK
+
+
+def test_a_diversity_run_that_degenerated_into_disjoint_blocks_is_rejected():
+    '''The failure no other check sees: the monitor's check-point is already
+    `groups * p`, so a run whose peers stopped competing accepts the same
+    number of routes and satisfies route_counts either way.'''
+    doc = diversity_artifact(imported=5000000, best=5000000)
+    checks = check.check_workload(doc)
+    assert statuses(checks)['competing_paths'] == check.FAIL
+    assert 'best path' in {c.name: c.detail for c in checks}['competing_paths']
+
+
+def test_a_fleet_that_offered_fewer_paths_than_configured_is_rejected():
+    doc = diversity_artifact(imported=2000000)
+    assert statuses(check.check_workload(doc))['competing_paths'] == check.FAIL
+
+
+def test_a_target_that_dropped_under_a_percent_still_passes():
+    '''WITNESS_AGREEMENT_FRACTION, not a tolerance invented here: a target does
+    not always hold everything offered to it, which is why the monitor's own
+    check-point carries a 0.99 factor.'''
+    doc = diversity_artifact(imported=4_995_000, best=99_950)
+    assert statuses(check.check_workload(doc))['competing_paths'] == check.OK
+
+
+def test_a_target_with_no_gauge_withholds_rather_than_fails():
+    '''target_table is absent for every daemon but BIRD and FRR, and FRR
+    publishes no best_paths at all.'''
+    doc = diversity_artifact(gauge=False)
+    assert statuses(check.check_workload(doc))['competing_paths'] == check.NOTE
+
+
+def test_a_run_at_the_default_diversity_is_not_asked_about_competing_paths():
+    assert 'competing_paths' not in statuses(
+        check.check_workload(cell_artifact()))

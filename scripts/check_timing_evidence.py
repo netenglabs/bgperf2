@@ -122,8 +122,23 @@ def _row_int(row, column):
 
 
 def load_rows(csv_path):
-    '''Map CSV `name` to the row, by column name.'''
-    rows = {}
+    '''Every row of one batch CSV, in file order, read by column name.
+
+    A list rather than a name-keyed mapping, which is what this returned until
+    Block 8. A run name is not a row identity: it is label, else target plus
+    version, and it deliberately carries none of the matrix axes -- so a test
+    sweeping `neighbors: [50, 250, 500]` writes three rows called `bird 3.3.2`
+    and the mapping kept whichever came last. Every artifact of that name was
+    then qualified against one arbitrary cell, and the checks that read the row
+    -- `route_counts`, `stats_row`, `contention`, `memory_guardrail` -- were
+    reported as though they described the run whose name matched. Blocks 0-7
+    each ran one cell per name, so nothing collided and nothing looked wrong;
+    the peer-scaling scenario is the campaign's first multi-valued axis, and
+    it is the axis that block exists to measure.
+
+    See `RowIndex`, which is what pairs a row with an artifact now.
+    '''
+    rows = []
     with open(csv_path, newline='', encoding='utf-8') as f:
         reader = csv.reader(f)
         try:
@@ -142,7 +157,7 @@ def load_rows(csv_path):
             if len(raw) != len(header):
                 row['__short_row__'] = '{0} fields against {1} columns'.format(
                     len(raw), len(header))
-            rows[row.get('name', '')] = row
+            rows.append(row)
     return rows
 
 
@@ -158,6 +173,181 @@ def row_name_for(artifact):
     dimension and would have to be reimplemented to be parsed.
     '''
     return (artifact.get('run') or {}).get('name') or ''
+
+
+# The CSV columns that, with the name, identify one matrix cell, paired with
+# the `run` field each is written from. `create_output_stats()` builds `peers`
+# and `prefixes per peer` from `args.neighbor_num` and `args.prefix_num`, and
+# `filters` is `args.filter_test` or the empty string -- the same three values
+# the artifact records -- so this is a lookup on both sides rather than a
+# reconstruction on either.
+#
+# These are the axes `expand_batch_cells()` iterates and the ones
+# `create_graph()` groups by. The workload controls are deliberately *not*
+# here: `--path-diversity`, `--receivers`, churn and the policy reload are in
+# the artifact stem and in `run`, and none of them is a CSV column, so two
+# cells differing only in one of those cannot be told apart in a CSV at all.
+# That is why a block runs each such scenario into its own results directory
+# rather than trusting a key to separate them, and why `RowIndex` reports an
+# ambiguous match instead of choosing.
+ROW_IDENTITY_COLUMNS = (('peers', 'peers'),
+                        ('prefixes per peer', 'prefixes_per_peer'),
+                        ('filters', 'filter_test'))
+
+
+class RowIndex(object):
+    '''The rows of a block's CSVs, paired with artifacts by cell identity.
+
+    Three outcomes, kept apart because they send a reader to different places:
+    the row, no row at all (a run that wrote an artifact and no CSV line), and
+    more than one row that the published documents cannot tell apart. The last
+    one used to be silent -- see `load_rows` -- and it is the one that produces
+    a qualified verdict describing a different run.
+    '''
+
+    def __init__(self):
+        self._by_key = {}
+        self._ambiguous = {}
+        self._malformed_rows = []
+
+    def add_rows(self, rows):
+        for row in rows:
+            # A row whose field count does not match the header is kept and
+            # flagged by `load_rows`, and `check_status` turns that flag into a
+            # precise verdict -- but only for a row an artifact can be paired
+            # with. A row that is merely *short*, written by a build before a
+            # column was appended, still pairs: the missing fields are at the
+            # end and `name`, `peers` and `prefixes per peer` are columns 1, 4
+            # and 5. A row shifted by an unquoted comma in a `label` does not,
+            # because `_key_of_row` then reads `peers` out of the `version`
+            # column. Kept so the "no CSV row" message can say that some row
+            # in this directory could not be read against the header, rather
+            # than reporting a malformed row as a missing one -- but only for
+            # the malformed rows no artifact claimed, which is why `pair_all`
+            # does every lookup before rendering any message.
+            if row.get('__short_row__'):
+                self._malformed_rows.append(row)
+            key = self._key_of_row(row)
+            if key in self._ambiguous:
+                self._ambiguous[key] += 1
+            elif key in self._by_key:
+                # Both are dropped from `_by_key`, so neither can be returned
+                # by accident: an ambiguous cell has no row, it does not have
+                # the first one found.
+                del self._by_key[key]
+                self._ambiguous[key] = 2
+            else:
+                self._by_key[key] = row
+
+    @staticmethod
+    def _key_of_row(row):
+        return ((row.get('name') or '').strip(),) + tuple(
+            (row.get(column) or '').strip()
+            for column, _ in ROW_IDENTITY_COLUMNS)
+
+    @staticmethod
+    def _key_of_artifact(artifact):
+        run = artifact.get('run') or {}
+        key = [row_name_for(artifact)]
+        for _, field in ROW_IDENTITY_COLUMNS:
+            value = run.get(field)
+            # `filter_test` is null for an unfiltered run and the column is
+            # empty for one, which is the same cell. An absent axis is not:
+            # see `_match`.
+            key.append('' if value is None else str(value))
+        return tuple(key)
+
+    def pair_all(self, artifacts):
+        """Pair every artifact with its row, then say what went wrong.
+
+        One pass over all of them rather than a lookup at a time, because the
+        diagnosis for a run with no row depends on what the *other* runs
+        claimed: a results directory can hold a malformed row that paired with
+        its own artifact perfectly well, and telling a second run that "1 row
+        here is not the header width, so one of them may be this run's" sends
+        the reader to inspect a row that is already accounted for. Doing every
+        lookup first counts only the malformed rows nobody claimed, which is
+        the only set worth naming -- and it makes the answer independent of the
+        order the directory happens to be read in.
+
+        Returns a list of `(row, problem)` in the order given; exactly one of
+        each pair is set.
+        """
+        paired = [self._match(artifact) for artifact in artifacts]
+        claimed = {id(row) for row, _ in paired if row is not None}
+        orphaned = sum(1 for row in self._malformed_rows
+                       if id(row) not in claimed)
+        return [(row, None if row is not None else self._render(reason,
+                                                                orphaned))
+                for row, reason in paired]
+
+    def lookup(self, artifact):
+        """Pair one artifact; `pair_all` for a whole directory."""
+        return self.pair_all([artifact])[0]
+
+    def _match(self, artifact):
+        """Return `(row, reason)`, where reason is a code and not yet text."""
+        run = artifact.get('run') or {}
+        missing = [field for _, field in ROW_IDENTITY_COLUMNS
+                   if field not in run]
+        if missing:
+            # An artifact from a build that predates these fields. Nothing in
+            # this campaign is one -- every block from 0 on records all three
+            # -- but a checker that raised on one would be unable to read the
+            # evidence of the runs it was written to re-examine. Fall back to
+            # the name, and only where the name alone is unambiguous.
+            return self._match_by_name(artifact, missing)
+        key = self._key_of_artifact(artifact)
+        if key in self._ambiguous:
+            return None, ('ambiguous', key, self._ambiguous[key])
+        row = self._by_key.get(key)
+        if row is None:
+            return None, ('missing', key, None)
+        return row, None
+
+    def _match_by_name(self, artifact, missing):
+        name = row_name_for(artifact)
+        matches = [row for key, row in self._by_key.items() if key[0] == name]
+        ambiguous = sum(count for key, count in self._ambiguous.items()
+                        if key[0] == name)
+        if len(matches) + ambiguous > 1:
+            return None, ('unidentifiable', (name,),
+                          (missing, len(matches) + ambiguous))
+        if not matches:
+            return None, ('missing', None, None)
+        return matches[0], None
+
+    def _render(self, reason, orphaned_malformed):
+        kind, key, extra = reason
+        if kind == 'ambiguous':
+            return self._ambiguous_detail(key, extra)
+        if kind == 'unidentifiable':
+            missing, count = extra
+            return ("this run's artifact records no {0}, and {1} CSV row(s) "
+                    'are named {2!r}; the row cannot be identified'.format(
+                        ', '.join(missing), count, key[0]))
+        detail = ('no CSV row named by this run'
+                  if key is None else
+                  'no CSV row for {0}'.format(self._describe(key)))
+        if orphaned_malformed:
+            detail += ('; {0} row(s) here are not the header width and were '
+                       "claimed by no run, so one of them may be this run's, "
+                       'written by a build with a different column set or '
+                       'shifted by an unquoted comma in a label'.format(
+                           orphaned_malformed))
+        return detail
+
+    @staticmethod
+    def _describe(key):
+        parts = ['{0!r}'.format(key[0])]
+        for (column, _), value in zip(ROW_IDENTITY_COLUMNS, key[1:]):
+            parts.append('{0} {1!r}'.format(column, value))
+        return ', '.join(parts)
+
+    def _ambiguous_detail(self, key, count):
+        return ('{0} CSV rows share {1}, so no row identifies this run; run '
+                'each workload into its own results directory, or give its '
+                'targets distinct labels'.format(count, self._describe(key)))
 
 
 def check_provenance(artifact, versions):
@@ -212,7 +402,7 @@ def check_provenance(artifact, versions):
     return checks
 
 
-def check_status(artifact, row):
+def check_status(artifact, row, row_problem=None):
     checks = []
     status = artifact.get('status')
     if status == 'converged':
@@ -221,7 +411,11 @@ def check_status(artifact, row):
         checks.append(Check('status', FAIL,
                             'run status is {0!r}'.format(status)))
     if row is None:
-        checks.append(Check('stats_row', FAIL, 'no CSV row named by this run'))
+        # `row_problem` says which of the two it is -- no row, or several the
+        # published documents cannot separate. Both leave every row-derived
+        # check unmade, and they send a reader to different places.
+        checks.append(Check('stats_row', FAIL,
+                            row_problem or 'no CSV row named by this run'))
         return checks
     if row.get('__short_row__'):
         checks.append(Check('stats_row', FAIL,
@@ -1017,6 +1211,217 @@ def describe_tester_health(health, errors, timeouts):
         detail, len(found), kind, shown)
 
 
+def check_workload(artifact):
+    """Did the post-convergence workload the run asked for actually happen?
+
+    Every other check here reads the delivery of the table. A churn sequence, a
+    policy reload and an export fan-out are separate work the run was asked to
+    do *after* that, and none of them reaches the row: `elapsed (s)`,
+    `received` and the resource columns are all settled before the first burst
+    or the reload command, deliberately, so that what a burst cost does not
+    move the column describing the delivery.
+
+    The consequence is that a run which converged and then issued no burst at
+    all is, in the CSV, an ordinary row. `bench()` writes the reason into
+    `MSG` without setting the `failed` flag -- correctly, since the convergence
+    measurement stands -- and `check_status()` reads `MSG` only for a row
+    already marked failed. So before this check, a churn cell whose every
+    burst was lost and a reload that never applied both qualified, and the
+    block that asked for them was stamped as having met an exit criterion
+    phrased in terms of "operation evidence".
+
+    Keyed on what the run *asked* for, never on which sections are present: a
+    section that is missing is exactly the failure worth catching, and reading
+    the artifact's own sections as the list of things to check would make an
+    absent one unfalsifiable.
+    """
+    checks = []
+    run = artifact.get('run') or {}
+
+    if run.get('churn_prefixes'):
+        section = artifact.get('churn')
+        requested = run.get('churn_bursts')
+        if not section:
+            checks.append(Check('churn', FAIL,
+                                'asked for {0} burst(s) of {1} prefix(es) and '
+                                'published no churn section'.format(
+                                    requested, run['churn_prefixes'])))
+        elif not section.get('sequence_complete'):
+            # `requested` here is the run's own `churn_bursts`, not the
+            # section's `requested_bursts`. `churn_metrics()` reads that from
+            # the first CHURN_BURST_STARTED event, so a sequence refused
+            # *before* its first burst -- no generator that can churn, or a
+            # block larger than the converged table -- publishes None, and the
+            # message would read "0 of None burst(s)" in precisely the case
+            # this check exists to catch.
+            checks.append(Check('churn', FAIL,
+                                '{0} of {1} burst(s) completed: {2}'.format(
+                                    section.get('completed_bursts') or 0,
+                                    requested,
+                                    section.get('incomplete_reason')
+                                    or 'no reason published')))
+        else:
+            checks.append(Check('churn', OK,
+                                '{0} burst(s), {1} distinct prefix(es) '
+                                'withdrawn and re-announced each'.format(
+                                    section.get('completed_bursts'),
+                                    section.get('distinct_withdrawals'))))
+
+    if run.get('policy_reload_blocks'):
+        section = artifact.get('policy_reload')
+        # `reload_complete`, not `complete`: `policy_reload_metrics()` derives
+        # a `complete` off the event stream and the evidence key is the other
+        # one, which is why `_policy_reload_section()` refuses a caller that
+        # lands on the derived name.
+        if not section:
+            checks.append(Check('policy_reload', FAIL,
+                                'asked to reject {0} block(s) and published '
+                                'no policy_reload section'.format(
+                                    run['policy_reload_blocks'])))
+        elif not section.get('reload_complete'):
+            checks.append(Check('policy_reload', FAIL,
+                                'reload did not complete: {0}'.format(
+                                    section.get('incomplete_reason')
+                                    or 'no reason published')))
+        else:
+            checks.append(Check('policy_reload', OK,
+                                '{0} block(s) rejected, {1} accepted '
+                                'prefix(es) became {2}'.format(
+                                    section.get('rejected_blocks'),
+                                    section.get('accepted_before'),
+                                    section.get('accepted_after'))))
+
+    diversity = run.get('path_diversity') or 1
+    if diversity > 1:
+        checks.extend(_competing_path_checks(run, artifact, diversity))
+
+    receivers = run.get('receivers')
+    if receivers:
+        section = artifact.get('export')
+        if not section:
+            checks.append(Check('export_fanout', FAIL,
+                                'asked for {0} receiver(s) and published no '
+                                'export section'.format(receivers)))
+        elif section.get('unmeasured_reason'):
+            # The fan-out happened -- the receivers exist, hold the table and
+            # cost the target its export work -- and only the *timing* was
+            # withheld, by name. A run that asks for a post-convergence
+            # workload beside it is the case that does this, and it is a
+            # published refusal rather than a failed measurement.
+            checks.append(Check('export_fanout', NOTE,
+                                '{0} receiver(s); export timing withheld: '
+                                '{1}'.format(receivers,
+                                             section['unmeasured_reason'])))
+        elif section.get('receivers') != receivers:
+            # `_export_section()` counts the union of the receivers declared in
+            # the scenario and the ones actually observed, deliberately: "a
+            # receiver observed but not declared is a wiring fault, and
+            # dropping its intervals here would hide it in the one document
+            # that could show it". So a disagreement is that fault, and it is
+            # reported as itself -- reading `receivers_complete` against the
+            # *requested* count instead would answer it twice wrongly, failing
+            # a run where an extra receiver was served and passing one where an
+            # extra receiver was not.
+            checks.append(Check('export_fanout', FAIL,
+                                'the run asked for {0} receiver(s) and the '
+                                'export section describes {1}'.format(
+                                    receivers, section.get('receivers'))))
+        elif not section.get('monitor_reached_required'):
+            # An incomplete fan-out is only a finding about the receivers if
+            # the table was reachable at all. The check-point takes no account
+            # of a `--filter_test` policy, so a policy that drops enough of the
+            # table puts it out of reach for every session in the run,
+            # receivers and monitor alike -- and naming the receivers there
+            # sends the reader to the sessions rather than to the policy.
+            # `monitor_reached_required` is what `export_metrics()` publishes
+            # for this consumer.
+            checks.append(Check('export_fanout', NOTE,
+                                '{0} receiver(s); the monitor did not reach '
+                                'the {1}-prefix check-point either, so the '
+                                'fan-out cannot be judged against it'.format(
+                                    receivers,
+                                    section.get('required_prefixes'))))
+        elif section.get('receivers_complete') != receivers:
+            checks.append(Check('export_fanout', FAIL,
+                                '{0} of {1} receiver(s) held the table by '
+                                'convergence; not served: {2}'.format(
+                                    section.get('receivers_complete'),
+                                    receivers,
+                                    ', '.join(section.get(
+                                        'incomplete_receivers') or [])
+                                    or 'none named')))
+        else:
+            checks.append(Check('export_fanout', OK,
+                                '{0} of {0} receiver(s) held {1} prefix(es); '
+                                'spread {2}'.format(
+                                    receivers,
+                                    section.get('required_prefixes'),
+                                    _duration(section.get('export_spread_s')))))
+
+    return checks
+
+
+def _duration(value):
+    return 'unresolved' if value is None else '{0:.3f}s'.format(value)
+
+
+def _competing_path_checks(run, artifact, diversity):
+    """Did `--path-diversity` actually make the peers compete?
+
+    The failure this catches is silent in every other check. A diversity run
+    that degenerated into the disjoint blocks every other synthetic run uses
+    would accept the same number of routes, converge, and satisfy
+    `route_counts` -- because the monitor's check-point is already `groups * p`
+    and `received` would be the same number either way. What separates the two
+    is the target's own gauge: `imported_paths` counts every path it holds,
+    losers included, while `best_paths` counts the prefixes holding a selected
+    best path. Competing, those differ by the diversity; disjoint, they are
+    equal.
+
+    A daemon with no gauge withholds them, and that is a NOTE rather than a
+    failure: `target_table` is absent for every daemon but BIRD and FRR, and
+    FRR deliberately publishes no `best_paths` at all, so failing here would
+    reject a correct run for a measurement its target cannot make.
+    """
+    peers = run.get('peers')
+    prefixes = run.get('prefixes_per_peer')
+    if not peers or not prefixes:
+        return [Check('competing_paths', NOTE,
+                      'the run records no peer or prefix count, so a '
+                      'diversity of {0} cannot be checked'.format(diversity))]
+    series = ((artifact.get('target_table') or {}).get('series') or {})
+    imported = (series.get('imported_paths') or {}).get('final')
+    best = (series.get('best_paths') or {}).get('final')
+    if imported is None or best is None:
+        return [Check('competing_paths', NOTE,
+                      'diversity {0}, and this target publishes no {1} gauge, '
+                      'so the competing paths cannot be witnessed'.format(
+                          diversity,
+                          'best-path' if imported is not None else 'table'))]
+    want_paths = peers * prefixes
+    want_best = (peers // diversity) * prefixes
+    faults = []
+    # `WITNESS_AGREEMENT_FRACTION` rather than a tolerance invented here: it is
+    # the same 1% `convergence.DROP_FRACTION` already used to decide that two
+    # counts of one table agree, and a target does not always hold everything
+    # offered to it -- which is why the monitor's own check-point carries a
+    # 0.99 factor.
+    if abs(imported - want_paths) > want_paths * WITNESS_AGREEMENT_FRACTION:
+        faults.append('holds {0} path(s) against the {1} offered'.format(
+            imported, want_paths))
+    if abs(best - want_best) > want_best * WITNESS_AGREEMENT_FRACTION:
+        faults.append('selected {0} best path(s) against the {1} distinct '
+                      'prefix(es) {2} group(s) offer'.format(
+                          best, want_best, peers // diversity))
+    if faults:
+        return [Check('competing_paths', FAIL,
+                      'diversity {0}: the target {1}'.format(
+                          diversity, '; and '.join(faults)))]
+    return [Check('competing_paths', OK,
+                  'diversity {0}: {1} path(s) held for {2} selected '
+                  'prefix(es)'.format(diversity, imported, best))]
+
+
 def check_host(artifact, row, health=None):
     '''Contention and memory, from the row and from the run's own findings.
 
@@ -1263,12 +1668,13 @@ def check_instrument(artifact):
 
 def qualify(artifact, versions, row, expect_limiting=None,
             expect_mbit=None, tolerance=DEFAULT_EGRESS_TOLERANCE,
-            health=None):
+            health=None, row_problem=None):
     checks = []
     checks.extend(check_provenance(artifact, versions))
-    checks.extend(check_status(artifact, row))
+    checks.extend(check_status(artifact, row, row_problem))
     checks.extend(check_events(artifact))
     checks.extend(check_testers(artifact))
+    checks.extend(check_workload(artifact))
     checks.extend(check_host(artifact, row, health))
     checks.extend(check_findings(artifact))
     checks.extend(check_instrument(artifact))
@@ -1339,14 +1745,15 @@ def main(argv=None):
             parser.error('unknown limiting component(s): '
                          + ', '.join(unknown))
 
-    rows = {}
+    rows = RowIndex()
     for entry in sorted(os.listdir(args.results_dir)):
         if entry.endswith('.csv'):
-            rows.update(load_rows(os.path.join(args.results_dir, entry)))
+            rows.add_rows(load_rows(os.path.join(args.results_dir, entry)))
 
     artifacts = sorted(e for e in os.listdir(args.results_dir)
                        if e.endswith('.events.json'))
     results = []
+    readable = []
     for entry in artifacts:
         path = os.path.join(args.results_dir, entry)
         artifact = load_json(path)
@@ -1354,16 +1761,22 @@ def main(argv=None):
             results.append({'artifact': entry, 'verdict': 'unreadable',
                             'checks': []})
             continue
+        readable.append((entry, path, artifact))
+
+    # Every artifact is paired before any of them is judged; see pair_all.
+    pairings = rows.pair_all([doc for _, _, doc in readable])
+    for (entry, path, artifact), (row, row_problem) in zip(readable, pairings):
         stem = path[:-len('.events.json')]
         versions = load_json(stem + '.versions.json')
         # Written only when a count is nonzero, and by builds from 2026-09-11
         # onward. None covers both, and the detail says which.
         health = load_json(stem + '.tester-health.json')
-        name = row_name_for(artifact)
-        verdict, checks = qualify(artifact, versions, rows.get(name),
+        verdict, checks = qualify(artifact, versions, row,
                                   expect_limiting, args.expect_egress_mbit,
-                                  args.egress_tolerance, health)
-        results.append({'artifact': entry, 'run': name, 'verdict': verdict,
+                                  args.egress_tolerance, health,
+                                  row_problem=row_problem)
+        results.append({'artifact': entry, 'run': row_name_for(artifact),
+                        'verdict': verdict,
                         'checks': [c.as_dict() for c in checks]})
 
     for result in results:

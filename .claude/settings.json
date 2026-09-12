@@ -15,6 +15,16 @@
           }
         ],
         "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
+            "command": "sh \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/invariants-guard.sh\"",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit|Write|Bash"
       }
     ],
     "SessionStart": [

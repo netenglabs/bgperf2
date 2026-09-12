@@ -574,7 +574,9 @@ Each phase should be a reviewable change set. Before committing:
 3. Run a real benchmark only when the phase requires Docker verification.
 4. Review the working and staged diff.
 5. State explicitly whether a real benchmark was run.
-6. Keep `AGENTS.md` and `CLAUDE.md` aligned when the operator contract changes.
+6. Keep the operator contract current where it lives: the `measurement-implementation`
+   skill (`.claude/skills/measurement-implementation/SKILL.md`), named from `CLAUDE.md`'s
+   contract table. `AGENTS.md` is a symlink to `CLAUDE.md` and needs no aligning.
 
 ## Continuation Prompt Contract
 

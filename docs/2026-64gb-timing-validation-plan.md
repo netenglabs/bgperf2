@@ -550,7 +550,8 @@ Three things the block cost, stated rather than left in the artifacts:
   config predicted: 37.4 GB peak, `min free mem` 12.4 GB, which is 20.2% of the
   61.44 GB host against a 20% floor. It ran alone, like every cell. Nothing
   swapped. Its own tester logs are the other pressure: one run of this shape
-  writes ~23 GB into the work directory, against the ~5 GB `CLAUDE.md` records,
+  writes ~23 GB into the work directory, against the ~5 GB
+  `docs/invariants/host-and-environment.md` records,
   so a block needs headroom nearer 25 GB per cell.
 
 ### Block 3: high-load synthetic repetition 2 of 3 -- **accepted 2026-09-10**

@@ -12,8 +12,26 @@ rather than replaces, and no mention at all of the last seven change sets — ev
 repetitions, order control and `summary.py`. None of that looked wrong from inside the file. A
 document that is confidently out of date is worse than no document, because it is followed.
 
-So: do not recreate a condensed agent file. If this one is too long for some harness, shorten *this*
-one.
+So: **do not recreate a condensed agent file.** That rule is about a second *copy* — a summary
+living beside the thing it summarises, free to drift in silence. It is not a rule against this file
+having parts, and since 2026-09-12 it has three:
+
+- **this file**, always loaded: the rules, the shape of the system, and an index naming every
+  invariant there is;
+- **`docs/invariants/*.md`**, which hold the argument for each of those invariants and the
+  measurement that settled it. They were *moved* there, not duplicated; nothing was left behind but
+  the index line, and a `PreToolUse` hook names the right document whenever the source it governs is
+  about to be edited, so following it is not the model's to skip. **That last part holds for Claude
+  Code only** — Codex reads this file through the `AGENTS.md` symlink but loads neither
+  `.claude/skills/` nor the hook, so for it the index below and the skill files are ordinary
+  documents it has to choose to open.
+- **`.claude/skills/*`**, one per operator contract, loaded in full when its trigger phrase is said.
+
+What made the old `AGENTS.md` dangerous was that it could go on looking right while saying something
+different from the source. An index line cannot, because it names a document and a rule rather than
+restating one, and `tests/test_docs_index.py` fails if a document is missing, unindexed, or no
+longer governs anything. If this file is still too long for some harness, shorten *this* one — do
+not fork it.
 
 
 ## rules
@@ -177,1547 +195,139 @@ renders a recipe without building it (`Container.render_dockerfile`, which short
 A bare `prepare` builds only the unversioned images; version lists are opt-in behind `-t`, since
 `FRRoutingCompiled.VERSIONS` alone is four full compiles. It prints its plan and skips what exists.
 
-### Peer scaling
 
-`gen_conf()` gives each neighbour its own `gen_paths(p)` off one shared iterator, so peers get
-*disjoint* prefixes and the table is `n * p`. **Session count and table size are therefore one
-axis**, and every synthetic matrix in `benchmarks/` sweeps both at once: `2026-core-synth.yaml`'s
-`neighbors: [10, 50]` x `prefixes: [50_000, 100_000]` holds 500k, 1M, 2.5M and 5M routes, so
-nothing downstream can separate "50 sessions were slower" from "five times the routes were slower".
+### The invariants index
+
+The documents under `docs/invariants/` hold the rules for the measurement and orchestration
+layers. They were **moved** out of this file, not summarised away: the argument and the measurement
+that settled each one are in the document, and a `PreToolUse` hook
+(`.claude/hooks/invariants-guard.sh`) names the relevant file whenever one of the sources it
+governs is about to be edited, so the pointer is not the model's to skip. Each line below exists so
+you know a rule is there; none of them is the rule.
+
+Each document states the sources it governs on its own `**Read this before editing:**` line, and
+**that line is the mapping** — the guard reads it rather than carrying a copy, so a document that
+starts governing another module says so in one place. The first version of the guard did carry its
+own table, and review found it had already drifted from three documents and matched four modules
+nowhere at all; `tests/test_docs_index.py` now runs the guard against every module every document
+claims.
+
+**`docs/invariants/workload-controls.md`** — `bgperf2.py` argument guards, `check_batch_test()`,
+`bench_output_prefix()`; `base.py`'s `gen_conf()`/`gen_paths()`/`scenario_neighbors()`; `churn.py`;
+`policy.py`; `bird.py`.
+
+- Session count and table size are one axis. `--prefix-scope total`, `--path-diversity D`,
+  `--receivers N`, `--churn-prefixes C`/`--churn-bursts B`, `--policy-reload-blocks N` and
+  `--threads N` are the controls that separate them, and each is refused for a named list of things.
+- **A rule that refuses something must be applied at every entry point, and there are four**:
+  `bench`, `bench -f`, `config`, and `batch`, which synthesizes args and bypasses argparse *and*
+  `bench`'s own guards. The peer-scaling change got this wrong seven times in review.
+- A batch *test* key written under a *target* is refused; a batch target's defaults are **read**
+  through `batch_target_field()` and never written into the target dict, because that dict is the
+  cell identity. A default needs its own guard.
+- Every dimension a batch iterates must reach `bench_output_prefix()`, or two cells overwrite each
+  other's artifacts.
+- No call that asks the world may run before the guards that read only the command line.
+
+**`docs/invariants/batch-passes.md`** — `bgperf2.py`'s `expand_batch_cells()`/`batch_report_rows()`/
+`create_batch_graphs()`, `summary.py`, `graphs.py`.
+
+- A repetition repeats the whole matrix, not each cell, and is part of a run's *name*, never a
+  column beside it.
+- A cell id says what the cell is, never when it ran; execution order is not report order.
+- Nothing absent is published as a zero: a withheld statistic is `null` with its reason beside it,
+  and an unsampled extreme is not an observation.
+- **A pass that failed and a pass that has not run are never described by one clause**, at any level
+  of aggregation. Collapsed three times.
+- `summary.py` reads the stats row by column name and must not import `bgperf2`.
+
+**`docs/invariants/target-state.md`** — `frr.py`, `bird.py`, `gobgp.py`, `base.py`'s
+`sample_target_state()`, `measurements.py`'s `target_table_section()`/`delivery_metrics()`,
+`scripts/check_timing_evidence.py`.
+
+- **Never read a BIRD stats table positionally.** BIRD 3 inserts columns, which made every BIRD 3
+  target report `accepted` 0 for every neighbour, silently.
+- FRR's End-of-RIB log read must stay incremental and key its restart reset on **inode**: a 1 GB
+  `bgpd.log` cost 4.14s per 1s poll and the run never finished.
+- One CLI read per poll serves the neighbour counters and the table witness both — two reads are
+  two execs and, worse, two instants.
+- A daemon with no gauge reports `None`, never 0. FRR withholds `best_paths` deliberately.
+- `monitor_required_reached` is the monitor's count against the check-point; a second rule for it
+  was built, verified and backed out. `delivery_metrics()` is the sound version and carries ten
+  named refusals; `check_events()` accepts it in place of that event only for an MRT generator,
+  only for that one event, and only when it resolved.
+
+**`docs/invariants/tester-offering.md`** — `measurements.py`'s `TesterOffering`,
+`TesterEventRecorder`, `tester_metrics()`, `tester_fleet_metrics()`; `Tester.offering_stats()`;
+`tester.py`; `mrt_tester.py`; `bird.py`; `bgpdump2.py`; `exabgp.py`.
+
+- **Both poll loops stamp the sample before the read**, and the published resolution is the gap the
+  loop achieved, not the one it asked for.
+- `post_injection_tail_s` is signed and nothing clamps it.
+- A span nothing crossed is not a rate of zero.
+- One `docker exec` per poll, not one per peer; every configured peer appears in every poll, with
+  `offered=None` where the read failed.
+- A BIRD 2.19 offered count is queue-side; bgpdump2's prefix counts are encode-side and its octet
+  count wire-side. Any generator logging to a redirected stdout needs `stdbuf -oL`.
+  `--tester-trace-io` inflates the walk time it measures by 56%.
+
+**`docs/invariants/export-timing.md`** — `monitor.py`'s `Receiver`, `measurements.py`'s
+`ExportEventRecorder`, and `bgperf2.py`'s `controller_export_stats()`/`finish_bench()`.
+
+- A receiver is not a route source and not a second monitor; `Receiver.stats()` is refused.
+- One serialised round for the whole fan-out, never a thread per receiver, and **every** round waits
+  at least as long as it took.
+- This is the one sampler that does not go through the run's queue.
+- Export timing and a post-convergence workload are not measured in the same run; a run asking for
+  both keeps the fan-out and withholds the timing by name.
+- What still cannot be separated is table selection, and that is said out loud rather than folded
+  into an interval that quietly contains it.
+
+**`docs/invariants/findings.md`** — `findings.py`, the only thing allowed to name a limiting
+component, and `bgperf2.py`'s `write_event_artifact()`, which catches for it.
+
+- `inconclusive` (the deciding measurement was never made) and `unresolved` (it was made and
+  something forbids attributing it) are different refusals and must not be collapsed.
+- Half the offered table must cross the measured interval before that interval may be read as the
+  generator's send — or the generator must have timed its own send.
+- A confounder withholds the verdict, not the evidence.
+
+**`docs/invariants/host-and-environment.md`** — `contention.py`, the controller threads, and the
+`-d` warnings.
+
+- **Measure CPU as a delta between two `/proc` samples, never `ps -eo pcpu`**, which fails in both
+  directions.
+- **Never allowlist interpreters**; exclude bgperf2's own tree by pid, exclude kernel threads, and
+  charge a first-seen process rather than skipping it. Each of those three made the feature report
+  a clean machine while it was busy.
+- Every daemon a target can run must be in `BGPERF_PROCESSES`, or that target's own load is
+  published as contention.
+- The names travel with the number, and only ever together.
+- The controller threads are governed by the `controller_stop` Event and must actually stop — they
+  once did not, and bgperf was manufacturing the contention it reports.
+- The bench directory must not be in RAM, and must not be on the root filesystem.
+
+**`docs/invariants/provenance-and-verify.md`** — `Container.version_string()`,
+`collect_provenance()`, `verify`, and every module carrying a version command (`rustybgp.py` and
+`openbgp.py` included — both had the bug this document is about).
+
+- `version_string()` is the only thing to call for a version; it never guesses, and its parsers
+  match a banner rather than taking a fixed word.
+- A version command belongs on the **daemon base class**, not the `*Target` subclass, or the monitor
+  and testers cannot answer.
+- `verify` probes through `TARGET_CLASSES` **and** `TESTER_CLASSES`, never the daemon base class,
+  and a green result over zero checks must exit non-zero.
+- The three provenance columns stay last in the stats row.
+
+**`docs/invariants/convergence.md`** — `convergence.py`'s `ConvergenceTracker`, and the `bench()`
+loop that feeds it.
+
+- Four rules hold it up and each was broken once: stability is tracked on **every** sample;
+  regression is measured against the **high-water mark**, not the previous sample; a count more
+  than `DROP_FRACTION` below its peak is never reported CONVERGED however steady it looks; and the
+  target's own table witness excuses a monitor decline the target does not share — but a monitor
+  count of zero never attests, and a run the witness alone is keeping alive still ends.
 
-`--prefix-scope total` (batch: `prefix_scope: total` on a test) reads `-p` as the whole table and
-splits it across the peers instead. `benchmarks/2026-peer-scaling.yaml` is the shape it exists for.
-
-- **It is normalised to a per-peer count before anything reads it** -- in `bench()` beside the
-  image resolution, and in `expand_batch_cells()` for a batch. `-n 50 -p 100000 --prefix-scope
-  total` and `-n 50 -p 2000` are the *same workload* and must produce the same scenario (verified
-  byte-identical), the same cell identity, the same row and the same bar. Everything downstream is
-  keyed on the per-peer number: the CSV column is literally `prefixes per peer`,
-  `bench_output_prefix()` names artifacts from `prefix_num`, and `create_graph()` groups by it. A
-  scope surviving into those would be a fourth dimension in all three. The batch sets
-  `a.prefix_scope = 'per-peer'` on the synthesized args for that reason -- passing the test's scope
-  through as well would divide twice.
-- **The division must be exact, and an inexact one is refused before the first container.** A
-  remainder means the peers do not all offer the same table, so `prefixes per peer` is true of none
-  of them, each neighbour's `check-points` differs, and the monitor's stops being `n * p`.
-  `check_batch_test()` checks every (neighbors, prefixes) combination, not just the first: 1,050,000
-  divides by 10 and 25 but not by 9, and finding that out at cell three is hours lost. The message
-  names peer counts and prefix counts that would work.
-- **It is refused for the MRT testers, on the batch path as well as the CLI.** `gen_conf()` sets
-  the monitor check-point straight from `-p` for `gobgp` and `bgpdump2`, so it is already the whole
-  table. Refusing it only on the CLI let a batch divide a 1.05M-prefix MRT table by its peer count
-  and report CONVERGED at a tenth of it, silently -- `check_batch_test()` therefore reads the
-  tester from the test's targets, and one MRT target refuses the whole test, since `prefixes` is a
-  single axis shared by every target.
-
-**A rule that refuses something must be applied at every entry point, and there are four:**
-`bench`, `bench -f`, `config`, and `batch` (which synthesizes args and so bypasses argparse *and*
-`bench`'s own guards for anything it pins). The peer-scaling change got this wrong seven times in
-review, each time refusing on one path while another accepted it silently -- three of them in
-guards added by an earlier round of the same review, because a guard is code and gets the rule as
-wrong as the code it guards. Note `gen_conf()` routes on `tester_type not in ('exa', 'bird')`, so
-anything unrecognised is an MRT injector: a batch target's `tester_type` is validated against
-`TESTER_TYPES` (the CLI's own `choices`) because a batch target bypasses argparse. A default for a batch
-target belongs in `BATCH_FIELD_DEFAULTS` and must be **read** through `batch_target_field()`, never
-written into the target dict: that dict is part of the cell identity, so filling a default into it
-renames every completed cell of every in-flight batch. **A default needs its own guard**, because it
-can replace a loud failure with a quiet wrong answer -- defaulting `tester_type` to `bird` turned a
-target that named `mrt_file` and no generator from an immediate `invalid mrt_injector: None` into a
-synthetic run that never read the MRT file, converged, and published a row. **A `file:` target
-takes no defaults at all** (`batch_target_defaults()`): its generator is inert, but `tester_type`
-still reaches `write_provenance()` and `bench_output_prefix()`, so a default there writes
-`"tester_type": "bird"` into the manifest of a run that played back MRT. Provenance never guesses. `batch` is the path that
-matters: a CLI mistake costs one run, a batch mistake costs a matrix, and nobody is watching it.
-
-A test key written under a *target* is refused (`BATCH_TEST_ONLY_KEYS`). There is no allowlist of
-target keys -- `batch()` reads a fixed field list and ignores the rest -- and every knob an operator
-sets is a target key, so a test key one level too deep is the natural slip and fails silently:
-`prefix_scope: total` under a target runs that target at `neighbors x prefixes`, converges, and
-writes rows that read as a peer sweep.
-
-`--path-diversity D` (batch: `path_diversity: D`, a *test* key) is the other half of
-that separation: it deals the peers into groups of `D` and gives each group one shared prefix
-block, so the fleet offers `n * p` paths for `(n / D) * p` distinct prefixes and the target
-actually has to select a best path. Without it every route the target learns is the only path it
-holds for that prefix, so a run measures reception and re-advertisement and publishes it as
-convergence -- and best-path selection is one of the three things BIRD 3's worker threads exist to
-parallelise.
-
-- **The monitor's check-point counts distinct prefixes, not offered paths** (`groups * p`), since
-  the monitor reads what the target *re-advertises* and that is one best path per prefix.
-  `path_diversity_groups()` is the only place that arithmetic lives, because the block a neighbour
-  is given in `gen_conf()` and the check-point are far apart and must agree: too high never
-  converges, too low reports CONVERGED on a fraction of the table. Per-neighbour `count` stays `p`
-  -- a peer still offers `p` and the target still accepts all of them, since BGP holds the losers.
-- **The default renders the scenario it always did.** `gen_paths()` takes an optional `block` and
-  the caller omits it at diversity 1 (verified byte-identical); the cell id omits the key at the
-  default too, so an in-flight batch from an older build still resumes.
-- **The block is keyed on the count of configured neighbours, not the loop index**, which skips the
-  target's and monitor's addresses.
-- **Refused, at all four entry points, for**: an MRT generator (no paths are synthesised there),
-  `-f`/a scenario target (the file states its own paths), a diversity above the peer count, and an
-  inexact division -- the remainder group would announce a block with fewer competing paths than
-  the rest. `check_batch_test()` checks every peer count on the axis, not the first.
-- **`--prefix-scope total` and `--path-diversity` are refused together**, deliberately: "the whole
-  table" then has two readings differing by exactly `D` (paths offered vs. distinct prefixes held),
-  and the reading would decide the `prefixes per peer` column, the cell identity and every artifact
-  name. Choosing one is its own change set.
-- **It is in the artifact stem (`pd<D>`) and in `run.path_diversity`, not in the CSV.** Nothing
-  else in `bench_output_prefix()` carries it -- a disjoint run and a competing one have the same
-  peer and per-peer prefix counts -- so two tests differing only in it would overwrite each other's
-  artifacts, which is the `filter_test` failure. A `-f` run records `null`: provenance never
-  guesses about a workload bgperf2 did not build. **Both `run` blocks carry it** --
-  `write_provenance()` and `write_event_artifact()` -- because the events artifact is what
-  `findings.py` reads, and stating `peers` and `prefixes_per_peer` alone describes a table five
-  times the one the target held, uncorrectably. Same rule as `repetition`.
-- **A refusal names the fault, not the nearest rule it trips.** The scope cross-check tests against
-  `PREFIX_SCOPES`, so a typo'd `prefix_scope: totl` beside a diversity gets `unknown prefix scope`
-  from the function that owns that diagnosis, rather than being blamed on the combination -- which
-  sends the operator to remove the diversity and meet the same typo again.
-
-`--receivers N` (batch: `receivers: N`, a *test* key) is export fan-out: N sessions the
-target advertises its whole table to and which announce nothing back. Without it a run has exactly
-one export session -- the monitor -- so what a table costs to *send* and what it costs to *receive*
-have been one number in every result this tool has produced, and decoupled exports are the third
-thing BIRD 3's worker threads exist to parallelise.
-
-- **A receiver is not a route source.** It is a top-level `receivers` key in the scenario, never an
-  entry in `conf['testers']`: `get_test_counts()` reads the testers, so a receiver is never waited
-  on for a table it will never send, and the monitor's check-point and the whole ingress side do
-  not move with the receiver count. Verified: 2 peers x 10 prefixes gives `required` 19 and
-  `received` 20 with 0 receivers and with 3.
-- **It is not a second monitor.** The monitor is the single instrument every published timing is
-  read from; a second one polled into the same queue would be an unlabelled second `recved` series.
-  `Receiver(Monitor)` inherits the gobgpd config, the startup script and the establishment wait, and
-  **refuses `stats()`** so that cannot happen by accident. It *is* read --
-  `accepted_prefixes()`, see the export timing section below -- but into a recorder and an
-  artifact section of its own, never into the queue the row is built from.
-- **`Target.scenario_neighbors()` (base.py) is the one place that knows a target has three kinds of
-  session.** Eight target modules built `flatten(testers) + [monitor]` independently, and a receiver
-  added to seven of them is a target quietly exporting to fewer sessions than the run claims.
-  `sort=False` for `frr.py` and `gobgp.py`, which never sorted -- ordering in a generated config is
-  cosmetic and changing it puts an unrelated diff in front of anyone comparing against an older run.
-  `tests/test_export_fanout.py` asserts no module still builds that list by hand.
-- **Receivers are established before any generator launches**, since a session that came up mid-run
-  would take a partial table and put the export work at a moment nothing recorded. Their wait is
-  *not* folded into `monitor (s)`: that column is the instrument coming up, and a `--receivers 20`
-  run would otherwise read as a slow monitor in every row.
-- **They are removed like testers** (`bgperf_receiver<i>`), because `batch()` reuses the process per
-  cell and a leftover fails the next cell on a duplicate name.
-- **Their addresses continue the peers' own index**, so neither the address nor the AS number
-  (`1000 + i`) can collide whatever the peer count -- a separate region would be safe only until
-  someone ran enough peers to reach it.
-- Unlike `--path-diversity` and `--prefix-scope`, it is refused for **nothing** except a bad count
-  and `-f`/a scenario target: a receiver is a target-side session, so an MRT run has the same reason
-  to want fan-out as a synthetic one. Stem gets `rx<N>`, both `run` blocks record it, `-f` records
-  `null`.
-- **A receiver follows the monitor's lifecycle, not the testers'.** `--repeat` reuses the *tester*
-  containers and has never reused the monitor: `Container.run()` removes and recreates anything it
-  finds by name, and the target is rebuilt under `-r` too, so every receiver session has to re-peer
-  regardless. Receivers are therefore built and established on **every** run. Skipping them under
-  `-r` -- the first version -- meant the count the target was configured for, the count in the
-  artifact name and the count in both manifests were three claims about sessions that did not
-  exist, and the establishment wait that keeps the export work from landing mid-run went with them.
-  `surplus_receiver_names()` covers the one case recreating by name does not: a run asking for fewer
-  than the last built leaves the rest up, `--repeat` skips `remove_old_containers()`, and a
-  dynamic-neighbour target's `neighbor range 10.0.0.0/8` accepts every one of them.
-- **No call that asks the world may run before the guards that read only the command line.**
-  `bench()`'s argument guards are covered by a suite that deliberately needs no Docker daemon, so a
-  Docker call ahead of them makes that suite depend on machine state -- it went green or red
-  according to whether a verification run had left receiver containers up. `target_image()` was
-  doing the same thing and older: a mistyped `-p` was answered by `ImageNotBuilt` on a host with no
-  daemon or no built image rather than by the typo. Image resolution now sits after every pure guard
-  and still above the teardown, which is the invariant
-  `test_image_resolves_before_containers_are_torn_down` was always about.
-- **The fan-out is in `min free mem (GB)`, and that column feeds a confounder.** Each receiver holds
-  its own copy of the table on the same host, and a low value becomes `findings.py`'s
-  `low_free_memory`, which withholds `limiting_component` -- so a run can be told its intervals
-  include page pressure caused by memory it consumed on purpose. `describe_export_fanout_cost()`
-  says so before the run and deliberately **does not estimate the size**, for the reason
-  `LOG_SPACE_FLOOR_GB` is not an estimate: what a GoBGP holds per route depends on the paths, and an
-  invented number gets quoted back as though it had been measured.
-- **A `-f` scenario's own `receivers` key is validated where the file is parsed**
-  (`scenario_receivers()`). `resolve_receivers()` guards every path that *builds* a scenario; this
-  guards the one path that is handed one, so `receivers: 3` written into a scenario file is refused
-  by name instead of reaching `enumerate()` as a bare `TypeError`.
-
-`--churn-prefixes C` and `--churn-bursts B` (batch: `churn_prefixes` / `churn_bursts`, *test* keys)
-are the fourth workload control: once the run has converged, the last `C` prefixes of every peer's
-own list are withdrawn and re-announced, `B` times. Every run this tool has published measures a
-table arriving at a daemon that has never seen it, and a router spends almost none of its life
-doing that -- it spends it holding a table while parts of it move, which is removing routes from a
-loaded table, re-running best-path selection for every prefix that had a competing path, and
-withdrawing and re-advertising on every export session.
-
-- **A burst is switched, not reconfigured.** The block goes into a `protocol static churn` of its
-  own in each peer's generator config and a burst is `birdc -s <sock> disable churn` / `enable
-  churn`, one `docker exec` for the whole fleet. A `configure` would re-read the whole file --
-  several hundred thousand static routes on a real run -- so the interval measured would be BIRD
-  parsing its own config rather than the target reacting to a withdrawal. Verified on
-  `bgperf/bird:2.19.2` and `:3.3.2`: both answer exactly `churn: disabled` / `churn: enabled`, and
-  `churn: already disabled` for a protocol in that state, which is **not** success -- the sequence
-  alternates, so reaching a `disable` on an already-disabled protocol means the previous `enable`
-  was lost.
-- **The block is the tail of each peer's own list.** A sampled block would need a seed, and a seed
-  is a fourth dimension in the cell identity, the stem and the manifest -- what `--prefix-scope`
-  and `--path-diversity` both refuse to become. Taking the tail also keeps the block *shared* under
-  `--path-diversity`: peers in a group are handed the same list, so they churn the same prefixes
-  and the target loses the prefix rather than falling back to a surviving path. That is why the
-  monitor-visible count is `groups * C` and not `n * C`; `churn_operation_counts()` publishes both,
-  because reporting only the second understates a diversity-5 fleet's work fivefold.
-- **The two halves of a burst are timed separately.** Dropping routes and re-selecting/re-exporting
-  them are different mechanisms and the second is one of the three BIRD 3 parallelises, so one
-  end-to-end number would hide what the workload exists to expose. `burst_s` *is* their sum -- the
-  withdrawal's end and the re-announcement's start are one event -- and is published so a reader
-  need not add two rounded numbers, never as a third measurement.
-- **An interval of one poll is an upper bound, not a duration.** Both halves are bounded below by
-  one poll by construction -- the command is issued just after a sample and the soonest it can be
-  seen is the next. The printed line says `within the 1.0s poll resolution` for that case, on the
-  same rule `print_tester_metrics()` applies to a sub-poll injection, reached from the other side.
-- **A burst nobody performed is caught when it is issued.** `churn_failures()` checks every
-  session's reply against the sessions asked about (not against the sections that came back), so a
-  lost withdrawal is named immediately instead of arriving `CHURN_STALL_SAMPLES` later as a stall
-  that reads as a stuck target.
-- **A collapsed count is not a withdrawal.** Completion is `accepted <= converged - groups * C`,
-  and a post-convergence sample of 0 -- a session that flapped, a target that restarted -- satisfies
-  that for every block there is. Read as a withdrawal it would stamp the burst complete, issue the
-  re-announcement against a table that never lost the block, and publish the session re-learning the
-  whole table as `reannounce_s`. A count more than `CHURN_COLLAPSE_FRACTION` of the converged count
-  below the floor fails the sequence by name instead, in either phase and between bursts --
-  `ConvergenceTracker`'s `DROP_FRACTION` rule on the other side of convergence. The message names
-  the phase, and distinguishes a collapse before the first burst from one between bursts, for the
-  reason the stall message names its phase: the three send the reader to different logs.
-- **A run that asked for churn and issued none still says so**, and that fallback lives in
-  `write_event_artifact()` rather than at the `FAILED` branch that needs it. That branch is inside
-  `bench()`'s monitor loop, which no Docker-free test can drive, so a fix written there passed the
-  whole suite when review deleted it again. Anything that builds a run's document gets the
-  fallback; a caller that supplies real evidence always wins.
-- **`MSG` is rewritten through `row_message()`** -- commas to `;`, whitespace folded -- because a
-  churn failure quotes birdc's own reply and `syntax error, unexpected CF_SYM_UNDEFINED, expecting
-  CF_SYM_KNOWN` is two extra CSV fields, shifting `filters`, `max foreign cpu %` and all three
-  provenance columns. Same rule as `Container.version_string()`. **`name` and `filters` are still
-  unguarded**, which is pre-existing: a comma in a batch `label` shifts the row the same way, and
-  the fix there is a guard in `check_batch_run_names()` rather than a rewrite, since a label also
-  names every artifact the run writes.
-- **The withdrawal target is exact, and a target that never held part of the block stalls rather
-  than being tolerated.** Completion is `accepted <= converged - groups * C`, so a target holding
-  fewer prefixes than the fleet offered -- the reason the monitor check-point carries a 0.99 factor
-  in the first place -- can leave that count unreachable if any of the missing prefixes fall in the
-  tail. The stall message names the count it held and the count it wanted, which is diagnosable; a
-  tolerance would have to be a number nobody measured, and it would let a burst that only half
-  landed be published as complete.
-- **The published row describes the delivery, not the churn.** `elapsed (s)` is settled before the
-  first burst, and the churn loop drains every other producer's queue messages without acting on
-  them, so `max cpu %`, `max mem (GB)` and `min free mem (GB)` do not move with a burst's peak.
-  `total time` *does* include churn, since it is wall clock. What a burst cost is in
-  `<prefix>.events.json`'s `churn` section, per burst.
-- **A sequence that did not complete leaves the run converged and says so in `MSG`.** The
-  convergence measurement is real and marking the row FAILED would corrupt `elapsed (s)`, which is
-  computed on the CONVERGED path; but a batch of churn cells whose rows all read as ordinary would
-  say nothing about the second workload. `summary.py` reads `MSG` only for a row marked failed, so
-  no summary changes.
-- **Refused, at all four entry points, for**: any generator but synthetic `bird` (the handle is
-  BIRD's own `birdc`), `-f`/a scenario target, `-r/--repeat` (which builds no tester objects at
-  all, so nothing would issue the burst and nothing rewrites the generator config the churn
-  protocol lives in -- the `--receivers` shape one round earlier), a block larger than the per-peer
-  count *after* `--prefix-scope total` has divided, a burst count with no block, and
-  `--filter_test` (a policy that drops part of the block makes the burst's completion count
-  unreachable, so a correctly filtered run would be published as a stalled one -- a deferred
-  definition, like `total` under `--path-diversity`). `check_batch_test()` checks every
-  (generator, filter, peers, prefixes) combination, not the first.
-- **One rule cannot be checked before the run**: the converged count is not known until the table
-  is delivered, so a run that accepted fewer prefixes than it offered can reach a block the flag
-  guards passed. `ChurnBurstTracker` refuses it there and the sequence is reported incomplete
-  rather than raising -- by then the convergence measurement is the thing being preserved.
-- Stem gets `ch<C>x<B>`, both `run` blocks record both numbers, `-f` records `null`. Not a CSV
-  column, for the reason `--path-diversity` is not.
-
-`--policy-reload-blocks N` (batch: `policy_reload_blocks: N`, a *test* key) is the fifth workload
-control and the last of Phase 5A's: once the run has converged, an import policy rejecting the last
-`N` of the fleet's prefix blocks is installed on the target and applied with that daemon's own
-reload command. Churn makes a converged table move; this makes the *policy over* a converged table
-move, which is the thing an operator does most often and the thing nothing here has measured. The
-daemon re-reads its config, re-evaluates its import policy against routes it already holds, and
-withdraws the rejected ones from every export session, with the sessions staying up.
-
-- **The workload is stated in blocks, not peers, and whole blocks are rejected.** A block is the
-  group `--path-diversity` deals the fleet into -- one peer per block at the default. Rejecting
-  *part* of a shared block leaves the prefix behind a surviving path, so the target does real
-  best-path work and the monitor's count does not move at all: the reload could never be observed
-  to complete. Same reason `split_churn_paths()` shares its block, reached from the other side.
-- **The blocks are the tail, so there is no seed** -- churn's determinism rule. The set is
-  rebuildable from the peer count, the diversity and the block count alone, and is published as
-  `rejected_peer_asns` so nobody has to. The peers are ordered by **AS**, not by mapping order: a
-  scenario is YAML and a mapping's order is not part of what the file means, while `gen_conf()`
-  assigns the address and the AS from the same index it keys the diversity block on.
-- **The expected count is exact and measured down from what the run converged on**, not from what
-  the fleet offered -- the check-point's 0.99 factor exists because a target does not always hold
-  everything offered to it. A target missing prefixes that fall *inside* a rejected block stalls,
-  naming both counts, on `ChurnBurstTracker`'s rule: a tolerance would have to be a number nobody
-  measured, and it would let a half-applied policy be published as an applied one.
-- **`command_s` is published beside `reload_s`, never as it.** Measured on 3.3.2, `birdc configure`
-  returns in ~20ms while the table drains over the following polls, so one number would credit the
-  daemon with an instant reload. The started event is dated to the *sample* the reload was issued
-  from rather than to the command's return -- the rule both poll loops already follow.
-- **The CPU across the interval is the measurement, and an unsampled interval is `null`.**
-  Re-evaluating a table is mostly CPU, and a reload finishing inside one poll would otherwise have
-  no measurement beyond "it happened". Samples come from the target's existing stats thread and stay
-  in the artifact -- `max cpu %` still describes the delivery, on churn's rule. `0.0` would publish
-  an interval too short to sample as a daemon that did no work; those are different findings.
-- **A collapsed count is not an applied policy**, in either phase, and the message names which.
-  `DROP_FRACTION` and `CHURN_COLLAPSE_FRACTION` on a third side of convergence. Rejecting *every*
-  block is refused up front for the same reason: an empty table cannot be told from an empty session.
-- **What BIRD does was measured, not assumed** (2.19.2 and 3.3.2, two peers each). `birdc configure`
-  holds the sessions up -- `Since` unchanged, both Established -- so these runs belong in the
-  no-reset comparison `docs/policy-testing-plan.md`'s P4 asks for. But neither series re-evaluates
-  purely locally: both answer a changed import filter by asking their peers for a route refresh, and
-  each generator's `Export updates` doubled. `reload_s` therefore covers re-import as well as
-  re-decision. Recorded as `mechanism` and `session_preserving` rather than hidden, and not
-  comparable with a daemon that re-filters from its own stored routes.
-- **Refused for**: a target with no reload mechanism (only BIRD has one -- read through
-  `Target.SUPPORTS_POLICY_RELOAD`, never a list of names), an MRT generator (the policy selects a
-  block by the peer AS bgperf2 assigned, and an injector replays the file's own paths), `-f`/a
-  scenario target, `--filter_test` (the target's import filter is already the policy under test and
-  the reload is written into the same place, so the run would change two policies at once), a churn
-  workload, and a block count covering every block. `check_batch_test()` checks every
-  (target, filter, peers) combination, not the first.
-- **Refused alongside churn, deliberately**: both run against the converged table off the same
-  monitor samples, so running both means fixing an order, and the second would take the first's
-  outcome as its baseline with nothing in the row, the stem or the manifest saying which ran first.
-  A deferred definition, like `total` under `--path-diversity`.
-- **Refused under `-r/--repeat` too**, for a different reason than churn's. Churn needs the
-  *generator* config rewritten; a reload is target-side and the target is rebuilt anyway, so the
-  first version accepted `-r`. What breaks is the completion count: it is `blocks x prefixes per
-  peer`, and repeat reuses whatever tester containers it finds while regenerating the scenario, so
-  `-p` need not be what the generators are announcing. Measured -- `-n 4 -p 1000 -r` behind a
-  `-p 10000` run converged at 40,000, expected the policy to leave 39,000, and the rejected peer
-  took 10,000 with it. The collapse guard named it correctly, which is the point: it named it after
-  a full run, and this is knowable from the command line.
-- **There are three entry points here, not four.** `config` deliberately does not take the flag: a
-  reload is a runtime action on the target and changes no part of the scenario, so `config` has
-  nothing to emit for it and offering it there would print a scenario that reads as though it
-  encoded a workload it does not.
-- Stem gets `pr<N>`, both `run` blocks record it, `-f` records `null`. Not a CSV column, for the
-  reason `--path-diversity` is not. The evidence key is `reload_complete`, not `complete`:
-  `policy_reload_metrics()` derives a `complete` off the event stream, and
-  `_policy_reload_section()` refuses a caller that lands on a derived name.
-
-`--threads N` sets worker threads on the target (`conf['target']['threads']`). Only BIRD reads it
-so far: **BIRD 3 runs one worker unless the config says otherwise**, so benching 3.x against 2.x
-without it measures nothing (verified: 3.3.2 gives 2 OS threads by default, 5 with `threads 4`;
-2.19.2 accepts the keyword and stays at 1).
-
-`bench()` and `batch()` resolve and verify images before starting any container, so a version that
-was never built costs a second rather than an hour.
-
-Batch configs take `versions: [...]` on a target, expanded by `expand_target_versions()` into one
-run per version with an auto label. Batch yaml is parsed with `BatchLoader`, which drops YAML's
-float resolver — plain `yaml.safe_load` reads `10.10` as `10.1` and would silently bench the wrong
-release.
-
-### Repetitions
-
-One observation per cell says nothing about run-to-run variance. A test may declare
-`repetitions: N`; `expand_batch_cells()` turns the matrix into the ordered list of runs, and
-`batch_repetitions()` rejects anything that is not a positive int **before the first container
-starts** — a `repetitions: 0` that ran nothing would otherwise be found hours in. `check_batch_test()`
-does the same for the matrix axes, which had no such check: a test with no `filter_test` reached
-expansion as a bare `KeyError` naming neither the test nor the key, which is what
-`benchmarks/big-tests.yaml` did. An axis is required rather than defaulted, so a typo cannot quietly
-run the matrix unfiltered.
-
-- **A repetition repeats the whole matrix, not each cell.** Three back-to-back runs of one cell
-  share a page cache, a thermal state, and whatever else the machine was doing a minute ago, so
-  part of what they measure is that. Block order also means an interrupted batch holds one
-  observation of everything rather than every observation of the first few cells.
-- **A repetition is part of the run's *name*, not a column beside it.** Everything a run writes is
-  named from `bench_output_prefix()` — `<prefix>.events.json`, `<prefix>.versions.json`, the six
-  per-run PNGs — and those are written with `os.replace`/`open(...,'w')`, so a second pass under
-  the same name silently replaces the first one's evidence and the CSV grows two rows nothing can
-  tell apart. `create_graph()` needs it too: it keys the x axis off a dict of row names and appends
-  one bar height per row, so rows sharing a name give it fewer ticks than heights — a wrong graph
-  or a crash, depending on the matplotlib version, at the end of a batch that has already run for
-  hours. The artifacts also carry `run.repetition` so a summary does not have to parse a label to
-  group passes.
-- **`bench_output_prefix()` is the one place that names a run's files**, for the same reason, and
-  it must carry every dimension a batch iterates. `filter_test` was missing: the three policy cells
-  of `benchmarks/2026-filters.yaml` all wrote `bird_2.19.2_bgpdump2_1050000_10.*`, so two thirds of
-  that suite's per-run evidence was overwritten and no `run` dict recorded which policy the
-  survivor came from. The periodic mid-run graphs were worse — built from `args.target` alone, they
-  dropped label, version, filter and repetition. Both now use the same stem, and each dimension is
-  appended only when set, so an unfiltered single-pass run keeps the name it has always had.
-- **A cell id says what the cell is, never when it ran.** `ordinal` is its position within one pass
-  and `repetition` says which pass, so raising a test from two passes to three does not move the
-  ids of the two that already have results, and resume keeps matching once execution order can be
-  permuted.
-- **The id and the name must agree about a single-pass test.** Both say "no repetition" — the cell
-  carries `repetition: None` and the id omits the key entirely. Suffixing only when `repetitions >
-  1` while the id always said `repetition: 1` meant a completed single-pass batch whose config
-  later gained `repetitions: 3` matched its stored pass-1 ids under `--resume`, reused those rows,
-  and produced a CSV holding `bird` beside `bird #2` and `bird #3`. Omitting the key also means a
-  single-pass id has exactly its pre-repetition shape, so `BATCH_PROGRESS_SCHEMA_VERSION` did not
-  have to move and an in-flight batch from an older build still resumes instead of costing the
-  operator every completed cell.
-
-### Order
-
-A test may also declare `order: shuffle` (default `matrix`) and, optionally, `seed: <int>`. A test
-key outside `BATCH_TEST_KEYS` + `BATCH_TEST_OPTIONAL_KEYS` is rejected: `seeds: 7` under
-`order: shuffle` would otherwise draw a fresh permutation every invocation while looking pinned,
-and a misspelt `repetitions` runs one pass of a matrix someone asked three of. Matrix
-order runs every cell of one target next to every other cell of that target, so anything that
-drifts over a batch — a thermal ramp, a filling page cache, a neighbour's job that starts an hour
-in — lands on the axes as a pattern and comes back out as a difference between the daemons.
-Shuffling does not remove that drift; it stops it lining up with one axis.
-
-- **The permutation is inside a pass, never across one.** A repetition stays a block for the
-  reason above, so dealing the passes together would take that back. Each pass draws its own
-  permutation — one permutation reused for all three applies the same position bias three times
-  and the repetitions cannot average it out.
-- **The order is a digest of the seed and the cell id, not `random.shuffle`.** The point of
-  recording a seed is that the sequence can be rebuilt later, and a Mersenne Twister draw is a
-  property of the interpreter as much as of the seed. `tests/test_batch_order.py` pins one seed's
-  order so changing the keying scheme has to be deliberate.
-- **The seed is recorded in the progress file before the first cell runs**, and `--resume` uses
-  the recorded one. A seed written only on a cell's completion would be missing from exactly the
-  batches that died early, and a resumed batch drawing a fresh permutation has run two orders,
-  neither of which is the one it recorded. Only a *drawn* seed is recovered that way — a seed the
-  config states is left alone, since editing it by hand is an instruction to re-sequence. An
-  omitted seed is drawn rather than defaulted to a constant: one shared default is itself a
-  permutation nobody chose. A `seed` under `order: matrix` is rejected rather than ignored.
-- **Execution order is not report order.** `batch_report_rows()` emits the CSV and the graphs in
-  matrix order whatever order the cells ran in, because `create_graph()` keys the x axis off the
-  row names it sees and appends one bar height per row, pairing the two positionally — that only
-  holds while each (peers, prefixes, filter) group arrives with its targets in the same order. A
-  shuffled batch reporting in execution order would produce bars under the wrong labels, or a
-  length mismatch, at the end of a batch that has already run for hours.
-- Identity is untouched by the order: `ordinal` stays a cell's place in the matrix, so `--resume`
-  matches its completed cells whichever way either pass ran.
-- **A superseded sequence stays in the file.** The progress document is rewritten whole on every
-  checkpoint, so a sequence dropped when the config is edited mid-batch leaves the record
-  describing an order that some of its own completed rows did not run in. It moves to
-  `previous_seeds` instead, and only when rows exist to describe. That covers a matrix pass
-  resumed as a shuffle, not just a changed seed — a file naming no order at all was written before
-  ordering existed, and is read as matrix, because that was the only order there was.
-
-### Summarising the passes — `summary.py`
-
-A batch writes `<test>.summary.json` beside its CSV: one entry per matrix cell, with the
-distribution of that cell's passes. Pure and Docker-free like `contention.py`, `convergence.py`,
-`churn.py` and `findings.py`, and it reads the stats row **by column name** — that row is positional for
-`create_batch_graphs()` and has drifted by a column once already, so a summary keyed on index 12
-would be arithmetic nobody could check. `docs/measurement-dictionary.md` has the field list.
-
-- **The summary never replaces the rows.** Every pass keeps its CSV row and its own artifacts; the
-  summary carries the observations it computed each statistic from, and which pass produced each
-  one. A number whose inputs are gone is not auditable.
-- **Nothing absent is published as a zero.** A withheld statistic is `null` with its reason beside
-  it. `stdev`/`cv_percent` need two observations — a CV of 0 over one pass says the measurement is
-  perfectly repeatable on the strength of never having been repeated — and `cv_percent` needs a
-  positive mean, which `tester errors` never has in a good run. `stdev` is the **sample** (n-1)
-  deviation: the population formula understates the spread of one, to exactly 0 at n=1.
-- **`min` and `max` are observations and are not rounded**; the derived statistics are, to six
-  places, so a 0.4 MB spread in `max mem (GB)` does not read as `0.0`.
-- **A failed pass is counted and named, never averaged in and never silently dropped.** Dropping it
-  would change `n` without saying so, which is the one thing a dispersion cannot survive; a pass
-  that has not run is counted apart from one that failed, because one is a result and the other is
-  unfinished work.
-- **An unsampled extreme is not an observation, here as well as in `findings.py`.** `min_free`
-  starts above every real value and `max_mem` at 0, so an untouched sentinel reaches the row as
-  ~931,322 GB or as 0.0 GB; `unsampled_row_values()` names both in the row's own units (via the
-  single `row_gb()` formatter, so the two cannot drift) and the whole column is withheld for that
-  cell. One pass of three losing its sampler would otherwise publish a ~310,474 GB mean and a 173%
-  CV on a 64 GB box, or an 87% CV on the target's peak — and `Container.stats()` has no `try` around
-  its walk, with a `mem` that comes from a `.get('usage', 0)`. `min idle%` and `max cpu %` are
-  deliberately excluded: 100 and a peak rounding to 0 are both values a real run can report.
-- **A stored row that is not the header's width costs its own pass, not the document.** `--resume`
-  onto a progress file written before a column was appended is a supported path — the schema version
-  deliberately did not move for `max foreign cpu %` — and one short row indexed against the current
-  header raises, which the wrapper turns into *no summary at all* for that test. Such a pass is
-  `unreadable`, kept apart from `failed`. A right-width, wrong-layout row cannot be caught here at
-  all, which is why `stats_header()` is the contract.
-- **Passes that disagree about an image are not observations of one thing.** `target image`,
-  `tester version`, `monitor version` and `required` are checked for agreement across the passes
-  and any disagreement lands in `inconsistent` and in a printed warning — the gcov trap (a freshly
-  built version beside a cached one) reached one layer up.
-- **Grouping and reporting are in matrix order**, sorted by `ordinal` rather than left in the order
-  they arrived, for the same reason `batch_report_rows()` is: execution order is a property of the
-  run, not of the report, and a summary dealt in shuffle order would sit under a CSV and a set of
-  bars that were not.
-- **A summariser that raises costs the summary, not the rows.** It runs after the CSV is on disk and
-  `publish_batch_summary()` catches — same rule as `write_event_artifact()` and its findings.
-- **It is written before the first cell, then after each one**, and a non-resumed batch unlinks its
-  predecessor's summary along with its progress file — otherwise a write that then fails leaves the
-  previous run's document beside a rewritten CSV. Every call site prints a failure line, including
-  the two that do not ask for the description: it is the only report that the document beside the
-  CSV is not the one describing it.
-- **The document must stay readable by a strict parser.** `json.dump` runs with `allow_nan=False`
-  and a non-finite observation is published as its own repr — a bare `NaN` is rejected by jq and by
-  most non-Python parsers.
-- **Whether a cell has earned more passes is a named rule, not a reader's judgement.**
-  `apply_variance_rule()` says two cells are separated when their medians differ by more than the
-  sum of their standard deviations, **floored at the metric's resolution**, applied to `elapsed (s)`
-  alone. That floor is not a detail: `elapsed (s)` is whole seconds counted off the monitor's 1s
-  poll loop, so passes of one cell agree exactly all the time, `stdev` is 0.0, and an unfloored
-  rule clears any gap at all — publishing `separated` on one rounding boundary, in silence, for
-  exactly the sub-second comparisons it exists to catch. `METRIC_RESOLUTION` is pinned against
-  `MONITOR_POLL_INTERVAL_S` by `test_stats_contract.py`, since `summary.py` must not import
-  `bgperf2`. Unnamed, the decision to rerun
-  belongs to whoever read the CSV and disliked it, which reruns the surprising results and turns a
-  benchmark into a search for the expected answer. It is comparative rather than a CV threshold
-  because no CV means the same thing twice: 2% is nothing between targets 40% apart and fatal
-  between ones 0.12% apart, which is what FRR 8.5, 9.1 and 10.0 were over a 95s MRT run. Three
-  details are load-bearing. It is decided against **every** rival sharing the cell's (peers,
-  prefixes, filter) axes and reported against the *binding* one — the smallest margin — since
-  separating a cell from its nearest neighbour separates it from the rest only if every rival has
-  the same dispersion, and `create_graph()` draws the whole group side by side. Rivals that have a
-  dispersion are preferred, so one mostly-failed cell cannot sit between two unseparated ones and
-  silently mute both — but preferred is not ignored. `separated` means *distinguishable from every
-  cell drawn beside it*, so every rival that cannot be judged is a rival that cannot be cleared:
-  each verdict names its unjudgeable rivals, and `separated` alone is withheld when one of them is
-  at least as near as the binding rival, or has no observation at all. That one claim was got wrong
-  three times, once per path into it — the rival that decided the verdict, the rival skipped for
-  having no dispersion, the rival skipped for having no median — because each fix was written
-  against the case instead of against the claim. The companion invariant, collapsed three times the
-  same way: **a pass that failed and a pass that has not run are never described by one clause, at
-  any level of aggregation** — one is a result to investigate, the other unfinished work, and only
-  the first is something an operator can act on. And `EXPANSION_PASSES` (5) is a floor
-  under the recommendation, never a cap: telling a `repetitions: 7` test to rerun at five would
-  discard observations, and a cell with fewer observations than passes is told about its shortfall
-  *beside* that count, never instead of it — fixing the failed pass and rerunning at the count you
-  already had comes back unseparated again. Where a pair's two cells disagree, the printed line is the more
-  actionable verdict, never the lower ordinal: a shortfall to investigate must not lose to "more
-  passes will not decide it" on matrix position alone.
-- The printed block is `elapsed (s)` and `total time` only, and nothing at all for a single-pass
-  test; the cell is named by `batch_cell_description()`, since the run name alone is the target and
-  two cells of one target differ only in their axes.
-
-**Two targets in one test may not share a run name.** A run name is label, else target plus
-version — nothing else — so entries differing only in `threads`, `mrt_file` or `image` are one
-name, and that is the stem `bench_output_prefix()` builds every artifact from, the `name` column
-of the CSV, and the x label `create_graph()` pairs bar heights against. `check_batch_run_names()`
-refuses them before the first container and says to add a `label`; `expand_target_versions()`
-already does the same thing along the version axis by labelling each version. This is also why
-two identical target entries are refused rather than treated as two observations — that is what
-`repetitions` is for, and it names its passes.
-
-Note the container work directory (`<--dir>/<bench-name>`) is wiped at the start of every cell, so
-raw daemon and tester logs only ever survive for the run in progress — that is true across cells
-already, and repetitions do not change it. The published artifacts are the durable record.
-
-### get_neighbors_state — the per-daemon wart
-
-`bench` needs to know how many prefixes each neighbor has sent, and every daemon reports this
-differently. There is no common API, so each target parses its own CLI:
-
-- FRR: `vtysh -c 'sh ip bgp summary json'`, JSON
-- BIRD: `birdc 'show protocols all'`, parsed by `bird.parse_protocols()` — which reads the
-  route-change-stats table by **column name**. It replaced a positional TextFSM template
-  (`bird.tfsm`, now deleted, along with the `textfsm` dependency): BIRD 3 inserts `RX limit`
-  and `limit` into that table, so the field that is `accepted` on 2.19 is `RX limit` on 3.3.2.
-  Every BIRD 3 target therefore reported `accepted` 0 for every neighbor, `neighbors_checked`
-  never went all-True, and that route to `note_neighbors_checkpoint()` was dead — quietly, since
-  runs still converged through `neighbors_received_full`. Never read a BIRD stats table
-  positionally.
-- Junos/EOS/SR Linux: vendor JSON via their own CLIs
-
-**Those counters are not the whole of what a target can be asked, and reading
-only them cost a whole phase.** `Import updates accepted` is a cumulative event
-counter: it only ever rises, so it can witness delivery and cannot witness a
-loss. `birdc show protocols all` also prints `Routes: N imported, N filtered, N
-exported, N preferred` per channel, which is a *gauge* of the table as it
-stands, and `parse_protocols()` had always parsed it while nothing read it. It
-is now `bird.table_witness()`, reaching the progress line and the events
-artifact's `target_table` section as three numbers: `best_paths` (the sum of
-each peering's `preferred` -- one best route per prefix, so the count of
-distinct prefixes held, which is what the monitor's `accepted` tracks),
-`imported_paths` (the sum of `imported` -- every path, losers included, so it
-moves with delivery rather than selection) and `exported_to_monitor` (the
-`exported` count on the monitor's own session: the target's end of the very
-session the monitor reads).
-
-- **The monitor cannot check itself.** It is one BGP session's view of the
-  target and it is the instrument every published timing comes from, so a move
-  in its count had nothing to be compared against -- which is how
-  `bgperf2-dcs` reached a state where an MRT run failed deterministically on a
-  1.5% decline nobody could attribute. With the gauge, four runs showed the
-  target's table climbing to 1,080,985 distinct prefixes and staying flat while
-  the *export* fell 1.35%, with the target's own export count agreeing with the
-  monitor to three decimal places. Neither instrument was wrong and no routes
-  were lost.
-- **One CLI read serves both.** `Target.sample_target_state()` is the single
-  call the poll makes, and `BIRDTarget` overrides it to parse one `show
-  protocols all` twice rather than exec twice: two reads would be two execs a
-  second into the container being measured, and -- worse for a number whose only
-  job is to be compared against another number -- two different instants. The
-  sample is stamped before the read, on the rule both poll loops already follow.
-- **Two daemons answer, with different halves, and a partial answer is not a
-  wrong one.** BIRD publishes all three sums. FRR publishes
-  `exported_to_monitor` and `imported_paths` (`frr.table_witness()`), off the
-  same `sh ip bgp summary json` its neighbour counters already come from -- one
-  exec, one instant, BIRD's rule. `exported_to_monitor` is the monitor
-  session's own `pfxSnt`, and `imported_paths` the per-peer `pfxRcd` sum, which
-  is what the MRT size floor is built on; both need no interpretation.
-
-  It withholds **`best_paths`** deliberately, and only that one: FRR does
-  report a table size, but `ribCount` and `show bgp ipv4 unicast statistics`'
-  `Total Prefixes` disagreed (1,081,000 against 1,080,985 on one measured run)
-  and neither has been established to mean "prefixes holding a selected best
-  path", which is what BIRD's `preferred` sum means and what the convergence
-  rule compares against its own peak. A witness that is subtly wrong is worse
-  than none -- it excuses declines it has no standing to excuse -- and `None`
-  is the documented way to attest to nothing, so adding FRR's halves changed
-  nothing about how an FRR run converges.
-- **A daemon with no gauge reports `None`, never 0**, and a run with no witness
-  gets no `target_table` section at all, so every other daemon's artifact and
-  progress line are exactly what they were. A sum is withheld when any peering
-  did not report -- `tester_offering()`'s rule, and it matters more here: a
-  partial read looks exactly like a table that shrank, which is the one thing
-  this measurement exists to rule on.
-- **The measurement publishes no verdict; the rule that reads it lives in
-  `convergence.py`.** `measurements.target_table_section()` records the
-  per-poll series and each series' peak and final value and derives nothing --
-  it was shipped one change set *before* the rule, deliberately, because a rule
-  shipped beside the first evidence for it is fitted to the run in front of it,
-  which is how all three convergence rules were broken. The rule is in
-  "Termination detection" below; what it did with the witness comes back into
-  this section as `witness_rule`, from the tracker that decided the run rather
-  than recomputed from the series.
-
-FRR is a special case worth knowing about: it has no received-prefix counter, so
-`FRRoutingTarget.get_neighbor_received_routes()` overrides the base method and greps `bgpd.log` for
-`End-of-RIB` messages instead.
-
-**That log read must stay incremental.** `write_config()` sets `log stdout debug` purely so
-End-of-RIB is visible, which means `bgpd.log` grows with the route count — a 10-peer 1.05M-prefix
-MRT run puts it past **1 GB**. `_get_EOR_from_log()` used to `readlines()` the whole file and
-rematch every line once per second, costing 4+ seconds of CPU against a 1-second poll interval: the
-loop fell permanently behind, stopped printing progress, and the run never finished even though the
-target had converged minutes earlier. Measured on a real 1.04 GB log, same neighbors found either
-way: **4.14s per poll before, 0.0000s after the first.** It now tracks a byte offset and reads only
-what was appended, and:
-
-- it stops at the last complete line, so a half-written one is not consumed and lost;
-- the restart reset keys on **inode**, not size — a replaced log that had already grown past the
-  saved offset would otherwise be resumed from the wrong place, and since FRR reaches its
-  checkpoint only via End-of-RIB, missing those lines means the run never converges;
-- the per-poll read is capped, and matching happens on bytes with the decode deferred to lines that
-  hit, because this process's own RSS feeds the recorded `min_free` column.
-
-**`monitor_required_reached` is the monitor's count against the check-point,
-and a second rule for it was tried and backed out.** The check-point is `n * p`
-for a synthetic run -- a statement of fact, since bgperf2 generated the prefix
-lists -- and `0.99 * -p` for MRT playback, where `-p` is the per-injector cap
-and the union of ten overlapping peer views cannot be known in advance. Daemons
-legitimately export different shares of one RIB: measured on a single
-routeviews file, RustyBGP 1,081,178, BIRD and OpenBGPD 1,056,779 each, every
-FRR release ~961,000 (0.91% apart across four releases and master). **A daemon
-below that guess emits no `monitor_required_reached` and so publishes no
-`convergence_s`, `assurance_s` or `post_injection_tail_s`** -- a known gap, not
-a bug to patch casually.
-
-The second rule was the target's own account, which is what the blog series
-this project comes from did when filtering raised the identical problem ("we
-don't know what will get filtered"): the target has received everything from
-every neighbour, and has sent it on to the monitor. It was built, verified, and
-removed, for a reason worth keeping:
-
-- **The neighbour checkpoint says every generator has *sent* everything, not
-  that the target has finished *exporting*.** So one poll in which the export
-  count does not advance, with the monitor drained to that same number, stamps
-  the event mid-delivery -- at a fraction of the table, permanently, since the
-  event is recorded once and nothing in the artifact says which rule supplied
-  it. An earlier version that required only `monitor_accepted >= exported` was
-  worse still: the witness is resampled onto the monitor's polls and can be
-  seconds old, so a fast climb lets the monitor overtake a stale export count.
-  That one escaped the measured FRR case only because bgpdump2's injectors were
-  blocked on FRR draining (75s to complete against OpenBGPD's 2.4s).
-- **Whether the target finished exporting is only decidable in retrospect**, so
-  a sound version is a measurement derived off the completed `target_table`
-  series -- named as its own thing, never synthesised into the event stream as
-  though it had been observed -- with `event_coverage` accepting it in place of
-  an event that legitimately cannot fire.
-
-**That measurement is `target_table.delivery`** (`measurements.delivery_metrics()`),
-and it is deliberately *not* a replacement for `convergence_s`. It is the
-earliest reading of the terminal export plateau at or after which the monitor
-holds it: the target stopped exporting at `plateau_start_s`, and the far end had
-it at `complete_s`. Because the series is complete, "and it never changed again"
-is checked rather than assumed -- which is the whole difference from the two
-backed-out rules, both of which decided from the samples in hand.
-
-- **It answers a different question from `convergence_s`, and the recorded runs
-  say so loudly.** The MRT check-point is `0.99 * -p`, the per-injector cap,
-  which is a threshold part-way up the climb: on one recorded 2-injector 500k
-  run the monitor crossed it at 16.85s with 500,171 prefixes visible while the
-  target went on exporting to 501,471 until 36.36s. On a *synthetic* run the
-  check-point is the whole table and the two land on the same poll. Across the
-  34 recorded runs that resolve, `complete_s` lands at or after
-  `monitor_required_reached` and at or before `convergence_confirmed` every
-  time -- **at** poll resolution, not strictly between: in the 5 same-poll runs
-  the two differ by under 500ns in either direction, which is the sample
-  series' 6-place rounding against the event's raw timestamp. Compare them as
-  an ordering at poll resolution; a strict inequality reads the rounding.
-- **Derived for every run with an export gauge**, not only the daemons that lose
-  the event, so the column is comparable across daemons rather than appearing
-  only where there is trouble.
-- **The final reading is the table, not the peak.** 11 of 39 recorded runs end
-  1.35%-1.55% below their peak and every one settles on exactly 1,056,779 --
-  what BIRD and OpenBGPD both converge to on this RIB -- so the peak is a
-  convergence overshoot. Taking it would wait for the monitor to reach a count
-  the target does not hold and withhold every MRT run. A target that delivered
-  and then really lost routes is dated to the loss, and is failed by the
-  tracker's drop rule and rejected by `check_timing_evidence.py` before anyone
-  reads the number.
-- **Whether the table was the right *size* is not judged here.** The function
-  gets samples and no denominator, so a target stalled at a fraction of the RIB
-  has a terminal plateau like any other; that is the checker's call, which
-  knows the check-point. The zero case is refused for a different reason -- the
-  rule degenerates, since `0 >= 0` makes the monitor trivially level -- and
-  that is the line between the two.
-- **Ten refusals, each because the alternative publishes a number that looks
-  measured and is not**: no gauge or no samples; a final count of zero; a
-  truncated series; a plateau of one reading (the run stopped, which is not the
-  target finishing); a withheld poll inside the plateau; a *carried* reading in
-  the plateau; a plateau that cannot be dated at all; a stale reading past the
-  carry bound; a monitor that never drew level; and samples that cannot be
-  dated at all. Five of those ten were added by review of the first version,
-  each having been reproduced against the shipped function, which is why the
-  list is worth reading rather than summarising:
-  - **A final count of zero is not a delivery.** `bench()` writes a FAILED
-    run's artifact with its samples exactly like a converged one's, and an
-    all-zero series satisfies every other rule here -- `0 >= 0` draws the
-    monitor level on the first sample -- so the tracker's "nothing arriving
-    within 15s" failure published a completed delivery at 0.1s. The same guard
-    stops an export count that *collapses* to zero from dating the delivery to
-    the collapse. Churn's "a collapsed count is not a withdrawal" and the
-    tracker's "a monitor count of zero never attests", on a third side.
-  - **A single-reading plateau is checked against the read timestamps, not the
-    ages**, because the age bound does not implement the rule it states: a dead
-    poll thread is re-paired with every later monitor sample, so its ages are
-    1s..5s and all *within* bound. It requires **two distinct** reads and not
-    all-distinct ones: a repeated read is ordinary whenever the target's poll
-    is the slower loop (11 of 39 recorded runs contain one), which is likeliest
-    on the very large-table runs this measurement is for -- so refusing on any
-    duplicate would withhold the answer from the rows that need it while naming
-    a dead sampler that was alive. A first version got this wrong on evidence
-    that only covered the other sign.
-  - **A withheld sum is not a carried one** and the age rule cannot see it:
-    the read stays fresh while the sums are None, so a hole in the plateau
-    left "and it never changed again" unsupported across it. `series_truncated`
-    one step inward. No recorded run reaches it (0 of 1303 post-first-reading
-    samples), so it closes a blind spot rather than explaining a run.
-  - **Undated and stale are named apart**, on `findings.py`'s `inconclusive`
-    vs `unresolved` rule: the five recorded withholdings are four artifacts
-    written before the fields existed (`gauge_undated`) and one frozen sampler
-    (`gauge_carried_across_plateau`), a split the plan used to have to make in
-    prose because the reason string could not.
-  - **The draw-level scan reads every sample from the plateau's start**, not
-    only those carrying a gauge reading: `monitor_accepted` is recorded on
-    every poll, so restricting it made a crossing during a withheld poll
-    invisible and returned `monitor_never_drawn_level` for a session the
-    document's own `monitor_final` disproved. It asks whether the monitor
-    *ever* drew level, not whether it ended there -- a monitor that draws level
-    and then declines has taken delivery, and those declines are ordinary here
-    (the tracker's fourth rule exists for them) -- and the comparison is exact
-    rather than tolerant.
-  - **A resolved section always has an answer in it.** Samples with no
-    `monotonic_s` fell through to a null reason beside a null `complete_s`,
-    contradicting the documented contract and leaving the branch unnameable --
-    the one outcome `_delivery()` exists to prevent. It is `no_sample_times`.
-- **The staleness bound is the tracker's own carry bound**
-  (`WITNESS_CARRY_SAMPLES` polls), pinned in `tests/test_stats_contract.py`
-  rather than imported, since `measurements.py` stays free of project imports.
-  A bound invented here would be one fitted to whichever run was in front of it.
-- **`check_events()` reads it, and only it.** It shipped one change set before
-  that rule, deliberately -- the same reason `target_table` itself did, since a
-  rule landed beside the first evidence for it is fitted to that evidence,
-  which is how all three convergence rules were broken. The rule accepts a
-  *resolved* `delivery` in place of `monitor_required_reached`, under three
-  limits: **only for an MRT generator** (a synthetic run's check-point is
-  `n * p`, a statement of fact, so a target that misses it lost routes --
-  tested by membership in `MRT_TESTER_TYPES`, because a `-f` run records
-  `tester_type: null` and states its own check-point too); **only for that one
-  event** (the other three are recorded by every run that got that far, so a
-  missing one is a broken run rather than a yardstick that did not fit); and
-  **only when it resolved** (a withheld `delivery` names why, so reading one as
-  a substitute would replace a missing measurement with an absent one).
-  `findings.py` does **not** read it: such a row still reports
-  `limiting_component: inconclusive`, which the checker accepts, and
-  `convergence_s`, `assurance_s` and `post_injection_tail_s` are still not
-  published for it -- they are intervals measured *from* the event. The 64 GB
-  plan's Required Measurements carries the amendment saying so, because the
-  campaign may not silently re-define what a correct row is between blocks.
-
-**`check_timing_evidence.py` judges an MRT row on consistency plus a size
-floor**, never on the absolute alone -- that part stayed. Consistency is the
-monitor's count against the target's own export count; but those are the two
-ends of one link and agree whenever the link works, so a target that imported a
-tenth of the RIB would show them agreeing at a tenth. The floor is the target's
-accepted-path count against what the generators report offering. Neither half of the
-check-point survives as a rule on its own: treating it as *necessary* rejected
-every FRR row, and it is not *sufficient* either, because `0.99 * -p` is about
-4% below the union the ten peers actually hold -- so a target can clear it
-having dropped several percent of the table, and the convergence tracker will
-not catch that, since routes never delivered are not a decline from the run's
-own peak. The floor therefore applies as well as the check-point wherever there
-is a gauge, and clearing the check-point is the *fallback* where there is none,
-which is how OpenBGPD and RustyBGP rows are still judged. A row below the
-check-point with no usable import gauge is rejected, because nothing vouches
-for it. A **filtered** MRT row is that same fallback reached from the other
-side: its gauge exists but is post-policy for both daemons that publish one, so
-it cannot be compared with the offered count either, and the check-point is all
-that is left -- clearing it passes the row, below it nothing bounds the table
-and the row is rejected. The refusal that names the missing evidence names
-*which half of the run* it is missing from, never generalising to the target: a
-gauge that reported fine beside generators that publish no offered count
-(`gobgp`, `exabgp_mrtparse`) is not a target without a gauge.
-
-### Asking the generator what it sent — tester offering polls
-
-`bench()` polls every tester whose class sets `REPORTS_OFFERING` (`BIRDTester`
-and `Bgpdump2Tester`) at the monitor's own 1s cadence, so the two sides of a run
-are read at the same resolution. `Tester.offering_stats()` is the sampler;
-`get_offerings()` returns one `measurements.TesterOffering` per configured peer,
-and `measurements.TesterEventRecorder` turns those polls into
-`tester_session_ready`/`tester_first_update`/`tester_last_update`/
-`tester_complete`. They are merged into the same ordered `<prefix>.events.json`
-stream as the monitor's events, with the derived intervals under `testers`. The
-legacy `testers (s)` CSV column is untouched: it is elapsed minus
-time-to-first-prefix, a property of the target and monitor, and the two must not
-be read as versions of the same measurement.
-
-`measurements.tester_fleet_metrics()` summarises every generator in the run into
-one `tester_fleet` section beside those per-generator ones, aggregated the way
-`TesterEventRecorder` combines the sessions inside one container: ready when the
-**last** generator is ready, injection from the **earliest** first update to the
-**slowest** completion, and completion all-or-nothing. One injector of ten that
-never completed leaves `injection_s` null and its name in `incomplete_testers`
-— an interval bounded by the nine that finished would describe a workload that
-was never fully offered, and it would look entirely ordinary. Counts are summed
-under the same rule; durations are not summed at all, because the generators
-send at the same time. It is a summary of the sections, never a replacement:
-the fleet says whether the load was delivered, the sections say which generator
-was slow.
-
-**`post_injection_tail_s` is signed, and nothing clamps it.** It runs from a
-generator's completion (the **slowest** one, for the fleet) to
-`monitor_required_reached`, and it is the only published interval that spans
-two producers — which is why `measurements.signed_duration_s()` exists beside
-`duration_s()`, which still refuses an inverted interval because within one
-producer that is a wiring fault. A negative tail means the monitor reached the
-check-point while the generator was still finishing, which is ordinary: the
-check-point is 99% of the table, and a generator goes on flushing sessions it
-did not need. Clamping at zero would give that run the same number as one that
-converged the instant its generators finished — the two conclusions this
-measurement exists to separate. It is never measured from `tester_last_update`
-instead: that is the last increase *observed*, not the end of the workload, so
-it would supply a plausible tail for exactly the stalled-injector runs that
-have none. The printed line reports a magnitude at or under
-`post_injection_tail_resolution_s` in words rather than as a duration.
-
-**The monitor stamps its own poll resolution too**, for the same reason the
-generators do and because the tail is bounded by one poll from each loop.
-`Monitor.stats()` execs `gobgp neighbor -j` and only then sleeps 1s, so its
-achieved cadence is `read + 1s`; `MonitorEventRecorder` takes
-`MONITOR_POLL_INTERVAL_S` as a floor and publishes the gap it achieved — the
-constant is *passed into* that loop rather than asserted about it, so the
-published floor cannot drift away from the sleep the loop takes. **Both poll
-loops stamp the sample before the read**, never after: the monitor's read is a
-`docker exec` too, and dating its sample to when the read finished while the
-generator dates its own to before would bias `post_injection_tail_s` positive
-by a read from each instrument — on the one interval whose *sign* is the
-finding. That
-qualifies `first_prefix_s`, `convergence_s` and `assurance_s` as well, which
-were previously published bare — a `first_prefix_s` of 0.0s is a poll that
-could not resolve it, not an instant first prefix. `convergence_confirmed`
-carries the resolution of the sample its verdict ruled on, not a gap to the
-moment it was stamped: assurance is a decision about a sample, not a fresh
-look.
-
-**A span nothing crossed is not a rate of zero**, at either level. Each MRT
-injector's sub-millisecond walk is over before its own first poll, so a fleet
-span bounded by two injectors completing at different polls contains none of
-the table: the real ten-injector run measured `injection_s` 1.0s with
-`offered_in_interval` 0, and dividing would have published `0 prefixes/s` for
-ten injectors that delivered all 100,000 prefixes. The same shape occurs
-per-generator every time a self-reporting generator's count goes final one poll
-before it says `End-of-RIB`. The rate is withheld in both cases — and the
-printed line does not borrow the sub-poll wording for it, since "shorter than
-the 1.0s poll resolution" is true only when first update and completion shared
-a poll.
-
-Five things this depends on:
-
-- **The published resolution is the gap the loop achieved, not the one it asked
-  for.** A poll stamps a sample, reads the generator, and only then waits, so
-  sleeping a fixed interval after the read makes the real cadence
-  `read + interval`. It waits to a deadline measured from the sample instead —
-  except when the read itself overruns the interval, where it keeps the full
-  wait rather than polling back-to-back and putting the controller inside a
-  container continuously. Either way the recorder derives each event's
-  `poll_resolution_s` from the sample timestamps (from the bench clock origin
-  on the first poll, since everything before the instrument arrived is
-  invisible), floored at the requested cadence, which the loop cannot beat.
-  That number is what makes an `injection_s` of 0.0 read as *unresolved at this
-  resolution* rather than as an instant injection, so understating it by the
-  cost of the read overstates what the run knows. **Each interval is qualified
-  by the polls that bound it** — `startup_resolution_s` and
-  `injection_resolution_s`, never one shared number: sessions are usually up on
-  the first poll, whose resolution is the whole interval since the origin, and
-  folding that into the injection bound would call a 1s-resolved injection
-  30s-unresolved.
-- **One `docker exec` per poll, not one per peer.** A BIRD tester runs a
-  separate `bird` per neighbour on its own control socket, so a bare `birdc`
-  reaches no daemon at all and each socket must be named. They are read in a
-  single `sh -c` loop, split on `bird.SESSION_MARKER`, because an exec is ~50ms:
-  per-peer execs at 50 peers overrun the poll interval and the controller
-  becomes contention the run then reports as someone else's.
-- **Every configured peer appears in every poll**, with `offered=None` where the
-  read failed. `observe()` rejects a poll whose session keys differ from the
-  first one — dropping a key would let the peers that remain satisfy "the whole
-  table was offered".
-- **`expected` is the configured table size** (`len(p['paths'])`), never
-  `tester_offering()['configured']`. That is the generator's own report of what
-  it loaded, a cross-check; using it as the yardstick would make a generator
-  that loaded half its config look complete.
-- **The poll thread stops, twice over.** It waits on `controller_stop` like the
-  other samplers, and `finish_bench()` sets `stop_monitoring` on the testers
-  too, so a batch does not accumulate one exec loop per cell into containers
-  that are gone. It also ends itself the moment the generator has reported the
-  whole table offered, since polling on until the monitor converges spends a
-  `birdc` per peer per second on a generator with nothing left to say — and
-  `birdc` is in `contention.BGPERF_PROCESSES`, so that is the one load `max
-  foreign cpu %` cannot report. The rule is
-  `measurements.offering_poll_can_stop()`, and it is deliberately not
-  `all(o.complete)`: it is the exact condition under which `observe()` records
-  `tester_complete` on that same poll, which also needs every session's count
-  legible and nonzero. A generator can report completion on a poll whose
-  counters are not yet readable — bgpdump2 logs `RIB walk complete` before its
-  final `Sent ...` counters — and stopping there would take away the poll that
-  would have supplied the update, leaving a converged run with a generator that
-  never completed. Nothing is lost by stopping: `offered` cannot move past
-  completion, and a session's queue stops filling once the last update is handed
-  to it, so the completion poll reads the largest queue there will be.
-
-**A BIRD 2.19 offered count is queue-side.** `Export updates accepted` counts a
-route when it is handed to the BGP protocol, not when it hits the wire, so it
-saturates before the instrument first looks: in the 4-peer x 250k verification
-the generator reported all 1,000,000 prefixes offered at 1.94s while the monitor
-had seen 215,552 and the target held full tables from 2 of 4 peers. The count
-and the completion fact are sound; the *duration* is not. Repeated runs put
-between 0 and 153,744 of the million inside the measured interval depending
-purely on where the first poll landed, and polling at 0.2s made it worse — a
-confident-looking 21452 prefixes/s that was the slope of the last 6,436
-prefixes. `tester_metrics()` publishes `offered_in_interval` beside
-`offered_rate_pps` for that reason; never read the rate without it, and do not
-call a BIRD 2.19 run tester-limited from it. Wire-side evidence needs BIRD 3's
-`TX pending`, i.e. running the generator on `bgperf/bird:3.3.2`, which the CLI
-cannot select today.
-
-### Asking the other end what it got — export timing
-
-`bench()` polls every receiver at the monitor's own cadence and publishes an
-`export` section in `<prefix>.events.json`. Without it, **a `--receivers 20` run
-and a `--receivers 0` run differ in exactly one published number** — `elapsed
-(s)` — with whatever the fan-out cost the target inside it, indistinguishable
-from a slow daemon. Ingress is measured at the generators and convergence at the
-monitor; export was measured nowhere, which is the end-to-end collapse Phase 5A's
-last work item is about.
-
-`Receiver.accepted_prefixes()` is the read and it is deliberately not `stats()`,
-which stays refused: `stats()` feeds the queue every published timing comes from,
-and a receiver in it would be an unlabelled second `recved` series. This one
-answers `controller_export_stats()`, which keeps it in `ExportEventRecorder` and
-in a section of its own. `EventPhase.EXPORT` exists for the same reason one level
-down — a reader grouping the stream by phase must not find several first-prefix
-intervals under `convergence` with nothing saying which one the row describes.
-
-- **The check-point is the run's own** (`conf['monitor']['check-points'][0]`),
-  the same yardstick the monitor is judged by. Deriving one from what the monitor
-  has seen so far would couple the two instruments, and the whole point of
-  reading a receiver is that its answer does not depend on the monitor's. A
-  policy that makes that count unreachable leaves the receivers incomplete
-  exactly as it leaves `convergence_s` null.
-- **One loop for the whole fan-out, not a thread per receiver.** A round reads
-  each receiver in turn, so the controller is inside one container at a time.
-  The alternative keeps the nominal cadence by putting N concurrent `docker
-  exec`s on the host — and the run that wants this measurement is the one whose
-  host is already loaded, so the instrument would become part of what it
-  reports. A serialised round costs resolution instead, and the resolution is
-  published: a 6-receiver 1M-prefix run measured a 3.8s round.
-- **Every receiver in a round shares the round's timestamp, and the cost of that
-  is bounded rather than hidden.** A round takes real time, so a receiver read
-  late in it is dated to the round's start and can appear to reach a state up to
-  one round-gap before one read early in it — which is what the 6-receiver run
-  showed. That gap *is* each event's `poll_resolution_s`, and `export_spread_s`
-  is compared against the wider of the two bounding it, so a fan-out served
-  simultaneously can be off by at most one gap and can never be published as a
-  *resolved* spread. Verified: spread 3.849s against resolution 3.849s, printed
-  as "within the poll resolution of each other".
-- **The fan-out is served when its *slowest* receiver has the table**, and one
-  receiver that never got there leaves every fleet interval null with its name
-  in `incomplete_receivers` — `tester_fleet_metrics()`'s all-or-nothing rule,
-  reached from the export side. The export *start* is gated separately: a
-  fan-out where every session was seen taking prefixes and one never finished
-  has a real start, and that is exactly the run where a reader wants it.
-- **Every configured receiver appears in every round**, with `None` where the
-  read failed — the generator poll's rule, and here it is what stops the
-  receivers that happen to answer from satisfying "the whole fan-out has the
-  table". A failed read does not erase what that receiver was already seen
-  holding; the last count read from each is published as `accepted_prefixes`,
-  which is the only thing that says how far a receiver that never finished got.
-- **`monitor_delta_s` is signed**, for the reason `post_injection_tail_s` is: the
-  monitor is one export session among several and nothing orders them, so a
-  receiver reaching the table first is ordinary. It is deliberately measured
-  against the monitor rather than against the generators — a generator-relative
-  export tail is `post_injection_tail_s + monitor_delta_s`, and publishing it
-  here would repeat `tester_fleet_metrics()`'s completion rule in a second place
-  where the two could drift apart.
-- **The poll ends itself once every receiver holds the table**, since a round
-  cannot be batched: continuing to convergence spends an exec per receiver per
-  second on sessions with nothing left to say. That load is invisible to
-  `max foreign cpu %` — not because it is bgperf2's own process tree (the read
-  runs *inside* the receiver container, where `own_process_tree()` does not
-  reach), but because `gobgp` is in `contention.BGPERF_PROCESSES`, the by-name
-  allowlist, exactly as `birdc` is. A poll whose CLI were *not* in that
-  frozenset would be charged to that column as somebody else's load. It is
-  also why **every** round waits at least as long as it took
-  (`EXPORT_POLL_MAX_DUTY`), not only one that overran the cadence: four
-  receivers at a 200ms read give a 0.8s round inside a 1s cadence, 80% of the
-  window spent inside containers without ever tripping an overrun. The
-  instrument runs inside the window it measures, nothing bounds the receiver
-  count, and it may never spend more than half its time inside containers. The
-  cost is resolution — the 6-receiver run's 3.8s rounds now publish a 7.1s gap
-  — and every interval publishes the resolution that bounds it. Nothing is
-  lost: both events are recorded on or before the round that satisfies the
-  rule, in that round rather than queued for someone else to record.
-- **The poll takes one closing round when the window shuts.** The gap between
-  rounds is wider than the window that follows the check-point: at six
-  receivers it is a round plus its floor, against the five monitor polls
-  between the check-point and convergence. Ending on the stop event without a
-  last look would publish a fan-out served in that gap as one that was never
-  served — the same false conclusion review found for the churn case, reached
-  from the other side. The closing read is stamped when it is taken and carries
-  the gap since the previous round as its resolution, which is the honest
-  statement of when it could have happened. `finish_bench()` waits for it after
-  the clock has stopped, for `EXPORT_POLL_TEARDOWN_WAIT_S` plus an allowance
-  per receiver, since a flat wait long enough for six expires on fifty.
-- **Export timing and a post-convergence workload are not measured in the same
-  run**, and that is the settled answer rather than a gap. The poll's window
-  closes at convergence, which is exactly where churn and the reload begin, so
-  every way of making them coexist costs something published: letting the poll
-  run on puts N `docker exec`s inside a burst's 1.0s-resolution withdrawal and
-  the reload's CPU interval; waiting for it puts that wait inside `total time`
-  — a graphed column, moving with the *instrument's* fan-out — and leaves the
-  workload's recorder dating its first sample across the wait, so a withdrawal
-  resolved to a second is published as "within the 25.0s poll resolution".
-  Eight rounds of review found that seam from five different sides. A run that
-  asks for both keeps the fan-out — the receivers exist, hold the table and
-  cost the target its export work — and withholds the *timing* by name, on the
-  rule `--prefix-scope total` under `--path-diversity` and churn beside a
-  reload already follow. Choosing an order and paying for it is its own change
-  set.
-- **The window is the delivery of the table**, closing at convergence — the
-  same window `elapsed (s)`, `max cpu %` and `max mem (GB)` describe. It closes
-  there because the run does: nothing waits for the fan-out afterwards, and a
-  wait that grew with the receiver count would land inside `total time`. A
-  receiver not served by then is reported incomplete with the count it last
-  held, and the printed line names the window, because "2 of 3" alone reads as
-  a broken session. **`monitor_delta_s`'s positive side is bounded by that
-  window** — convergence is 5 polls past the check-point, so a fan-out slower
-  than that is reported incomplete rather than as a large lag, and what
-  separates that from a stalled session is each receiver's `accepted_prefixes`.
-  Giving the positive side a bound would mean a post-convergence phase that
-  waits for the fan-out: a separate decision, like `total` under
-  `--path-diversity`. The stop event is per run and never cleared, unlike
-  `controller_stop`, so a round still in flight at the end of a batch cell
-  cannot find that event clear again at the start of the next one.
-- **This is the one sampler that does not go through the run's queue**, and the
-  reason is that nothing would reliably take its messages out again: `bench()`'s
-  monitor loop stops the instant convergence is declared, and `run_churn_bursts()`
-  and `run_policy_reload()` read that queue afterwards and skip anything that is
-  not a monitor sample. A round completing near the end of a run — and a round
-  takes seconds at the fan-out sizes this measures — would be queued and never
-  observed, publishing a receiver that had been served as one that never was,
-  with the previous round's stale count beside it. The poll thread is its
-  recorder's only writer instead, and `finish_bench()` waits
-  `EXPORT_POLL_TEARDOWN_WAIT_S` for a round still in flight before reading it —
-  **after** `bench_stop`, on the rule the tester log scan follows, so a wait
-  that grows with the receiver count cannot reach `total time`.
-- **Nothing about the CSV moves.** `elapsed (s)` is the monitor's convergence and
-  must keep meaning that in every row; what the fan-out cost is printed beside
-  the row and published in the artifact, on churn's and the reload's rule. A run
-  with no receivers keeps exactly the document it has always produced. A run
-  that *had* receivers and could not measure them — the check-point is 99% of
-  the table, so `-p 1` gives 0, and a threshold of 0 would stamp every receiver
-  complete on the first round — publishes an `unmeasured_reason` instead:
-  absent is what an older build wrote, so silence could not be told from a
-  build that never took the measurement.
-
-**What still cannot be separated is table selection.** With this in place a run
-decomposes into ingress (measured at the generators), the target's own work, and
-export (measured at the receivers) — but best-path selection happens inside the
-target and the only external observable is when a session sees the result. No
-daemon-agnostic instrument can split it out of the target-side interval, so it is
-stated here rather than implied by an interval that quietly contains it.
-
-### What a bgpdump2 injector says about itself
-
-`bgpdump2 --blaster` reports its own work to stdout, and `start.sh` redirects
-that to `<host_dir>/bgpdump2.log`, which is bind-mounted — so the controller can
-read it from the host, no `docker exec` per poll.
-
-**It has to run under `stdbuf -oL`.** bgpdump2 logs with `fprintf(stdout)`, and
-stdout to a file is block-buffered; nothing ever ends the process except the
-container being torn down, so the buffer was never flushed. Measured: a
-converged 2-injector run left both `bgpdump2.log` files at **exactly 0 bytes**
-with the blaster still running and its work done. The generator had been
-reporting all along and none of it was observable. A run whose log outgrows one
-buffer is not saved by that either — it is simply always up to a buffer behind,
-which is exactly the tail a poll wants to read. Any generator that logs to a
-redirected stdout has this trap.
-
-`parse_blaster_log()` and `tester_offering()` in `bgpdump2.py` read that log:
-
-- **Prefix counts are encode-side, the octet count is wire-side.** `prefixes
-  sent` and `updates sent` increment as prefixes are encoded into the 256KB
-  session write buffer; `octets` only on a successful `write()` to the socket.
-  One real mid-walk line reads `Sent 2280 updates, 9981 prefixes sent, 0
-  prefixes withdrawn, 88 octets`. Same caveat as BIRD 2.19's counter, with one
-  wire-side number beside it. It reaches the artifact as `octets_on_wire`, read
-  at the poll that saw completion so it pairs with the `offered_prefixes` off
-  the same line of counters. Two injectors sending the same 10,000 prefixes
-  from different MRT peers wrote 183,852 and 259,226 octets — the byte count is
-  a property of the paths played back, not of the prefix count.
-- **`End-of-RIB, walk time` is bgpdump2's own measurement of its walk**, and it
-  resolves what a 1s poll cannot: one injector's whole 10,000-prefix walk took
-  1.03ms. It is encode time bounded by the write buffer, so on a table large
-  enough to fill that buffer it tracks the wire and on a small one it does not.
-  It times *one* RIB — a session given several `-p` indexes logs one per RIB,
-  and summing them would drop the gaps between walks, so the summary publishes
-  it only for a single-RIB session (which is what bgperf configures). It is
-  published as `reported_injection_s`, **beside** the polled `injection_s` and
-  never folded into it: different clock, and the generator's own definition of
-  sending. No rate is derived from it either — dividing an encode-side count by
-  an encode-side interval gives a send rate the generator never achieved.
-- **Completion is the injector's own report, not a count.** `-T` caps the table
-  while the MRT file is read, so an injector ends up holding whatever that MRT
-  peer's table has; `offered >= expected` can stay false forever on an injector
-  that has demonstrably sent everything it holds. That is what
-  `TesterOffering.send_complete` is for, and it decides completion in both
-  directions — a generator saying it has *not* finished is not overruled by a
-  count that reached `expected`. `configured` vs `expected` stays the separate
-  cross-check for a workload that did not load.
-- **The completion signal is the `End-of-RIB` line, not `RIB walk complete`.**
-  bgpdump2 logs the marker, then the final `Sent ...` counters, then End-of-RIB
-  — one code path, microseconds apart, but a poll lands between them often
-  enough. Reporting on the marker freezes the counters at their mid-walk value
-  (9,981 of 10,000 in one capture), and in the other capture the marker precedes
-  the first `Sent` line entirely, so completion would carry no count at all.
-  `TesterEventRecorder` refuses that second case anyway: it holds
-  `tester_complete` until an update has been observed, because a completion
-  sorted before `tester_first_update` makes `tester_metrics()` raise out of
-  `finish_bench()` and kills a run that had already converged.
-- **The log's timestamps are never parsed.** They are local wall-clock with no
-  year and no zone (`%b %d %H:%M:%S.%06lu`); durations here come from the
-  controller's monotonic clock.
-- **Blocked-write evidence is opt-in, because it costs the measurement beside
-  it.** `--tester-trace-io` starts the blaster with `-t io`, whose write lines
-  are the only backpressure bgpdump2 has: `Partial write` (the socket took part
-  of the buffer and refused the rest) and `Write buffer full` (an encode pass
-  found no room in the 256KB session buffer, which is also the only place a
-  `write()` returning `EAGAIN` appears — bgpdump2 logs nothing for one). They
-  reach the artifact as `max_blocked_writes` and `max_send_stalls`. But the
-  same class logs one line per BGP message *received*, and the target
-  re-advertises to each tester what it learns from the others, so those lines
-  arrive in the blaster's event loop while it is still walking and lengthen the
-  walk it is timing. Measured, three runs each on 2 injectors x 10,000
-  prefixes: the injector whose walk overlapped the echo reported 0.01122 /
-  0.01128 / 0.01125s without the flag and 0.01763 / 0.01756 / 0.01751s with it
-  — a 56% inflation of `reported_injection_s`, the one number that resolves a
-  sub-poll injection — and its log grew from 947 bytes to 350KB, which scales
-  with the table, and lands in `min free mem` whenever `-d` names a memory-backed path.
-  A run that wants to know whether the generator was blocked asks for it and reads a
-  perturbed walk time; a run that wants the walk time does not. **`injection_s`
-  is perturbed too, by a second mechanism**: `BlasterLogReader.READ_MAX` caps a
-  poll at 4 MB, sized for the ~1 KB an untraced injector writes, so a traced
-  injector can log `End-of-RIB` several polls before the reader gets to it and
-  `tester_complete` is stamped late. Measured on a traced 2 x 500,000-prefix
-  run: 22.5 MB written before `End-of-RIB` on one injector, `injection_s` 5.0s
-  against its own reported 1.4996s. The counts stay exact — the reader catches
-  up — so only the interval is affected. Never compare `injection_s` across the
-  flag. **A count of
-  zero is only published when the log proves the class was on**; otherwise the
-  counters are absent, because 0 would say the generator was never blocked on
-  the strength of lines it was never asked to write.
-
-`Bgpdump2Tester` sets `REPORTS_OFFERING`, so `bench()` polls each injector at
-the monitor's own cadence and every one of them contributes its own
-`tester_session_ready`/`tester_first_update`/`tester_last_update`/
-`tester_complete` to `<prefix>.events.json`, under its container name. There is
-no aggregate across injectors and deliberately no `docker exec`: the log is
-bind-mounted, so `BlasterLogReader` reads it straight from the host, keeping a
-byte offset, stopping at the last complete line, and keying its restart reset on
-**inode** as well as size — the same rules as the FRR reader, and for the same
-reason: a replaced log that had already grown past the saved offset is not
-smaller, so a size check alone would resume in the middle of a new session and
-go on reporting the old one's completion. A
-`Sent ...` line is logged per `write()` — one real capture shows an 88-octet
-write — so the line count follows how the peer drained the session, not the
-table size, and nothing bounds it in advance.
-
-**A 10,000-prefix walk is over before the first poll.** Verified on a 2-injector
-run: both injectors reported the exact 10,000, `tester_complete` observed, and
-`injection_s` 0.0 with `offered_in_interval` 0 and no rate — the same
-unresolvable-injection shape as BIRD 2.19, said out loud rather than published
-as an instant injection. What says anything at all about that interval is the
-generator's own two numbers, carried into the artifact from the poll that saw
-completion: `reported_injection_s` (0.001017s and 0.011280s for the two
-injectors of a later verification) and the wire-side `octets_on_wire`. The
-printed line names both bounds rather than choosing between them — `injection
-shorter than the 1.0s poll resolution; the generator measured its own send at
-0.001017s`.
-
-### What the run was waiting for — `findings.py`
-
-The intervals above exist to answer one question, and `findings.py` is the only
-thing allowed to answer it. It derives a `findings` section into every
-`<prefix>.events.json` and prints its verdict as the last line of a run. Pure
-and Docker-free like `contention.py`, `convergence.py` and `churn.py`, and it reads the
-*artifact* rather than the event stream, so it cannot reason about a duration
-the artifact did not publish.
-
-`limiting_component` is `tester`, `target_or_monitor`, `unresolved`, or
-`inconclusive`, and the last two are not the same refusal: `inconclusive` means
-the deciding measurement was never made (no generator that can be asked, a
-generator that never completed, a monitor that never reached the check-point),
-`unresolved` means it was made and something forbids attributing it. Collapsing
-them hides which one the operator can do something about. Each finding carries
-the rule it applied (`policy`) and the durations it applied it to (`evidence`),
-because a verdict that cannot be argued with is a validity boolean with extra
-words.
-
-Six rules hold the thing up:
-
-- **Half the offered table must cross the measured interval before that
-  interval may be read as the generator's send** — or the generator must have
-  timed its own send. This is what keeps a queue-side counter from becoming a
-  verdict *without the policy having to know which generator produced it*. BIRD
-  2.19 puts between 0 and ~15% of its table inside that interval depending only
-  on where the first poll landed, so it fails both tests and the run is
-  `unresolved` with `injection_boundary_unresolved` — including its large
-  positive tail, which would otherwise be charged to the target while the
-  generator was still draining its sessions. An MRT injector fails the first
-  test and passes the second, so a 10,000-prefix walk that is over before the
-  first poll can still show a target tail.
-- **A confounder withholds the verdict, not the evidence.** A tester-limited
-  run on a saturated host still publishes the `tester_limited` finding and
-  reports `unresolved`, naming host saturation as what decided it. `min idle%`
-  is host-wide and includes bgperf2's own load, so it says the machine had
-  nothing spare and not whose work that was — per-role, time-aligned CPU is
-  what would say more, and it does not exist.
-- **Backpressure names no component, and only the counts of *being blocked*
-  qualify.** BIRD 3 reports `TX pending` bytes at every poll and a session with
-  something queued is what a working session looks like, so reading queue depth
-  as backpressure would withhold every BIRD 3 verdict there is. Only
-  `max_blocked_writes` and `max_send_stalls` are read, and which end of a
-  blocked write was at fault is not in those numbers.
-- **An unsampled minimum is not a measurement.** `min_free` starts at a
-  sentinel above every real value so the first sample can only lower it; a run
-  whose memory sampler never fired would otherwise publish a machine with a
-  petabyte free. `host_evidence()` maps it back to `None`.
-- **Tester log errors and timeouts are deliberately not inputs.**
-  `finish_bench()` writes the artifact *before* scanning those logs, on purpose,
-  and a finding is worth less than the atomic write of the evidence it would be
-  derived from.
-- **A policy that raises costs the verdict, not the evidence.**
-  `write_event_artifact()` catches: by the time the findings run, that document
-  is the only record a converged run happened, and the failure is published in
-  the shape of a verdict (`inconclusive`, naming the exception) rather than as
-  an absent section that would read as a run with nothing to say.
-
-`docs/measurement-dictionary.md` lists every finding and when it fires.
-
-### Host contention — `contention.py`
-
-A benchmark sharing its machine reports numbers that look fine and are not comparable with
-anything. The margins here are small enough that this decides results: FRR 8.5, 9.1 and 10.0
-finished a 95s MRT run within **0.11s** of each other, so a competing job of a few cores invents a
-version ranking out of nothing.
-
-`contention.py` attributes busy CPU to processes outside `BGPERF_PROCESSES`. It is kept free of
-Docker and privileges so the test suite covers it, like `convergence.py`. Two consumers:
-
-- `warn_if_machine_is_busy()` names the offenders before the run starts. It is called **after**
-  `remove_target_containers()`, not at the top of `bench()`: `batch()` reuses the process for every
-  cell, so checking earlier sees the previous cell's own target daemon and blames it.
-- `controller_foreign_cpu()` samples every 5s into the same queue as the other controller threads;
-  `bench()` keeps the max and writes it as the **`max foreign cpu %`** column. The interval is a
-  parameter so the tests can pass a short one — the first sample only arrives one interval in,
-  because the measurement is a delta.
-
-**The names travel with the number, and only ever together.** A confounder that withholds a verdict
-has to be arguable, and for a while this one was not: four consecutive MRT calibration runs on this
-host were withheld by "processes outside the benchmark used up to 1.1 cores" with nothing anywhere
-saying which process, and by the time anyone looked it had exited. `foreign_cpu_report()` returns
-the total and the heaviest commands from one pass, `note_foreign_cpu_sample()` replaces both or
-neither — names from a different sample than the published peak are two moments reported as one —
-and they reach `host_evidence()` and the finding's `evidence.processes`. Three details:
-
-- **Aggregated by command, with a `process_count`.** The canonical competitor is a parallel build:
-  thousands of sub-second `cc1` processes, none individually large. Ranked per pid that names three
-  `cc1` at 1% each beside a total of 800%, which reads as though the names do not cover the number.
-- **A peak whose competitors could not be named is still kept**, and publishes `null` rather than an
-  empty list. Absent is also what an older build wrote, so an empty list would report both as a run
-  that found nobody. Dropping the peak instead would understate the column that decides whether the
-  row is comparable at all.
-- **`findings.py` never re-derives them.** It reads the artifact, and the run that fires this
-  finding is exactly the one whose competitor has since exited.
-
-The identification that closed those four runs is worth keeping: **`python` on this host is
-`venv/bin/python`, which is bgperf2 itself** — the system interpreter reports `python3`. A bare
-`python` at one core is a *previous bgperf2 run that outlived its own bench* and is now competing
-with the next one, which `own_process_tree()` cannot exclude because it is not a descendant. Check
-for one before reading a contention number, and before starting a campaign block.
-
-`min idle%` cannot replace this: bgperf's *own* daemons move it, so it cannot separate "the target
-worked hard" from "something else was running."
-
-**Measure CPU as a delta between two `/proc` samples, never `ps -eo pcpu`.** This was got wrong
-first time round and the mistake is easy to repeat, because `ps` looks exactly like what you want.
-It reports cputime divided by process *lifetime*, so it fails in both directions: a job that
-finished an hour ago still reads high and condemns a clean run, and — the case the whole module
-exists for — a long-lived process that starts burning four cores for a 95s run barely moves its
-average. On a real box: alive 16821s, 1475s of CPU, reads 8.7%; four cores for 95s takes it to
-about 11%, well under the one-core threshold. A lifetime average also barely moves within a run, so
-sampling repeatedly and keeping the max adds nothing over sampling once.
-
-Every daemon a target can run must be in `BGPERF_PROCESSES`, including the commercial NOSes
-(`rpd`, `Bgp`, `sr_bgp_mgr`, …) and `flockd`. A missing name means that target's own load is
-reported as contention and every one of its rows looks incomparable — the failure is silent and
-looks like a real finding. cEOS and SR Linux run dozens of agents each and those lists are the
-main ones, not complete.
-
-Three more traps, each of which made the feature report a *clean* machine while it was busy — the
-worst possible failure for something whose output is "0 means the machine was yours":
-
-- **Never allowlist interpreters.** `python`, `python3`, `sh` and `bash` were in the list at first,
-  and `/proc/<pid>/comm` for a script-driven workload is the interpreter — so a neighbouring
-  `python3 train.py` on eight cores was filtered out entirely. bgperf2's own Python is excluded by
-  PID via `own_process_tree()`, which walks descendants of `os.getpid()`.
-- **Kernel threads are excluded** (`PF_KTHREAD`). The ones that appear during a run — `ksoftirqd`,
-  `kworker` — are doing *the benchmark's own* veth and bridge softirq work.
-- **A process with no baseline is charged, capped at the interval.** Skipping first-seen processes
-  scored a fully saturated machine at 0, because a parallel build is thousands of sub-second `cc1`
-  processes that never appear in two consecutive samples.
-
-The column goes **before** the three provenance columns, not after: `test_provenance.py` requires
-provenance to stay last, and every graph index in `create_batch_graphs()` points at a column before
-either group, so both invariants hold.
-
-**The controller threads must actually stop.** They are governed by the `controller_stop`
-`threading.Event`: `bench()` clears it before starting the samplers, `finish_bench()` sets it. This
-was previously a module-level bool that `finish_bench()` assigned *without* `global`, so the
-assignment created a local and was a no-op — and since `batch()` calls `bench()` in-process once per
-cell, a 40-run batch ended with 40 `mpstat` loops, 40 `free` loops and 40 `ps` loops still polling.
-bgperf was manufacturing the contention it now reports, and it grew run over run, so later cells of
-a long batch were quietly noisier than earlier ones. Two things follow: clearing the event at the
-start of each run is required or every cell after the first gets a sampler that exits immediately
-and a contention column stuck at 0, and the samplers wait on the event instead of `time.sleep()` so
-they stop at once rather than lingering a poll interval. `tests/test_controller_threads.py` covers
-both directions.
-
-### The bench directory must not be in RAM
-
-`-d/--dir` holds every role's config and logs, bind-mounted under it, and defaults to `/var/tmp` —
-**not** `/tmp`, which is tmpfs on most systemd distros. A 50-peer 100k-prefix BIRD run wrote
-**31GB** of tester logs there — half this machine's RAM — pulling the recorded `min free mem` from
-56GB to **28.5GB** on a run whose target daemon used **0.56GB**. A published, graphed column was
-measuring tester logging. The default stayed `/tmp` long after that was found, while every operator
-contract and every doc told the operator to pass `-d /var/tmp/bgperf` — so the only runs that hit it
-were the ones nobody had thought about, which is the wrong way round. (The contracts have since
-moved on again, to `/data/bgperf-work`; the `-d` default stays `/var/tmp` because it must work on
-any machine, so the gap between the default and the contract is permanent and is what
-`warn_if_log_dir_is_in_ram()` and `warn_if_log_dir_is_short_on_space()` are for.)
-`warn_if_log_dir_is_in_ram()` still runs at the start of every run, because `/var/tmp` is tmpfs on
-some systems and `-d` can still name one; `is_memory_backed()` in `contention.py` is the pure part.
-
-Moving off tmpfs traded that for a smaller failure, and `warn_if_log_dir_is_short_on_space()` covers
-it: `/var/tmp` is on the **root** filesystem on most hosts, so a run that fills it takes Docker and
-journald with it, hours into a batch, and what is lost is the finished cells' artifacts rather than
-the current run. The floor is `LOG_SPACE_FLOOR_GB` (10) and is deliberately **not** an estimate of
-the run in front of it: a 50-peer 100k-prefix BIRD run writes ~5GB of tester logs while a full-table
-MRT run puts `bgpd.log` past 1GB, so those two ends differ by 30x and an estimate would have to know
-what each generator logs. `free_space_bytes()` in `contention.py` is the pure part, and two details
-in it decide whether the number means anything: it reads `f_bavail`, not `f_bfree` — the difference
-is the reserve only root may use, and bgperf2 does not run as root — and it measures the nearest
-**existing** ancestor, because `bench()` asks before it creates the directory, on purpose. A warning
-about log volume is worth nothing once the logs are written.
-
-Two things made it that large, and only one is fixed:
-
-- The BIRD tester config used `log ... all`, which includes `trace` — every route event, ~7KB per
-  prefix. It now names the classes `find_errors()` actually needs, about 6x less.
-- What remains is `<RMT> Invalid route ... withdrawn`: the target re-advertises everything it
-  learns back to the testers, which reject it. That is normal operation — `find_errors()` already
-  excludes those lines — but they are class `remote`, which `find_errors()` needs, so they cannot be filtered
-  out without blinding it. Stopping the target from exporting to testers would remove the noise but
-  would also change the workload (no RIB-out to N peers), so it is left alone.
-
-### Recording versions — provenance
-
-A result nobody can trace back to a build is not reproducible, so every run records the version
-**and** image of all three roles, not just the target: the testers generate the load and the monitor
-is the instrument the timings are read from.
-
-- `Container.version_string()` is the only thing that should ever be called for this. It returns
-  what the daemon reported, or a string starting `UNKNOWN` explaining why not — it never guesses.
-  Commas are rewritten to `;` because rows are `','.join()`ed with no quoting.
-- Each daemon's `get_version_cmd`/`exec_version_cmd` belong on the **daemon base class**
-  (`BIRD`, `GoBGP`, `RustyBGP`), not the `*Target` subclass. `Monitor(GoBGP)` and
-  `BIRDTester(Tester, BIRD)` inherit from the base, so a version command defined on the target was
-  invisible to them and asking raised `NotImplementedError`. That is why only targets used to be
-  recorded.
-- Parse defensively. These parsers used to take a fixed word (`ret.split(' ')[2]`), which on an
-  error message produced a plausible-looking value — `benchmarks/baseline/baseline-benchmark.csv`
-  has two rows whose BIRD version is the word `exec`. Match the expected banner and raise
-  `VersionUnavailable` otherwise.
-- `collect_provenance()` asks one tester per distinct image and records a count, so a 100-peer run
-  does not exec into 100 containers.
-- Output goes two places: three columns appended to the **end** of the stats row (`target image`,
-  `tester version`, `monitor version`) and a full `<prefix>.versions.json` manifest beside the
-  graphs. Appending at the end is required — `create_batch_graphs()` indexes the row positionally.
-
-Caveat worth knowing: a git ref pins source, not dependencies. RustyBGP gitignores its `Cargo.lock`,
-so its builds resolve dependencies fresh and old refs rot — `340f521` (the 2024-12 commit the 2025
-baseline benched) no longer compiles on any toolchain, which is why it is not offered as a version.
-
-### verify — the check the test suite cannot do
-
-`./bgperf2.py verify` starts a throwaway container per built image and asks the daemon about
-itself. It exists because the unit tests deliberately cannot touch Docker, so nothing else covers
-the seam where a parser meets a real container — and that is exactly where the bugs have been.
-Both of these pass every unit test and are caught by `verify` in about a second per image:
-
-- rustybgp read its version with **GoBGP's** parser (`RustyBGPTarget`'s MRO is
-  `RustyBGP → GoBGPTarget → GoBGP`), recording `UNKNOWN` on every run.
-- openbgpd looked for `bgpctl` under `/usr/local/sbin`, which does not exist in the image.
-
-It also checks the daemon binary for gcov instrumentation, the defect that made every FRR result
-incomparable for years. Notes for anyone extending it:
-
-- Probe through the classes that really run the image — `TARGET_CLASSES` **and** `TESTER_CLASSES`,
-  never the daemon base class. The rustybgp bug was invisible when the base was asked directly,
-  because GoBGP is not in that MRO. `TESTER_CLASSES` exists for this: `bench` builds
-  `ExaBGPTester(Tester, ExaBGP)`, not `ExaBGP`, and bird/gobgp run as both roles with different MROs.
-- The throwaway container is created with `entrypoint=[]`. `command` is *appended* to an
-  `ENTRYPOINT`, not run instead of it, so `bgperf/bgpdump2` and `bgperf/exabgp_mrtparse`
-  (`ENTRYPOINT ["/bin/bash"]`) would run `bash sleep 600`, exit 126, and every later `exec` would
-  fail with "not running" — while `dckr.start()` still returned success.
-- The tag-vs-reported-version check runs only when the label could plausibly appear in a banner
-  (`expect_version_in_banner`). `resolve_ref()` passes unrecognized values through as raw refs, so
-  `update gobgp --version master` is supported and reports `3.38.0` — demanding the word "master"
-  would fail a good image. Matching is anchored on a numeric boundary, because a bare substring
-  makes `3.1` match `3.13`.
-- An explicitly requested version that is missing, or a run that checked nothing at all, exits
-  non-zero. A green result over zero checks is the one outcome a caller must not be able to trust.
-- `VERSION_NEEDS_DAEMON` (FRR) means the version command talks to a running daemon over a socket,
-  so a bare container cannot answer it — it is reported as unprobeable, not as broken.
-- A daemon with no version command at all is a declared gap, not a failure; failing on it would
-  make `verify` permanently red and therefore worthless.
-- The gcov pattern is `GCOV_PATTERN`, and `.gcda` only counts where a **non-letter** follows.
-  A bare `\.gcda` matches Go's `runtime.gcdata` and flags every gobgp image. Both halves were
-  validated against a purpose-built instrumented/clean pair — a detector that never fires is worse
-  than none.
-- `verify` creates containers, so it is not in the permission allowlist alongside the read-only
-  subcommands.
-
-### Termination detection
-
-Lives in `convergence.py` as `ConvergenceTracker`, deliberately separated from `bench()`'s container
-plumbing so the rules are testable without Docker (`tests/test_convergence.py`).
-
-The naive check ("stop when received == expected") only works for synthetic prefix generation. With
-MRT playback the total unique prefix count is unknown (peers' tables overlap), and with filtering
-enabled the accepted count is deliberately lower than what was sent. So the tracker instead waits for
-the count to go *stable*: `ASSURANCE_SAMPLES` (20) without change, or 5 if the configured checkpoint
-was already hit. Those trailing samples are subtracted from the reported elapsed time afterward.
-
-It also detects failure: a count that stops moving for `STUCK_SAMPLES` (600), a drop of >1% sustained
-over 10 samples, or nothing arriving at all within 15s. `bench()` feeds it one sample per monitor
-poll via `update()` and acts on the returned status; `note_neighbors_checkpoint()` is called from the
-target branch when every neighbor has finished sending.
-
-Three rules here are load-bearing and were each broken at some point. Any change to `update()`
-should be checked against all of them:
-
-1. **Stability is tracked on every sample, including ones below the peak.** It used to sit behind
-   the regression branch, so a count that came to rest under an earlier peak by *less than*
-   `DROP_FRACTION` advanced neither the stability counter nor the stuck counter: the run could
-   neither converge nor fail, and polled forever with the target idle. Every one of the four FRR
-   MRT runs settles 0.07–0.43% below its peak, so this hung the entire FRR test, not an edge case.
-2. **Regression is measured against the high-water mark, not the previous sample** — otherwise a
-   count resting below its peak compares equal to the sample before it and a real slide is missed.
-3. **A count sitting more than `DROP_FRACTION` below its peak must not be reported CONVERGED**,
-   however steady it looks. Every real run reaches the neighbor checkpoint, which shortens the
-   assurance window to 5 samples — fewer than the 10 the regression streak needs — so without that
-   gate a run that lost half its routes and held there was reported CONVERGED at sample 6, with the
-   loss visible only as a low `received` column. None of the original drop tests set the
-   checkpoint, so this was uncovered; `test_a_big_drop_still_fails_once_the_checkpoint_is_set`
-   pins it now.
-
-Both halves of the regression rule apply to the same samples: the streak counts only samples that
-are themselves past `DROP_FRACTION`. If sub-threshold wobble armed the streak instead, one later
-sample past the threshold would fail the run instantly.
-
-**A fourth rule reads the second witness, and it is what made 10-injector MRT runs reproducible.**
-`update()` optionally takes the target's own table gauge (above) beside each monitor sample: **a
-monitor decline past `DROP_FRACTION` is not route loss while the target's own `best_paths` is
-within `DROP_FRACTION` of its peak.** The monitor counts what the target re-advertises to one
-session; `best_paths` counts what it holds, and a genuine loss takes both down together -- so the
-same constant serves both counts and nothing is fitted to one RIB. Measured over eight
-10 x 1,050,000 runs: monitor declines of 1.18%-1.76% against a target that was 0.00%-0.19% below
-its own peak on the samples excused. Before it, 4 of 5 runs of `2026-calibration-mrt.yaml` failed
-and `summary.py` published `0 of 3 passes observed`; after it, 5 of 5 single runs converged.
-
-- **It applies to the drop streak *and* to the convergence gate.** Excusing the samples only keeps
-  such a run alive -- with the gate unchanged, a table settled 1.5% below its own transient peak
-  polls on to `STUCK_SAMPLES` and fails anyway.
-- **Four things do not attest**: a withheld sum (`None` -- what a peering still coming up or a
-  partial read gives), a reading with no timestamp, a reading carried for `WITNESS_CARRY_SAMPLES`
-  monitor samples without being re-read, and a target that holds nothing and never held anything.
-  The carry bound is `ASSURANCE_SAMPLES_AFTER_CHECKPOINT` and it bounds how long such a reading
-  keeps a run *alive*, nothing about the verdict: a target poll thread that dies (`bgperf2-sl1`)
-  freezes the witness, and that has now been seen for real -- a batch pass whose target container
-  vanished excused a "100% export change" for three samples before the bound cut it off. The run
-  still failed. **A CONVERGED verdict separately requires a reading taken on the deciding sample**,
-  because a witness that freezes partway through the assurance window is still inside the carry
-  bound when the window closes; that costs at most one poll, since the count is flat by then.
-- **A run the witness alone is keeping alive still ends**, after `WITNESS_EXCUSED_LIMIT`
-  (= `STUCK_SAMPLES`) consecutive excused samples, and the message names the witness. A count that
-  declines a little on *every* sample resets the drop streak through the excuse and the stability
-  counter through changing, so the first version of this rule left such a run with no terminating
-  path at all -- and `bench()` has no run timeout, so under `batch()` that is the rest of the
-  matrix.
-- **A monitor count of zero never attests**, which is the rule that accident added. Zero is not a
-  decline in what the target exports; it is the absence of the session every published timing is
-  read from, which the target-side witness cannot see. Churn's "a collapsed count is not a
-  withdrawal", from the other side of convergence.
-- **The convergence gate additionally requires the sample's own `checked` flag.** A target holding
-  its whole table is exactly what a *broken monitor session* looks like from the target's side, so
-  without it this gate would report CONVERGED for a run whose monitor sat at zero -- the case the
-  gate was added for, reached from the other side. The cost is stated rather than hidden: a run
-  whose monitor never reaches the check-point (a filtered run) cannot be carried by the witness,
-  and a monitor that stops seeing the run is failed as stuck rather than as a drop.
-- **Nothing in the CSV moves**, and `MSG` is left alone: `elapsed (s)` is still the monitor's
-  convergence in every row. What the rule did is printed once beside the run and published as
-  `target_table.witness_rule` -- and only when it did something, so a run it never touched writes
-  the document it always wrote.
-- `tests/test_convergence_mrt_replay.py` replays the four recorded runs and pins that the monitor
-  alone fails three of them, that all four converge once the target is asked, and that the same
-  series with the target's own count falling still fails. `results/` is gitignored, so the series
-  lives in the test.
 
 ## Targets and images
 
@@ -1798,154 +408,33 @@ tag them as `crpd:latest` / `ceos:latest` — or as `crpd:<version>` to select t
 like any other daemon. These write root-owned files into the bench directory (`/var/tmp/bgperf2` by
 default), which bgperf2 then cannot clean up; `sudo rm -rf /var/tmp/bgperf2` when that happens. Their licenses prohibit publishing results.
 
+
 ## Conventions
 
-### 2026 benchmark campaign operator contract
+### Operator contracts
 
-When the user says `continue the 2026 benchmark campaign`, use these fixed defaults unless durable run metadata
-already records different values:
+Four contracts are each triggered by an exact user phrase — which is precisely what a skill
+description is — so each one is a skill under `.claude/skills/` and is loaded **in full** on
+invocation. Nothing about them has been condensed and the plan documents they drive are unchanged:
 
-- run ID: `2026-baseline`
-- results root: `results/2026`
-- work directory: `/data/bgperf-work`
+| the user says | skill | drives |
+|---|---|---|
+| `continue the 2026 benchmark campaign` | `2026-benchmark-campaign` | run ID `2026-baseline`, `results/2026`, `/data/bgperf-work` |
+| `continue the bgperf2 measurement implementation plan` | `measurement-implementation` | `docs/bgperf2-measurement-implementation-plan.md` and its decision log |
+| `continue the 64 GB timing validation campaign` | `timing-validation-campaign` | `docs/2026-64gb-timing-validation-plan.md`, `scripts/run_timing_validation_block.sh` |
+| `continue the unattended execution plan` | `unattended-execution` | `docs/unattended-execution-plan.md` |
 
-Inspect `COMPLETE` markers, progress JSON, CSV rows, logs, and active benchmark processes first. Never run suites
-concurrently. Monitor an active suite or resume an interrupted one; otherwise run exactly one suite with
-`scripts/run_2026_suite.sh next --run-id 2026-baseline --workdir /data/bgperf-work`. Review it for failed rows,
-tester errors/timeouts, foreign CPU contention, low free memory, and timing evidence. The legacy `testers (s)`
-field is elapsed minus time to the first monitor-visible prefix, so its proximity to elapsed must not be used as
-an injection-bound verdict. Stop after that one
-suite is complete and reviewed, and tell the user to use the same prompt next time. Prerequisite image or MRT work
-is allowed, but do not advance into a second suite in the same continuation.
+All four have one shape: inspect durable state first, never run two things concurrently, complete
+exactly one reviewable unit, then stop and tell the user to use the same prompt again.
 
-### Measurement implementation operator contract
+**The campaign host is a class, not a machine**, and that is cross-cutting enough to state here: 16
+vCPU / 61.44 GiB AMD EPYC 9R14 (`m7a.4xlarge`), an EC2 spot instance reclaimed without warning, of
+which only `/data` survives a reclaim — which is why the work directory is `/data/bgperf-work` and
+not `/var/tmp`. Rows measured on it may never be read against
+`benchmarks/baseline/baseline-benchmark.csv`, which was produced on a different CPU. The
+timing-validation skill carries the full rule.
 
-When the user says `continue the bgperf2 measurement implementation plan`, follow
-[`docs/bgperf2-measurement-implementation-plan.md`](docs/bgperf2-measurement-implementation-plan.md). Inspect durable
-state, resume unfinished work, and complete exactly one smallest reviewable change set from the first incomplete
-phase. Run proportionate tests and any phase-required Docker verification, review the full diff, then stop and tell
-the user to use the same prompt again. Do not start follow-up benchmarking before the release gate passes.
-
-**That plan comes in two halves and both are part of being done.** The plan document is forward-looking --
-phases, work lists, tests, exit criteria, and one `Status:` line each -- and stays short enough to read whole
-before starting.
-[`docs/bgperf2-measurement-decision-log.md`](docs/bgperf2-measurement-decision-log.md) holds why each change was
-made the way it was, what was measured to decide it, and what its Docker verification showed, one section per
-phase. Read the phase's log section before changing what that phase settled, and append to it when a change set
-lands; the `Status:` line moves in the plan. Several log entries exist because a first attempt was wrong -- a
-bound on an interval nobody measured, a poll resolution that understated itself, a guard that refused on one
-path while another accepted silently -- so it is append-only: correcting an entry means adding what was found,
-never editing the earlier reading away. The record of having been wrong is the part that stops it happening
-twice, which is the same reason `verify` exists.
-
-### 64 GB timing validation campaign operator contract
-
-When the user says `continue the 64 GB timing validation campaign`, follow
-[`docs/2026-64gb-timing-validation-plan.md`](docs/2026-64gb-timing-validation-plan.md) with run ID
-`2026-timing-validation`, results root `results/2026`, and work directory `/data/bgperf-work`. Verify the measurement
-release gate first. Never run cells or blocks concurrently. Monitor or resume an active block; otherwise run exactly
-one next block, review timing evidence, correctness, provenance, contention, and memory, then stop at the reviewed
-block boundary. The local 64 GB host is a hard ceiling; do not schedule a larger-memory workload.
-
-**The entry point is `scripts/run_timing_validation_block.sh`** (`status`, `next`,
-`accept N --note "..."`), which carries that identity as its defaults and holds a lock so two blocks
-cannot run at once. It writes **two** markers: `RAN` when a block's mechanical work finished, and
-`COMPLETE` only when an operator accepts it after review -- `next` advances past `COMPLETE` alone.
-That split is what makes "stop at the reviewed block boundary" durable rather than a habit: a
-session that died between the batch and the review would otherwise leave a block indistinguishable
-from a reviewed one. A block whose configs and procedure have not been written yet exits 2 saying
-so rather than improvising a matrix, and every benchmark block runs
-`scripts/check_timing_evidence.py` over its own results before it claims to have run -- that is the
-plan's Acceptance Rules as code, reading the published documents and re-deriving no measurement.
-
-**`RAN` states that the work ran, not that it qualified**, and that distinction is what keeps a
-block with one bad row from becoming unreachable. Written only on the passing path -- as it was --
-a single rejected row could be neither accepted nor re-measured: `accept` refuses a block with no
-`RAN`, and `next`, seeing a directory and no marker, re-selected the block and ran it with
-`--resume`, which skips every cell the progress file already holds *including the failed ones*
-(`batch()` records `completed[cell_id] = bench(a)` for a FAILED run exactly as for a converged
-one). The block re-ran, measured nothing, exited 0, and failed the identical check; the cell that
-most needed re-measuring was the one resume would never re-run. So the marker carries the verdict
-beside the fact, and what the verdict controls is the exit status and what `accept` demands.
-
-**A rejected row is accepted only as an explicit exclusion**: `accept N --with-exclusions --note
-"why"`, which is the plan's "14 reviewed rows *or* explicit durable exclusions with evidence"
-written where a later session can still read it. The marker names the rows, from the verdicts
-themselves rather than from a count of failed checker calls -- Blocks 2-7 make one call covering 14
-runs, so that count is 1 whether one row was rejected or all of them. **A missing run is not an
-exclusion.** `check_timing_evidence.py` also exits non-zero on a shortfall, and a block that
-produced 9 artifacts for 14 configurations is unfinished work rather than a result to exclude; the
-two are reported apart (`excluded_row:` against `missing_runs:`), on the same rule `summary.py` and
-`findings.py` follow everywhere else. Re-measuring means `--force`, which discards that block's
-previous results, artifacts, markers and batch progress -- there is no way to re-run a single cell.
-
-**The campaign host is settled: the machine this repository is checked out on** -- 16 vCPU, 61.44
-GiB, AMD EPYC 9R14 (`m7a.4xlarge`), resized into that shape on 2026-09-03. Justin chose it on
-2026-09-08 as the closest available match to the host that produced
-`benchmarks/baseline/baseline-benchmark.csv`, which is a match on memory (61.44 GiB against 60.74)
-and **not** on CPU. Run Phase 6 calibration and every campaign block on a host of that class.
-
-**"That machine" is a class, not a machine, because it is an EC2 spot instance and is reclaimed
-without warning.** This said "one host for the whole experiment" until 2026-09-10, which was never
-a rule the campaign could keep: by the time anyone read the manifest it had already recorded three
-hostnames across blocks 0-2, and Block 2 was measured on two of them because a reclaim landed
-between its cells. Do **not** read a two-host block as invalidating and re-measure it -- that
-discards rows that qualified in order to satisfy a rule the hardware cannot honour. The rule is in
-the timing plan's Fixed Campaign Identity and is summarised here: a replacement matching on
-**instance type, CPU model, vCPU count and memory** continues the campaign; kernel, AZ and instance
-ID are recorded and advisory; a host change *between* blocks is expected and recorded, and one
-*within* a block is a finding stated in that block's record, not grounds to discard it. All of it
-is checkable after the fact, per block, under `metadata/manifest.json` -- `blocks.<key>.host` for
-the attempt that finished, `previous_entries` for the ones a reclaim interrupted and the rows each
-measured. Checkable **from block 3 onward**: `host.instance` was added with the rule on 2026-09-10,
-so blocks 0-2 record CPU, cores, memory and hostname and not the instance type the rule turns on. **Only `/data` survives a reclaim** (its own EBS volume, carrying the repo, `results/`,
-Docker's `data-root` and `/home/ubuntu`); the root filesystem is fresh on every replacement, which
-is the harder half of why the work directory is `/data/bgperf-work` and not `/var/tmp`.
-
-The CPU cost against the 2025 baseline is paid in exactly one place:
-**campaign rows may never be read against `benchmarks/baseline/baseline-benchmark.csv`**. That is
-already the campaign's own design (it is not a continuation of `2026-baseline`, it re-runs the
-comparisons under a new run identity), so nothing has to be given up for it -- but nothing refuses
-it either, and `create_batch_graphs()` will put two hosts' bars side by side without comment.
-
-**The work directory in both contracts above moved to `/data/bgperf-work` for this host**, and
-that is the whole of the change -- there is no advisory version of it, because a work directory
-named in prose beside a contract that pins a different one is read as decoration. `/var/tmp` here
-is on the **29 GB root**, with ~26 GB free, shared with journald and the OS; `/data` has ~150 GB.
-Docker itself is safe either way -- `/etc/docker/daemon.json` sets `data-root` to `/data/docker` on
-this host, so images and container logs are not on the root. `2026-core-mrt.yaml` runs 14 target
-configurations at 1.05M prefixes, five of them `frr_c` whose `bgpd.log` alone passes 1 GB, and
-`warn_if_log_dir_is_short_on_space()` only fires below `LOG_SPACE_FLOOR_GB` (10) -- so a batch can
-fill the root hours in and take Docker and journald down with it, losing the *finished* cells'
-artifacts rather than the current run. The `2026-baseline` contract's "unless durable run metadata
-already records different values" clause still wins for that campaign, so anything in flight keeps
-the directory it recorded. **The timing-validation campaign has no such clause** -- its work
-directory is part of Fixed Campaign Identity -- but it has not started, so there is nothing to
-contradict; if a block is ever found mid-flight against `/var/tmp/bgperf`, the recorded manifest
-wins and the discrepancy is a finding to report, not a path to silently switch.
-
-### Unattended execution operator contract
-
-When the user says `continue the unattended execution plan`, follow
-[`docs/unattended-execution-plan.md`](docs/unattended-execution-plan.md). Inspect which migration
-steps are complete, complete exactly one step, verify its exit criterion, record progress in that
-document, then stop and tell the user to use the same prompt again. That plan is infrastructure for
-the other three contracts: it runs no benchmark and changes no measurement semantics.
-
-Two things the plan leaves to whoever adopts it, settled here:
-
-- **The driver's scope is the measurement plan, and it stops at Phase 6 — for a reason that has
-  changed.** It used to stop because calibration taken on the development host would describe a
-  machine the campaign never runs on. That reason is gone: as of 2026-09-08 this *is* the campaign
-  host (see the campaign contract above), and the resize took it past the memory objection too. The
-  stop stays for the reason underneath it: a Phase 6 calibration is a multi-hour benchmark that
-  takes the whole host exclusively, and starting one is the operator's call, not something a worker
-  does to see how it goes. A worker that finds Phase 6 next still stops and says so. Do not restate
-  the old wording — an 8-core / 30 GB host is not what this runs on any more, and a contract that
-  describes a machine that no longer exists is followed anyway.
-- **Unattended work does not reach master.** It commits to `unattended/measurement`, and
-  `/code-review` before every commit stays part of the definition of done — it is the only thing
-  between a bad edit and the branch, and it does not become optional because nobody is watching.
+### Code conventions
 
 - Container names are fixed strings (`bgperf_<name>_target`, `bgperf_monitor`) declared as
   `CONTAINER_NAME` class attributes; testers use a `CONTAINER_NAME_PREFIX` plus an index.
@@ -2075,4 +564,8 @@ this repository that no one asked it to. The resolutions:
   hook edit arrives inside a whole-file diff; read it for the hook bodies, not the line count.
   Worse, `bd setup claude` does not revert an edited hook, it **appends a second unguarded copy
   beside it**, so both run while the edited one still looks right. Re-review that file after any
-  `bd setup`, and do not run one casually.
+  `bd setup`, and do not run one casually. It now also registers
+  `.claude/hooks/invariants-guard.sh`, which is what points an editor at the invariant document
+  governing the file they are changing; `tests/test_docs_index.py` fails if that registration is
+  ever dropped, because a guard that silently stops firing is the failure this whole split is
+  arranged against.

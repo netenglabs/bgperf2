@@ -1,9 +1,11 @@
 # Unattended Execution Plan
 
 Status: proposed on 2026-09-03; steps 0 through 5 taken the same day.
-The continuation prompt at the end of this document is now an operator contract
-in `CLAUDE.md`, which settles two things this document deliberately left open --
-the driver's scope and where its commits go; see the contract. Step 6 is next:
+The continuation prompt at the end of this document is now an operator contract,
+carried by the `unattended-execution` skill (`.claude/skills/unattended-execution/SKILL.md`)
+and named in `CLAUDE.md`'s contract table. It settles two things this document
+deliberately left open -- the driver's scope and where its commits go; see the
+contract. Step 6 is next:
 `bd` 1.2.2 is installed and initialized, the three epics exist, the measurement
 plan's phases are seeded, and the 64 GB campaign's twelve blocks are seeded
 behind its release gate, so `bd ready --exclude-type=epic` offers the four
@@ -315,8 +317,8 @@ nothing downstream refuses the comparison either.
 **The Phase 6 stop stays, on its remaining reason.** A calibration is a
 multi-hour benchmark that takes the whole host exclusively, and starting one is
 the operator's call. That reason was always underneath the host argument; it
-was simply never the binding one. It is stated in `CLAUDE.md` in the form the
-worker actually reads.
+was simply never the binding one. It is stated in the `unattended-execution`
+skill, in the form the worker actually reads.
 
 The lesson is the one this repository keeps relearning and is worth naming
 here, because a driver is the thing least able to notice it: **a rule outlives

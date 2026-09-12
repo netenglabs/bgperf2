@@ -48,6 +48,16 @@ for _path in (REPO_ROOT, HERE):
 from summary import (DECISION_METRIC, EXPAND, EXPANSION_PASSES,  # noqa: E402
                      METRIC_RESOLUTION, OBSERVED, summarize_batch,
                      summarize_metric)
+# Which cells are drawn beside each other, and therefore which ones a cell has
+# to be separated *from*. Private to `summary.py` and imported anyway: a
+# second copy of "one graph's group is (peers, prefixes, filter)" is a rule
+# that would drift from the rule the verdict was computed under.
+from summary import _comparison_key as comparison_key  # noqa: E402
+# And the rounding the rule's own published gaps go through. Comparing a raw
+# `abs(a - b)` against the resolution reports 1.0000000000000002 > 1.0 for a
+# pair the rule can never separate -- a float artefact approving hours of
+# measurement.
+from summary import _round as round_like_the_rule  # noqa: E402
 # The pairing of an artifact to the row of the cell that produced it, from the
 # one module that already does it -- including its refusal to choose when two
 # rows of a directory cannot be told apart.  A second copy of that rule is how
@@ -537,12 +547,38 @@ def review_series(run_root, series, unavailable, problems):
     positions_known = all(one_pass['positions_known'] for one_pass in passes)
 
     groups, records = build_groups(passes, problems)
-    document = summarize_batch(series['name'], header, groups,
-                               repetitions=len(passes), unavailable=unavailable)
+    try:
+        document = summarize_batch(series['name'], header, groups,
+                                   repetitions=len(passes),
+                                   unavailable=unavailable)
+    except Exception as failure:      # noqa: BLE001 - see above
+        # `summarize_batch()` refuses a header that does not carry a column it
+        # reads, which is what three passes written under an older stats
+        # header look like -- the per-pass equality check above only catches
+        # passes that disagree with *each other*. Uncaught it killed the whole
+        # review, with the runner then pointing at a `review/` directory that
+        # had been removed and never recreated.
+        #
+        # Broad, like `summarize_batch()`'s own catch around the variance
+        # rule, and for the same reason one level up: this reads six other
+        # series from documents that are all still on disk, and a KeyError in
+        # one of them must cost that one. The type is named so the failure is
+        # not mistaken for a rule.
+        problem(problems, ERROR, '{0}: {1}: {2}'.format(
+            series['name'], type(failure).__name__, failure))
+        return None
     if document.get('variance_failure'):
         problem(problems, ERROR, '{0}: {1}'.format(series['name'],
                                                    document['variance_failure']))
     by_ordinal = {cell['cell']: cell for cell in document['cells']}
+    # The cells each cell is drawn beside, which is the group `separated` is a
+    # claim about.
+    grouped = {}
+    for cell in document['cells']:
+        grouped.setdefault(comparison_key(cell), []).append(cell)
+    rivals_of = {cell['cell']: [other for other in grouped[comparison_key(cell)]
+                                if other is not cell]
+                 for cell in document['cells']}
 
     metric_index = {name: position for position, name in enumerate(header)}
     relations = {}
@@ -587,7 +623,13 @@ def review_series(run_root, series, unavailable, problems):
             # document down.
             artifacts.append(cell.get('artifact')
                              if observed and cell is not None else None)
-        record['expansion'] = expansion_prospect(summary_cell)
+        # Carried onto the record so a selection can be judged on the cells
+        # it names rather than only on each cell's own group.
+        decision = (summary_cell.get('metrics') or {}).get(DECISION_METRIC) or {}
+        record['median'] = decision.get('median')
+        record['stdev'] = decision.get('stdev')
+        record['expansion'] = expansion_prospect(
+            summary_cell, rivals_of.get(record['ordinal']) or [])
         record['order_relation'] = (
             order_relation(observations) if positions_known
             else 'order withheld: a superseded sequence')
@@ -601,13 +643,35 @@ def review_series(run_root, series, unavailable, problems):
         record['workload'] = {name: stats for name, stats in workload.items()
                               if stats['n']}
         record['churn'] = churn_statistics(artifacts, record['passes'])
-        limiting, disagreed = agreement(
-            [dig(artifact or {}, ('findings', 'limiting_component'))
-             for artifact in artifacts])
+        # Only the passes that observed something. `artifacts` carries None
+        # for a pass that failed or never ran, and an agreement over those
+        # published `['unresolved', None]` as the cell's attribution and then
+        # reported it as a disagreement -- a pass that failed described in the
+        # same clause as an attribution that differs, which is the one thing
+        # this file's header says it does not do.
+        attributions = [dig(artifact, ('findings', 'limiting_component'))
+                        for artifact in artifacts if artifact is not None]
+        limiting, disagreed = agreement(attributions)
         record['limiting_component'] = limiting
+        # Counted by state rather than as "n of m", which collapses a pass
+        # that failed into one clause with a pass that never ran -- the one
+        # distinction this campaign keeps at every level of aggregation, and
+        # `0 of 3` means all three failed, none ran, or any mix of the two.
+        record['limiting_component_observations'] = {
+            'passes': {state: sum(1 for entry in record['passes']
+                                  if entry['state'] == state)
+                       for state in sorted({entry['state']
+                                            for entry in record['passes']}
+                                           - {None})},
+            # Not the same number: a pass can be `observed` and still have no
+            # artifact to attribute from -- `pair_artifacts()` reports that as
+            # a cell with a row and no artifact -- and counting the states
+            # alone published three passes behind a verdict two of them
+            # supported.
+            'attributed': len(attributions)}
         record['limiting_reason'] = agreement(
-            [dig(artifact or {}, ('findings', 'reason'))
-             for artifact in artifacts])[0]
+            [dig(artifact, ('findings', 'reason'))
+             for artifact in artifacts if artifact is not None])[0]
         if disagreed:
             # A note, not an error.  The verdict is a judgement about one run
             # and it is allowed to differ between passes -- that difference is
@@ -645,18 +709,43 @@ def review_series(run_root, series, unavailable, problems):
     }
 
 
-def expansion_prospect(cell):
-    '''Whether more passes of this cell could change its verdict.
+def expansion_prospect(cell, rivals):
+    '''Whether a tighter dispersion could change this cell's verdict.
 
     The rule separates two cells when their medians differ by more than the
     sum of their deviations, **floored at the metric's resolution** -- so a
     pair whose medians are one second apart on a metric counted off a one
     second poll can never be separated, however many passes are run: with a
     dispersion of exactly zero the margin is still zero, and the rule needs it
-    positive.  Four of this campaign's `expand` verdicts are that pair, and
-    "observed variance could change the decision" is a condition the plan puts
-    on expanding a comparison, so it is worth saying out loud rather than
-    leaving to be re-derived by whoever plans Block 10.
+    positive.  "Observed variance could change the decision" is a condition
+    the plan puts on expanding a comparison, so it is worth saying out loud
+    rather than leaving to be re-derived by whoever plans Block 10.
+
+    **The claim is about the dispersion, not about the future.**  More passes
+    move a median as well as tightening a spread, so "these two can never be
+    separated" is not something this can know.  What it does know is that at
+    the medians already observed, a gap inside the resolution cannot be
+    cleared by *any* reduction in dispersion -- the floor is what the margin
+    is measured against -- so expanding is a bet on a median moving rather
+    than on the variance the plan's condition names.  Hence
+    `dispersion_could_decide` and not `could_separate`.
+
+    **Decided against the nearest rival, not the binding one.**  The verdict's
+    own `evidence` names the rival with the smallest *margin*, which is the
+    closest call and the right thing to report a verdict against -- but it is
+    the wrong thing to ask this question of, because `separated` means
+    distinguishable from *every* cell drawn beside it.  A cell 0.5s from one
+    rival and 10s from the rival that happened to bind is not separated by
+    tightening anything, and reading the binding rival's gap says it is.  Same
+    shape of error as the one `apply_variance_rule()` records making three
+    times: a rule written against the case in front of it rather than against
+    the claim.
+
+    **Only rivals the rule would judge**, which is `summary.py`'s `measurable`
+    set: a rival with a median and no dispersion has one observation, and a
+    provisional median is not something to rule against -- the verdict
+    withholds `separated` for such a rival under its own reason, and that one
+    *is* removable by giving the rival more passes.
 
     It says nothing about whether the comparison is worth making.  That is the
     review, and it is the reason this returns a prospect rather than a
@@ -665,20 +754,33 @@ def expansion_prospect(cell):
     variance = cell.get('variance') or {}
     if variance.get('verdict') != EXPAND:
         return None
-    evidence = variance.get('evidence') or {}
-    gap = evidence.get('gap')
-    resolution = evidence.get('metric_resolution')
-    if gap is None or resolution is None:
+    statistics = (cell.get('metrics') or {}).get(DECISION_METRIC) or {}
+    median = statistics.get('median')
+    if median is None:
         return None
+    resolution = METRIC_RESOLUTION.get(DECISION_METRIC, 0.0)
+    gaps = []
+    for other in rivals:
+        rival = (other.get('metrics') or {}).get(DECISION_METRIC) or {}
+        if rival.get('median') is None or rival.get('stdev') is None:
+            continue
+        gaps.append((round_like_the_rule(abs(rival['median'] - median)),
+                     other['description']))
+    if not gaps:
+        return None
+    gap, nearest = min(gaps)
     if gap > resolution:
-        return {'could_separate': True, 'gap': gap, 'resolution': resolution,
-                'rival': evidence.get('rival_description')}
+        return {'dispersion_could_decide': True, 'gap': gap,
+                'resolution': resolution, 'rival': nearest,
+                'rival_chosen_by': 'gap'}
     return {
-        'could_separate': False, 'gap': gap, 'resolution': resolution,
-        'rival': evidence.get('rival_description'),
-        'reason': 'a gap of {0} cannot clear the {1} resolution of {2} at any '
-                  'number of passes, because the rule floors the combined '
-                  'deviation there'.format(gap, resolution, DECISION_METRIC),
+        'dispersion_could_decide': False, 'gap': gap, 'resolution': resolution,
+        'rival': nearest, 'rival_chosen_by': 'gap',
+        'reason': 'a gap of {0} to {1} is inside the {2} resolution of {3}, '
+                  'which the rule floors the combined deviation at -- so no '
+                  'reduction in dispersion separates them, and only a moved '
+                  'median could'.format(gap, nearest, resolution,
+                                        DECISION_METRIC),
     }
 
 
@@ -931,7 +1033,46 @@ def exclusion_for(excluded, block, results, artifact, name):
     return '; '.join(verdicts) if verdicts else None
 
 
-def validate_selection(document, reviews, excluded, problems):
+def selection_prospect(cells, resolution):
+    '''Whether the comparison a selection names is resolvable at all.
+
+    Judged on the cells the selection names, not on each cell's whole group.
+    A cell can sit inside the resolution of some *other* daemon's median and
+    still be 27s from the cell it is being compared with -- `bird 2.19.2` is
+    1s from `frr_c 10.0` and 27s from `bird 3.3.2 (default threads)` -- and
+    refusing that expansion in the name of a cell the selection never mentions
+    is the group-wide claim answering a question nobody asked.
+
+    The widest pair, not the narrowest: a three-cell comparison where two
+    cells happen to agree is still worth expanding for the third.
+
+    **Only cells that have a dispersion**, which is the same rule
+    `expansion_prospect()` applies to a rival and for the same reason: a
+    median from one observation is provisional, and refusing an expansion on
+    the strength of it refuses exactly the passes that would settle it.  Every
+    BIRD screen cell is one observation by design, so without this the three
+    scenarios Block 10 is *for* were judged on single readings -- and passed
+    only because their gaps happen to be large.
+    '''
+    known = [(cell['description'], cell.get('median')) for cell in cells
+             if cell.get('median') is not None and cell.get('stdev') is not None]
+    if len(known) < 2:
+        return None
+    gaps = []
+    for index, (described, median) in enumerate(known):
+        for other_described, other_median in known[index + 1:]:
+            gaps.append((round_like_the_rule(abs(other_median - median)),
+                         described, other_described))
+    gap, one, two = max(gaps)
+    if gap > resolution:
+        return None
+    return ('its widest pair is {0} apart ({1} against {2}), inside the {3} '
+            'resolution of {4} -- no dispersion separates any pair here, and '
+            'only a moved median could'.format(gap, one, two, resolution,
+                                               DECISION_METRIC))
+
+
+def validate_selection(document, reviews, excluded, problems, attempted=None):
     '''Check the operator's Block 10 selection against what the passes measured.
 
     The plan's exit criterion for this block is that "every optional
@@ -971,6 +1112,11 @@ def validate_selection(document, reviews, excluded, problems):
 
     seen = set()
     for entry in repetitions:
+        if not isinstance(entry, dict):
+            problem(problems, ERROR,
+                    'a selected repetition is {0}, not an object: {1!r}'.format(
+                        type(entry).__name__, entry))
+            continue
         name = str(entry.get('id') or '').strip()
         if not name:
             problem(problems, ERROR, 'a selected repetition has no `id`')
@@ -984,13 +1130,25 @@ def validate_selection(document, reviews, excluded, problems):
                 problem(problems, ERROR, '{0}: no {1}'.format(name, field))
         review = by_series.get(entry.get('series'))
         if review is None:
-            problem(problems, ERROR, '{0}: {1!r} is not a reviewed series'
-                    .format(name, entry.get('series')))
+            # A series that was read and dropped for a fault has already
+            # reported why. Calling it unknown as well is a second error that
+            # reads as a bad selection document -- and the false one looks the
+            # more actionable, which is the thing this keeps getting wrong.
+            named = entry.get('series')
+            problem(problems, ERROR, '{0}: {1}'.format(name,
+                    '{0!r} was not reviewed; see its error above'.format(named)
+                    if named in (attempted or set())
+                    else '{0!r} is not a reviewed series'.format(named)))
             continue
         known = {cell['description']: cell for cell in review['cells']}
         cells = entry.get('cells') or []
         if not cells:
             problem(problems, ERROR, '{0}: names no cells'.format(name))
+        # The cells that resolved, counted before the per-cell guards: gating
+        # those on the raw list let one misspelled name turn a single-cell
+        # selection into a two-cell one, skipping the very check the rule is
+        # there to make while reporting only the typo.
+        resolved = [described for described in cells if described in known]
         for described in cells:
             cell = known.get(described)
             if cell is None:
@@ -998,14 +1156,23 @@ def validate_selection(document, reviews, excluded, problems):
                         .format(name, described, review['series']))
                 continue
             prospect = cell.get('expansion')
-            if prospect and not prospect.get('could_separate'):
-                # The plan's second condition: "observed variance could change
-                # the decision".  Where the review has already shown it
-                # cannot, expanding spends hours to reproduce the same
-                # verdict -- and `variance_reason` being a non-empty string is
-                # not a check of it, which is what this used to rely on.
+            if (len(resolved) == 1 and prospect
+                    and not prospect.get('dispersion_could_decide')):
+                # A selection naming one cell is a comparison against that
+                # cell's own group, which is what the prospect is a claim
+                # about. Where it names several, the comparison is between
+                # them and is judged below -- deliberately, and it is worth
+                # saying because it looks like a hole: a cell whose group-wide
+                # prospect is `false` can be selected against a *named* cell
+                # that has no dispersion, and nothing refuses it. That is the
+                # right answer. A cell with no dispersion has one observation
+                # -- by design for every screen cell -- and the passes being
+                # asked for are exactly what would give it one, so refusing on
+                # the strength of its provisional median refuses the
+                # measurement that would settle it.
                 problem(problems, ERROR,
-                        '{0}: {1} cannot be separated by more passes -- {2}'
+                        '{0}: {1} is not separated from the cells drawn beside '
+                        'it by any dispersion more passes could produce -- {2}'
                         .format(name, described, prospect['reason']))
             for entry_pass in cell['passes']:
                 verdict = exclusion_for(excluded, entry_pass['block'],
@@ -1027,6 +1194,23 @@ def validate_selection(document, reviews, excluded, problems):
             problem(problems, ERROR,
                     '{0}: names every cell of {1}; the plan forbids expanding '
                     'the whole matrix'.format(name, review['series']))
+        # The plan's second condition -- "observed variance could change the
+        # decision" -- read against the comparison this selection names.
+        #
+        # Only where the comparison is about the metric the rule is computed
+        # on. A selection may declare its own (`metric: reload_s`), and the
+        # BIRD reload scenario is exactly that: `summary.py` computes the
+        # variance rule on `elapsed (s)` alone, so a policy-reload comparison
+        # refused on its elapsed medians would be refused on a number it was
+        # never about.
+        measured_by = entry.get('metric') or DECISION_METRIC
+        if measured_by == DECISION_METRIC:
+            unresolvable = selection_prospect(
+                [known[described] for described in resolved],
+                METRIC_RESOLUTION.get(DECISION_METRIC, 0.0))
+            if unresolvable:
+                problem(problems, ERROR, '{0}: {1}'.format(name, unresolvable))
+
         observed = len(review['passes'])
         requested = entry.get('passes_requested')
         if not isinstance(requested, int) or isinstance(requested, bool):
@@ -1183,13 +1367,13 @@ def render_series(review):
 
     undecidable = [labels[record['ordinal']] for record in review['cells']
                    if record['expansion']
-                   and not record['expansion']['could_separate']]
+                   and not record['expansion']['dispersion_could_decide']]
     if undecidable:
-        lines.extend(['', '  more passes cannot separate these from their '
-                      'binding rivals -- the gap is inside the {0}s resolution '
-                      'of {1}: {2}'.format(review['metric_resolution'],
-                                           DECISION_METRIC,
-                                           ', '.join(undecidable))])
+        lines.extend(['', '  no dispersion separates these from their nearest '
+                      'rivals -- the gap is inside the {0}s resolution of {1}, '
+                      'so only a moved median could: {2}'.format(
+                          review['metric_resolution'], DECISION_METRIC,
+                          ', '.join(undecidable))])
 
     lines.append('')
     lines.append('  order effects: {0}'.format(', '.join(
@@ -1264,17 +1448,30 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     problems = []
+    if args.out:
+        # Before any check runs, not after they all pass. `run_variance_review`
+        # removes this directory and regenerates it, and the runner's messages
+        # name it -- so an exception anywhere below used to leave the operator
+        # pointed at a directory that had been deleted and never recreated.
+        # The transcript under `metadata/` holds the traceback either way; this
+        # makes the named directory exist to be looked in.
+        os.makedirs(args.out, exist_ok=True)
     unavailable = unsampled_row_values()
     wanted = set(args.series or [])
-    reviews = []
+    reviews, attempted = [], set()
     for series in ALL_SERIES:
         if wanted and series['name'] not in wanted:
             continue
+        # Attempted, not succeeded: a series dropped because its documents
+        # could not be read has already reported why, and naming it again as
+        # one that does not exist is a second, false error beside the true
+        # one -- and the false one looks the more actionable.
+        attempted.add(series['name'])
         review = review_series(args.run_root, series, unavailable, problems)
         if review is not None:
             reviews.append(review)
     if wanted:
-        for name in sorted(wanted - {review['series'] for review in reviews}):
+        for name in sorted(wanted - attempted):
             problem(problems, ERROR, 'no such series: {0}'.format(name))
 
     blocks = review_blocks(args.run_root, problems)
@@ -1292,7 +1489,8 @@ def main(argv=None):
             document = read_json(args.selection, problems,
                                  'the selection document is not readable JSON')
             if document is not None:
-                validate_selection(document, reviews, excluded, problems)
+                validate_selection(document, reviews, excluded, problems,
+                                   attempted=attempted)
 
     lines = []
     for review in reviews:
@@ -1316,7 +1514,6 @@ def main(argv=None):
     print(text)
 
     if args.out:
-        os.makedirs(args.out, exist_ok=True)
         for review in reviews:
             write_json(os.path.join(args.out, '{0}.json'.format(review['series'])),
                        review)

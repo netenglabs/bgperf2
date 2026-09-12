@@ -318,6 +318,66 @@ def test_a_block_that_measures_nothing_is_not_told_to_re_measure(roots):
         'the real cause must still be reported')
 
 
+def _review_block():
+    """The block that measures nothing, discovered rather than named.
+
+    Same reason `unbuilt_block()` is discovered: a test that hardcoded an
+    index would be testing the wrong block the day the list changes.
+    """
+    keys = _block_keys()
+    index = [n for n, key in enumerate(keys) if 'variance-review' in key][0]
+    return index, keys[index]
+
+
+def _a_block_that_ran_and_failed(results, key):
+    run_root = os.path.join(results, '2026-timing-validation')
+    os.makedirs(os.path.join(run_root, key), exist_ok=True)
+    with open(os.path.join(run_root, key, 'RAN'), 'w') as marker:
+        marker.write('block: %s\nevidence: 1 check(s) failed\n' % key)
+    return run_root
+
+
+def test_accept_does_not_send_a_review_block_to_a_checker_that_never_ran(roots):
+    """A block with no rows has nothing to exclude and nothing to re-measure.
+
+    `accept` refuses it either way -- there is no evidence to record a durable
+    exclusion against -- but the refusal used to name a `$dir/evidence/`
+    directory that is never created and tell the operator to "re-measure" a
+    block that measures nothing.
+    """
+    results, _ = roots
+    index, key = _review_block()
+    _a_block_that_ran_and_failed(results, key)
+    result = run([BLOCK_RUNNER, 'accept', str(index), '--note', 'x',
+                  '--results-root', results])
+    assert result.returncode == 1
+    assert 'measures nothing' in result.stderr
+    assert '/evidence/' not in result.stderr
+
+
+def test_next_points_a_failed_review_block_at_its_review(roots):
+    """The fourth path that has to know a block produces no rows.
+
+    Every other block is marked complete first, from the runner's own key
+    list, so the only candidate is the review block and `next` cannot reach a
+    benchmark: it finds that block awaiting review and prints.
+    """
+    results, work = roots
+    index, key = _review_block()
+    run_root = _a_block_that_ran_and_failed(results, key)
+    for other in _block_keys():
+        if other == key:
+            continue
+        os.makedirs(os.path.join(run_root, other), exist_ok=True)
+        with open(os.path.join(run_root, other, 'COMPLETE'), 'w') as marker:
+            marker.write('accepted: fixture\n')
+    result = block('next', results_root=results, workdir=work)
+    assert result.returncode == 1
+    assert 'Read its review under' in result.stderr
+    assert 'discards no observation' in result.stderr
+    assert 'with-exclusions' not in result.stderr
+
+
 def test_next_selects_block_zero_first_then_advances_only_past_acceptance(roots):
     results, work = roots
     run_root = os.path.join(results, '2026-timing-validation')

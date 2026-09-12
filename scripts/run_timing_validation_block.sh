@@ -184,6 +184,23 @@ BLOCK_TITLES=(
   "final report"
 )
 
+# Blocks that produce no rows at all. Keyed by index, like BLOCK_HELD, and
+# stated here rather than probed for on disk: the three places that need to
+# know are all *failure* paths, and the directory a probe would look for
+# (`review/`, which `run_variance_review` removes before regenerating) is
+# missing in exactly the failure they are written for. A benchmark block whose
+# batch died before its first `check_evidence` has no `evidence/` either, so a
+# probe gets both cases backwards.
+declare -A BLOCK_MEASURES_NOTHING=(
+  [9]=1
+  # Block 11 writes the campaign's report and runs no benchmark either. Listed
+  # before it is built, deliberately: an unbuilt block exits 2 long before any
+  # of these paths, so the entry changes nothing until the block lands -- and
+  # the alternative is four messages that go wrong on the day it does, which
+  # is the defect this table was added to fix.
+  [11]=1
+)
+
 # A block can be *built* and still not be the right thing to run, and those are
 # different states from "not built yet". A held block has a config and a
 # procedure that were reviewed and are believed correct; what it lacks is a
@@ -477,10 +494,26 @@ MSG
       exit 1
       ;;
     no-evidence)
-      # The checks failed and no verdict can be read -- the checker died, or the
-      # directory is gone. Accepting here would write a durable exclusion record
-      # naming an evidence path that holds nothing, which is what "explicit
-      # durable exclusions *with evidence*" exists to refuse.
+      # The checks failed and no verdict can be read. Two different reasons
+      # land here and they are told apart by whether the block produces rows
+      # at all: a benchmark block whose checker died or whose directory is
+      # gone, and a review block that writes no `evidence/` by design. Both
+      # refuse -- accepting either would write a durable exclusion record
+      # naming rows nothing can show -- but the advice has to be true of the
+      # block it is given about, which is the misdirection the run-failure
+      # path was fixed for.
+      if [[ -n "${BLOCK_MEASURES_NOTHING[$index]:-}" ]]; then
+        cat >&2 <<MSG
+block-$index has failing checks, and it measures nothing: there are no rows
+here and nothing to exclude.
+
+What failed is under $dir/review/ and in
+$METADATA_DIR/variance-review-${BLOCK_KEYS[$index]}.txt. Fix what it named, then
+run it again:
+  scripts/run_timing_validation_block.sh block-$index --force
+MSG
+        exit 1
+      fi
       cat >&2 <<MSG
 block-$index has failing checks and no readable verdicts under $dir/evidence/.
 
@@ -561,6 +594,23 @@ if [[ "$ACTION" == "next" ]]; then
       excludable) next_step="accept $BLOCK_INDEX --with-exclusions --note \"...\"" ;;
       *)          next_step="block-$BLOCK_INDEX --force   # unfinished or unreadable; re-measure" ;;
     esac
+    # The fourth path that has to know a block produces no rows: it names the
+    # directory to read and the command to run, and both were wrong for one.
+    reading="evidence"
+    # True of a block that measured something, and only of one: re-running a
+    # review discards nothing, because it reads documents that are still on
+    # disk and were paid for by the blocks that published them.
+    rerun_cost="Re-running it instead would discard an observation that was already paid for;
+pass --force if that is really what you mean."
+    if [[ -n "${BLOCK_MEASURES_NOTHING[$BLOCK_INDEX]:-}" ]]; then
+      reading="review"
+      rerun_cost="Re-running it discards no observation -- it reads documents the accepted
+blocks published -- but --force is still how it is run again."
+      case "$BLOCK_EXCLUSION_CLASS" in
+        clean) ;;
+        *) next_step="block-$BLOCK_INDEX --force   # nothing to exclude; fix what it named and re-read" ;;
+      esac
+    fi
     cat >&2 <<MSG
 block-$BLOCK_INDEX (${BLOCK_TITLES[$BLOCK_INDEX]}) has already run and is waiting to be reviewed.
 
@@ -568,11 +618,10 @@ $(sed -n 's/^evidence: /evidence: /p' "$RUN_ROOT/${BLOCK_KEYS[$BLOCK_INDEX]}/RAN
 ${BLOCK_EXCLUSION_DETAIL:+
 $BLOCK_EXCLUSION_DETAIL
 }
-Read its evidence under $RUN_ROOT/${BLOCK_KEYS[$BLOCK_INDEX]}, then:
+Read its $reading under $RUN_ROOT/${BLOCK_KEYS[$BLOCK_INDEX]}, then:
   scripts/run_timing_validation_block.sh $next_step
 
-Re-running it instead would discard an observation that was already paid for;
-pass --force if that is really what you mean.
+$rerun_cost
 MSG
     exit 1
   fi
@@ -1463,7 +1512,8 @@ esac
   fi
 } > "$BLOCK_DIR/RAN"
 
-if [[ $EVIDENCE_FAILURES -gt 0 && ! -d "$BLOCK_DIR/evidence" ]]; then
+if [[ $EVIDENCE_FAILURES -gt 0 \
+      && -n "${BLOCK_MEASURES_NOTHING[$BLOCK_INDEX]:-}" ]]; then
   # A block that measures nothing has no per-row verdicts, so every clause of
   # the message below is false for it: there is no `evidence/` to read, there
   # is nothing to re-*measure*, and there is no progress file for a plain
@@ -1517,10 +1567,20 @@ MSG
   exit 1
 fi
 
+# Whichever directory this block actually wrote its verdicts into. A
+# benchmark block writes `evidence/`; a block that measures nothing writes no
+# such directory and its reading is under `review/`. Naming the wrong one
+# sends the operator to look for a checker that never ran -- which is the same
+# defect the failure path above had, on the path taken when nothing is wrong.
+VERDICT_DIR="$BLOCK_DIR/evidence"
+if [[ -n "${BLOCK_MEASURES_NOTHING[$BLOCK_INDEX]:-}" ]]; then
+  VERDICT_DIR="$BLOCK_DIR/review"
+fi
+
 cat <<MSG
 
 block-$BLOCK_INDEX ran. It is NOT complete until it is reviewed:
 
-  read $BLOCK_DIR/evidence/
+  read $VERDICT_DIR/
   then: scripts/run_timing_validation_block.sh accept $BLOCK_INDEX --note "..."
 MSG

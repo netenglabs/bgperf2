@@ -228,6 +228,9 @@ def a_review(series='synthetic', cells=('bird 2.19.2', 'frr_c 10.7'), passes=3,
         'scope': scope,
         'passes': [{'repetition': n + 1} for n in range(passes)],
         'cells': [{'ordinal': n, 'name': name, 'expansion': None,
+                   # Far enough apart that the comparison itself is always
+                   # resolvable; the tests that care set their own.
+                   'median': 90.0 + 27.0 * n, 'stdev': 1.0,
                    'description': '{0}, peers=50'.format(name),
                    'passes': [{'block': 'block{0}'.format(p + 2),
                                'results': series,
@@ -358,19 +361,104 @@ class TestSelection:
         of that.'''
         reviewed = a_review()
         reviewed['cells'][1]['expansion'] = {
-            'could_separate': False, 'gap': 1.0, 'resolution': 1.0,
+            'dispersion_could_decide': False, 'gap': 1.0, 'resolution': 1.0,
             'rival': 'frr_c 10.0, peers=50',
             'reason': 'a gap of 1.0 cannot clear the 1.0 resolution of '
                       'elapsed (s) at any number of passes'}
-        assert any('cannot be separated by more passes' in message
+        assert any('not separated from the cells drawn beside it' in message
                    for message in errors_for(a_selection(), reviews=[reviewed]))
 
     def test_a_pair_more_passes_could_separate_is_allowed(self):
         reviewed = a_review()
         reviewed['cells'][1]['expansion'] = {
-            'could_separate': True, 'gap': 6.0, 'resolution': 1.0,
+            'dispersion_could_decide': True, 'gap': 6.0, 'resolution': 1.0,
             'rival': 'frr_c 10.0, peers=50'}
         assert errors_for(a_selection(), reviews=[reviewed]) == []
+
+    def test_a_near_neighbour_does_not_veto_a_wide_comparison(self):
+        """The comparison is between the cells the selection names.
+
+        `bird 2.19.2` sits 1s from `frr_c 10.0` and 27s from the BIRD 3 cell
+        it is actually being compared with. Refusing that expansion in the
+        name of a cell the selection never mentions is a group-wide claim
+        answering a question nobody asked.
+        """
+        reviewed = a_review(cells=('bird 2.19.2', 'frr_c 10.0', 'bird 3.3.2'))
+        reviewed['cells'][0]['median'] = 90.0
+        reviewed['cells'][1]['median'] = 91.0
+        reviewed['cells'][2]['median'] = 117.0
+        reviewed['cells'][0]['expansion'] = {
+            'dispersion_could_decide': False, 'gap': 1.0, 'resolution': 1.0,
+            'rival': 'frr_c 10.0, peers=50', 'reason': 'a gap of 1.0 ...'}
+        document = a_selection(repetitions=[{
+            'id': 'bird-2-against-bird-3', 'series': 'synthetic',
+            'cells': ['bird 2.19.2, peers=50', 'bird 3.3.2, peers=50'],
+            'passes_requested': 5, 'hypothesis': 'BIRD 3 is slower here',
+            'variance_reason': 'a 27s gap the passes have not resolved'}])
+        assert errors_for(document, reviews=[reviewed]) == []
+
+    def test_a_comparison_of_single_observations_is_not_refused(self):
+        """Every BIRD screen cell is one observation, by design.
+
+        There is no dispersion there to reason about and the median is one
+        sample that will move, so refusing the expansion refuses exactly the
+        passes that would settle it -- the same rule `expansion_prospect()`
+        applies to a rival with one observation, reached from the other side.
+        """
+        screen = a_review(series='screen-reload', passes=1, scope='scenario',
+                          cells=('bird 2.19.2', 'bird 3.3.2'))
+        for cell, median in zip(screen['cells'], (43.0, 43.5)):
+            cell['median'] = median
+            cell['stdev'] = None
+        document = a_selection(repetitions=[{
+            'id': 'bird-policy-recalculation', 'series': 'screen-reload',
+            'cells': [cell['description'] for cell in screen['cells']],
+            'passes_requested': 3, 'hypothesis': '3.3.2 reloads in half the time',
+            'variance_reason': 'one observation per cell decides nothing'}])
+        assert errors_for(document, reviews=[screen]) == []
+
+    def test_a_comparison_about_another_measurement_is_not_judged_on_elapsed(self):
+        '''`summary.py` computes the variance rule on `elapsed (s)` alone, so a
+        policy-reload comparison refused on its elapsed medians would be
+        refused on a number it was never about.'''
+        reviewed = a_review(cells=('bird 2.19.2', 'bird 3.3.2'))
+        reviewed['cells'][0]['median'] = 43.0
+        reviewed['cells'][1]['median'] = 43.5
+        document = a_selection(repetitions=[{
+            'id': 'reload', 'series': 'synthetic', 'metric': 'reload_s',
+            'cells': [cell['description'] for cell in reviewed['cells']],
+            'passes_requested': 5, 'hypothesis': 'reload_s halves',
+            'variance_reason': 'reload_s has no dispersion in this campaign'}])
+        assert not [message for message in errors_for(document, reviews=[reviewed])
+                    if 'no dispersion separates any pair here' in message]
+
+    def test_a_misspelt_cell_does_not_disarm_the_per_cell_check(self):
+        '''One real unseparable cell plus one typo used to skip both guards:
+        the per-cell branch saw two names and the pairwise one resolved
+        only one.'''
+        reviewed = a_review()
+        reviewed['cells'][1]['expansion'] = {
+            'dispersion_could_decide': False, 'gap': 1.0, 'resolution': 1.0,
+            'rival': 'bird 2.19.2, peers=50', 'reason': 'a gap of 1.0 ...'}
+        document = a_selection()
+        document['repetitions'][0]['cells'].append('frr_c 99.9, peers=50')
+        messages = errors_for(document, reviews=[reviewed])
+        assert any('is not a cell of synthetic' in message for message in messages)
+        assert any('not separated from the cells drawn beside it' in message
+                   for message in messages)
+
+    def test_a_comparison_no_dispersion_can_resolve_is_refused(self):
+        reviewed = a_review(cells=('bird 2.19.2', 'frr_c 10.0', 'bird 3.3.2'))
+        reviewed['cells'][0]['median'] = 90.0
+        reviewed['cells'][1]['median'] = 90.5
+        reviewed['cells'][2]['median'] = 117.0
+        document = a_selection(repetitions=[{
+            'id': 'bird-2-against-frr', 'series': 'synthetic',
+            'cells': ['bird 2.19.2, peers=50', 'frr_c 10.0, peers=50'],
+            'passes_requested': 5, 'hypothesis': 'they differ',
+            'variance_reason': 'the medians are ordered'}])
+        assert any('no dispersion separates any pair here' in message
+                   for message in errors_for(document, reviews=[reviewed]))
 
     def test_a_cell_whose_row_was_excluded_may_not_be_expanded(self):
         '''"Only when all existing rows pass qualification" -- checked against
@@ -529,3 +617,187 @@ class TestUnreadableDocuments:
         assert any(entry['severity'] == review.ERROR
                    and 'progress file could not be read' in entry['message']
                    for entry in problems)
+
+
+def a_summary_cell(ordinal, description, median, stdev, verdict='expand',
+                   peers=50, prefixes=100000, filter='None'):
+    return {
+        'cell': ordinal, 'description': description,
+        'identity': {'peers': peers, 'prefixes': prefixes, 'filter': filter},
+        'metrics': {review.DECISION_METRIC: {'median': median, 'stdev': stdev}},
+        'variance': {'verdict': verdict},
+    }
+
+
+class TestExpansionProspect:
+    """Whether more passes could change a verdict is a claim about every rival.
+
+    `separated` means distinguishable from every cell drawn beside it, so a
+    cell half a second from one rival cannot reach it however many passes are
+    run -- even when the rival that happened to *bind* the verdict is ten
+    seconds away. The verdict names the binding rival because that is the
+    closest call; this question needs the nearest one.
+    """
+
+    def prospect(self, rival_medians, median=100.0, stdev=3.0,
+                 rival_stdev=0.1):
+        cell = a_summary_cell(0, 'A', median, stdev)
+        rivals = [a_summary_cell(n + 1, chr(66 + n), rival_median, rival_stdev)
+                  for n, rival_median in enumerate(rival_medians)]
+        return review.expansion_prospect(cell, rivals)
+
+    def test_a_far_binding_rival_does_not_hide_a_near_one(self):
+        found = self.prospect([100.5, 110.0])
+        assert found['dispersion_could_decide'] is False
+        assert found['rival'] == 'B'
+        assert '0.5' in found['reason']
+
+    def test_a_gap_above_the_resolution_can_still_be_decided(self):
+        found = self.prospect([106.0, 110.0])
+        assert found['dispersion_could_decide'] is True
+        assert found['rival'] == 'B'
+
+    def test_a_separated_cell_has_no_prospect_to_report(self):
+        cell = a_summary_cell(0, 'A', 100.0, 1.0, verdict='separated')
+        assert review.expansion_prospect(cell, []) is None
+
+    def test_a_cell_with_no_rival_median_reports_nothing(self):
+        cell = a_summary_cell(0, 'A', 100.0, 1.0)
+        blank = a_summary_cell(1, 'B', None, None)
+        assert review.expansion_prospect(cell, [blank]) is None
+
+    def test_a_cell_with_no_median_of_its_own_reports_nothing(self):
+        '''Reached before the rivals are measured, not after: subtracting from
+        None is a TypeError that costs the whole review.'''
+        cell = a_summary_cell(0, 'A', None, None)
+        assert review.expansion_prospect(
+            cell, [a_summary_cell(1, 'B', 100.0, 1.0)]) is None
+
+    def test_a_rival_with_one_observation_does_not_veto_an_expansion(self):
+        """A provisional median is not something to rule against.
+
+        `summary.py` decides the verdict on rivals that have a dispersion for
+        exactly this reason, and `separated` is withheld against an unjudged
+        near rival under its own reason -- one that *is* removable by giving
+        that rival more passes. Counting it here would refuse a legitimate
+        expansion on the strength of one observation.
+        """
+        cell = a_summary_cell(0, 'A', 100.0, 3.0)
+        near_but_unjudged = a_summary_cell(1, 'B', 100.5, None)
+        far_but_measurable = a_summary_cell(2, 'C', 105.0, 3.0)
+        found = review.expansion_prospect(
+            cell, [near_but_unjudged, far_but_measurable])
+        assert found['dispersion_could_decide'] is True
+        assert found['rival'] == 'C'
+
+    def test_float_noise_does_not_clear_the_resolution(self):
+        '''A nominal 1.0s gap that subtracts to 1.0000000000000002.
+
+        `summary.py` publishes every gap through its own rounding; comparing a
+        raw subtraction against the resolution reported a pair no dispersion
+        can separate as one more passes could decide -- and would have
+        approved hours of measurement on it. Medians 1.2 and 2.2, which is a
+        pair this exact subtraction misreports.
+        '''
+        assert abs(2.2 - 1.2) > 1.0, 'this pair no longer exercises the noise'
+        found = self.prospect([2.2], median=1.2)
+        assert found['gap'] == 1.0
+        assert found['dispersion_could_decide'] is False
+
+
+class TestAttributionOverPasses:
+    def test_a_failed_pass_is_not_a_second_opinion(self, tmp_path):
+        """`['unresolved', None]` is not a disagreement about a component.
+
+        It is one pass that failed, described in the same clause as an
+        attribution that differs -- which is the distinction this campaign
+        keeps at every other level of aggregation.
+        """
+        series = review.SERIES[0]
+        rows, convergences = [], []
+        for index in range(len(series['passes'])):
+            failed = index == 1
+            rows.append([a_row('bird', failed='FAILED' if failed else '')])
+            convergences.append([90.0])
+        root = a_run_root(tmp_path, series, rows, convergences)
+        problems = []
+        document = review.review_series(str(root), series, {}, problems)
+        cell = document['cells'][0]
+        assert cell['limiting_component'] == 'unresolved'
+        assert cell['limiting_component_observations'] == {
+            'passes': {'observed': 2, 'failed': 1}, 'attributed': 2}, (
+                'a pass that failed and a pass that never ran must not be one '
+                'clause, and the count behind the verdict is its own fact')
+        assert not [entry for entry in problems
+                    if 'was attributed to' in entry['message']]
+
+
+class TestAnObsoleteHeaderCostsItsSeries:
+    def test_a_header_missing_a_column_is_a_problem_not_a_traceback(self, tmp_path):
+        """Three passes can agree on a header the summary cannot read.
+
+        The per-pass equality check only catches passes that disagree with
+        each other; `summarize_batch()` refuses a header that does not carry a
+        column it reads, and uncaught that killed the whole review -- leaving
+        the runner pointing at a `review/` directory it had just removed.
+        """
+        series = review.SERIES[0]
+        root = a_run_root(tmp_path, series, [[a_row('bird')]] * 3, [[90.0]] * 3)
+        short = [name for name in HEADER if name != 'max foreign cpu %']
+        for entry in series['passes']:
+            path = (root / entry['block'] / entry['results'] /
+                    'test-rep{0}.csv'.format(entry['repetition']))
+            path.write_text(','.join(short) + '\n')
+        problems = []
+        assert review.review_series(str(root), series, {}, problems) is None
+        assert any('max foreign cpu %' in entry['message'] for entry in problems)
+
+
+class TestSelectionScopeIsDeliberate:
+    def test_a_named_cell_without_a_dispersion_does_not_refuse_the_comparison(self):
+        """Looks like a hole in the guards, and is the right answer.
+
+        A cell whose group-wide prospect is `false` can be selected against a
+        named cell that has no dispersion, and nothing refuses it. A cell with
+        no dispersion has one observation -- by design for every screen cell,
+        and by accident when passes fail -- and the passes being asked for are
+        exactly what would give it one. Refusing on the strength of its
+        provisional median refuses the measurement that would settle it, which
+        is the error this file made once already.
+        """
+        reviewed = a_review(cells=('bird 2.19.2', 'frr_c 10.0', 'bird 3.3.2'))
+        reviewed['cells'][0]['median'] = 90.0
+        reviewed['cells'][0]['expansion'] = {
+            'dispersion_could_decide': False, 'gap': 0.5, 'resolution': 1.0,
+            'rival': 'frr_c 10.0, peers=50', 'reason': 'a gap of 0.5 ...'}
+        reviewed['cells'][1]['median'] = 90.5
+        reviewed['cells'][1]['stdev'] = None
+        document = a_selection(repetitions=[{
+            'id': 'bird-2-against-frr-10.0', 'series': 'synthetic',
+            'cells': ['bird 2.19.2, peers=50', 'frr_c 10.0, peers=50'],
+            'passes_requested': 5, 'hypothesis': 'they differ',
+            'variance_reason': 'one of the two has a single observation'}])
+        assert errors_for(document, reviews=[reviewed]) == []
+
+
+class TestSelectionDocumentShape:
+    def test_a_repetition_that_is_not_an_object_is_named(self):
+        '''`"repetitions": ["oops"]` used to raise out of the whole review,
+        which left the runner naming a `review/` directory that was never
+        written.'''
+        messages = errors_for(a_selection(repetitions=['oops']))
+        assert any('not an object' in message for message in messages)
+
+    def test_a_series_that_was_read_and_dropped_is_not_called_unknown(self):
+        messages = []
+        review.validate_selection(a_selection(), [], NO_EXCLUSIONS, messages,
+                                  attempted={'synthetic'})
+        assert any('was not reviewed; see its error above' in entry['message']
+                   for entry in messages)
+
+    def test_a_series_that_does_not_exist_still_says_so(self):
+        messages = []
+        review.validate_selection(a_selection(), [], NO_EXCLUSIONS, messages,
+                                  attempted=set())
+        assert any('is not a reviewed series' in entry['message']
+                   for entry in messages)

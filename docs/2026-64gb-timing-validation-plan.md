@@ -1575,35 +1575,148 @@ evidence.
 Exit criterion per block: 14 reviewed rows or explicit durable exclusions with
 evidence.
 
-### Block 8: BIRD architecture screen
+### Block 8: BIRD architecture screen -- **ran 2026-09-12, 18/21 qualified, awaiting acceptance**
 
 The baseline's initial-table cells do not reproduce the workload BIRD 3 was
 designed to scale. BIRD's documented worker group runs BGP protocols,
 routing-table maintenance, and exports, while BIRD 3 also decouples exports
-from imports. Screen these three configurations:
+from imports. Three configurations -- BIRD `2.19.2`, `3.3.2` at its own default
+single worker, and `3.3.2` with `threads: 4` -- across five bounded scenarios,
+one observation each, from five configs run into five results directories:
 
-- BIRD `2.19.2`;
-- BIRD `3.3.2` with default threads;
-- BIRD `3.3.2` with `threads: 4`.
+| scenario | config | workload |
+|---|---|---|
+| peers | `benchmarks/2026-timing-bird-peers.yaml` | 50, 250, 500 peers x 2,000 |
+| diversity | `benchmarks/2026-timing-bird-diversity.yaml` | 50 peers, `path_diversity: 50`, 5,000,000 paths for 100,000 prefixes |
+| fanout | `benchmarks/2026-timing-bird-fanout.yaml` | 50 peers x 20,000, `receivers: 10` |
+| reload | `benchmarks/2026-timing-bird-reload.yaml` | 50 x 50,000, `policy_reload_blocks: 10` |
+| churn | `benchmarks/2026-timing-bird-churn.yaml` | 50 x 50,000, `churn_prefixes: 5_000`, `churn_bursts: 3` |
 
-Run one reviewed observation for each configuration in each bounded scenario:
+`order: shuffle` seed 20268 in all five -- the campaign's year+block rule,
+continuing 20267. Work directory `/data/bgperf-work`. Procedure is
+`run_bird_architecture_screen()`: one preflight, one `verify`, one metadata
+capture over all five rendered configs, then each scenario run and checked
+before the next starts.
 
-1. Peer scaling: 50, 250, then 500 peers with 2,000 unique prefixes per peer.
-2. Path diversity: 50 peers advertising competing paths for the same 100,000
-   prefixes (5 million paths, 100,000 selected prefixes).
-3. Export fan-out: 50 ingress peers feeding 10 receiver sessions, with total
-   selected prefixes capped at 1 million.
-4. Loaded policy recalculation: reload a nontrivial import/export policy with
-   50 peers × 50,000 prefixes already present.
-5. Churn: withdraw and reannounce a deterministic 10% of a 50 × 50,000 table.
+**Separate directories are load-bearing, not tidiness.**
+`check_timing_evidence.py` pairs an artifact with its CSV row by the cell's
+identity, and the workload controls are deliberately not CSV columns -- so the
+reload and churn scenarios, both 50 x 50,000 with the same three run names,
+are indistinguishable in one CSV. In one directory their six rows would be
+three ambiguous pairs and every one would be rejected.
 
-Calibrate upward within each named cap and stop immediately on the standard
-memory guardrail. Do not substitute a larger initial-table workload: the point
-is to expose independent protocol, route-selection, export, reload, and churn
-work that can be scheduled across BIRD 3 worker threads.
+**Result, 2026-09-12: 18 of 21 rows qualified**, on the same instance Blocks 5-7
+ran on (`i-08c8b32e512905f84`, `m7a.4xlarge` / EPYC 9R14 / 16 threads /
+61.44 GiB), one host throughout (`previous_entries` absent). All 19 built images
+verified clean of gcov instrumentation before the first container. **Every count
+is exact in all 21 runs** -- 100,000 / 500,000 / 1,000,000 / 2,500,000 received
+against the offered table, and 5,000,000 paths held for exactly 100,000 selected
+prefixes in the diversity cells. No failed rows, no timeouts. Peak foreign CPU
+0-7%, far under the one-core threshold. Lowest `min free mem` 48.65 GB (79%),
+on the fan-out rows where ten GoBGP receivers each hold the table; no swap.
+
+#### What the five scenarios measured
+
+`elapsed (s)` is the monitor's convergence in every row, as everywhere else in
+this campaign; the reload, churn and export numbers are from the artifacts.
+
+| scenario | metric | 2.19.2 | 3.3.2 default | 3.3.2 threads 4 |
+|---|---|---|---|---|
+| peers 50 | elapsed | 4 | 5 | 5 |
+| peers 250 | elapsed | **112** | 54 | **49** |
+| peers 500 | elapsed | **281** | 201 | **177** |
+| diversity | elapsed | **7** | 13 | **19** |
+| fanout | elapsed | **23** | 31 | 29 |
+| fanout | slowest receiver | 19.67s | 35.32s | 28.32s |
+| reload | `reload_s` | **22.44** | **12.43** | 12.82 |
+| reload | reload CPU mean | 89.3% | **40.7%** | 94.9% |
+| churn | mean `withdraw_s` | 5.83 | 6.05 | **4.92** |
+| churn | mean `reannounce_s` | **6.22** | 8.28 | 8.42 |
+| max cpu % | (all scenarios) | ~101 | ~102-112 | **166-223** |
+
+**The screen separates BIRD 3 on the axis it was built for and finds it behind
+on two others.** This is the first evidence in this campaign of BIRD 3 beating
+BIRD 2 at anything: every canonical cell in Blocks 2-7 is a single large table
+arriving over 10 or 50 sessions, where 3.3.2 is slower in every pass.
+
+- **Session count is where BIRD 3 wins, and the win grows with it.** At 50
+  peers the three are indistinguishable at the instrument's 1s resolution --
+  which is why the plan sweeps upward rather than reading a single cell. At 250
+  peers 3.3.2 is 2.07x faster at its default and 2.29x with four threads; at
+  500 peers 1.40x and 1.59x. The thread setting buys a further 9-10% at both.
+- **Competing-path selection is where it loses most, and threads make it
+  worse.** 7s / 13s / 19s for the identical 5,000,000 paths, so 3.3.2 is 1.9x
+  slower at its default and 2.7x slower with four threads while drawing 223%
+  CPU. Best-path selection is the one thing in the worker group's documented
+  remit that this scenario isolates, and adding workers cost time.
+  The 4-thread run's `best_paths` peaks at 100,804 before settling to exactly
+  100,000 -- a transient overcount the single-worker runs do not produce.
+- **Policy recalculation is the cleanest win and the only one that is also
+  cheaper.** 22.44s against 12.43s, and 3.3.2 at its default does it at 40.7%
+  mean CPU against 2.19.2's 89.3% -- half the time for less than half the CPU.
+  Four threads buys nothing (12.82s against 12.43s, inside the 2.0s resolution)
+  while more than doubling CPU. All three preserved their sessions and converted
+  exactly 2,500,000 accepted prefixes to 2,000,000. `command_s` was 32-41ms
+  against a `reload_s` of 12-22s, which is why the two are never one number.
+- **Churn splits by half.** 3.3.2 withdraws slightly faster with four threads
+  (4.92s against 5.83s) and re-announces slower in both configurations (8.28s
+  and 8.42s against 6.22s). Timing the two halves separately is what shows
+  that; one end-to-end burst number would have read as a uniform 2s loss.
+- **Export fan-out follows the canonical result rather than reversing it.** All
+  ten receivers held 990,000 prefixes in every run. 3.3.2 default's fan-out
+  shows a 12.2s spread across the ten against 0.0s for the other two, and its
+  slowest receiver reached the table at 35.32s against 2.19.2's 19.67s.
+
+#### Every row is `unresolved`, and that is the generator, not the runs
+
+All 21 rows report `limiting_component: unresolved (injection_boundary_
+unresolved)`. This is the documented BIRD 2.19 generator limitation, not a
+property of this block: `Export updates accepted` is queue-side and saturates
+before the instrument's first poll, so less than half the offered table crosses
+the measured interval and the generator does not time its own send. Every
+synthetic row in Blocks 2-4 reports the same thing. **Block 8 therefore supports
+no attribution of any interval to a component**, and nothing above depends on
+one -- `elapsed (s)`, `reload_s`, the burst halves, the export intervals and the
+CPU and memory columns are all direct measurements.
+
+#### The three excluded rows, which are two different things
+
+`exclusion_counts: 3 rejected row(s), 0 shortfall(s)`. Every one was rejected on
+`tester_health` alone; all three runs converged with exact counts.
+
+- **`peers: bird 2.19.2` (500 peers) is a real finding about the daemon.**
+  Twelve of 500 generator sessions logged `Error: Hold timer expired`, in twelve
+  distinct logs, inside a 30s window of a 281s run. Neither 3.3.2 configuration
+  produced one at the same peer count. This reads as the single-threaded daemon
+  failing to service keepalives on part of a 500-session fleet while it works,
+  which is the scheduling behaviour BIRD 3's workers exist to address -- and it
+  is the same cell where 3.3.2 is 1.4-1.6x faster. Recorded as `bgperf2-599`.
+  Whether a row carrying it may support the peer-scaling comparison is Block 9's
+  call; the measurement itself is sound and the count is exact.
+- **`peers: bird 3.3.2 (4 threads)` and `fanout: bird 2.19.2` are an instrument
+  defect and measure nothing.** Their captured error lines are
+  `<RMT> bgp1: Invalid ro` and `<RMT> bgp1: Invali` -- the last line of a tester
+  log, partially written. `Tester.find_errors()` excludes
+  `Invalid route ... withdrawn`, which is the target reflecting routes back at
+  the generators and is normal operation, but it scans while the container is
+  still writing and a truncated line fails that substring test. The FRR
+  End-of-RIB reader and the bgpdump2 blaster reader both stop at the last
+  complete line for exactly this reason; `find_errors()` has no such guard. In
+  both rows `sampled_errors` equals `tester_errors`, so every counted error is
+  one of these lines and nothing else was missed.
+
+  **The fix is deferred rather than taken here, deliberately.** Blocks 2-7 were
+  measured under the current definition of a tester error, and changing it
+  between blocks puts a difference in how the passes were measured inside the
+  statistics Block 9 exists to compute. The counterargument is that a false
+  count is not a measurement worth preserving, and the fix only stops counting
+  lines that were never errors. Either way it belongs in its own change set and
+  before Block 10, which is the next block that runs benchmarks.
 
 Exit criterion: each feasible scenario has correct counts and complete timing,
-CPU, memory, and operation evidence, or a durable 64 GB exclusion.
+CPU, memory, and operation evidence, or a durable 64 GB exclusion. **Met for all
+five scenarios**; no scenario proved infeasible on 64 GB, and no cell approached
+the memory guardrail.
 
 ### Block 9: variance, version, and BIRD-screen review
 

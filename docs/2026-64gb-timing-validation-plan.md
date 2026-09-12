@@ -1471,9 +1471,10 @@ amendment above forbids. Both are derivable retroactively from the Block 5-7
 artifacts on disk, so the cost of waiting is nothing. Land them before Block 9
 reads the three passes.
 
-### Blocks 8-11
+### Blocks 10-11
 
-Not started. Each block's configs and procedure are its own change set.
+Not started. Each block's configs and procedure are its own change set. Blocks
+8 and 9 are recorded under Execution Blocks below, where their sections are.
 
 ## Execution Blocks
 
@@ -1732,7 +1733,7 @@ CPU, memory, and operation evidence, or a durable 64 GB exclusion. **Met for all
 five scenarios**; no scenario proved infeasible on 64 GB, and no cell approached
 the memory guardrail.
 
-### Block 9: variance, version, and BIRD-screen review
+### Block 9: variance, version, and BIRD-screen review -- **accepted 2026-09-12**
 
 For each workload and version comparison:
 
@@ -1766,8 +1767,235 @@ across daemons with different export shares; within a daemon, which is what
 every Primary Question asks, the share is constant to 0.4% across the three
 passes.
 
+Procedure is `run_variance_review()`, and this is the first block that measures
+nothing. It runs no preflight, no `verify` and no container, and depends on no
+Docker daemon at all: every number it publishes was published first by a block
+that has already been accepted, and `scripts/timing_variance_review.py` reads
+those documents and re-derives no measurement. The arithmetic is `summary.py`'s
+-- the same module that writes each block's own `<test>.summary.json`, floors
+the variance rule at the metric's resolution and refuses a dispersion over one
+observation -- so the statistics here are the ones the campaign already
+publishes, computed over three blocks instead of one.
+
+**It writes no `evidence/` directory, deliberately.** Those documents are read
+by `block_exclusion_report` as *rows a block excluded*, and `accept
+--with-exclusions` turns them into durable exclusions; a failed review is not a
+row to exclude, it is a block to re-run once the fault is fixed. So it lands in
+the `no-evidence` class, where `--with-exclusions` is refused. The one thing
+that must survive a `--force` re-run is the selection, which is why that lives
+under `metadata/` and not in the block directory: it is written by the operator
+*between* a first reading of the statistics and the run that validates them.
+
+**Result, 2026-09-12: seven series reviewed, 0 errors, 2 notes**, on a third
+instance of the campaign's host class (`i-03c5d7d55de1dc561`, `m7a.4xlarge` /
+EPYC 9R14 / 16 threads / 61.44 GiB) -- which changes nothing here, since the
+block reads documents rather than running containers. All seven input blocks
+carry a COMPLETE marker, every cell of every canonical pass is present, and no
+cell's passes disagree about the target image, the tester version, the monitor
+version or `required`.
+
+#### The three passes, and what they separate
+
+`elapsed (s)`, three passes per cell, by the plan's own variance rule -- two
+cells are separated when their medians differ by more than the sum of their
+standard deviations, floored at the 1s resolution of the metric:
+
+| | synthetic | full-internet MRT |
+|---|---|---|
+| separated from every rival | 5 of 14 | 5 of 14 |
+| `expand` | 9 of 14 | 9 of 14 |
+| of those, no dispersion can separate from the nearest rival | 6 | 8 |
+| widest `elapsed (s)` CV | 2.84% (`frr_c 8.5`) | 8.57% (`bird 2.19.2`) |
+
+That third row is the block's most useful single result and it is arithmetic on
+the rule rather than a new measurement: the rule floors the combined deviation
+at the metric's resolution, so for a pair whose medians are one second apart on
+a number counted off a 1s poll, *no* dispersion produces a positive margin --
+not five passes' worth, not fifty, not zero. Fourteen of the eighteen `expand`
+verdicts are that pair, read against each cell's **nearest** rival with a
+dispersion rather than the one that bound its verdict, since `separated` is a
+claim about every cell drawn beside it.
+
+**The claim is about the dispersion and not about the future**, which is worth
+stating precisely because the stronger version is so easy to write: more passes
+move a median as well as tightening a spread, so nothing here says those pairs
+can never be separated. What it says is that expanding them is a bet on a
+median moving rather than on the variance the plan's condition names -- and the
+plan expands a comparison only when "observed variance could change the
+decision". So the review publishes
+`expansion.dispersion_could_decide: false` beside each of those fourteen, and
+`validate_selection()` refuses a selection that names one.
+
+#### What the passes already answer
+
+Eight of the ten Primary Questions are settled by three passes and need no
+repetitions; 9 and 10 are what the selections below are for. Every one is a
+within-daemon comparison, which is what makes it readable across daemons that
+export different shares of one RIB.
+
+- **Question 1 -- FRR 10.7's synthetic improvement repeats, and it is
+  separated from every pinned release.** Medians 85s against 91s (10.0), 95s
+  (9.1) and 92s (8.5), with margins of 3.47s, 8.42s and 3.35s over the combined
+  deviations. The interval that carries it is `convergence_s` (71.9s against
+  79.2s for 10.0), and about a second of it is reaching the first
+  monitor-visible prefix (3.09s against 4.12s). **No component attribution is
+  available and none is claimed**: every synthetic row in the campaign is
+  `unresolved (injection_boundary_unresolved)` because the BIRD generator's
+  offered count is queue-side and saturates before the first poll -- the review
+  publishes `offered_in_interval` beside `injection_s` for that reason, and it
+  is 0 on all fourteen cells.
+- **Question 2 -- FRR 10.7 is not measurably slower on MRT playback, and no
+  number of passes can make it so.** 104s against 103s for all three pinned
+  earlier releases, deviations of 0.0-0.58s, a 1s gap against a 1s resolution.
+  The four pinned releases are 103-104s in all three passes.
+- **Question 3 -- BIRD 3 threading buys target processing time, and costs
+  roughly twice the CPU for it.** 117s -> 109s synthetic and 45s -> 40s MRT,
+  both separated, at 102-110% -> 200-210% and ~178% -> ~318% CPU. Whether it
+  changes tester backpressure cannot be read off the MRT rows, because those
+  rows are tester-limited (below).
+- **Question 4 -- OpenBGPD 9.2's memory reduction is stable, and its
+  end-to-end time is workload-specific rather than longer.** 37.437 / 37.435 /
+  37.437 GB for 8.8 against 18.533 / 18.713 / 18.536 GB for 9.2 on the
+  synthetic workload, a 50.5% reduction with CVs of 0.005% and 0.55%; 4.97 GB
+  against 3.02 GB on MRT. On time, 9.2 is *slower* synthetically (733s against
+  624s) and *faster* on MRT (80s against 123s), and in both workloads the
+  whole of the difference is after the first monitor-visible prefix -- which is
+  1.03s for every OpenBGPD row synthetically and 2.06s for every one on MRT.
+  Decomposed on MRT: 30.4s of the 43s sits in the post-injection tail and the
+  rest in the assurance window.
+- **Question 5 -- OpenBGPD 8.8 is safe at the guardrail, and it is not
+  moving.** `min free mem` 12.392 / 12.409 / 12.400 GB, 20.2% of host memory,
+  a 17 MB spread over three passes run at shuffle positions 7, 14 and 4, no
+  swap on any of them.
+- **Question 6 -- the RustyBGP pinned/default difference is workload-specific,
+  in both directions.** Synthetic: the master build is 2.3x slower (152s
+  against 66s) for comparable memory. MRT: the two are 27s and 25s and the
+  master build holds **4.9x** the memory (11.472 / 11.540 / 11.389 GB against
+  2.372 / 2.336 / 2.328 GB), each build's three readings within 1.9%.
+- **Questions 7 and 8 -- yes, and not separably.** On MRT the generator limits
+  the five fastest rows: `tester (tester_limited)` for all four BIRD rows and
+  `rustybgp default`, in all three passes. The three OpenBGPD rows and
+  `rustybgp 2026-02` are `target_or_monitor (post_injection_tail)`, which is
+  the measurement declining to separate the target from the monitor; no number
+  of passes changes that, since it is a property of where the instrument sits.
+  Every synthetic row is `unresolved` on the generator, so the synthetic
+  workload answers neither question.
+
+#### Order, hosts and images
+
+- **No order effect dominates either workload.** Ranking each cell's passes by
+  its own execution position: synthetic 4 rise, 4 fall, 5 neither, 1 tied; MRT
+  2 rise, 1 falls, 8 neither, 3 tied. Fourteen cells over three passes is a
+  description and not a test, and the review says so where it prints it. The
+  empirical version of the same claim is `openbgp 8.8`'s 17 MB of `min free
+  mem` spread across positions 7, 14 and 4. Positions are rebuilt from each
+  pass's recorded seed -- the progress file's keys *are* the cell ids
+  `order_batch_cells()` digested -- and `tests/test_variance_review.py` pins
+  that against the controller's own permutation.
+- **Blocks 2-8 ran on two instances of one class**, `i-0de8e1dd0d3dba94d`
+  (blocks 2-4) and `i-08c8b32e512905f84` (blocks 5-8), which is the host-class
+  rule working as intended. The two report `MemTotal` 4 kB apart -- 64,425,440
+  against 64,425,436 -- so the review compares memory with a tolerance and
+  everything else in the class exactly; an exact test there would report a
+  host-class change over 0.000006% and reject the rule on the case it was
+  written for.
+- **The unpinned binaries did not move, and that is now an artifact rather
+  than an argument.** Every one of the 19 `bgperf/*` images carries the
+  identical image id in all nine blocks, `bgperf/frr_c:latest` included
+  (`6f0f67a1cc71`). The Block 6 and 7 records had to reason from "nothing ran
+  `prepare`" precisely because provenance records an image *tag* and the
+  daemon's own version string, and a rebuilt `:latest` reporting the same
+  `-dev` string would be invisible in a stats row. The manifest's per-block
+  image ids answer it directly, and that closes the caveat those records left
+  open: `frr default`'s 102/89/88s on MRT is one slow run, not a different
+  binary.
+
+#### What Block 10 will run, and what it will not
+
+Recorded in `metadata/block10-selection.json`, which
+`scripts/timing_variance_review.py` validates every time the block runs: each
+selection carries a hypothesis, a variance reason and a requested pass count,
+each declined comparison carries its reason, no selection may name a cell whose
+existing row was excluded by an accepted block, and the canonical matrix may not
+be named whole.
+
+**Three selected, all in the BIRD architecture screen** -- which is what the
+plan anticipated when it called the screen "deliberately adaptive", and it is
+where one observation per cell means the variance rule currently withholds every
+verdict:
+
+| selection | cells | passes | why |
+|---|---|---|---|
+| `bird-session-scaling-250-peers` | the three 250-peer cells | 3 | 112s against 54s and 49s: gaps of 58s and 63s against a 1s resolution, and Question 9's central claim |
+| `bird-competing-path-selection` | the three diversity cells | 3 | 7s / 13s / 19s for identical work, the only measurement in the campaign where more CPU bought more time |
+| `bird-policy-recalculation` | the three reload cells | 3 | `reload_s` 22.44s at 89.3% CPU against 12.43s at 40.7%; the variance rule says nothing about these cells at all, because the measurement is not `elapsed (s)` |
+
+**Seven declined, each with its reason in the same document.** Four are worth
+restating here because they answer questions earlier blocks left open:
+
+- **The 500-peer comparison cannot be expanded**, which is Block 8's explicit
+  question for this block. Two of its three rows were excluded on
+  `tester_health`, so "all existing rows pass qualification" is not met.
+  The two exclusions are not the same thing: `bird 2.19.2`'s twelve hold-timer
+  expiries are a real property of the single-threaded daemon under a 500-session
+  fleet (`bgperf2-599`) and the row is preserved and excluded only from the
+  comparison it cannot support, exactly as the plan requires; `bird 3.3.2 (4
+  threads)` was rejected on a truncated tester log line and measures nothing.
+  Re-measuring is not an expansion, and the second of the two should be fixed
+  first.
+- **The fan-out comparison cannot be expanded either**, for the same rule --
+  `fanout: bird 2.19.2` carries the same truncated-line defect -- and
+  repetitions would reproduce rather than remove the `host_cpu_saturated`
+  condition all three of its rows share.
+- **`openbgp default` against `openbgp 9.2` is not a version comparison.**
+  Both cells run OpenBGPD 9.2: `bgperf/openbgp:latest` and `bgperf/openbgp:9.2`
+  are two image ids built from one upstream tag three seconds apart, and both
+  report `9.2`. Their unseparated verdict is the expected result, and the pair
+  is six readings of 9.2 per workload rather than two cells of three.
+- **The churn halves are already read three times each and the difference is at
+  the sampler's resolution.** Re-announce is 6.10 / 6.12 / 6.44s for 2.19.2
+  against 8.14-8.54s for both 3.3.2 configurations, with no overlap, while the
+  withdraw halves overlap completely -- but each burst is resolved only to
+  +/-2.0-2.4s, and repeating the *run* does not sharpen an interval whose
+  resolution is the poll gap. A faster churn sampler would.
+
+**One prerequisite for Block 10, carried forward from Block 7 and Block 8.**
+`Tester.find_errors()` scans while the container is still writing, so a
+partially written last line fails the `Invalid route ... withdrawn` exclusion
+and is counted as an error. It cost three of Block 8's rows and it will cost
+Block 10's too: all three selected scenarios re-run the same generator. Blocks
+2-7 were deliberately measured under the current definition and the statistics
+above are computed over them, so the fix belongs in its own change set -- but it
+belongs before Block 10 rather than after it, which is what Block 8's record
+said and what this block's selection now depends on.
+
+**Six `/code-review` rounds ran over this block's own change set**, and every
+round found something the round before it had introduced. Twenty-six findings
+were acted on; the two that would have corrupted this block's output:
+`check_timing_evidence.load_json()` *returns* None for a file it cannot read
+rather than raising, so every unreadable document was dereferenced instead of
+named -- and a pass that FAILED was published as an observation, beside a
+summary that had counted it out, which would have put a failed run's intervals
+in the decomposition and invented a coefficient of variation out of it. No row
+in blocks 2-8 failed, so that one changed no number here: all 49 cells report
+every pass observed. Two more mattered to the *selection*: the expansion
+prospect asked the binding rival rather than the nearest one, and then -- in
+the fix for that -- ruled against medians drawn from a single observation,
+which is every BIRD screen cell and so exactly the three expansions this block
+selects. They passed only because their gaps are 58s, 12s and 16s.
+
+**One operational caution, learned the hard way while testing the runner's
+messages.** `next` against a scratch `--results-root` finds no COMPLETE markers
+and runs **block 0 for real** -- containers, MRT replay and all -- and leaves
+its last cell's containers up afterwards (`bgperf2-mzy`). Nothing of the
+campaign was touched and the containers were removed, but drive a scratch root
+with `block-N` rather than `next`, and mark the earlier blocks complete first
+if the message under test is `next`'s.
+
 Exit criterion: every optional repetition has a named hypothesis and variance
-reason, or the campaign advances with no optional repeats.
+reason, or the campaign advances with no optional repeats. **Met**: three
+selected with hypotheses and variance reasons, seven declined with reasons, and
+the document is machine-checked against the rows rather than trusted.
 
 ### Block 10: selected repetitions
 

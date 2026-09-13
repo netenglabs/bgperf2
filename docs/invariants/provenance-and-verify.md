@@ -2,10 +2,12 @@
 
 Recording which build produced a result, and the one check the Docker-free test suite cannot make.
 
-**Read this before editing:** `base.py` (`Container.version_string()`, `collect_provenance()`),
-`bgperf2.py` (`verify`), and every module carrying a version command: `bird.py`, `gobgp.py`,
-`rustybgp.py`, `openbgp.py`, `frr.py`, `frr_compiled.py`, `bgpdump2.py`, `exabgp.py`, `junos.py`,
-`eos.py`, `srlinux.py`, `flock.py`, `monitor.py`, `tester.py`, `mrt_tester.py`
+**Read this before editing:** `base.py` (`Container.version_string()`, `collect_provenance()`,
+`RECIPE_LABEL_KEY`, `recipe_hash()`, `img_recipe_label()`, `Container.current_recipe_hash()`,
+`Container.override_buildargs()`, `Container.recipe_status()`), `bgperf2.py` (`verify`, `doctor`,
+`images`, `prepare`, `checkable_versions()`), and every module carrying a version command: `bird.py`,
+`gobgp.py`, `rustybgp.py`, `openbgp.py`, `frr.py`, `frr_compiled.py`, `bgpdump2.py`, `exabgp.py`,
+`junos.py`, `eos.py`, `srlinux.py`, `flock.py`, `monitor.py`, `tester.py`, `mrt_tester.py`
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 
@@ -78,3 +80,68 @@ incomparable for years. Notes for anyone extending it:
   than none.
 - `verify` creates containers, so it is not in the permission allowlist alongside the read-only
   subcommands.
+
+## Recipe drift — `RECIPE_LABEL_KEY`
+
+`build_dockerfile()`/`prepare` skip a tag that already exists, so a recipe changed after that point
+-- a new apt package, a fixed `ENTRYPOINT`, a `resolve_ref()` mapping a version onto a different
+checkout -- is invisible until someone remembers to force a rebuild. That has happened three times
+over (FRR's `--enable-gcov`, exabgp/bgpdump2's base image and `autoreconf`) and each was closed with
+a hand-written, date-stamped CLAUDE.md paragraph naming what predates what.
+`img_recipe_label()`/`recipe_status()` replace the next occurrence of that with something checkable.
+
+- **The hash covers `render_dockerfile()`'s text plus the buildargs it would actually be built
+  with**, stored as a Docker image label rather than a `LABEL` line inside the Dockerfile, which
+  would need to hash itself. An override Dockerfile is the same file for every version routed
+  through it -- only `BGPERF_REF`/`BGPERF_VERSION` vary it, as buildargs, not text -- so the text
+  alone would be blind to a `resolve_ref()` change for such a version. `Container.override_buildargs()`
+  is the one place that pair is built, called by both `build_version()` (which builds it) and
+  `current_recipe_hash()` (which has to fingerprint the identical shape), so the two cannot drift
+  apart the way a hand-reconstructed copy in each would. `recipe_hash()` folds text and buildargs
+  together through `json.dumps([text, buildargs])`, not a bare concatenation, which a sufficiently
+  contrived Dockerfile could otherwise split two different ways to the same string.
+  `build_dockerfile()` hashes *before* splicing in the operator's `http_proxy`/`https_proxy`, or a
+  machine's proxy settings would manufacture staleness that has nothing to do with the recipe.
+- **It is not a substitute for `PULL_BASE`.** OpenBGPD's `FROM openbgpd/openbgpd:latest` is the same
+  text before and after upstream republishes new content under that tag, so this hash cannot see the
+  exact drift CLAUDE.md's OpenBGPD section is about -- it answers "has the recipe bgperf2 owns moved
+  on", not "does a moving upstream tag still point at what it did." `pulls_base()` is the existing,
+  separate answer to that one.
+- **Only checked against a trustworthy version string.** `built_versions()` returns sanitized tags,
+  and `sanitize_tag()` is lossy (`'stable/10.1'` and a literal `'stable_10.1'` sanitize to the same
+  string), so a built tag with no matching entry in `cls.VERSIONS` has no way back to the ref it was
+  actually built from. `doctor`/`images` skip the check for such a tag rather than render against a
+  guessed ref and report a real, unchanged build as `stale`.
+- **`unknown` and `stale` are different claims and must not collapse.** `unknown` is every image
+  built before this label existed -- there is nothing to compare, the same shape as bgpdump2's
+  "commit unknown" for a pruned clone -- and `stale` is a real mismatch. Reading `unknown` as `ok`
+  calls an unverifiable image current; reading it as `stale` sends an operator to rebuild images
+  that are probably fine.
+- **Nothing rebuilds automatically, but skipping is not silent any more.** `prepare`'s "skip an
+  existing tag" behaviour is unchanged -- an unattended rebuild triggered by an unrelated recipe edit
+  is its own hazard, and the campaign skills already treat `prepare` as fast and idempotent -- but
+  `prepare` is the command an operator actually runs day to day, and `doctor`/`images` are a separate
+  step easy to forget. A tag it is about to skip is checked the same way and named if `stale`, so the
+  trap CLAUDE.md records three times over now surfaces at the point it actually bites rather than
+  only in a report nobody asked for. `v` on this path is always trustworthy (`None`, an explicit
+  `--versions` entry, or a raw `cls.VERSIONS` member), so it needs none of `checkable_versions()`'s
+  guessing-back through a sanitized tag.
+- Verified against a real build (`bgperf/openbgp:9.2`, forced): the label round-trips through
+  `docker build`'s `labels=` argument and `dckr.images()`'s own `Labels` field with no extra
+  `inspect` call, and editing the recipe without rebuilding flips `recipe_status()` from `ok` to
+  `stale` while an untouched sibling tag stays `unknown`.
+- **`labels=` is withheld below Docker API 1.23** (~Engine 1.11): docker-py raises `InvalidVersion`
+  for it otherwise, on every build, and doctor()'s own minimum-supported-version check still accepts
+  Docker as old as 1.9.0. The gate reads `dckr.api_version` -- already resolved once at client
+  construction, so this costs no extra round trip -- via `docker.utils.version_gte()`, the same
+  function docker-py's own `build()` uses internally to decide the identical question, rather than a
+  version threshold invented here. A build on such a daemon still succeeds; it just cannot carry the
+  label, the same `unknown` shape as an image built before this feature existed.
+- **The printed remedy is `update`, never `prepare -f` on the same invocation.** `prepare()`'s
+  `wanted` list always prepends the unversioned tag regardless of `--versions`, so following that
+  remedy force-rebuilds the daemon's default tag -- and, without `--versions`, its entire `VERSIONS`
+  list -- even when exactly one specific version was ever flagged stale. `update <name>` (bare, for
+  the unversioned tag) and `update <name> --versions <v>` each touch only the tag named, which is
+  what `doctor`, `images`, and `prepare`'s own skip warning all recommend now. `prepare`'s "everything
+  requested is already built" line is withheld whenever it already printed a more specific remedy, so
+  the generic `-f` hint cannot read as reassurance undercutting the warning one line above it.

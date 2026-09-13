@@ -367,6 +367,70 @@ class TestArgumentGuards:
         assert 'exactly one' in str(e.value)
 
 
+class TestPrepareSurfacesStaleRecipes:
+    '''`prepare` is the command an operator actually runs day to day --
+    `doctor`/`images` are a separate, easy-to-forget step -- so a tag it
+    skips because it already exists must still say when its own recipe has
+    moved on since it was built. `v` here is always a trustworthy string
+    (None, or a member of cls.VERSIONS/an explicit --versions entry), never
+    a sanitized built tag, so none of checkable_versions()'s guesswork is
+    needed on this path.
+    '''
+
+    def test_a_skipped_stale_tag_is_named_and_left_unbuilt(self, monkeypatch, capsys):
+        stale_tag = BIRD.image_tag('2.19.2')
+        monkeypatch.setattr(base.dckr, 'images', lambda: [
+            {'RepoTags': [stale_tag],
+             'Labels': {base.RECIPE_LABEL_KEY: 'not-the-current-hash'}}])
+        built = []
+        monkeypatch.setattr(
+            BIRD, 'build_version',
+            classmethod(lambda cls, v=None, force=False, nocache=False: built.append(v)))
+
+        bgperf2.prepare(Namespace(target=['bird'], versions='2.19.2',
+                                  force=False, no_cache=False))
+
+        out = capsys.readouterr().out
+        assert 'recipe changed since built, not rebuilt' in out
+        assert stale_tag in out
+        assert '2.19.2' not in built
+
+    def test_a_skipped_tag_with_a_matching_label_says_nothing(self, monkeypatch, capsys):
+        current = BIRD.current_recipe_hash('2.19.2')
+        monkeypatch.setattr(base.dckr, 'images', lambda: [
+            {'RepoTags': [BIRD.image_tag('2.19.2')],
+             'Labels': {base.RECIPE_LABEL_KEY: current}}])
+        monkeypatch.setattr(BIRD, 'build_version', classmethod(lambda cls, v=None, **k: None))
+
+        bgperf2.prepare(Namespace(target=['bird'], versions='2.19.2',
+                                  force=False, no_cache=False))
+
+        assert 'recipe changed since built' not in capsys.readouterr().out
+
+    def test_a_check_that_raises_is_surfaced_not_swallowed(self, monkeypatch, capsys):
+        '''doctor()/images() print 'recipe check failed' for an identical
+        failure; prepare -- the command that actually runs unattended --
+        must not silently proceed as though nothing were wrong.
+        '''
+        skipped_tag = BIRD.image_tag('2.19.2')
+        monkeypatch.setattr(base.dckr, 'images', lambda: [
+            {'RepoTags': [skipped_tag], 'Labels': {}}])
+
+        def boom(cls, version=None):
+            raise ValueError('broken template')
+        monkeypatch.setattr(BIRD, 'current_recipe_hash', classmethod(boom))
+        monkeypatch.setattr(BIRD, 'build_version',
+                            classmethod(lambda cls, v=None, **k: None))
+
+        bgperf2.prepare(Namespace(target=['bird'], versions='2.19.2',
+                                  force=False, no_cache=False))
+
+        out = capsys.readouterr().out
+        assert 'recipe check failed' in out
+        assert skipped_tag in out
+        assert 'broken template' in out
+
+
 def test_remove_target_containers_covers_every_target():
     '''Derived from TARGET_CLASSES: a target registered there but missing from
     the removal list leaves its container behind, and the next bench fails on
@@ -401,3 +465,284 @@ class TestRenderDockerfileIsQuiet:
         FRRoutingCompiled.build_version('8.5')
         out = capsys.readouterr().out
         assert 'bgperf/frr_c:8.5' in out and 'stable/8.5' in out
+
+
+class TestRecipeDrift:
+    '''`prepare`/`build_dockerfile()` skip a tag that already exists, so a
+    recipe changed after that point is invisible until someone remembers to
+    force a rebuild -- the trap CLAUDE.md records three times over (FRR's
+    --enable-gcov, exabgp/bgpdump2's base image and autoreconf).
+    RECIPE_LABEL_KEY closes it: every build carries a hash of its own
+    rendered Dockerfile as an image label, read back by recipe_status() and
+    surfaced by `doctor`/`images`.
+
+    Verified separately against a real build (bgperf/openbgp:9.2, forced):
+    the label round-trips through docker build's labels= argument and
+    dckr.images()'s own Labels field with no extra inspect call, and editing
+    the recipe without rebuilding flips recipe_status() from 'ok' to 'stale'
+    while an untouched sibling tag stays 'unknown'.
+    '''
+
+    def test_hash_is_stable_and_sensitive_to_content(self):
+        a = base.recipe_hash('FROM x\nRUN y\n')
+        assert a == base.recipe_hash('FROM x\nRUN y\n')
+        assert a != base.recipe_hash('FROM x\nRUN z\n')
+
+    def test_label_is_none_for_a_tag_with_no_label(self, monkeypatch):
+        monkeypatch.setattr(base.dckr, 'images', lambda: [
+            {'RepoTags': ['bgperf/bird:latest'], 'Labels': {}}])
+        assert base.img_recipe_label('bgperf/bird:latest') is None
+
+    def test_label_is_none_for_a_tag_with_no_labels_key_at_all(self, monkeypatch):
+        '''Older docker-py/API responses may omit Labels rather than send {}.'''
+        monkeypatch.setattr(base.dckr, 'images', lambda: [
+            {'RepoTags': ['bgperf/bird:latest']}])
+        assert base.img_recipe_label('bgperf/bird:latest') is None
+
+    def test_label_is_none_for_a_tag_that_does_not_exist(self, monkeypatch):
+        monkeypatch.setattr(base.dckr, 'images', lambda: [])
+        assert base.img_recipe_label('bgperf/bird:latest') is None
+
+    def test_untagged_images_do_not_crash_the_lookup(self, monkeypatch):
+        monkeypatch.setattr(base.dckr, 'images', lambda: [{'RepoTags': None}])
+        assert base.img_recipe_label('bgperf/bird:latest') is None
+
+    def test_label_reads_back_what_was_stored(self, monkeypatch):
+        monkeypatch.setattr(base.dckr, 'images', lambda: [
+            {'RepoTags': ['bgperf/bird:latest'],
+             'Labels': {base.RECIPE_LABEL_KEY: 'abc123'}}])
+        assert base.img_recipe_label('bgperf/bird:latest') == 'abc123'
+
+    def test_status_is_unknown_with_no_stored_label(self, monkeypatch):
+        '''Built before this label existed -- there is nothing to compare, so
+        this must not read as 'ok': an unverifiable image is not a current one.
+        '''
+        monkeypatch.setattr(base, 'img_recipe_label', lambda tag, images=None: None)
+        status, current = BIRD.recipe_status('2.19.2')
+        assert status == 'unknown'
+        assert current == BIRD.current_recipe_hash('2.19.2')
+
+    def test_status_is_ok_when_the_label_matches(self, monkeypatch):
+        current = BIRD.current_recipe_hash('2.19.2')
+        monkeypatch.setattr(base, 'img_recipe_label', lambda tag, images=None: current)
+        assert BIRD.recipe_status('2.19.2') == ('ok', current)
+
+    def test_status_is_stale_when_the_recipe_moved_on(self, monkeypatch):
+        monkeypatch.setattr(base, 'img_recipe_label',
+                            lambda tag, images=None: 'not-the-current-hash')
+        status, current = BIRD.recipe_status('2.19.2')
+        assert status == 'stale'
+        assert current != 'not-the-current-hash'
+
+    def test_the_label_is_hashed_before_the_operators_proxy_is_spliced_in(self, monkeypatch):
+        '''An operator's http_proxy/https_proxy must not change the hash, or a
+        machine's own proxy settings would manufacture staleness that has
+        nothing to do with the recipe.
+        '''
+        captured = {}
+
+        def fake_build(fileobj, rm, tag, decode, nocache, pull, buildargs, labels):
+            captured['labels'] = labels
+            return iter([])
+
+        monkeypatch.setattr(base.dckr, 'build', fake_build)
+        monkeypatch.setattr(base, 'img_exists', lambda tag: False)
+        monkeypatch.setenv('http_proxy', 'http://proxy.example:3128')
+        dockerfile = 'FROM scratch\nRUN true\n'
+
+        class Dummy(base.Container):
+            pass
+
+        Dummy.build_dockerfile(dockerfile, force=False, tag='bgperf/x:latest')
+        assert captured['labels'] == {base.RECIPE_LABEL_KEY: base.recipe_hash(dockerfile)}
+
+    def test_labels_are_withheld_below_the_api_version_that_supports_them(self, monkeypatch):
+        '''docker-py raises InvalidVersion for `labels` below API 1.23
+        (~Engine 1.11) -- older than the 1.9.0 doctor()'s own version check
+        still accepts. A build on an old daemon must still succeed; it just
+        cannot carry the label, same as one built before this feature shipped.
+        '''
+        captured = {}
+
+        def fake_build(**kwargs):
+            captured.update(kwargs)
+            return iter([])
+
+        monkeypatch.setattr(base.dckr, 'build', fake_build)
+        monkeypatch.setattr(base.dckr, '_version', '1.20')
+        monkeypatch.setattr(base, 'img_exists', lambda tag: False)
+
+        class Dummy(base.Container):
+            pass
+
+        Dummy.build_dockerfile('FROM scratch\nRUN true\n', force=False, tag='bgperf/x:latest')
+        assert 'labels' not in captured
+
+    def test_labels_are_sent_at_or_above_the_api_version_that_supports_them(self, monkeypatch):
+        captured = {}
+
+        def fake_build(**kwargs):
+            captured.update(kwargs)
+            return iter([])
+
+        monkeypatch.setattr(base.dckr, 'build', fake_build)
+        monkeypatch.setattr(base.dckr, '_version', '1.23')
+        monkeypatch.setattr(base, 'img_exists', lambda tag: False)
+        dockerfile = 'FROM scratch\nRUN true\n'
+
+        class Dummy(base.Container):
+            pass
+
+        Dummy.build_dockerfile(dockerfile, force=False, tag='bgperf/x:latest')
+        assert captured['labels'] == {base.RECIPE_LABEL_KEY: base.recipe_hash(dockerfile)}
+
+    def test_an_override_dockerfiles_hash_moves_with_its_resolved_ref(self, tmp_path, monkeypatch):
+        '''An override Dockerfile is the same text for every version routed
+        through it -- only BGPERF_REF/BGPERF_VERSION vary, as buildargs, so
+        the text alone is blind to a resolve_ref() change. That is exactly
+        the "recipe changed" case this mechanism exists to catch.
+        '''
+        d = tmp_path / 'dockerfiles' / 'frr_c'
+        d.mkdir(parents=True)
+        (d / '10.dockerfile').write_text('FROM scratch\nARG BGPERF_REF\n')
+        monkeypatch.setattr(base, 'REPO_ROOT', tmp_path)
+
+        before = FRRoutingCompiled.current_recipe_hash('10.1')
+
+        class RefMovedOn(FRRoutingCompiled):
+            @classmethod
+            def resolve_ref(cls, version):
+                return 'a-different-ref'
+
+        after = RefMovedOn.current_recipe_hash('10.1')
+        assert before != after
+
+    def test_the_stored_label_for_an_override_build_matches_current_recipe_hash(
+            self, tmp_path, monkeypatch):
+        '''build_version() passes BGPERF_REF/BGPERF_VERSION as buildargs for
+        an override Dockerfile; current_recipe_hash() has to fold in the
+        same pair the same way, or a real build and its own status check
+        would permanently disagree.
+        '''
+        d = tmp_path / 'dockerfiles' / 'frr_c'
+        d.mkdir(parents=True)
+        (d / '10.dockerfile').write_text('FROM scratch\nARG BGPERF_REF\n')
+        monkeypatch.setattr(base, 'REPO_ROOT', tmp_path)
+        monkeypatch.setattr(base, 'img_exists', lambda tag: False)
+
+        captured = {}
+
+        def fake_build(fileobj, rm, tag, decode, nocache, pull, buildargs, labels):
+            captured['labels'] = labels
+            return iter([])
+
+        monkeypatch.setattr(base.dckr, 'build', fake_build)
+        FRRoutingCompiled.build_version('10.1')
+        expected = FRRoutingCompiled.current_recipe_hash('10.1')
+        assert captured['labels'] == {base.RECIPE_LABEL_KEY: expected}
+
+    def test_current_recipe_hash_resolves_the_override_only_once(self, monkeypatch):
+        '''render_dockerfile()'s `_override` distinguishes "not passed" from
+        "resolved to None" with a sentinel, not None -- a version with no
+        override *is* None, and confusing the two meant current_recipe_hash()
+        silently re-probed the filesystem for every version with no override,
+        i.e. every version of every daemon today.
+        '''
+        calls = []
+
+        def counting(cls, version=None):
+            calls.append(version)
+            return None
+
+        monkeypatch.setattr(BIRD, 'dockerfile_override', classmethod(counting))
+        BIRD.current_recipe_hash('2.19.2')
+        assert calls == ['2.19.2']
+
+
+class TestCheckableVersions:
+    '''checkable_versions() is shared by doctor() and images() so the rule
+    for which built versions get a recipe check cannot read differently
+    between the two.
+    '''
+
+    class _Daemon:
+        VERSIONS = ()
+
+    def test_a_version_from_VERSIONS_is_checkable(self):
+        class Daemon(self._Daemon):
+            VERSIONS = ('8.5', '9.1')
+        assert bgperf2.checkable_versions(Daemon, ['8.5']) == {'8.5': '8.5'}
+
+    def test_latest_is_checkable_with_a_none_version(self):
+        assert bgperf2.checkable_versions(self._Daemon, ['latest']) == {'latest': None}
+
+    def test_a_built_tag_outside_versions_is_left_out(self):
+        '''sanitize_tag() is lossy, so a built tag with no matching VERSIONS
+        entry has no trustworthy version string to check it against.
+        '''
+        class Daemon(self._Daemon):
+            VERSIONS = ('8.5',)
+        assert bgperf2.checkable_versions(Daemon, ['8.5', 'deadbeef']) == {'8.5': '8.5'}
+
+    def test_two_versions_that_sanitize_the_same_are_both_excluded(self):
+        '''Ambiguous is not the same as absent -- trusting whichever one a
+        dict comprehension happened to keep last would check the wrong ref.
+        '''
+        class Daemon(self._Daemon):
+            VERSIONS = ('stable/10.1', 'stable_10.1')
+        assert bgperf2.checkable_versions(Daemon, ['stable_10.1']) == {}
+
+    def test_a_version_repeated_verbatim_is_not_ambiguous(self):
+        '''A literal duplicate is redundancy, not a collision between two
+        different answers -- excluding it on the strength of matching itself
+        would silently drop the version from every drift check.
+        '''
+        class Daemon(self._Daemon):
+            VERSIONS = ('8.5', '8.5')
+        assert bgperf2.checkable_versions(Daemon, ['8.5']) == {'8.5': '8.5'}
+
+    def test_a_version_that_sanitizes_to_latest_still_means_the_unversioned_tag(self):
+        '''sanitize_tag() falls back to 'latest' for a string with no
+        tag-safe characters left (e.g. '---', not '///', which becomes
+        '___'); that is a real collision in Docker too, since it is the same
+        image_tag(), so 'latest' must still mean the unversioned build here
+        rather than checking it against a version's own recipe.
+        '''
+        class Daemon(self._Daemon):
+            VERSIONS = ('---',)
+        assert bgperf2.checkable_versions(Daemon, ['latest']) == {'latest': None}
+
+
+class TestImagesCaching:
+    '''doctor()/images() fetch dckr.images() once and thread it through, so
+    a health check does not turn into dozens of Docker API round trips.
+    '''
+
+    def _forbid_docker(self, monkeypatch):
+        def boom():
+            raise AssertionError('dckr.images() was called despite a passed list')
+        monkeypatch.setattr(base.dckr, 'images', boom)
+
+    def test_img_exists_uses_the_passed_list(self, monkeypatch):
+        self._forbid_docker(monkeypatch)
+        images = [{'RepoTags': ['bgperf/bird:latest']}]
+        assert base.img_exists('bgperf/bird:latest', images) is True
+        assert base.img_exists('bgperf/bird:9.9', images) is False
+
+    def test_img_recipe_label_uses_the_passed_list(self, monkeypatch):
+        self._forbid_docker(monkeypatch)
+        images = [{'RepoTags': ['bgperf/bird:latest'],
+                   'Labels': {base.RECIPE_LABEL_KEY: 'abc'}}]
+        assert base.img_recipe_label('bgperf/bird:latest', images) == 'abc'
+
+    def test_built_versions_uses_the_passed_list(self, monkeypatch):
+        self._forbid_docker(monkeypatch)
+        images = [{'RepoTags': ['bgperf/bird:2.19.2']}]
+        assert BIRD.built_versions(images) == ['2.19.2']
+
+    def test_recipe_status_uses_the_passed_list(self, monkeypatch):
+        self._forbid_docker(monkeypatch)
+        current = BIRD.current_recipe_hash('2.19.2')
+        images = [{'RepoTags': [BIRD.image_tag('2.19.2')],
+                   'Labels': {base.RECIPE_LABEL_KEY: current}}]
+        assert BIRD.recipe_status('2.19.2', images) == ('ok', current)

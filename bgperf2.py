@@ -973,6 +973,46 @@ def gc_thresh3():
         return int(f.read().strip())
 
 
+def checkable_versions(cls, built):
+    '''{sanitized_tag: version} for every built tag recipe_status() can
+    safely be asked about, shared by doctor() and images() so the rule for
+    which built versions get checked cannot read differently between them.
+
+    built_versions() returns sanitized tag suffixes, which are not always
+    invertible to the version resolve_ref()/render_dockerfile() need --
+    sanitize_tag() is lossy ('stable/10.1' and a literal 'stable_10.1'
+    sanitize to the same tag). A built tag recovered from cls.VERSIONS is the
+    one case with a trustworthy, pre-sanitize string still on record; an
+    `update --version <ref>` outside that list is built but left out here
+    rather than rendered against a guessed ref and reported stale for a
+    recipe that never changed. Two *distinct* VERSIONS entries that sanitize
+    to the same tag are themselves ambiguous, so both are excluded too,
+    rather than trusting whichever a dict comprehension kept last -- but an
+    entry repeated verbatim is not ambiguous, just redundant, and must not be
+    excluded on the strength of colliding with itself.
+    '''
+    # Deduplicated by version string first -- an accidental literal repeat in
+    # VERSIONS is not an ambiguity, it is the same answer twice, and treating
+    # it as one would silently drop that version from every drift check with
+    # nothing said, the exact failure mode this whole feature exists to close.
+    distinct_tags = {v: sanitize_tag(v) for v in cls.VERSIONS}
+    tags = list(distinct_tags.values())
+    ambiguous = {t for t in tags if tags.count(t) > 1}
+    checkable = {t: v for v, t in distinct_tags.items()
+                 if t not in ambiguous and t in built}
+    # 'latest' always means the unversioned build here, even if some
+    # VERSIONS entry's sanitized tag collides with it (sanitize_tag() falls
+    # back to 'latest' for a string with no tag-safe characters left, e.g.
+    # '---') -- that collision is real in Docker too, since it is the exact
+    # same image_tag(), so there is no way to tell the two apart from `built`
+    # alone. This unconditionally wins over whatever the comprehension above
+    # produced for that key, which is also why excluding 'latest' up front
+    # in `ambiguous` would change nothing observable.
+    if 'latest' in built:
+        checkable['latest'] = None
+    return checkable
+
+
 def doctor(args):
     ver = dckr.version()['Version']
     if ver.endswith('-ce'):
@@ -983,12 +1023,37 @@ def doctor(args):
     ok = curr_version >= min_version
     print('docker version ... {1} ({0})'.format(ver, 'ok' if ok else 'update to {} at least'.format(min_version)))
 
+    # Fetched once and threaded through -- built_versions()/img_exists()/
+    # recipe_status() each scan this same listing, and asking Docker for it
+    # again per daemon per version would turn one health check into dozens of
+    # API round trips.
+    images_list = dckr.images()
+
     for name in PREPARE_IMAGES:
         cls = BUILDABLE_IMAGES[name]
-        built = cls.built_versions()
+        built = cls.built_versions(images_list)
         print('{0} image'.format(name), end=' ')
-        if img_exists(cls.image_tag()):
-            print('... ok')
+        if img_exists(cls.image_tag(), images_list):
+            try:
+                status, _ = cls.recipe_status(images=images_list)
+            except Exception as e:
+                # A broken render (a template placeholder BUILD_VARS no
+                # longer sets, say) must cost this one line, not the rest of
+                # the report -- doctor used to need only img_exists() here,
+                # pure string work that could not raise. Never paired with
+                # 'ok': a reader scanning for that word must not get a false
+                # positive on a line reporting the check itself is broken.
+                print('... recipe check failed: {0}'.format(e))
+            else:
+                if status == 'ok':
+                    print('... ok')
+                elif status == 'unknown':
+                    # Never paired with 'ok' -- unknown is not a clean bill
+                    # of health, and a reader (or a script) scanning for
+                    # that word must not get a false positive here either.
+                    print('... recipe unknown -- built before recipe tracking')
+                else:
+                    print('... recipe changed since built -- bgperf2 update {0}'.format(name))
         else:
             print('... not found. if you want to bench {0}, run `bgperf2 prepare -t {0}`'.format(name))
 
@@ -997,13 +1062,54 @@ def doctor(args):
         extra = [v for v in built if v != 'latest']
         if extra:
             print('    versions built: {0}'.format(', '.join(extra)))
+            checkable = checkable_versions(cls, built)
+            stale, unknown, errored = [], [], []
+            for v in extra:
+                if v not in checkable:
+                    continue
+                try:
+                    status = cls.recipe_status(checkable[v], images=images_list)[0]
+                except Exception as e:
+                    # Surfaced rather than dropped -- silently skipping a
+                    # version whose render is broken hides a real bug in the
+                    # recipe machinery from the one command meant to catch
+                    # drift, and looks identical to a version nobody built.
+                    errored.append((v, e))
+                    continue
+                if status == 'stale':
+                    stale.append(v)
+                elif status == 'unknown':
+                    # Must not read as ok -- the top-level daemon line above
+                    # only speaks for the unversioned tag, so a specific old
+                    # version can still be unverified under it.
+                    unknown.append(v)
+            if stale:
+                # `update`, not `prepare -f`: prepare()'s `wanted` always
+                # prepends the unversioned tag regardless of --versions, so
+                # `-f` there would force-rebuild it too even though it was
+                # never checked here, let alone flagged. `update` with
+                # --versions touches exactly the tags named. The remedy also
+                # needs the trustworthy version string (checkable[v]), not
+                # the built tag itself -- resolve_ref() would otherwise be
+                # handed a sanitized tag it does not recognise for any
+                # version sanitize_tag() actually rewrites.
+                print('    recipe changed since built: {0}   '
+                      '(bgperf2 update {1} --versions {2})'.format(
+                          ', '.join(stale), name,
+                          ','.join(str(checkable[v]) for v in stale)))
+            if unknown:
+                print('    recipe unknown (built before recipe tracking): {0}'.format(
+                    ', '.join(unknown)))
+            if errored:
+                print('    recipe check failed: {0}'.format(
+                    ', '.join('{0} ({1})'.format(v, e) for v, e in errored)))
         missing = [v for v in cls.VERSIONS if sanitize_tag(v) not in built]
         if missing:
             print('    not built: {0}   (bgperf2 prepare -t {1})'.format(', '.join(missing), name))
 
     for name in ['flock', 'srlinux', 'junos', 'eos']:
         cls = TARGET_CLASSES[name]
-        tags = cls.built_versions()
+        tags = cls.built_versions(images_list)
         print('{0} image ... {1}'.format(
             name, '{0} ({1})'.format(cls.IMAGE_REPO, ', '.join(tags)) if tags else 'not found'))
 
@@ -1176,6 +1282,10 @@ def verify(args):
         sys.exit('--versions needs exactly one -t/--target: version names mean different '
                  'things to different daemons')
 
+    # Fetched once and threaded through -- see checkable_versions()'s
+    # comment in doctor()/images() for why one listing beats one per tag.
+    images_list = dckr.images()
+
     failed = []
     checked = 0
     for name in names:
@@ -1192,7 +1302,7 @@ def verify(args):
         if not roles:
             roles = [('image', buildable)]
 
-        built = buildable.built_versions()
+        built = buildable.built_versions(images_list)
         wanted = versions or [None if v == 'latest' else v for v in built]
         if not wanted:
             print('{0} ... nothing built'.format(name))
@@ -1210,7 +1320,7 @@ def verify(args):
                 print('  {0:<12} {1:<28} FAIL  {2}'.format(shown, '-', msg))
                 failed.append(('{0}:{1}'.format(name, shown), msg))
                 continue
-            if not img_exists(tag):
+            if not img_exists(tag, images_list):
                 # Never built is only an error when this version was asked for
                 # by name: reporting success for a version nothing checked is
                 # the one result a caller must not be able to trust.
@@ -1266,11 +1376,13 @@ def images(args):
     batch config, and `docker images` cannot answer the second half of it --
     that bgperf/frr_c:10.1 came from stable/10.1.
     '''
+    images_list = dckr.images()
     for name in sorted(BUILDABLE_IMAGES):
         cls = BUILDABLE_IMAGES[name]
-        built = cls.built_versions()
+        built = cls.built_versions(images_list)
         print('{0} ({1})'.format(name, cls.IMAGE_REPO))
         known = list(dict.fromkeys(['latest'] + list(cls.VERSIONS) + built))
+        checkable = checkable_versions(cls, built)
         for v in known:
             version = None if v == 'latest' else v
             try:
@@ -1280,15 +1392,33 @@ def images(args):
             # built_versions() returns sanitized tags, so a version containing a
             # character sanitize_tag() rewrites ('stable/8' -> 'stable_8') would
             # otherwise always read as not built. doctor already compares this way.
-            print('  {0:<12} {1:<28} {2:<18} {3}'.format(
+            tag_key = sanitize_tag(v)
+            is_built = tag_key in built
+            note = ''
+            # checkable's value, not the loop's own `version` -- a v that
+            # reached `known` only via built_versions() can still sanitize to
+            # the same tag as a genuine cls.VERSIONS entry (sanitize_tag() is
+            # lossy) without being that entry's own string, and rendering
+            # against v itself would then compare the wrong recipe.
+            trusted_version = checkable.get(tag_key)
+            # checkable only ever keys a tag already confirmed present in
+            # built, so this already implies is_built.
+            if tag_key in checkable:
+                try:
+                    status, _ = cls.recipe_status(trusted_version, images=images_list)
+                    if status != 'ok':
+                        note = '  (recipe {0})'.format(status)
+                except Exception as e:
+                    note = '  (recipe check failed: {0})'.format(e)
+            print('  {0:<12} {1:<28} {2:<18} {3}{4}'.format(
                 v, tag, cls.resolve_ref(version),
-                'built' if sanitize_tag(v) in built else 'not built'))
+                'built' if is_built else 'not built', note))
         print()
 
     print('downloaded out of band (tag them yourself):')
     for name in ['srlinux', 'junos', 'eos']:
         cls = TARGET_CLASSES[name]
-        tags = cls.built_versions()
+        tags = cls.built_versions(images_list)
         print('  {0:<10} {1:<28} {2}'.format(
             name, cls.IMAGE_REPO, ', '.join(tags) if tags else 'nothing tagged'))
 
@@ -1326,7 +1456,13 @@ def prepare(args):
             sys.exit('{0} is not built by bgperf2; known images: {1}'.format(
                 name, ', '.join(sorted(BUILDABLE_IMAGES))))
 
+    # Fetched once and threaded through -- see checkable_versions()'s
+    # comment in doctor()/images() for why one listing beats one per tag.
+    images_list = dckr.images()
+
     plan = []
+    stale_skipped = []
+    check_failed = []
     for name in names:
         cls = BUILDABLE_IMAGES[name]
         # The unversioned image tracks the daemon's default branch; the version
@@ -1339,12 +1475,47 @@ def prepare(args):
             # it is current -- skipping it is what let bgperf/openbgp:latest sit
             # at 8.8 for months after 9.2 shipped. Rebuild it every time and let
             # the layer cache make that cheap when upstream has not moved.
-            existed = img_exists(tag)
+            existed = img_exists(tag, images_list)
             if args.force or not existed or cls.pulls_base(tag):
                 plan.append((cls, v, tag, existed))
+            else:
+                # `prepare` is the command an operator actually runs day to
+                # day -- `doctor`/`images` are a separate step easy to
+                # forget, and a tag skipped here is exactly the "prepare
+                # skips an existing tag" trap CLAUDE.md records three times
+                # over. `v` is always trustworthy here (None, an explicit
+                # --versions entry, or a raw cls.VERSIONS member), never a
+                # sanitized built tag, so this needs none of
+                # checkable_versions()'s guessing-back.
+                try:
+                    if cls.recipe_status(v, images=images_list)[0] == 'stale':
+                        stale_skipped.append((name, v, tag))
+                except Exception as e:
+                    # Surfaced, not dropped -- doctor()/images() print
+                    # 'recipe check failed' for the identical failure, and
+                    # this is the command that actually runs unattended.
+                    check_failed.append((tag, e))
+
+    for name, v, tag in stale_skipped:
+        # `update`, not `prepare -f` on this same invocation: `wanted`
+        # always prepends the unversioned tag regardless of --versions, so
+        # `-f` here would force-rebuild it too even when only one specific
+        # version was ever flagged stale. `update <name> --versions <v>`
+        # rebuilds exactly the one tag named.
+        remedy = 'bgperf2 update {0}'.format(name) + (' --versions {0}'.format(v) if v else '')
+        print('recipe changed since built, not rebuilt: {0}   ({1})'.format(tag, remedy))
+    if check_failed:
+        print('recipe check failed: {0}'.format(
+            ', '.join('{0} ({1})'.format(tag, e) for tag, e in check_failed)))
 
     if not plan:
-        print('everything requested is already built (use -f to rebuild)')
+        if not (stale_skipped or check_failed):
+            # Said only when there is nothing more specific to say -- a
+            # generic "-f" hint right after a precise `update` remedy above
+            # would read as reassurance undercutting the warning, and "-f"
+            # on this same invocation rebuilds more than the flagged tag
+            # anyway (wanted always prepends the unversioned tag).
+            print('everything requested is already built (use -f to rebuild)')
         return
 
     print('building {0} image(s):'.format(len(plan)))

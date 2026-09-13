@@ -15,9 +15,12 @@
 
 from settings import dckr
 import glob
+import hashlib
 import io
+import json
 import os
 import re
+from docker.utils import version_gte
 from itertools import chain
 from pathlib import Path
 from threading import Thread
@@ -55,7 +58,28 @@ def normalize_image_name(name):
     return name if ':' in name.rsplit('/', 1)[-1] else name + ':latest'
 
 
-def img_exists(name):
+def _find_image(name, images=None):
+    '''The local image dict carrying exactly this repository:tag, or None.
+
+    The one scan img_exists() and img_recipe_label() both need -- kept in one
+    place so a future fix to the matching itself (this already replaced one
+    bug, comparing only RepoTags[0]) cannot be made in one and not the other.
+
+    `images` takes a pre-fetched dckr.images() listing, for a caller (doctor,
+    images) about to ask this question many times in one command -- each
+    dckr.images() call is a full local-image listing, and asking it once per
+    daemon per version otherwise turns one health check into dozens of Docker
+    API round trips. Fetched fresh here when omitted, as every caller before
+    this parameter existed already got.
+    '''
+    name = normalize_image_name(name)
+    for img in (dckr.images() if images is None else images):
+        if name in (img.get('RepoTags') or []):
+            return img
+    return None
+
+
+def img_exists(name, images=None):
     '''True if a local image carries exactly this repository:tag.
 
     This used to compare only the repository half of RepoTags[0], so
@@ -64,11 +88,60 @@ def img_exists(name):
     builds had to fake them with path-like names ('bgperf/frr_c/stable_8').
     Reading every RepoTag also fixes images that carry more than one tag.
     '''
-    name = normalize_image_name(name)
-    for img in dckr.images():
-        if name in (img.get('RepoTags') or []):
-            return True
-    return False
+    return _find_image(name, images) is not None
+
+
+# `prepare`/`build_dockerfile()` skip a tag that already exists, so a recipe
+# changed after that point -- a new apt package, a fixed ENTRYPOINT, a
+# resolve_ref() that now maps a version to a different checkout -- is
+# invisible until someone thinks to force a rebuild. That has happened three
+# times over (FRR's gcov flags, exabgp/bgpdump2's base image and autoreconf)
+# and each was closed by a hand-written, date-stamped paragraph telling the
+# operator to rebuild -- exactly the kind of prose this label replaces with
+# something checkable.
+#
+# It is not a substitute for PULL_BASE: OpenBGPD's `FROM openbgpd/openbgpd:
+# latest` is the same text before and after upstream republishes new content
+# under that tag, so the rendered recipe -- and this hash -- do not change
+# when only the *content behind a moving tag* drifts. That is what pulls_base()
+# forces a fresh `pull` for; this label answers a different question, whether
+# the recipe bgperf2 owns has moved on since the image was built.
+RECIPE_LABEL_KEY = 'bgperf2.recipe_hash'
+
+
+def recipe_hash(dockerfile_text, buildargs=None):
+    '''A short content hash of a rendered Dockerfile plus its buildargs.
+
+    Hashed rather than written into the image as a `LABEL` line in the
+    Dockerfile text itself, so the hash plays no part in what it is a hash
+    of -- passed to `docker build` as an image label instead, which is read
+    back by img_recipe_label().
+
+    `buildargs` matters for an override Dockerfile (dockerfile_override()):
+    its text is the same for every version routed through it, and only
+    BGPERF_REF/BGPERF_VERSION -- passed as buildargs, not baked into the
+    file -- vary per version. Hashing the text alone would be blind to a
+    resolve_ref() change for any such version, exactly the "recipe changed"
+    case this mechanism exists to catch.
+    '''
+    # A structured encoding of the pair, not a bare concatenation -- text
+    # plus buildargs with no delimiter between them could in principle be
+    # split two different ways to the same string.
+    fingerprint = json.dumps([dockerfile_text, buildargs or {}], sort_keys=True)
+    return hashlib.sha256(fingerprint.encode('utf-8')).hexdigest()[:12]
+
+
+def img_recipe_label(name, images=None):
+    '''The recipe hash a local image was built with, or None.
+
+    None covers two cases that must read the same way to a caller: the tag
+    does not exist, or it was built before this label existed. Either way
+    there is nothing to compare against, which is the same shape as
+    bgpdump2's "commit unknown" for a pruned clone -- said explicitly rather
+    than guessed. See _find_image() for `images`.
+    '''
+    img = _find_image(name, images)
+    return (img.get('Labels') or {}).get(RECIPE_LABEL_KEY) if img else None
 
 
 def sanitize_tag(version):
@@ -80,6 +153,12 @@ def sanitize_tag(version):
     '''
     tag = re.sub(r'[^A-Za-z0-9_.-]', '_', str(version).strip())
     return tag.lstrip('.-')[:128] or 'latest'
+
+
+# Sentinel for an optional parameter whose real values include None --
+# render_dockerfile()'s `_override` is None both when unset and when a
+# version genuinely has no override file, and those must not be confused.
+_UNSET = object()
 
 
 class _RenderOnly:
@@ -289,10 +368,20 @@ class Container(object):
             ' using {0}'.format(override.relative_to(REPO_ROOT)) if override is not None else ''))
         if override is not None:
             cls.build_dockerfile(override.read_text(), force, tag, nocache=nocache,
-                                 buildargs={'BGPERF_REF': ref, 'BGPERF_VERSION': str(version)})
+                                 buildargs=cls.override_buildargs(version))
         else:
             cls.build_image(force=force, tag=tag, checkout=ref, nocache=nocache, version=version)
         return tag
+
+    @classmethod
+    def override_buildargs(cls, version):
+        '''The buildargs an override Dockerfile is built with for this version.
+
+        Shared by build_version() (which builds it) and current_recipe_hash()
+        (which has to fingerprint the identical shape) so the two cannot
+        drift apart from each other.
+        '''
+        return {'BGPERF_REF': cls.resolve_ref(version), 'BGPERF_VERSION': str(version)}
 
     @classmethod
     def require_image(cls, version=None):
@@ -307,13 +396,16 @@ class Container(object):
         return tag
 
     @classmethod
-    def built_versions(cls):
-        '''Version tags of this daemon that exist locally, for `doctor`.'''
+    def built_versions(cls, images=None):
+        '''Version tags of this daemon that exist locally, for `doctor`.
+
+        See _find_image() for `images`.
+        '''
         if cls.IMAGE_REPO is None:
             return []
         prefix = cls.IMAGE_REPO + ':'
         tags = set()
-        for img in dckr.images():
+        for img in (dckr.images() if images is None else images):
             for repo_tag in img.get('RepoTags') or []:
                 if repo_tag.startswith(prefix):
                     tags.add(repo_tag[len(prefix):])
@@ -350,13 +442,21 @@ class Container(object):
         cls.build_dockerfile(cls.dockerfile, force, tag, nocache=nocache, buildargs=buildargs)
 
     @classmethod
-    def render_dockerfile(cls, version=None):
+    def render_dockerfile(cls, version=None, _override=_UNSET):
         '''The Dockerfile a version would build, without building it.
 
         Debugging a failed build by running it is a compile-length round trip
         per attempt, so let the recipe be read directly instead.
+
+        `_override` lets a caller that has already resolved
+        dockerfile_override() (current_recipe_hash(), which also needs it to
+        decide the buildargs) pass it straight in rather than probing the
+        filesystem for the same version a second time; every other caller
+        leaves it unset and this resolves it itself as before. A sentinel,
+        not None -- a version with no override resolves to None too, and
+        that is a real answer this must not re-probe for.
         '''
-        override = cls.dockerfile_override(version)
+        override = cls.dockerfile_override(version) if _override is _UNSET else _override
         if override is not None:
             return override.read_text()
         _RenderOnly.active = True
@@ -366,6 +466,38 @@ class Container(object):
         finally:
             _RenderOnly.active = False
         return cls.dockerfile
+
+    @classmethod
+    def current_recipe_hash(cls, version=None):
+        '''The hash a build of this version would carry right now.
+
+        Mirrors build_version() via override_buildargs(): an override
+        Dockerfile is built with BGPERF_REF/BGPERF_VERSION as buildargs,
+        which have to be part of the fingerprint the same way
+        build_dockerfile() folds them in at build time, or a resolve_ref()
+        change for a version routed through an override would leave this
+        hash unchanged.
+        '''
+        override = cls.dockerfile_override(version)
+        buildargs = cls.override_buildargs(version) if override is not None else None
+        return recipe_hash(cls.render_dockerfile(version, _override=override), buildargs)
+
+    @classmethod
+    def recipe_status(cls, version=None, images=None):
+        '''('ok' | 'stale' | 'unknown', current_hash) for a built tag.
+
+        Only meaningful once the tag is known to exist -- an unbuilt tag has
+        no label to compare and callers check built_versions()/img_exists()
+        first. 'unknown' is what an image built before this label existed
+        reports, on purpose: that is not the same claim as 'ok', and treating
+        it as one would call an unrebuildable image current. See
+        _find_image() for `images`.
+        '''
+        current = cls.current_recipe_hash(version)
+        stored = img_recipe_label(cls.image_tag(version), images)
+        if stored is None:
+            return 'unknown', current
+        return ('ok' if stored == current else 'stale'), current
 
     @classmethod
     def build_dockerfile(cls, dockerfile, force, tag, nocache=False, buildargs=None):
@@ -397,9 +529,26 @@ class Container(object):
         f = io.BytesIO(dockerfile.encode('utf-8'))
         if force or not img_exists(tag):
             print('build {0}...'.format(tag))
+            # Hashed before the proxy ENV line above was spliced in, so an
+            # operator's http_proxy/https_proxy cannot change the hash and
+            # manufacture staleness that has nothing to do with the recipe.
+            # buildargs is folded in too -- current_recipe_hash() mirrors
+            # this exactly so an override Dockerfile's BGPERF_REF is
+            # covered. Computed only here, not above: `prepare` re-asks this
+            # for every already-built tag it plans to skip, and hashing a
+            # multi-hundred-line rendered Dockerfile just to throw the
+            # result away is pure waste on that path.
+            label_hash = recipe_hash(cls.dockerfile, buildargs)
+            build_kwargs = dict(fileobj=f, rm=False, tag=tag, decode=True, nocache=nocache,
+                                pull=cls.pulls_base(tag), buildargs=buildargs or {})
+            # docker-py raises InvalidVersion for `labels` below API 1.23
+            # (~Engine 1.11), older than the 1.9.0 doctor()'s own version
+            # check still accepts -- the label is an enhancement, not
+            # something a build on an old daemon should fail over.
+            if version_gte(dckr.api_version, '1.23'):
+                build_kwargs['labels'] = {RECIPE_LABEL_KEY: label_hash}
             error = None
-            for line in dckr.build(fileobj=f, rm=False, tag=tag, decode=True, nocache=nocache,
-                                   pull=cls.pulls_base(tag), buildargs=buildargs or {}):
+            for line in dckr.build(**build_kwargs):
                 if 'stream' in line:
                     print(line['stream'].strip())
 

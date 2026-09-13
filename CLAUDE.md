@@ -373,6 +373,15 @@ ExaBGP release. With no version command, provenance records `UNKNOWN` for both a
 them apart — the gcov trap again, one layer up. Pinning `python:3.11-bookworm` and a concrete
 `exabgp==` would close it, at the cost of rebuilding those images.
 
+**Both traps above are the same shape — `prepare` skips a tag that already exists, so a recipe
+change is invisible until someone remembers to force a rebuild — and `prepare`/`doctor`/`images` now
+catch it going forward** rather than needing a date memorised by hand; see
+`docs/invariants/provenance-and-verify.md`'s "Recipe drift" section for the mechanism and its
+reasoning. One consequence worth stating here: every image built before that mechanism shipped —
+including every image the two paragraphs above describe — reports as unverifiable rather than as
+current, so an untouched pre-existing image is *not* a clean bill of health from it; only a rebuild,
+or the date/measurement checks above, settle those.
+
 The old `frr` target (a wrapper over the prebuilt `frrouting/frr:v7.5.1` image) was removed. **`frr.py` still exists and must stay**: its
 `FRRoutingTarget` holds all the FRR config generation, `get_neighbors_state`, and End-of-RIB parsing,
 which `FRRoutingCompiledTarget` inherits. Only the image build and CLI target went away.

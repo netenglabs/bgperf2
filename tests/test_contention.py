@@ -15,7 +15,9 @@ import os
 
 import pytest
 
+import bgperf2
 from contention import (
+    BGPERF_PROCESSES,
     CONTENTION_PERCENT,
     describe_contention,
     filesystem_type,
@@ -78,6 +80,30 @@ def test_every_target_daemon_is_recognised_as_ours(daemon):
     before = sample(p1=(daemon, 0))
     after = sample(p1=(daemon, 400 * TICKS))
     assert foreign_cpu_percent(before, after, 10, clock_ticks=TICKS) == 0
+
+
+def test_every_registered_daemon_binary_is_in_the_allowlist():
+    '''docs/invariants/host-and-environment.md: "every daemon a target can run
+    must be in BGPERF_PROCESSES ... a missing name means that target's own
+    load is reported as contention ... the failure is silent and looks like a
+    real finding." The parametrized case above only re-checks a fixed guess at
+    that list; this derives it from DAEMON_BINARY on the classes bgperf2
+    actually builds and runs, so a new compiled daemon that forgets to update
+    BGPERF_PROCESSES fails here instead of publishing quiet contention.
+
+    Commercial NOSes (junos/eos/srlinux/flock) run many daemons each and carry
+    no single DAEMON_BINARY, so they are not covered by this derivation --
+    those names in BGPERF_PROCESSES have no source of truth to check against.
+    '''
+    classes = set(bgperf2.TARGET_CLASSES.values()) | set(
+        bgperf2.TESTER_CLASSES.values())
+    binaries = {cls: cls.DAEMON_BINARY for cls in classes if cls.DAEMON_BINARY}
+    assert binaries, 'derivation found nothing -- DAEMON_BINARY moved or renamed'
+    missing = {cls.__name__: binary for cls, binary in binaries.items()
+               if os.path.basename(binary) not in BGPERF_PROCESSES}
+    assert not missing, (
+        'DAEMON_BINARY set but its basename is missing from '
+        'contention.BGPERF_PROCESSES: {}'.format(missing))
 
 
 def test_foreign_processes_are_summed_and_named():

@@ -54,6 +54,66 @@ class TestCountsAreUnchanged:
         assert BIRDTester.find_errors([str(tmp_path)]) == 1
 
 
+class TestAPartialFinalLine:
+    """A log's last line can be half a line, and half a line is not evidence.
+
+    Every one of these scans runs while the generator container is up and its
+    daemon is still writing. `bird 3.3.2 (4 threads)` at 500 peers x 2000
+    prefixes was rejected on `tester_health` in Block 8 of the 64 GB campaign
+    for exactly one error. Its `tester-health.json` captured the line verbatim
+    as `2026-09-12 01:51:01.260 <RMT> bgp1: Invalid ro`, at `10.10.0.241.log`
+    line 709953 -- a copy of the commonest line in the log, cut inside `Invalid
+    route` so the exclusion could no longer match it while `<RMT>` still put it
+    in front of the predicate. The run had converged with exact counts.
+
+    `test_a_truncated_exclusion_is_not_an_error` feeds that exact text.
+    """
+
+    def write_partial(self, d, name, lines, tail):
+        """A log ending mid-line: no trailing newline after `tail`."""
+        p = os.path.join(str(d), name)
+        with open(p, 'w') as f:
+            f.write(''.join(line + '\n' for line in lines))
+            f.write(tail)
+        return p
+
+    def test_a_truncated_exclusion_is_not_an_error(self, tmp_path):
+        """The Block 8 rejection, reproduced and then refused."""
+        self.write_partial(tmp_path, '10.10.0.241.log',
+                           ['<RMT> bgp1: Invalid route 10.0.0.0/8 withdrawn'] * 3,
+                           '2026-09-12 01:51:01.260 <RMT> bgp1: Invalid ro')
+        assert BIRDTester.find_errors([str(tmp_path)]) == 0
+
+    def test_a_partial_line_is_not_captured_either(self, tmp_path):
+        """Not counted and not sampled: `count` and `sampled` stay agreed."""
+        samples = []
+        self.write_partial(tmp_path, 'a.log', [], '<RMT>  bgp1: Invalid ro')
+        assert BIRDTester.find_errors([str(tmp_path)], samples) == 0
+        assert samples == []
+
+    def test_complete_lines_before_it_still_count(self, tmp_path):
+        """Only the partial line is withheld, not the log that carried it."""
+        self.write_partial(tmp_path, 'a.log',
+                           ['<RMT> Received: Cease'] * 2,
+                           '<RMT>  bgp1: Invalid ro')
+        assert BIRDTester.find_errors([str(tmp_path)]) == 2
+
+    def test_the_next_log_is_still_read(self, tmp_path):
+        """A partial line ends one log's scan, not the walk over the fleet."""
+        a = tmp_path / 'a'
+        a.mkdir()
+        self.write_partial(a, '1.log', [], '<RMT>  bgp1: Invalid ro')
+        write_log(a, '2.log', ['<RMT> Received: Cease'])
+        assert BIRDTester.find_errors([str(a)]) == 1
+
+    def test_the_mrt_scans_follow_the_same_rule(self, tmp_path):
+        """`count_matching_lines()` feeds every MRT tester's two counts."""
+        self.write_partial(tmp_path, 'bgpdump2.log',
+                           ['session timeout'], 'partial error')
+        assert base.count_matching_lines([str(tmp_path)], 'error') == 0
+        assert base.count_matching_lines([str(tmp_path)], 'timeout') == 1
+
+
 class TestWhatIsCaptured:
     def test_the_line_its_file_and_its_number_survive(self, tmp_path):
         write_log(tmp_path, '10.10.0.7.log', [

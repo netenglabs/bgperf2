@@ -1969,6 +1969,36 @@ above are computed over them, so the fix belongs in its own change set -- but it
 belongs before Block 10 rather than after it, which is what Block 8's record
 said and what this block's selection now depends on.
 
+**Settled 2026-09-13, before Block 10 ran.** `base.scan_log_lines()` now stops
+at the last complete line, and **both** tester-health scans go through it: the
+defect was in two implementations, not one -- `BIRDTester.find_errors()`, which
+is what Block 10's three selected scenarios run, and `count_matching_lines()`,
+which decides `tester_errors`/`tester_timeouts` for every MRT row in Blocks 5-7.
+The predicates stay predicates (`_is_bird_protocol_error()` is BIRD's exclusion
+list), so one place now carries the rule. `docs/invariants/tester-offering.md`
+holds the argument and the cost; `tests/test_tester_health_evidence.py`'s
+`TestAPartialFinalLine` feeds the Block 8 line verbatim from that row's own
+`tester-health.json`.
+
+**No measured number moves, and no accepted block is disturbed.** What changed
+is whether a partial final line qualifies a row, never a timing, CPU, memory or
+count value -- so the statistics Block 9 computed over Blocks 2-7 stand exactly
+as published, and pooling Block 10's passes with theirs is sound. What *is*
+now different between blocks is the qualification rule, which is looser by one
+line per log: a row Blocks 2-8 would have rejected on a truncated last line
+would qualify today. No such rejection exists in Blocks 2-7 (no row failed), so
+the only rows the change would have moved are Block 8's.
+
+**What this does not do is re-measure Block 8.** Its `bird 3.3.2 (4 threads)`
+500-peer row and its `fanout: bird 2.19.2` row remain excluded, because an
+accepted block's exclusions are durable -- and re-running is `--force` over the
+whole block, which discards eight qualified rows to recover two. Block 9's
+refusal to expand the 500-peer and fan-out comparisons therefore stands as
+written; this fix stops the defect recurring in Block 10, it does not reach
+backwards. The `bgperf2-599` exclusion was never this defect at all -- twelve
+real hold-timer expiries under a 500-session fleet -- and is unaffected either
+way.
+
 **Six `/code-review` rounds ran over this block's own change set**, and every
 round found something the round before it had introduced. Twenty-six findings
 were acted on; the two that would have corrupted this block's output:

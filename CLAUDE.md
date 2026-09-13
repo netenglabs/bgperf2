@@ -270,6 +270,8 @@ claims.
 - A BIRD 2.19 offered count is queue-side; bgpdump2's prefix counts are encode-side and its octet
   count wire-side. Any generator logging to a redirected stdout needs `stdbuf -oL`.
   `--tester-trace-io` inflates the walk time it measures by 56%.
+- Both tester-health scans go through `scan_log_lines()` and **stop at the last complete line**;
+  the generator is still writing, and a truncated `Invalid route` reads as a protocol error.
 
 **`docs/invariants/export-timing.md`** — `monitor.py`'s `Receiver`, `measurements.py`'s
 `ExportEventRecorder`, and `bgperf2.py`'s `controller_export_stats()`/`finish_bench()`.

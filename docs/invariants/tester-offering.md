@@ -267,3 +267,69 @@ injectors of a later verification) and the wire-side `octets_on_wire`. The
 printed line names both bounds rather than choosing between them — `injection
 shorter than the 1.0s poll resolution; the generator measured its own send at
 0.001017s`.
+
+## Tester health counts — a partial final line is not read
+
+`find_errors()` and `find_timeouts()` decide `tester_health`, and
+`check_timing_evidence.py` rejects a row on any nonzero count, so one line
+decides whether a converged run is evidence. **Every scan that opens a log goes
+through `base.scan_log_lines()`, which stops at the last complete line**, and
+the predicates stay predicates — `count_matching_lines()` is a substring test
+over it and `tester.py`'s `_is_bird_protocol_error()` is BIRD's exclusion list.
+One place to change the rule, because it was wrong in two.
+
+**"Every scan that opens a log" is narrower than "both counts", and the gap is
+BIRD's.** `BIRDTester` defines `find_errors()` and no `find_timeouts()`, so the
+latter resolves to `base.Tester.find_timeouts()` and returns 0 without reading
+anything — a BIRD row's `tester timeouts` column is therefore an unmeasured
+zero, not a measured one, and no rule on this page reaches it. That is the shape
+this repository refuses everywhere else (`a count of zero is only published when
+the log proves the class was on`), and `tests/test_tester_health_evidence.py`'s
+`test_which_testers_actually_scan_is_pinned` pins which testers really scan so
+the gap cannot widen unnoticed. It is stated here rather than fixed here:
+BIRD's own timeout vocabulary is a question for whoever measures it, and a
+`find_timeouts()` guessed at a substring would publish a number worse than the
+absent one. The MRT testers all define both.
+
+Every caller runs *while the generator container is still up and its daemon is
+still writing*, so a log's last line can be half a line. Half a line is not the
+line it came from, and the failure is not symmetric: BIRD's exclusion is a
+substring test against `Invalid route ... withdrawn`, which the target's
+reflected routes produce once per route — millions of lines on a full table, the
+commonest text in the log — and a copy cut mid-word matches no exclusion and is
+counted as a protocol error. That is the whole of Block 8's `bird 3.3.2 (4
+threads)` 500-peer rejection in the 64 GB campaign: one error, on a run that had
+converged with exact counts (1,000,000 of 1,000,000). Its
+`tester-health.json` holds the line verbatim, at `tester`'s
+`10.10.0.241.log:709953`:
+
+```
+2026-09-12 01:51:01.260 <RMT> bgp1: Invalid ro
+```
+
+**The `<RMT>` marker is still on it**, which is the part worth reading twice: a
+cut early enough to lose that marker is harmless, because the predicate rejects
+the line before it ever consults the exclusion list. The damage is done only by
+a cut that lands *between* the marker and the end of `Invalid route` — which is
+where a truncation of the log's commonest line is likeliest to land. It cost that block two of its three excluded rows, and
+it blocked Block 9 from expanding either the 500-peer or the fan-out comparison
+— an excluded row cannot support an expansion. The bigger the table the likelier
+it is, since the reflected-route log grows with it.
+
+This is the rule `BlasterLogReader` and the FRR End-of-RIB reader already follow
+(see above, and `target-state.md`), against the same kind of writer. They stop at
+the last complete line because they resume from a byte offset and would consume
+half a line and lose it; these scans resume from nothing, so the partial line is
+dropped rather than held.
+
+**What that costs is stated rather than discovered later**: an error written as a
+generator died, unterminated and with nothing after it, is not counted. At most
+one line per log, only ever the last, and a generator that died that way is not
+silent elsewhere — session counts, `find_timeouts()` and the offering all still
+speak. The alternative spends a whole qualified row on a line nobody can read.
+
+The partial line is withheld from the capture too, not only from the count:
+`sampled` against `count` is how a truncated capture says so, and a sample the
+count does not include breaks that. **Only that log's scan ends** — the walk
+continues into the next log, which is what keeps one peer's half-written line
+from blinding the scan to the other forty-nine.

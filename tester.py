@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from base import Tester, note_error_sample
+from base import Tester, scan_log_lines
 from exabgp import ExaBGP
 from bird import (BIRD, CHURN_PROTOCOL, SESSION_MARKER, churn_failures,
                   split_session_output, tester_offering)
@@ -21,8 +21,6 @@ from churn import split_churn_paths
 from measurements import TesterOffering
 from  settings import dckr
 from subprocess import check_output, Popen, PIPE
-import glob
-import os
 
 
 class ExaBGPTester(Tester, ExaBGP):
@@ -62,6 +60,20 @@ exabgp.daemon.daemonize=true \
 exabgp.daemon.user=root \
 exabgp {0}/{1}.conf'''.format(self.guest_dir, p['router-id']))
         return '\n'.join(startup)
+
+
+def _is_bird_protocol_error(line):
+    '''Whether one BIRD tester log line is a real protocol error.
+
+    The target re-advertises everything it learns, including back to the
+    testers that sent it. Testers run `import none`, so they reject all of it
+    and log "Invalid route ... withdrawn" for each -- normal operation, not an
+    error, and it dwarfs anything real (10 peers x 900 reflected routes =
+    9000). Excluded like NEXT_HOP already was.
+    '''
+    if '<RMT>' not in line:
+        return False
+    return 'NEXT_HOP' not in line and 'Invalid route' not in line
 
 
 class BIRDTester(Tester, BIRD):
@@ -248,38 +260,16 @@ ulimit -n 65536
 
     @staticmethod
     def find_errors(log_dirs=(), samples=None):
-        '''Count real protocol errors across the tester logs.
-
-        The target re-advertises everything it learns, including back to the
-        testers that sent it. Testers run `import none`, so they reject all of
-        it and log "Invalid route ... withdrawn" for each -- normal operation,
-        not an error, and it dwarfs anything real (10 peers x 900 reflected
-        routes = 9000). Excluded like NEXT_HOP already was.
+        '''Count real protocol errors across the tester logs, by
+        `_is_bird_protocol_error()`.
 
         Takes the tester host directories rather than assuming a fixed path, so
         it still works with -b/--bench-name and -d/--dir.
+
+        The scan is `scan_log_lines()`, which withholds a partial final line.
+        That matters more here than anywhere else it is used: the exclusion
+        in `_is_bird_protocol_error()` is a substring test against a message
+        BIRD writes once per reflected route, so a truncated copy of the single
+        commonest line in the log reads as a protocol error.
         '''
-        errors = 0
-        for log_dir in log_dirs:
-            # Sorted for the reason count_matching_lines() sorts: which peers
-            # a bounded capture drew from should be a property of the run.
-            for log in sorted(glob.glob(os.path.join(log_dir, '*.log'))):
-                taken = 0
-                # An unreadable log is skipped rather than raised: this runs
-                # once the run has converged but before its stats row is
-                # written, so letting an OSError out discards the whole run
-                # over a log file.
-                try:
-                    with open(log, errors='replace') as f:
-                        for lineno, line in enumerate(f, 1):
-                            if '<RMT>' not in line:
-                                continue
-                            if 'NEXT_HOP' in line or 'Invalid route' in line:
-                                continue
-                            errors += 1
-                            if note_error_sample(samples, log_dir, log, lineno,
-                                                 line, taken):
-                                taken += 1
-                except OSError:
-                    continue
-        return errors
+        return scan_log_lines(log_dirs, _is_bird_protocol_error, samples)

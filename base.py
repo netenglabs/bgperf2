@@ -1264,22 +1264,50 @@ def note_error_sample(samples, log_dir, log, lineno, line, taken=0):
     return True
 
 
-def count_matching_lines(log_dirs, needle, samples=None):
-    '''Count lines containing `needle` (case-insensitively) in each *.log
-    directly inside each of `log_dirs` -- not recursively, which is all the
-    testers need since they write their logs straight into guest_dir.
+def scan_log_lines(log_dirs, matches, samples=None):
+    '''Count the lines of each *.log directly inside each of `log_dirs` for
+    which `matches(line)` is true, capturing bounded samples of them.
 
-    The MRT testers used to shell out to `grep ... /tmp/bgperf2/...  | wc -l`,
-    which hardcoded the bench directory and returned a *string*, so the stats
-    row got '0\\n' where every other tester wrote an int. Reading the
-    directories bench() actually passes keeps -b/--bench-name working.
+    Not recursive, which is all the testers need since they write their logs
+    straight into guest_dir.
+
+    **A final line with no trailing newline is not read.** Every caller runs
+    while the generator container is still up and its daemon is still writing,
+    so the last line of a log can be half a line -- and half a line is not the
+    line it came from. A BIRD tester logs `<RMT> ... Invalid route ...
+    withdrawn` once per route the target reflects back at it, millions of times
+    on a full table, and `BIRDTester.find_errors()` excludes exactly that text;
+    cut mid-word it fails the exclusion and is counted as a real protocol error.
+    That is not hypothetical -- it is the whole of the `tester_health` rejection
+    that cost the 64 GB campaign's Block 8 its `bird 3.3.2 (4 threads)` 500-peer
+    row, a run that had converged with exact counts (1,000,000 of 1,000,000).
+    The captured line, verbatim from that row's `tester-health.json`, is
+    `2026-09-12 01:51:01.260 <RMT> bgp1: Invalid ro` at `tester`'s
+    `10.10.0.241.log:709953`. Note it still carries `<RMT>`: the truncation
+    landed inside `Invalid route`, past everything the predicate needs to reach
+    the exclusion and short of the exclusion itself, which is the only place a
+    cut does damage. The likelihood grows with the table, since the
+    reflected-route log grows with it.
+
+    This is the rule the FRR End-of-RIB reader and `BlasterLogReader` already
+    follow, for the same reason and against the same kind of writer. They stop
+    at the last complete line because they resume from a byte offset and would
+    otherwise consume half a line and lose it; here nothing resumes, so the
+    partial line is dropped rather than held.
+
+    **What that costs, stated rather than discovered later:** a real error
+    written as a generator died, with no trailing newline and nothing after it,
+    is not counted. One line per log at most, and only ever the last. The
+    asymmetry is deliberate -- the alternative spends a whole qualified row on
+    a line whose text nobody can read -- and a generator that died that way is
+    not silent elsewhere: session counts, `find_timeouts()` and the offering
+    all still speak.
 
     An unreadable log is skipped rather than raised: this runs at the moment a
     run has just converged but not yet written its stats row, so letting an
-    OSError out would throw away the whole run over a log file. The grep this
-    replaced also returned 0 in that case.
+    OSError out would throw away the whole run over a log file. The `grep`
+    these scans replaced also returned 0 in that case.
     '''
-    needle = needle.lower()
     count = 0
     for log_dir in log_dirs:
         # Sorted so that which sessions a bounded capture drew from is a
@@ -1289,11 +1317,28 @@ def count_matching_lines(log_dirs, needle, samples=None):
             try:
                 with open(log, errors='replace') as f:
                     for lineno, line in enumerate(f, 1):
-                        if needle in line.lower():
-                            count += 1
-                            if note_error_sample(samples, log_dir, log, lineno,
-                                                 line, taken):
-                                taken += 1
+                        if not line.endswith('\n'):
+                            break
+                        if not matches(line):
+                            continue
+                        count += 1
+                        if note_error_sample(samples, log_dir, log, lineno,
+                                             line, taken):
+                            taken += 1
             except OSError:
                 continue
     return count
+
+
+def count_matching_lines(log_dirs, needle, samples=None):
+    '''Count lines containing `needle` (case-insensitively), by the rules in
+    `scan_log_lines()` -- the partial last line among them.
+
+    The MRT testers used to shell out to `grep ... /tmp/bgperf2/...  | wc -l`,
+    which hardcoded the bench directory and returned a *string*, so the stats
+    row got '0\\n' where every other tester wrote an int. Reading the
+    directories bench() actually passes keeps -b/--bench-name working.
+    '''
+    needle = needle.lower()
+    return scan_log_lines(log_dirs, lambda line: needle in line.lower(),
+                          samples)

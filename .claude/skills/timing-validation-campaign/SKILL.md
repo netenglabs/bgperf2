@@ -33,6 +33,24 @@ one). The block re-ran, measured nothing, exited 0, and failed the identical che
 most needed re-measuring was the one resume would never re-run. So the marker carries the verdict
 beside the fact, and what the verdict controls is the exit status and what `accept` demands.
 
+**A block that stopped mid-run is `interrupted`, not unfinished.** The
+campaign host is a spot instance; a reclaim stops the block at a cell boundary
+with every measured cell checkpointed, and `RAN` records what the run itself
+said (`stopped: <reason>`, verbatim -- any SIGTERM reaches the same path, so
+the marker claims no cause). Continue it with `block-N --resume-after-stop`,
+which keeps those cells and measures only what never ran -- never `--force`,
+which is the opposite flag and discards them (the two are refused together).
+The resume is itself refused for a block whose `RAN` records no stop, because
+over an ordinary failure it would skip the failed cells and re-stamp their
+rows. A resumed block spans two hosts by construction, which the host rule
+above already allows: `resumed_after_stop: yes` in `RAN`, the per-attempt
+detail in the manifest's `previous_entries`, and the split named in the block's
+record. A marker written before the runner learned to record the stop carries
+the shortfall without it, and `record-stop N` is the migration for exactly
+that: it copies the reason verbatim out of that block's own run logs, refuses
+when no log carries one, and marks what it wrote `stopped_backfilled:`. It was
+run once, on Block 10.
+
 **A rejected row is accepted only as an explicit exclusion**: `accept N --with-exclusions --note
 "why"`, which is the plan's "14 reviewed rows *or* explicit durable exclusions with evidence"
 written where a later session can still read it. The marker names the rows, from the verdicts

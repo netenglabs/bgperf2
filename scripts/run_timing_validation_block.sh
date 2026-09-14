@@ -13,7 +13,7 @@ source "$SCRIPT_DIR/lib/campaign_common.sh"
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/run_timing_validation_block.sh <next|list|status|block-N|accept> [options]
+  scripts/run_timing_validation_block.sh <next|list|status|block-N|accept|record-stop> [options]
 
 Runs the 64 GB timing validation campaign
 (docs/2026-64gb-timing-validation-plan.md) one execution block at a time.
@@ -25,12 +25,26 @@ Actions:
   status      Print each block's durable state under this run ID
   accept N    Record block N as reviewed and accepted, after you have read its
               evidence. This is what `next` advances past.
+  record-stop N
+              Write into block N's RAN marker the cell-boundary stop its own
+              run logs record and the runner did not. A migration for markers
+              written before the runner recognised the stop, and nothing else:
+              it refuses a marker that already carries the line, and it refuses
+              outright unless that block's logs carry a `stopped:` line to
+              copy -- so it cannot unlock a block that did not stop.
 
 Two markers, not one. A block writes RAN when its mechanical work finished,
 and only an operator's `accept` writes COMPLETE. The campaign contract says a
 block is finished when it has been *reviewed*, and a single marker written by
 the runner would let a session that died between the batch and the review look
 exactly like one that reviewed it.
+
+A third state sits beside those two and is not a verdict about anything. A run
+stopped at a cell boundary -- a spot reclaim on this campaign's host, or any
+SIGTERM -- checkpoints what it had measured and records `stopped: <what it
+said>` in RAN. Such a block is *interrupted*, not merely unfinished: its
+measured cells are qualified, so it is continued with --resume-after-stop
+rather than re-measured with --force.
 
 Options:
   --run-id ID           Default: 2026-timing-validation (the campaign identity)
@@ -44,6 +58,10 @@ Options:
                         exclusions. Requires --note. (accept only)
   --force               Re-measure a block, discarding its previous results,
                         artifacts, markers and batch progress
+  --resume-after-stop
+                        Continue a block that stopped at a cell boundary,
+                        keeping every cell it had already checkpointed. Refused
+                        unless that block's RAN marker records the stop.
   --run-held-block      Run a block that is built but held pending a decision
                         about what its results would mean. The refusal names
                         the decision; this records in the RAN marker that it
@@ -77,12 +95,14 @@ ALLOW_ROOT_WORKDIR=0
 MRT_FILE=""
 NOTE=""
 FORCE=0
+RESUME_STOP=0
 WITH_EXCLUSIONS=0
 RUN_HELD_BLOCK=0
 ACCEPT_TARGET=""
 
-# `accept 3` takes its block number positionally, before the options.
-if [[ "$ACTION" == "accept" && $# -gt 0 && "$1" != --* ]]; then
+# `accept 3` takes its block number positionally, before the options, and so
+# does `record-stop 10`.
+if [[ ( "$ACTION" == "accept" || "$ACTION" == "record-stop" ) && $# -gt 0 && "$1" != --* ]]; then
   ACCEPT_TARGET="$1"
   shift
 fi
@@ -95,6 +115,7 @@ while [[ $# -gt 0 ]]; do
     --mrt-file) MRT_FILE="${2:?missing value for --mrt-file}"; shift 2 ;;
     --note) NOTE="${2:?missing value for --note}"; shift 2 ;;
     --force) FORCE=1; shift ;;
+    --resume-after-stop) RESUME_STOP=1; shift ;;
     --with-exclusions) WITH_EXCLUSIONS=1; shift ;;
     --run-held-block) RUN_HELD_BLOCK=1; shift ;;
     --allow-root-workdir) ALLOW_ROOT_WORKDIR=1; shift ;;
@@ -146,9 +167,33 @@ fi
 # `5 --run-held-block` with "applies to running a block, not to `5`", which is
 # false -- 5 is a block.
 if [[ $RUN_HELD_BLOCK -eq 1 ]] \
-   && [[ "$ACTION" == accept || "$ACTION" == status || "$ACTION" == list ]]; then
+   && [[ "$ACTION" == accept || "$ACTION" == status || "$ACTION" == list \
+      || "$ACTION" == record-stop ]]; then
   echo "--run-held-block applies to running a block, not to \`$ACTION\`" >&2
   echo "to run one anyway: scripts/run_timing_validation_block.sh block-N --run-held-block" >&2
+  exit 1
+fi
+
+# The same rule, for the same reason, applied to the resume: it changes what a
+# *run* does and nothing else, and `accept` is again the slip that matters --
+# the refusal an interrupted block gets from `accept` prints the resume command
+# to copy, so pasting it back onto `accept` is the natural next keystroke.
+if [[ $RESUME_STOP -eq 1 ]] \
+   && [[ "$ACTION" == accept || "$ACTION" == status || "$ACTION" == list \
+      || "$ACTION" == record-stop ]]; then
+  echo "--resume-after-stop applies to running a block, not to \`$ACTION\`" >&2
+  echo "to continue one: scripts/run_timing_validation_block.sh block-N --resume-after-stop" >&2
+  exit 1
+fi
+
+# They are opposites, so a command naming both has to be refused rather than
+# resolved: --force exists to discard the cells a reclaim preserved, and
+# --resume-after-stop exists to keep them. Whichever won silently, the
+# operator would learn which only by reading the results afterwards -- and one
+# of the two answers destroys them.
+if [[ $RESUME_STOP -eq 1 && $FORCE -eq 1 ]]; then
+  echo "--force and --resume-after-stop are opposites: one discards this" >&2
+  echo "block's measured cells and the other keeps them. Pass exactly one." >&2
   exit 1
 fi
 
@@ -388,10 +433,45 @@ PYEV
 #                                       exclusions *with evidence*" cannot be
 #                                       satisfied by a record with none.
 #   BLOCK_EXCLUSION_DETAIL  the per-row lines, empty when there are none
+# True of a block the host was taken away from mid-run. Read from the marker
+# rather than from the logs: the logs of the *previous* attempt are still on
+# disk after a resume, so a scan of them would report every later attempt as
+# interrupted too.
+# The command that continues an interrupted block, which for a *held* block is
+# not the bare form: `guard_held_block` runs after the resume gate, so the
+# printed line would be refused for want of the override. `next` used to get
+# this for free -- a block with a RAN never reached that guard -- and carrying
+# an interrupted block through to a run is what takes it there.
+resume_command() {
+  local index="$1"
+  local cmd="block-$index --resume-after-stop"
+  if [[ -n "${BLOCK_HELD[$index]:-}" ]]; then
+    cmd="$cmd --run-held-block"
+  fi
+  echo "$cmd"
+}
+
+block_was_stopped() {
+  grep -q '^stopped: ' "$1/RAN" 2>/dev/null
+}
+
 classify_block_evidence() {
   local dir="$1"
   BLOCK_EXCLUSION_DETAIL=""
   BLOCK_EXCLUSION_CLASS="clean"
+  # Ahead of the "did any check fail" gate, not merely ahead of the shortfall.
+  # `block_state` reads the stop line alone, so a reclaimed block whose checks
+  # somehow all qualified would be `interrupted` to one reader and `clean` to
+  # the other -- `next` printing the interrupted headline with `accept` as its
+  # next step, and `accept` stamping COMPLETE over cells that never ran. That
+  # the failure count is always non-zero today is a property of
+  # `tolerate_stop`, not of this function, and it is not what may hold the
+  # two readers together.
+  if block_was_stopped "$dir"; then
+    BLOCK_EXCLUSION_CLASS="interrupted"
+    BLOCK_EXCLUSION_DETAIL="$(block_exclusion_report "$dir")"
+    return 0
+  fi
   grep -q '^evidence: .* check(s) failed$' "$dir/RAN" 2>/dev/null || return 0
   BLOCK_EXCLUSION_DETAIL="$(block_exclusion_report "$dir")"
   if grep -q '^missing_runs: ' <<<"$BLOCK_EXCLUSION_DETAIL"; then
@@ -408,6 +488,11 @@ block_state() {
   local dir="$RUN_ROOT/${BLOCK_KEYS[$index]}"
   if [[ -f "$dir/COMPLETE" ]]; then
     echo "complete"
+  elif [[ -f "$dir/RAN" ]] && block_was_stopped "$dir"; then
+    # Not `awaiting-review`: there is nothing to review yet. The block stopped
+    # at a cell boundary with the host being taken away, and what it is waiting
+    # for is the rest of its own cells.
+    echo "interrupted"
   elif [[ -f "$dir/RAN" ]]; then
     echo "awaiting-review"
   elif [[ -d "$dir" ]]; then
@@ -435,6 +520,94 @@ if [[ "$ACTION" == "status" ]]; then
   for i in "${!BLOCK_KEYS[@]}"; do
     printf 'block-%-2s %-34s %s\n' "$i" "${BLOCK_KEYS[$i]}" "$(block_state "$i")"
   done
+  exit 0
+fi
+
+# The stop gate reads the marker and never the logs, for a reason stated where
+# `block_was_stopped` is defined: after a resume, the *previous* attempt's logs
+# are still on disk, so a gate that scanned them would report every later
+# attempt as interrupted too. That leaves one block stranded -- the one whose
+# RAN was written by the runner before it learned to record the stop, which is
+# Block 10 and is why any of this exists. This is the migration for it, and it
+# is deliberately not the gate:
+#
+#   - it is an operator action, run once, that writes the marker rather than
+#     interpreting it, so the gate keeps reading exactly one authority;
+#   - it copies the reason **verbatim** from the run's own log and refuses when
+#     there is none, so it cannot assert a stop that did not happen -- the
+#     evidence is what unlocks the resume, never the operator's recollection;
+#   - it refuses a marker that already carries the line, which is every marker
+#     the fixed runner writes. So it applies to pre-fix markers only and has
+#     nothing left to do once they are gone.
+#
+# What it cannot rule out is a block that stopped, resumed, and then failed for
+# an ordinary reason: its RAN carries no stop while the earlier attempt's log
+# still does, and this would offer to copy it. That is why it names the log it
+# read and writes `stopped_backfilled:` beside the line rather than forging a
+# marker indistinguishable from the runner's own -- a later reader can see that
+# a human asserted this, and check the log against the attempt.
+if [[ "$ACTION" == "record-stop" ]]; then
+  if [[ -z "$ACCEPT_TARGET" ]]; then
+    echo "record-stop needs a block number: record-stop 10" >&2
+    exit 1
+  fi
+  index="$(parse_block_number "$ACCEPT_TARGET")"
+  key="${BLOCK_KEYS[$index]}"
+  dir="$RUN_ROOT/$key"
+  if [[ ! -f "$dir/RAN" ]]; then
+    echo "block-$index has not run: no $dir/RAN to record a stop in." >&2
+    echo "Run it: block-$index" >&2
+    exit 1
+  fi
+  if [[ -f "$dir/COMPLETE" ]]; then
+    # An accepted block is a reviewed one, and its RAN is part of what was
+    # reviewed. Editing it here would change the record behind the acceptance.
+    echo "block-$index is already accepted; its RAN is part of what was" >&2
+    echo "reviewed and is not rewritten. Re-measure with --force if it is wrong." >&2
+    exit 1
+  fi
+  if block_was_stopped "$dir"; then
+    echo "block-$index already records its stop:" >&2
+    sed -n 's/^stopped: /  stopped: /p' "$dir/RAN" >&2
+    echo "Continue it: $(resume_command "$index")" >&2
+    exit 1
+  fi
+  # This block's own logs, and only this block's. `block1-*` does not match
+  # `block10-...`, because the glob requires the literal `-` that `block10`
+  # spells `0` -- which is also why the block *index* is the prefix here and
+  # not the block key: Block 1's log keys (`block1-tail-baseline`) do not begin
+  # with its key (`block1-generator-calibration`).
+  stop_log=""
+  stop_reason=""
+  for candidate in "$LOG_DIR/block$index-"*.stdout.log; do
+    [[ -f "$candidate" ]] || continue
+    reason="$(sed -n 's/^stopped: //p' "$candidate" | tail -1)"
+    [[ -n "$reason" ]] || continue
+    # The last one written wins when several passes recorded the same stop, as
+    # they do when a notice arrives mid-matrix and each pass in flight reports
+    # it. They agree by construction; the file is named either way.
+    stop_log="$candidate"
+    stop_reason="$reason"
+  done
+  if [[ -z "$stop_reason" ]]; then
+    echo "no run log for block-$index records a cell-boundary stop, so there is" >&2
+    echo "nothing to record. A block that failed for its own reasons is" >&2
+    echo "re-measured, not resumed: block-$index --force" >&2
+    exit 1
+  fi
+  {
+    echo "stopped: $stop_reason"
+    echo "stopped_backfilled: from $stop_log by record-stop; this marker was written before the runner recorded the stop itself"
+  } >>"$dir/RAN"
+  cat <<MSG
+block-$index: recorded the stop its run logged and its marker did not.
+
+read verbatim from $stop_log:
+  stopped: $stop_reason
+
+$dir/RAN now records it, marked as backfilled. Continue the block:
+  scripts/run_timing_validation_block.sh $(resume_command "$index")
+MSG
   exit 0
 fi
 
@@ -477,6 +650,25 @@ if [[ "$ACTION" == "accept" ]]; then
         echo "block-$index has no rejected rows; --with-exclusions does not apply" >&2
         exit 1
       fi
+      ;;
+    interrupted)
+      # Refused for the same reason `unfinished` is -- configurations that
+      # produced no row are work still to do -- but the advice differs, and
+      # sending an operator to --force here would discard the cells this
+      # block did measure before the host was taken away.
+      cat >&2 <<MSG
+block-$index was stopped mid-run: $(sed -n 's/^stopped: //p' "$dir/RAN")
+
+$EXCLUSION_DETAIL
+
+Its measured cells are checkpointed and are not lost. Continue it:
+  scripts/run_timing_validation_block.sh $(resume_command "$index")
+
+The resume skips every cell the progress file holds, so a pass that failed for
+its own reasons before the stop comes back unchanged and needs --force -- read
+the evidence above before assuming the stop is the only thing outstanding.
+MSG
+      exit 1
       ;;
     unfinished)
       # Never acceptable, with or without the flag. A configuration that
@@ -577,7 +769,13 @@ if [[ "$ACTION" == "next" ]]; then
     exit 0
   fi
   state="$(block_state "$BLOCK_INDEX")"
-  if [[ "$state" == "awaiting-review" && $FORCE -eq 0 ]]; then
+  # `--resume-after-stop` is what carries `next` past an interrupted block,
+  # the way `--force` carries it past a reviewed one: without it the refusal
+  # below prints the command, with it the block is selected and continued.
+  if [[ "$state" == "interrupted" && $RESUME_STOP -eq 1 ]]; then
+    state="resuming"
+  fi
+  if [[ ( "$state" == "awaiting-review" || "$state" == "interrupted" ) && $FORCE -eq 0 ]]; then
     # A block reaches awaiting-review with rejected rows too, and `accept`
     # refuses the bare form for exactly those. This message is what an operator
     # returning in a later session sees -- the end-of-run one is long gone, which
@@ -592,6 +790,7 @@ if [[ "$ACTION" == "next" ]]; then
     case "$BLOCK_EXCLUSION_CLASS" in
       clean)      next_step="accept $BLOCK_INDEX --note \"...\"" ;;
       excludable) next_step="accept $BLOCK_INDEX --with-exclusions --note \"...\"" ;;
+      interrupted)  next_step="$(resume_command "$BLOCK_INDEX")   # it stopped at a cell boundary; continue it" ;;
       *)          next_step="block-$BLOCK_INDEX --force   # unfinished or unreadable; re-measure" ;;
     esac
     # The fourth path that has to know a block produces no rows: it names the
@@ -611,8 +810,14 @@ blocks published -- but --force is still how it is run again."
         *) next_step="block-$BLOCK_INDEX --force   # nothing to exclude; fix what it named and re-read" ;;
       esac
     fi
+    headline="has already run and is waiting to be reviewed"
+    if [[ "$state" == "interrupted" ]]; then
+      headline="was stopped mid-run and has cells still to measure"
+      rerun_cost="Its measured cells are checkpointed; the resume keeps them and re-runs only
+what never ran. --force would discard them."
+    fi
     cat >&2 <<MSG
-block-$BLOCK_INDEX (${BLOCK_TITLES[$BLOCK_INDEX]}) has already run and is waiting to be reviewed.
+block-$BLOCK_INDEX (${BLOCK_TITLES[$BLOCK_INDEX]}) $headline.
 
 $(sed -n 's/^evidence: /evidence: /p' "$RUN_ROOT/${BLOCK_KEYS[$BLOCK_INDEX]}/RAN" 2>/dev/null)
 ${BLOCK_EXCLUSION_DETAIL:+
@@ -638,10 +843,41 @@ if [[ -f "$BLOCK_DIR/COMPLETE" && $FORCE -eq 0 ]]; then
   echo "block-$BLOCK_INDEX is already accepted; pass --force to run it again" >&2
   exit 1
 fi
-if [[ -f "$BLOCK_DIR/RAN" && $FORCE -eq 0 ]]; then
+# A resume is refused for anything but a block whose RAN records the reclaim,
+# and that refusal is the whole safety of the flag: --force is what re-measures
+# a block that failed for its own reasons, and a resume there would skip every
+# cell already in the progress file -- the failed ones included -- and stamp the
+# same rows with a fresh revision. So the marker is the authority, never the
+# operator's recollection of why the block stopped.
+if [[ $RESUME_STOP -eq 1 ]] && ! block_was_stopped "$BLOCK_DIR"; then
+  if [[ -f "$BLOCK_DIR/RAN" ]]; then
+    echo "block-$BLOCK_INDEX did not stop at a cell boundary: its RAN marker" >&2
+    echo "records no such stop, so there is no interrupted run to continue." >&2
+    echo "To re-measure it: block-$BLOCK_INDEX --force" >&2
+  else
+    echo "block-$BLOCK_INDEX has not run, so there is nothing to continue:" >&2
+    echo "no $BLOCK_DIR/RAN. Run it: block-$BLOCK_INDEX" >&2
+  fi
+  exit 1
+fi
+if [[ -f "$BLOCK_DIR/RAN" && $FORCE -eq 0 && $RESUME_STOP -eq 0 ]]; then
+  if block_was_stopped "$BLOCK_DIR"; then
+    echo "block-$BLOCK_INDEX was stopped mid-run and has cells still" >&2
+    echo "to measure. Continue it with --resume-after-stop, which keeps the" >&2
+    echo "cells it already checkpointed, or --force to discard them and start over." >&2
+    exit 1
+  fi
   echo "block-$BLOCK_INDEX has already run and is waiting for review" >&2
   echo "accept it, or pass --force to run it again" >&2
   exit 1
+fi
+
+# Read before anything can overwrite or delete the marker it lives in, and
+# deliberately *not* under --force: a forced block discards its results, so the
+# assertion about a stop those results no longer exist for goes with them.
+BACKFILLED_STOP=""
+if [[ $FORCE -eq 0 && -f "$BLOCK_DIR/RAN" ]]; then
+  BACKFILLED_STOP="$(grep -m1 '^stopped_backfilled: ' "$BLOCK_DIR/RAN" || true)"
 fi
 
 # After the two "this block already has results" answers and before anything
@@ -903,7 +1139,15 @@ PY
 # still turn the run away -- the workdir guard, the lock, the recorded-workdir
 # refusal, `verify`, the MRT validation -- and a run that replaced nothing must
 # not have deleted the acceptance record of what is still there.
-retract_forced_markers() {
+retract_block_markers() {
+  # **A resume keeps RAN until it has one of its own to write.** Deleted here,
+  # a resumed block whose batch then failed for an ordinary reason -- and every
+  # non-143 exit aborts under `set -e` before the new marker is written -- would
+  # be left with no record of the reclaim at all, so the next
+  # --resume-after-stop is refused ("its RAN marker records no such stop")
+  # and the only route left is --force: the cells the boundary stop preserved,
+  # discarded by the recovery path built to keep them. The marker is overwritten
+  # on the way out anyway, so nothing stale survives a resume that finishes.
   if [[ $FORCE -eq 1 ]]; then
     rm -f "$BLOCK_DIR/COMPLETE" "$BLOCK_DIR/RAN"
     # And the verdicts, for the same reason. `block_exclusion_report` globs
@@ -914,6 +1158,14 @@ retract_forced_markers() {
     # write a durable exclusion naming a run that no longer exists.
     rm -rf "$BLOCK_DIR/evidence"
   fi
+  # A resume deletes neither, and the verdicts are the reason worth stating:
+  # `check_evidence` overwrites every label this block runs, and a resume runs
+  # the same block, so nothing stale can survive a resume that finishes. What
+  # deleting them up front *would* cost is the case where the resumed batch
+  # fails for an ordinary reason and `set -e` ends the block before the new
+  # marker is written: the detail behind the standing `stopped:` line would be
+  # gone, and `next` and `accept` would print that stop with an empty evidence
+  # block under it on every later invocation.
 }
 
 # Anything after the output directory is a scripts/calibration_case.sh
@@ -946,7 +1198,7 @@ run_batch() {
   # per dropped target beside the new ones, and `check_evidence`, which counts
   # the artifacts it finds, reported a permanent shortfall against a block that
   # had measured exactly what it was asked to. Cleared here rather than in
-  # `retract_forced_markers` because this is the one place that knows which
+  # `retract_block_markers` because this is the one place that knows which
   # directory is about to be rewritten, and only the directory being rewritten
   # may be cleared.
   if [[ $FORCE -eq 1 && -d "$out_dir" ]]; then
@@ -965,7 +1217,16 @@ run_batch() {
       exit 1
     fi
     echo "force: discarding previous results under $out_dir"
-    rm -rf "${out_dir:?}"
+    # Checked rather than trusted. Every call site now collects this function's
+    # status -- `|| tolerate_stop $?`, or the pass loops' own
+    # `|| batch_status=$?` -- so `set -e` no longer applies inside this body,
+    # and the two steps below were relying on it to stop the block. A prune
+    # that failed silently leaves exactly the state the guard above exists to
+    # prevent: results gone, manifest still naming them.
+    rm -rf "${out_dir:?}" || {
+      echo "run_batch: could not discard $out_dir; refusing to re-measure" >&2
+      exit 1
+    }
     # The manifest stops naming those rows at the moment they stop existing,
     # not at the moment the block was entered -- see capture_metadata. Scoped
     # to the directory just removed, because a block is not always one batch:
@@ -978,9 +1239,23 @@ run_batch() {
     # row".
     "$PYTHON_BIN" scripts/campaign_merge_block_facts.py \
       --manifest "$METADATA_DIR/manifest.json" --block-key "$BLOCK_KEY" \
-      --prune-under "$prune_under"
+      --prune-under "$prune_under" || {
+      echo "run_batch: the manifest still names the rows just discarded under" >&2
+      echo "$out_dir, and re-measuring now would publish two accounts of them" >&2
+      exit 1
+    }
   fi
   mkdir -p "$out_dir"
+  # Once the host has been taken away, the passes after it must not run. The
+  # first version let the loop walk on, and the pass after the interrupted one
+  # started, read the same notice seconds later and stopped having measured
+  # nothing -- burning its turn against a machine with two minutes left. The
+  # directory is created above regardless, so the pass is still *checked* and
+  # the shortfall it reports is what tells the resume which cells to measure.
+  if [[ $STOPPED -eq 1 ]]; then
+    echo "not starting $key: $STOP_REASON" >&2
+    return 143
+  fi
   echo "Running $key -> $out_dir"
   # --resume is what makes an interrupted block resumable, and it is exactly
   # wrong under --force: `batch --resume` records every completed cell in
@@ -1018,6 +1293,36 @@ run_batch() {
     cp "$LOG_DIR/$key.stderr.log" "$out_dir/case.log"
   fi
 
+  # What proves an orderly stop is the run's own `stopped:` line -- printed by
+  # bgperf2 exactly where `StopRequested` is caught, after the checkpoint --
+  # and never the exit status.
+  #
+  # A spot reclaim is not the only thing that gets here, which is why the
+  # reason is recorded **verbatim** and neither the marker nor this function
+  # claims a cause. bgperf2 asks for the same orderly stop on any SIGTERM, so
+  # an operator `kill`, a `systemctl stop` or a supervisor timeout prints
+  # `stopped: SIGTERM` and exits 143 too -- and writing "host reclaimed" over
+  # that would put a fabricated account of the machine into the campaign's
+  # durable record. What matters for the recovery is the same either way: the
+  # stop landed at a cell boundary with everything measured checkpointed, so
+  # the block is continued rather than re-measured.
+  #
+  # The status is read only to know the run did not finish, never to identify
+  # the stop: a *constrained* case never reaches 143 at all. `scripts/calibration_case.sh` propagates
+  # bgperf2's status only when it saw a container of the constrained role, and a
+  # stop at the first cell boundary happens before any container exists, so the
+  # wrapper exits 1 saying it saw none. Read from the status alone, Block 1's
+  # calibration would abort under `set -e` with no RAN marker at all -- the one
+  # state this whole path exists to make impossible.
+  local stop_reason
+  stop_reason="$(sed -n 's/^stopped: //p' "$LOG_DIR/$key.stdout.log" 2>/dev/null | tail -1)"
+  if [[ $status -ne 0 && -n "$stop_reason" ]]; then
+    STOPPED=1
+    STOP_REASON="$stop_reason"
+    echo "$key stopped: $STOP_REASON" >&2
+    echo "every cell it completed is checkpointed; the rest are still to measure" >&2
+    return 143
+  fi
   if [[ $status -ne 0 ]]; then
     # Everything this run had to say is in a redirected log, so failing on the
     # bare exit status under `set -e` would abort the block with nothing on
@@ -1039,6 +1344,46 @@ run_batch() {
 # lost to the first failure, on a block whose whole output is that record.
 # The count is read after every check has run, above the RAN marker.
 EVIDENCE_FAILURES=0
+# Exit 143 -- 128 + SIGTERM -- is bgperf2 saying the host is being taken away
+# and that everything checkpointed is on disk. It is a fact about the machine,
+# not a verdict about the block, so it is recorded apart from the failure count
+# and it decides what the block's own advice says afterwards.
+STOPPED=0
+STOP_REASON=""
+# `set -e` is what a block wants for every other non-zero batch exit: a batch
+# that failed for its own reasons should take the block down loudly. A reclaim
+# is not that. Aborting on it would leave the block with **no RAN marker at
+# all** -- `block_state` would read `started`, `next` would re-select the block
+# and `run_batch` would resume past every cell in the progress file, failed
+# ones included, which is precisely the state the two markers exist to make
+# impossible. So the stop is absorbed and counted here, every check below still
+# runs, and the marker records what happened.
+#
+# Only 143, and only when the run itself said so: any other status is returned
+# unchanged, so `set -e` still ends the block on it.
+tolerate_stop() {
+  local status="$1"
+  # Keyed on STOPPED rather than on the status the caller saw: `run_batch`
+  # normalises a reclaim to 143 whatever the wrapper exited with, and it is the
+  # only thing that sets the flag.
+  #
+  # **Absorbed and not counted**, which is the pass loops' rule and has to be
+  # this path's too: they are the two halves of one marker field, and while
+  # they disagreed `evidence: N check(s) failed` moved with *where* in the
+  # matrix the reclaim landed rather than with what failed. Block 0 stopped in
+  # `smoke-synth` recorded 4 -- the stop, the skip of `smoke-mrt`, and both
+  # shortfalls -- against 2 for a stop one batch later, for the same event.
+  # What records a batch the stop cost is the shortfall its own
+  # `check_evidence` reports, which is counted below and names the runs.
+  #
+  # Nothing downstream needs this to be non-zero: the epilogue and
+  # `classify_block_evidence` both branch on the stop itself, and a stopped
+  # block has shortfalls regardless.
+  if [[ $status -eq 143 && $STOPPED -eq 1 ]]; then
+    return 0
+  fi
+  return "$status"
+}
 check_evidence() {
   local out_dir="$1"
   local expect="$2"
@@ -1103,8 +1448,8 @@ run_synthetic_repetition() {
   }
   tail -5 "$METADATA_DIR/verify-$BLOCK_KEY.txt"
 
-  retract_forced_markers
-  run_batch "$BLOCK_KEY" "$BLOCK_DIR/synthetic"
+  retract_block_markers
+  run_batch "$BLOCK_KEY" "$BLOCK_DIR/synthetic" || tolerate_stop $?
 
   # No --expect-limiting: nothing here is a controlled case, so which component
   # limits a given target at this size is the measurement rather than the
@@ -1188,8 +1533,8 @@ run_mrt_repetition() {
 
   validate_mrt_inputs "$rendered"
 
-  retract_forced_markers
-  run_batch "$BLOCK_KEY" "$BLOCK_DIR/mrt"
+  retract_block_markers
+  run_batch "$BLOCK_KEY" "$BLOCK_DIR/mrt" || tolerate_stop $?
 
   # No --expect-limiting, for the reason the synthetic repetitions pin none:
   # which component limits a given target on a full internet table is the
@@ -1261,7 +1606,7 @@ run_bird_architecture_screen() {
   }
   tail -5 "$METADATA_DIR/verify-$BLOCK_KEY.txt"
 
-  retract_forced_markers
+  retract_block_markers
 
   # Each scenario is checked as soon as it has run, and a scenario that fails
   # does not take the other four with it.
@@ -1297,9 +1642,19 @@ run_bird_architecture_screen() {
     batch_status=0
     run_batch "$BLOCK_KEY-$key" "$BLOCK_DIR/$key" || batch_status=$?
     if [[ $batch_status -ne 0 ]]; then
-      echo "scenario $key: batch exited $batch_status; the remaining" >&2
-      echo "scenarios still run and the block is recorded as having run" >&2
-      EVIDENCE_FAILURES=$((EVIDENCE_FAILURES + 1))
+      # A stopped block's later passes are *skipped*, not failed, and saying
+      # "the remaining scenarios still run" of them is the opposite of what happened.
+      # They are not counted either: the shortfall each one's own
+      # `check_evidence` reports is the record of it, and counting the skip
+      # beside it turned `evidence: N check(s) failed` into a number that
+      # tracked where in the matrix the stop landed rather than what failed.
+      if [[ $STOPPED -eq 1 ]]; then
+        echo "scenario $key: not measured -- $STOP_REASON" >&2
+      else
+        echo "scenario $key: batch exited $batch_status; the remaining" >&2
+        echo "scenarios still run and the block is recorded as having run" >&2
+        EVIDENCE_FAILURES=$((EVIDENCE_FAILURES + 1))
+      fi
     fi
     # No --expect-limiting: nothing here is a controlled case. Which component
     # limits a given BIRD configuration under competing paths or export
@@ -1413,7 +1768,7 @@ run_selected_repetitions() {
   }
   tail -5 "$METADATA_DIR/verify-$BLOCK_KEY.txt"
 
-  retract_forced_markers
+  retract_block_markers
 
   # Each pass is checked as soon as it has run and a failure does not take the
   # other five with it -- Block 8's reasoning exactly, and it applies harder
@@ -1427,9 +1782,19 @@ run_selected_repetitions() {
     batch_status=0
     run_batch "$BLOCK_KEY-$key" "$BLOCK_DIR/$key" || batch_status=$?
     if [[ $batch_status -ne 0 ]]; then
-      echo "pass $key: batch exited $batch_status; the remaining passes" >&2
-      echo "still run and the block is recorded as having run" >&2
-      EVIDENCE_FAILURES=$((EVIDENCE_FAILURES + 1))
+      # A stopped block's later passes are *skipped*, not failed, and saying
+      # "the remaining passes still run" of them is the opposite of what happened.
+      # They are not counted either: the shortfall each one's own
+      # `check_evidence` reports is the record of it, and counting the skip
+      # beside it turned `evidence: N check(s) failed` into a number that
+      # tracked where in the matrix the stop landed rather than what failed.
+      if [[ $STOPPED -eq 1 ]]; then
+        echo "pass $key: not measured -- $STOP_REASON" >&2
+      else
+        echo "pass $key: batch exited $batch_status; the remaining passes" >&2
+        echo "still run and the block is recorded as having run" >&2
+        EVIDENCE_FAILURES=$((EVIDENCE_FAILURES + 1))
+      fi
     fi
     # No --expect-limiting, for Block 8's reason: which component limits a
     # given BIRD configuration is the measurement, not the setup.
@@ -1471,7 +1836,7 @@ run_variance_review() {
 
   capture_metadata
 
-  retract_forced_markers
+  retract_block_markers
   # The review is regenerated whole from documents that cannot change, so a
   # leftover series document from an earlier build would be a statistic nobody
   # computed sitting beside the ones somebody did.
@@ -1523,9 +1888,9 @@ case "$BLOCK_INDEX" in
     validate_mrt_inputs "$RENDERED_CONFIG_DIR/block0-smoke-synth.yaml" \
                         "$RENDERED_CONFIG_DIR/block0-smoke-mrt.yaml"
 
-    retract_forced_markers
-    run_batch "block0-smoke-synth" "$BLOCK_DIR/smoke-synth"
-    run_batch "block0-smoke-mrt" "$BLOCK_DIR/smoke-mrt"
+    retract_block_markers
+    run_batch "block0-smoke-synth" "$BLOCK_DIR/smoke-synth" || tolerate_stop $?
+    run_batch "block0-smoke-mrt" "$BLOCK_DIR/smoke-mrt" || tolerate_stop $?
 
     check_evidence "$BLOCK_DIR/smoke-synth" 1 "smoke-synth"
     check_evidence "$BLOCK_DIR/smoke-mrt" 1 "smoke-mrt"
@@ -1577,9 +1942,9 @@ case "$BLOCK_INDEX" in
                      "$RENDERED_CONFIG_DIR/block1-tester-baseline.yaml" \
                      "$RENDERED_CONFIG_DIR/block1-slow-tester.yaml"
 
-    retract_forced_markers
+    retract_block_markers
 
-    run_batch "block1-tail-baseline" "$BLOCK_DIR/tail-baseline"
+    run_batch "block1-tail-baseline" "$BLOCK_DIR/tail-baseline" || tolerate_stop $?
     # `unresolved` and `inconclusive` are kept apart everywhere else -- one is
     # a measurement that forbids attribution, the other a measurement never
     # made -- and both are correct for a run with nothing constrained. What
@@ -1588,7 +1953,7 @@ case "$BLOCK_INDEX" in
       --expect-limiting unresolved,inconclusive
 
     run_batch "block1-observer-tail" "$BLOCK_DIR/observer-tail" \
-      --role monitor --cpus 0.15
+      --role monitor --cpus 0.15 || tolerate_stop $?
     check_evidence "$BLOCK_DIR/observer-tail" 1 "observer-tail" \
       --expect-limiting target_or_monitor
 
@@ -1596,11 +1961,11 @@ case "$BLOCK_INDEX" in
     # not a control on the verdict, and pinning one would add a failure mode
     # the block's exit criterion does not ask about. Its rate is published as a
     # note either way.
-    run_batch "block1-tester-baseline" "$BLOCK_DIR/tester-baseline"
+    run_batch "block1-tester-baseline" "$BLOCK_DIR/tester-baseline" || tolerate_stop $?
     check_evidence "$BLOCK_DIR/tester-baseline" 1 "tester-baseline"
 
     run_batch "block1-slow-tester" "$BLOCK_DIR/slow-tester" \
-      --role tester --rate 4mbit
+      --role tester --rate 4mbit || tolerate_stop $?
     check_evidence "$BLOCK_DIR/slow-tester" 1 "slow-tester" \
       --expect-limiting tester --expect-egress-mbit 4
     ;;
@@ -1684,6 +2049,29 @@ esac
     # decided it.
     echo "held_override: --run-held-block"
   fi
+  if [[ $RESUME_STOP -eq 1 ]]; then
+    # A resumed block spans two hosts by construction, which the campaign
+    # allows and requires to be stated. The manifest carries the per-attempt
+    # detail; this is the line that makes a reader go and look.
+    echo "resumed_after_stop: yes"
+  fi
+  if [[ -n "$BACKFILLED_STOP" ]]; then
+    # Carried across the rewrite. `record-stop` writes this so a later reader
+    # can see that a human asserted the stop rather than the run recording it
+    # -- and RAN is rewritten whole by the very resume that line unlocks, so
+    # without this the provenance survives exactly until it has been used, and
+    # nothing else carries it. The block's stop was asserted by hand whatever
+    # happens afterwards, so the line outlives the marker it was written into.
+    echo "$BACKFILLED_STOP"
+  fi
+  if [[ $STOPPED -eq 1 ]]; then
+    # Above the evidence line and outside its condition: this is why the
+    # checks below failed, and `classify_block_evidence` reads it to tell an
+    # interrupted block from an unfinished one. A block stopped this way
+    # always has a shortfall, so the two lines appear together -- but the
+    # shortfall is the symptom and this is the cause.
+    echo "stopped: $STOP_REASON"
+  fi
   if [[ $EVIDENCE_FAILURES -gt 0 ]]; then
     echo "evidence: $EVIDENCE_FAILURES check(s) failed"
     # Which rows, and which runs never happened -- the count of failed checker
@@ -1736,6 +2124,13 @@ $(classify_block_evidence "$BLOCK_DIR"; case "$BLOCK_EXCLUSION_CLASS" in
   excludable) echo "Every configured run produced a row. When the rejected rows are a durable
 exclusion rather than a fault to fix:
   scripts/run_timing_validation_block.sh accept $BLOCK_INDEX --with-exclusions --note \"...\"" ;;
+  interrupted) echo "The run was stopped at a cell boundary -- usually a spot reclaim, and the
+marker names what it said. Every cell that completed is checkpointed; only the
+ones that never ran are outstanding.
+Continue it:
+  scripts/run_timing_validation_block.sh $(resume_command "$BLOCK_INDEX")
+The resume skips every cell already in the progress file, so a pass that failed
+for its own reasons before the stop needs --force rather than this." ;;
   unfinished) echo "Some configurations produced no row at all, so this block is unfinished
 rather than excludable. Re-measure:
   scripts/run_timing_validation_block.sh block-$BLOCK_INDEX --force" ;;
@@ -1745,6 +2140,29 @@ esac)
 
 Note that a plain re-run resumes past every cell the progress file already
 holds, failed ones included; only --force re-measures.
+MSG
+  exit 1
+fi
+
+# An interrupted block never reaches the success epilogue, whatever the failure
+# count says. The count is not a reliable proxy for it: the pass loops do not
+# count a skip and neither does `tolerate_stop`, so a notice arriving after the
+# last cell of the last pass completed leaves `EVIDENCE_FAILURES` at 0 -- and
+# the epilogue would then write `evidence: all checks qualified` beside
+# `stopped:`, exit 0, and print `accept N`. That is the one piece of advice
+# this whole change set exists to stop giving for a block with cells still to
+# measure, and every other reader -- `block_state`, `classify_block_evidence`,
+# `next`, `accept` -- says `interrupted` and points at the resume. `accept`
+# refusing afterwards is not enough: an unattended driver reads the exit
+# status.
+if [[ $STOPPED -eq 1 ]]; then
+  cat >&2 <<MSG
+
+block-$BLOCK_INDEX was stopped at a cell boundary: $STOP_REASON
+
+Every cell that completed is checkpointed and is not lost; the ones that never
+ran are outstanding, so this block is not ready to review. Continue it:
+  scripts/run_timing_validation_block.sh $(resume_command "$BLOCK_INDEX")
 MSG
   exit 1
 fi

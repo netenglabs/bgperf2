@@ -941,3 +941,478 @@ def test_the_held_override_is_refused_on_a_block_that_is_not_held(held_runner,
     assert 'is not held, so --run-held-block overrides nothing' in result.stderr
     assert not os.path.exists(os.path.join(
         results, '2026-timing-validation', _block_keys()[other]))
+
+
+def _reclaimed_block(results_root, key, evidence=SHORTFALL):
+    """A block the host was taken away from mid-run.
+
+    The marker carries the stop *and* the shortfall it explains, because that
+    is what the runner writes: a block stopped at a cell boundary always has
+    configurations that produced no row.
+    """
+    import os
+    directory = _ran_block(results_root, key, evidence)
+    path = os.path.join(directory, 'RAN')
+    body = open(path).read()
+    with open(path, 'w') as f:
+        f.write(body.replace(
+            'evidence: ',
+            'stopped: host reclaimed -- EC2 spot interruption notice: '
+            'terminate at 2026-09-14T05:40:43Z\nevidence: '))
+    return directory
+
+
+def test_a_reclaimed_block_is_reported_as_interrupted_not_awaiting_review(
+        tmp_path):
+    """`awaiting-review` would be a lie about what the block is waiting for:
+    there is nothing to review yet, only cells still to measure."""
+    root = str(tmp_path)
+    _reclaimed_block(root, 'block2-synthetic-rep1')
+    result = block('status', '--run-id', 'tvtest', results_root=root)
+    assert result.returncode == 0, result.stderr
+    line = [l for l in result.stdout.splitlines() if 'block2' in l][0]
+    assert line.endswith('interrupted'), line
+
+
+def test_a_reclaimed_block_is_pointed_at_the_resume_not_at_a_re_measure(
+        tmp_path):
+    """The whole cost of the old behaviour: `unfinished` sends an operator to
+    --force, which discards every cell the boundary stop preserved."""
+    root = str(tmp_path)
+    # Block 0, because `next` selects the first block with no COMPLETE and a
+    # `next` that reached an earlier one would *run* it -- this suite needs no
+    # Docker, and a test that launches a smoke benchmark is the failure
+    # `unbuilt_block` exists for.
+    _reclaimed_block(root, 'block0-preflight-and-smoke')
+    result = block('next', '--run-id', 'tvtest', results_root=root,
+                   workdir=str(tmp_path / 'work'))
+    assert result.returncode != 0
+    assert '--resume-after-stop' in result.stderr
+    assert '--force' not in result.stderr.split('--resume-after-stop')[0]
+
+
+def test_a_reclaimed_block_cannot_be_accepted(tmp_path):
+    """It is unfinished work however it stopped: accepting it would stamp
+    COMPLETE over configurations nobody measured."""
+    root = str(tmp_path)
+    directory = _reclaimed_block(root, 'block2-synthetic-rep1')
+    result = block('accept', '2', '--run-id', 'tvtest', '--with-exclusions',
+                   '--note', 'the host went away', results_root=root)
+    assert result.returncode != 0
+    assert 'host reclaim' in result.stderr
+    assert '--resume-after-stop' in result.stderr
+    import os
+    assert not os.path.exists(os.path.join(directory, 'COMPLETE'))
+
+
+def test_a_resume_is_refused_for_a_block_that_was_not_reclaimed(tmp_path):
+    """The marker is the authority, never the operator's recollection. A resume
+    over an ordinary failure would skip every cell in the progress file, the
+    failed ones included, and stamp those rows with a fresh revision."""
+    root = str(tmp_path)
+    _ran_block(root, 'block2-synthetic-rep1', SHORTFALL)
+    result = block('block-2', '--run-id', 'tvtest', '--resume-after-stop',
+                   results_root=root)
+    assert result.returncode != 0
+    assert 'did not stop at a cell boundary' in result.stderr
+
+
+def test_a_resume_of_a_block_that_never_ran_is_refused(roots):
+    """There is no interrupted run to continue, and the plain form is what
+    starts one."""
+    results, work = roots
+    index, _ = unbuilt_block()
+    result = block('block-%d' % index, '--resume-after-stop',
+                   results_root=results, workdir=work)
+    assert result.returncode != 0
+    assert 'nothing to continue' in result.stderr
+
+
+def test_force_and_resume_are_refused_together(roots):
+    """One discards this block's measured cells and the other keeps them.
+    Whichever won silently, the operator would learn which by reading the
+    results afterwards -- and one of the two answers destroys them."""
+    results, work = roots
+    index, _ = unbuilt_block()
+    result = block('block-%d' % index, '--force', '--resume-after-stop',
+                   results_root=results, workdir=work)
+    assert result.returncode != 0
+    assert 'opposites' in result.stderr
+
+
+def test_the_resume_flag_is_refused_by_an_action_that_runs_nothing(tmp_path):
+    """A flag that quietly does nothing is read next time as one that did
+    something -- and `accept` is the slip that matters, because the refusal an
+    interrupted block gets prints the resume command to copy."""
+    root = str(tmp_path)
+    _reclaimed_block(root, 'block2-synthetic-rep1')
+    result = block('accept', '2', '--run-id', 'tvtest',
+                   '--resume-after-stop', results_root=root)
+    assert result.returncode != 0
+    assert 'applies to running a block' in result.stderr
+
+
+def test_a_resume_retracts_nothing_and_a_force_retracts_the_claims():
+    """A resume deletes neither marker nor verdict; only --force does.
+
+    Every non-143 exit aborts the block under `set -e` before a new marker is
+    written. Deleted up front, a resume that then failed for an ordinary reason
+    would leave no record of the stop at all -- the next resume refused for a
+    block whose marker records none, and only --force left, discarding exactly
+    the cells the recovery path was built to keep. Deleting the verdicts costs
+    the detail printed under that standing stop line, on every later
+    invocation. Deleting results would make the flag a slower --force outright.
+    """
+    body = BLOCK_RUNNER.read_text()
+    retract = body.split('retract_block_markers() {', 1)[1].split('\n}', 1)[0]
+    deletes = retract.split('if [[ $FORCE -eq 1 ]]; then', 1)[1]
+    assert 'rm -f "$BLOCK_DIR/COMPLETE" "$BLOCK_DIR/RAN"' in deletes
+    assert 'rm -rf "$BLOCK_DIR/evidence"' in deletes
+    assert 'RESUME_STOP' not in retract, (
+        'a resume must retract nothing: it has no marker of its own yet')
+    assert 'progress' not in retract
+    force_only = body.split('if [[ $FORCE -eq 1 && -d "$out_dir" ]]; then', 1)
+    assert len(force_only) == 2, 'the results delete is no longer force-only'
+
+
+def test_the_force_branch_reports_its_own_failures():
+    """`set -e` no longer runs inside `run_batch`: every call site collects its
+    status now. The delete and the manifest prune were relying on the shell to
+    abort the block, and a prune that failed silently leaves the state its own
+    guard exists to prevent -- results gone, manifest still naming them."""
+    body = BLOCK_RUNNER.read_text()
+    fn = body.split('run_batch() {', 1)[1].split('\n}\n', 1)[0]
+    branch = fn.split('if [[ $FORCE -eq 1 && -d "$out_dir" ]]; then', 1)[1]
+    branch = branch.split('mkdir -p "$out_dir"', 1)[0]
+    assert branch.count('exit 1') >= 3, branch
+    assert 'rm -rf "${out_dir:?}" || {' in branch
+    assert '--prune-under "$prune_under" || {' in branch
+
+
+def test_a_stop_is_recorded_with_the_reason_the_run_gave():
+    """bgperf2 asks for the same orderly stop on any SIGTERM, so `stopped:
+    SIGTERM` reaches this path as readily as a spot interruption notice.
+    Writing "host reclaimed" over it would put a fabricated account of the
+    machine into the campaign's durable record."""
+    body = BLOCK_RUNNER.read_text()
+    assert 'echo "stopped: $STOP_REASON"' in body
+    assert 'stopped: host reclaimed' not in body, (
+        'the marker line may not assert a cause the run did not report')
+
+
+def test_a_held_block_is_told_the_resume_that_would_work():
+    """`guard_held_block` runs after the resume gate, so the bare form is
+    refused for a held block. `next` used to avoid this for free -- a block
+    with a RAN never reached that guard."""
+    body = BLOCK_RUNNER.read_text()
+    fn = body.split('resume_command() {', 1)[1].split('\n}', 1)[0]
+    assert 'BLOCK_HELD[$index]' in fn
+    assert '--run-held-block' in fn
+    # Every printed resume command goes through the helper. `block-N` is the
+    # placeholder in the flag-misuse message, which is about the flag rather
+    # than about any block, and is the one exception.
+    printed = [l for l in body.splitlines()
+               if '--resume-after-stop' in l
+               and 'run_timing_validation_block.sh' in l
+               and 'block-N' not in l]
+    assert not printed, printed
+
+
+def test_a_pass_that_never_started_is_not_reported_as_one_that_failed():
+    """After a stop, every later `run_batch` returns without starting. Saying
+    "the remaining passes still run" of those is the opposite of what happened,
+    and counting each skip turned the failure count into a number that tracked
+    where in the matrix the stop landed."""
+    body = BLOCK_RUNNER.read_text()
+    loops = [seg for seg in body.split('|| batch_status=$?')[1:]
+             if seg.lstrip().startswith('if [[ $batch_status -ne 0 ]]; then')]
+    assert len(loops) == 2, len(loops)
+    for seg in loops:
+        head = seg.split('\n    check_evidence', 1)[0]
+        assert 'if [[ $STOPPED -eq 1 ]]; then' in head
+        counted = head.split('if [[ $STOPPED -eq 1 ]]; then', 1)[1]
+        skip, failed = counted.split('else', 1)
+        assert 'EVIDENCE_FAILURES' not in skip, skip
+        assert 'EVIDENCE_FAILURES' in failed
+
+
+def test_a_reclaim_does_not_start_the_passes_after_it():
+    """A pass launched into a host with two minutes left reads the same notice
+    seconds later and stops having measured nothing -- burning its turn. That
+    is what Block 10's reload-rep3 did on 2026-09-14."""
+    body = BLOCK_RUNNER.read_text()
+    guard = body.split('run_batch() {', 1)[1].split('\n}', 1)[0]
+    assert 'if [[ $STOPPED -eq 1 ]]; then' in guard
+    assert 'return 143' in guard
+
+
+def _logical_lines(body):
+    """The script's lines with backslash continuations joined.
+
+    A guard on a `run_batch` call sits at the end of the *command*, which may
+    be several source lines; scanning source lines reports the first of them
+    as unguarded and the real defect -- a guard dropped from the last one --
+    as fine.
+    """
+    joined, buffer = [], ''
+    for line in body.splitlines():
+        buffer += line
+        if buffer.rstrip().endswith('\\'):
+            buffer = buffer.rstrip()[:-1]
+            continue
+        joined.append(buffer)
+        buffer = ''
+    if buffer:
+        joined.append(buffer)
+    return joined
+
+
+def test_a_reclaim_is_never_left_without_a_marker():
+    """Aborting the block on the stop would leave no RAN at all: `block_state`
+    reads `started`, `next` re-selects the block, and the plain re-run resumes
+    past every cell in the progress file including the failed ones.
+
+    So every `run_batch` call has to absorb the stop -- either through
+    `tolerate_stop` or by collecting the status itself, which the two pass
+    loops do."""
+    body = BLOCK_RUNNER.read_text()
+    assert 'tolerate_stop() {' in body
+    calls = [l for l in _logical_lines(body)
+             if l.strip().startswith('run_batch "')]
+    assert len(calls) >= 8, calls
+    unguarded = [l for l in calls
+                 if 'tolerate_stop' not in l and 'batch_status=$?' not in l]
+    assert not unguarded, unguarded
+
+
+def test_the_stop_is_read_from_the_run_and_not_from_its_exit_status():
+    """143 is neither necessary nor sufficient.
+
+    A constrained calibration case never reaches it -- `calibration_case.sh`
+    exits 1 when it saw no container of the constrained role, which is what a
+    stop at the first cell boundary leaves it -- and any other SIGTERM reaches
+    it with no checkpoint behind it, where recording a reclaim would unlock a
+    resume that skips every cell in the progress file."""
+    body = BLOCK_RUNNER.read_text()
+    fn = body.split('run_batch() {', 1)[1].split('\n}', 1)[0]
+    # STOPPED=1, not RECLAIMED=1 -- the flag was renamed and this split
+    # silently became a no-op, leaving `detect` the whole tail of
+    # `run_batch` rather than the detection block it claims to isolate.
+    assert 'RECLAIMED=1' not in body, 'stale flag name'
+    detect = fn.split('STOPPED=1', 1)[0].rsplit('local stop_reason', 1)[-1]
+    assert 's/^stopped: //p' in detect
+    assert '-n "$stop_reason"' in detect
+    assert 'status -eq 143' not in detect, (
+        'a reclaim is proved by the run saying it stopped, not by a status')
+    assert 'the host was taken away (exit 143)' not in fn, (
+        'a fabricated reason writes `stopped: host reclaimed` for a run that '
+        'never checkpointed')
+
+
+def test_a_reclaimed_block_is_never_read_as_clean(tmp_path):
+    """`block_state` reads the stop line alone. If the classifier can answer
+    `clean` for the same marker, `next` prints the interrupted headline with
+    `accept` beside it and `accept` stamps COMPLETE over cells that never ran.
+    """
+    root = str(tmp_path)
+    directory = _reclaimed_block(root, 'block2-synthetic-rep1')
+    marker = os.path.join(directory, 'RAN')
+    body = open(marker).read().replace('evidence: 1 check(s) failed',
+                                       'evidence: all checks qualified')
+    open(marker, 'w').write(body)
+    result = block('accept', '2', '--run-id', 'tvtest', results_root=root)
+    assert result.returncode != 0, result.stdout
+    assert '--resume-after-stop' in result.stderr
+    assert not os.path.exists(os.path.join(directory, 'COMPLETE'))
+
+
+def _stop_log(results_root, index, reason, suffix='reload-rep3'):
+    """A run log carrying the `stopped:` line bgperf2 prints at the checkpoint.
+
+    The name matters: `record-stop` globs on the block *index*, because Block
+    1's log keys do not begin with its block key.
+    """
+    import os
+    logs = os.path.join(results_root, 'tvtest', 'metadata', 'logs')
+    os.makedirs(logs, exist_ok=True)
+    path = os.path.join(logs, 'block{0}-{1}.stdout.log'.format(index, suffix))
+    with open(path, 'w') as f:
+        f.write('some output\nstopped: {0}\n'.format(reason))
+    return path
+
+
+def test_record_stop_writes_the_stop_its_run_logged_and_its_marker_did_not(
+        tmp_path):
+    """The migration for a marker written before the runner recorded the stop.
+    Block 10 is the block the whole reclaim path was built for and the one
+    block it could not reach, because its RAN predates the fix."""
+    root = str(tmp_path)
+    directory = _ran_block(root, 'block2-synthetic-rep1', SHORTFALL)
+    reason = 'EC2 spot interruption notice: terminate at 2026-09-14T05:40:43Z'
+    _stop_log(root, 2, reason)
+    result = block('record-stop', '2', '--run-id', 'tvtest', results_root=root)
+    assert result.returncode == 0, result.stderr
+    import os
+    body = open(os.path.join(directory, 'RAN')).read()
+    assert 'stopped: {0}\n'.format(reason) in body, body
+    # Marked as backfilled, and naming the log, so a later reader can see that
+    # a human asserted this and check it against the attempt.
+    assert 'stopped_backfilled: ' in body
+    assert 'block2-reload-rep3.stdout.log' in body
+
+
+def test_record_stop_makes_the_block_resumable_and_stops_pointing_at_force(
+        tmp_path):
+    """The point of it: the block flips to `interrupted`, so the resume is no
+    longer refused and `next` stops sending the operator to --force."""
+    root = str(tmp_path)
+    _ran_block(root, 'block0-preflight-and-smoke', SHORTFALL)
+    _stop_log(root, 0, 'SIGTERM', suffix='smoke-mrt')
+    assert block('record-stop', '0', '--run-id', 'tvtest',
+                 results_root=root).returncode == 0
+    state = block('status', '--run-id', 'tvtest', results_root=root)
+    line = [l for l in state.stdout.splitlines() if 'block0' in l][0]
+    assert line.endswith('interrupted'), line
+    result = block('next', '--run-id', 'tvtest', results_root=root,
+                   workdir=str(tmp_path / 'work'))
+    assert result.returncode != 0
+    assert '--resume-after-stop' in result.stderr
+
+
+def test_record_stop_is_refused_when_no_log_records_a_stop(tmp_path):
+    """The evidence is what unlocks the resume, never the operator's
+    recollection. Without this refusal the command is a way to assert a stop
+    that did not happen -- and the resume it unlocks skips the failed cells."""
+    root = str(tmp_path)
+    directory = _ran_block(root, 'block2-synthetic-rep1', SHORTFALL)
+    result = block('record-stop', '2', '--run-id', 'tvtest', results_root=root)
+    assert result.returncode != 0
+    assert '--force' in result.stderr
+    import os
+    assert 'stopped: ' not in open(os.path.join(directory, 'RAN')).read()
+
+
+def test_record_stop_copies_the_reason_verbatim_and_invents_none(tmp_path):
+    """The same rule the runner follows: any SIGTERM reaches this path, so
+    writing a cause over what the run said would put a fabricated account of
+    the machine into the campaign's durable record."""
+    root = str(tmp_path)
+    directory = _ran_block(root, 'block2-synthetic-rep1', SHORTFALL)
+    _stop_log(root, 2, 'SIGTERM')
+    assert block('record-stop', '2', '--run-id', 'tvtest',
+                 results_root=root).returncode == 0
+    import os
+    body = open(os.path.join(directory, 'RAN')).read()
+    assert 'stopped: SIGTERM\n' in body
+    assert 'reclaim' not in body.lower(), body
+
+
+def test_record_stop_is_refused_for_a_marker_that_already_records_a_stop(
+        tmp_path):
+    """Which is every marker the fixed runner writes, so the command applies to
+    pre-fix markers only and has nothing left to do once they are gone. It also
+    keeps a second invocation from stacking a duplicate line."""
+    root = str(tmp_path)
+    directory = _reclaimed_block(root, 'block2-synthetic-rep1')
+    _stop_log(root, 2, 'SIGTERM')
+    result = block('record-stop', '2', '--run-id', 'tvtest', results_root=root)
+    assert result.returncode != 0
+    assert '--resume-after-stop' in result.stderr
+    import os
+    body = open(os.path.join(directory, 'RAN')).read()
+    assert body.count('stopped: ') == 1, body
+
+
+def test_record_stop_does_not_rewrite_an_accepted_blocks_marker(tmp_path):
+    """An accepted block is a reviewed one, and its RAN is part of what was
+    reviewed. Editing it here would change the record behind the acceptance."""
+    root = str(tmp_path)
+    directory = _ran_block(root, 'block2-synthetic-rep1', SHORTFALL)
+    _stop_log(root, 2, 'SIGTERM')
+    import os
+    open(os.path.join(directory, 'COMPLETE'), 'w').close()
+    result = block('record-stop', '2', '--run-id', 'tvtest', results_root=root)
+    assert result.returncode != 0
+    assert 'stopped: ' not in open(os.path.join(directory, 'RAN')).read()
+
+
+def test_record_stop_is_refused_for_a_block_that_never_ran(tmp_path):
+    """No RAN is not an interrupted run; it is a block still to start, and a
+    marker conjured here would be one `next` advances past."""
+    root = str(tmp_path)
+    _stop_log(root, 2, 'SIGTERM')
+    result = block('record-stop', '2', '--run-id', 'tvtest', results_root=root)
+    assert result.returncode != 0
+    import os
+    assert not os.path.exists(os.path.join(
+        root, 'tvtest', 'block2-synthetic-rep1', 'RAN'))
+
+
+def test_record_stop_reads_only_its_own_blocks_logs(tmp_path):
+    """`block1-*` must not match `block10-...`. It does not, because the glob
+    requires the literal `-` that `block10` spells `0` -- but the two blocks
+    are one keystroke apart and a stop copied across them would unlock a resume
+    on a block that never stopped."""
+    root = str(tmp_path)
+    directory = _ran_block(root, 'block1-generator-calibration', SHORTFALL)
+    _stop_log(root, 10, 'a stop belonging to another block',
+              suffix='selected-repetitions-reload-rep3')
+    result = block('record-stop', '1', '--run-id', 'tvtest', results_root=root)
+    assert result.returncode != 0, result.stdout
+    import os
+    assert 'stopped: ' not in open(os.path.join(directory, 'RAN')).read()
+
+
+def test_a_stop_is_absorbed_without_being_counted_as_a_failed_check():
+    """The pass loops' rule, which has to be `tolerate_stop`'s too: they are
+    the two halves of one marker field. While they disagreed, `evidence: N
+    check(s) failed` moved with *where* in the matrix the reclaim landed --
+    Block 0 stopped in `smoke-synth` recorded 4 against 2 for a stop one batch
+    later, for the same event. The shortfall each unmeasured batch reports is
+    what records it, and that names the runs."""
+    body = BLOCK_RUNNER.read_text()
+    fn = body.split('tolerate_stop() {', 1)[1].split('\n}', 1)[0]
+    assert 'EVIDENCE_FAILURES=' not in fn, fn
+
+
+def test_an_interrupted_block_never_reaches_the_success_epilogue():
+    """`EVIDENCE_FAILURES` is not a proxy for the stop: neither the pass loops
+    nor `tolerate_stop` count a skip, so a notice arriving after the last cell
+    of the last pass completed leaves the count at 0 -- and the epilogue would
+    write `evidence: all checks qualified` beside `stopped:`, exit 0, and print
+    `accept N`. That is the one piece of advice this path exists to withhold,
+    and an unattended driver reads the exit status."""
+    body = BLOCK_RUNNER.read_text()
+    epilogue = body.index('block-$BLOCK_INDEX ran. It is NOT complete')
+    guard = body.rindex('if [[ $STOPPED -eq 1 ]]; then', 0, epilogue)
+    assert 'exit 1' in body[guard:epilogue], (
+        'the stop guard before the success epilogue must end the block')
+    assert 'resume_command' in body[guard:epilogue], (
+        'and point at the resume, like every other reader of the stop')
+
+
+def test_the_backfill_provenance_survives_the_resume_it_unlocks():
+    """`record-stop` writes `stopped_backfilled:` so a later reader can see a
+    human asserted the stop. RAN is rewritten whole by the very resume that
+    line unlocks, and nothing else carries it -- so without this the provenance
+    survives exactly until it has been used."""
+    body = BLOCK_RUNNER.read_text()
+    assert 'BACKFILLED_STOP="$(grep -m1 ' in body
+    assert 'echo "$BACKFILLED_STOP"' in body
+    # Not under --force: a forced block discards the results the assertion is
+    # about, so the assertion goes with them.
+    capture = body.split('BACKFILLED_STOP=""', 1)[1].split('\nfi', 1)[0]
+    assert 'FORCE -eq 0' in capture, capture
+
+
+def test_the_interrupted_advice_names_force_for_a_pass_that_really_failed():
+    """A block that had a pass fail for its own reasons *and* was then stopped
+    classifies `interrupted`, because the stop is read first. But `--resume`
+    skips every cell in the progress file including the failed ones, so the
+    resume returns the identical failure and the only repair is `--force`,
+    which is refused beside the resume and was named on neither path."""
+    body = BLOCK_RUNNER.read_text()
+    for marker in ('Its measured cells are checkpointed and are not lost.',
+                   'ones that never ran are outstanding.'):
+        advice = body.split(marker, 1)[1][:400]
+        assert '--force' in advice, marker

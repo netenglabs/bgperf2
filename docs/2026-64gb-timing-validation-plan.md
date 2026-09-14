@@ -1518,6 +1518,97 @@ aggregation. Re-measuring is `--force`, which discards that block's previous
 results and artifacts along with its markers and progress -- a single cell
 cannot be re-run on its own.
 
+**A stop at a cell boundary is a third state, and it is not a verdict about the block.**
+The campaign host is a spot instance, and a block it is taken away from stops
+at a cell boundary with everything already measured checkpointed
+(`reclaim.py`). The runner records that in `RAN` as `stopped: <what the run
+said>` -- **verbatim**, claiming no cause: bgperf2 asks for the same orderly
+stop on any SIGTERM, so an operator `kill` or a supervisor timeout reaches this
+path printing `stopped: SIGTERM`, and writing "host reclaimed" over that would
+put a fabricated account of the machine into the campaign's durable record.
+What matters for the recovery is the same either way.
+
+The block is then reported `interrupted` rather than `awaiting-review` -- there
+is nothing to review yet, only cells still to measure -- and continued with
+`block-N --resume-after-stop`, which re-enters the batch with `--resume` and
+keeps every cell already on disk. It retracts nothing: the standing `RAN` and
+its verdicts are what a resume that fails for an ordinary reason leaves behind,
+and every label the block runs overwrites its own. `--force` is refused beside
+it, because the two are opposites and one of them destroys the rows the
+boundary stop preserved. The resume is itself refused for any block whose `RAN`
+records no stop: over an ordinary failure it would skip the failed cells and
+stamp those rows with a fresh revision, which is the trap `RAN`-whatever-the-
+verdict was written to close, reached from the other side.
+
+The stop is read from the run's own `stopped:` line and never from its exit
+status -- a *constrained* calibration case never reaches 143 at all, because
+`calibration_case.sh` propagates bgperf2's status only when it saw a container
+of the constrained role, and a stop at the first cell boundary happens before
+any container exists.
+
+That path cost Block 10 thirteen qualified runs' worth of re-measurement the
+first time, on 2026-09-14: the runner counted bgperf2's exit 143 as an ordinary
+evidence failure, classified the block `unfinished`, and `unfinished` says
+`--force`. Three smaller faults came with it and are fixed here -- the passes
+*after* the stop were still started, each reading the same notice seconds later
+and burning its turn against a machine with two minutes left; a block whose
+batches are called bare under `set -e` would have aborted before writing any
+marker at all, which reads as `started` and sends `next` back to resume past
+its own failed cells; and a skipped pass was reported and counted as a pass
+that failed, so `evidence: N check(s) failed` tracked where in the matrix the
+stop landed rather than what failed.
+
+Review found that last one half-fixed and two more beside it. The skip stopped
+being counted in the two *pass loops* but not in `tolerate_stop`, which serves
+Blocks 0 and 1 and the repetitions -- so the count still moved with where the
+reclaim landed (Block 0 stopped in `smoke-synth` recorded 4 against 2 for a
+stop one batch later, same event), and the two halves of one marker field
+disagreed. Neither counts now: what records a batch the stop cost is the
+shortfall its own `check_evidence` reports, which names the runs. That makes
+the count useless as a proxy for the stop, which it always was -- a notice
+arriving after the last cell of the last pass completed leaves it at 0 -- and
+the **success epilogue was reachable on exactly that path**, writing `evidence:
+all checks qualified` beside `stopped:`, exiting 0 and printing `accept N`,
+which is the one piece of advice the whole change set exists to withhold from
+an interrupted block. It now branches on the stop itself, like every other
+reader. Third: an ordinary pass failure *followed* by a stop classifies
+`interrupted`, because the stop is read first -- but `--resume` skips the
+failed cell along with the good ones, so that pass comes back unchanged and
+needs `--force`, which is refused beside the resume and was named on neither
+path. Both interrupted messages now say so.
+
+**The fix does not reach backwards, and `record-stop` is how the one block it
+could not reach was migrated.** The gate reads the marker and never the logs,
+for the reason stated above -- after a resume the *previous* attempt's logs are
+still on disk, so a gate that scanned them would report every later attempt as
+interrupted too. Block 10's `RAN` was written minutes before the fix existed,
+so it carried the shortfall and not the stop, and `--resume-after-stop` refused
+it: the block the whole path was built for was the one block it could not
+continue, and the only route out on offer was the `--force` that discards
+thirteen qualified runs.
+
+So the migration is an operator action rather than a weakening of the gate.
+`record-stop N` copies the reason **verbatim** out of that block's own run logs
+into its marker, and refuses outright when no log carries one -- the evidence
+unlocks the resume, never the operator's recollection, so it cannot assert a
+stop that did not happen. It refuses a marker that already records a stop,
+which is every marker the fixed runner writes, so it applies to pre-fix markers
+only and has nothing left to do once they are gone; it refuses an accepted
+block, whose `RAN` is part of what was reviewed; and it globs on the block
+*index*, because Block 1's log keys (`block1-tail-baseline`) do not begin with
+its block key. What it cannot rule out is a block that stopped, resumed, and
+then failed for an ordinary reason -- its `RAN` carries no stop while the
+earlier attempt's log still does. That is why the line it writes is not
+indistinguishable from the runner's own: `stopped_backfilled:` sits beside it
+naming the log it was read from, so a later reader can see that a human
+asserted this and check it against the attempt. That line is carried across the
+rewrite the resume performs -- it was erased by the very resume it unlocked
+until review caught it, and nothing else records it, so the provenance survived
+exactly until it had been used.
+
+Run once, on Block 10, on 2026-09-14, against
+`metadata/logs/block10-selected-repetitions-reload-rep3.stdout.log`.
+
 **A block that has not been built refuses rather than improvising.** Each
 block's configs and procedure are their own change set, written when the
 campaign reaches that block; a runner that guessed at a matrix would produce

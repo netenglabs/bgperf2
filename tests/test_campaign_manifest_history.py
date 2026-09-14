@@ -162,7 +162,7 @@ def test_a_forced_re_run_drops_inherited_history_too(tmp_path):
     a moment later, so an entry inherited from an *earlier* attempt describes
     runs that are about to be deleted exactly as the immediately superseded one
     does. Carried through, the manifest would keep `rows_measured` naming rows
-    nothing can produce again -- the claim `retract_forced_markers` retracts,
+    nothing can produce again -- the claim `retract_block_markers` retracts,
     one layer up."""
     manifest = write_manifest(tmp_path, {'block2': dict(FIRST)})
     results = tmp_path / 'block2'

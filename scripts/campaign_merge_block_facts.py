@@ -31,7 +31,7 @@ under the same two conditions:
   validation, each of which can end the block, so a `--force` that never
   reached a container would already have dropped the history of fourteen rows
   still sitting on disk with their markers -- attributing them to a host that
-  measured none of them. `retract_forced_markers` avoids the same asymmetry by
+  measured none of them. `retract_block_markers` avoids the same asymmetry by
   running after the gates that can still turn the run away.
 - **Only when it differs.** A block re-entered on the same host with the same
   images and revision supersedes nothing, and carrying a duplicate would make
@@ -173,7 +173,7 @@ def merge(existing, block_key, new_entry, keeps_previous_rows, results_dir,
         # Inherited history is kept only on the path that keeps the rows it
         # describes. Carrying it under --force would leave the manifest naming
         # runs that `run_batch` is about to `rm -rf` -- the same claim
-        # `retract_forced_markers` exists to retract one layer up, and it
+        # `retract_block_markers` exists to retract one layer up, and it
         # survives a depth-1 test because the first forced re-run of a block
         # has nothing inherited to keep.
         carried = list(previous.get(CARRY_KEY) or [])

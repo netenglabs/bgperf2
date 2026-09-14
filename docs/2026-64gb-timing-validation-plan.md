@@ -2040,6 +2040,108 @@ For canonical initial-table comparisons, these are repetitions 4–5. For the
 BIRD architecture screen, run repetitions 2–3 first and expand to five only
 when variance could change the conclusion.
 
+**Built 2026-09-14, not yet run.** All three selections are in the BIRD
+architecture screen, so this block runs repetitions 2 and 3 of each — six
+batches of three cells, eighteen runs — and expands to five only if the three
+passes leave a comparison undecided.
+
+| pass | config | cells | results |
+|---|---|---|---|
+| peers 2 | `benchmarks/2026-timing-bird-peers250-rep2.yaml` | 3 × 250 peers × 2,000 | `peers-rep2` |
+| diversity 2 | `benchmarks/2026-timing-bird-diversity-rep2.yaml` | 3 × 50 peers, `path_diversity: 50` | `diversity-rep2` |
+| reload 2 | `benchmarks/2026-timing-bird-reload-rep2.yaml` | 3 × 50 × 50,000, `policy_reload_blocks: 10` | `reload-rep2` |
+| peers 3 | `benchmarks/2026-timing-bird-peers250-rep3.yaml` | as pass 2 | `peers-rep3` |
+| diversity 3 | `benchmarks/2026-timing-bird-diversity-rep3.yaml` | as pass 2 | `diversity-rep3` |
+| reload 3 | `benchmarks/2026-timing-bird-reload-rep3.yaml` | as pass 2 | `reload-rep3` |
+
+`order: shuffle` seed 202610 in all six — the campaign's year+block rule,
+continuing 20268 — and each draws a different permutation because
+`batch_shuffle_key()` digests the test name along with the seed. Work directory
+`/data/bgperf-work`. Procedure is `run_selected_repetitions()`.
+
+**All three second passes run before any third pass**, and that order is the
+block's own version of "a repetition repeats the whole matrix, not each cell".
+Running `peers-rep2` and `peers-rep3` back to back would put the two new
+observations of one comparison minutes apart on one thermal state and one page
+cache, and the run-to-run spread this block exists to measure is exactly what
+that hides. Blocks 2–4 and 5–7 get the separation from being separate blocks
+hours apart; this block has to arrange it itself.
+
+**The peer sweep is repeated in part, and that cost two mechanisms.** Block 8
+swept 50, 250 and 500 peers into one directory; the selection names only the
+three 250-peer cells, because the 50-peer comparison lies inside the 1s
+resolution of `elapsed (s)` and the 500-peer comparison had two of three rows
+excluded on `tester_health`. Those three cells therefore sit at ordinals 0–2
+here and at 3–5 in Block 8:
+
+- `cell_identity_key()` no longer includes `ordinal`. Keyed on it, the three
+  cells would pool with nothing and every comparison would stay at one
+  observation — the opposite of what the block is for. What identifies a cell
+  is its axes and its target, which two cells of one matrix cannot share.
+- What ordinal was also doing — catching a matrix that moved between passes in
+  silence — moves to a pass's `covers` declaration in `SCREEN_REPETITIONS`,
+  enforced in **both** directions: a cell inside the coverage that the pass
+  does not hold is still missing work, and a cell the pass holds that its
+  coverage excludes is refused. Otherwise the declaration is decoration.
+
+`docs/invariants/batch-passes.md` carries both arguments.
+
+**The block validates its own matrix before it runs a container.**
+`scripts/check_block10_configs.py` reads `metadata/block10-selection.json`
+against the six configs and refuses a mismatch: the cells each config runs must
+be exactly the cells its selection names, the pass arithmetic must come to
+`passes_requested` counting Block 8's pass 1, and every config must state the
+block seed. Two comparisons rather than one, and the second is the one that
+matters: the repetitions are checked against each other *and* against Block 8's
+own config, because they are made from each other and drift together — and a
+cell description carries the axes and the run name, not `tester_type`,
+`threads`, or anything else in the target mapping. `neighbors` is the only key
+the peer sweep may change against pass 1, which is the narrowing this block is
+allowed; everything else must be literally equal. It is a pure document check — no Docker, no results — and it is
+deliberately **not** the variance review, which cannot run here at all: the
+review requires a COMPLETE marker on every block whose passes it reads, and
+Block 10's own passes cannot carry one until after the block it would be
+guarding has been accepted.
+
+**So the pooled read happens at acceptance, not during the block.** The order
+is: run → `RAN` → read each pass's evidence → `accept 10` → `COMPLETE` → then
+`scripts/timing_variance_review.py --series screen-peers --series
+screen-diversity --series screen-reload`, which is what decides whether any
+comparison needs repetitions 4–5. `review_blocks()` now scopes its marker, host
+and image checks to the blocks the reviewed series actually read, so that
+narrowed review does not demand markers on the MRT blocks it never opens.
+
+One consequence to state plainly: **re-running Block 9's review now requires
+Block 10 to be complete**, because the screen series has three passes where it
+had one. Block 9 is accepted and its `review/` is on disk, so nothing is lost —
+but a `--force 9` before Block 10 is accepted will refuse, and that refusal is
+correct rather than a fault.
+
+**Two `/code-review` rounds ran over this block's own change set, and the
+second found something the first had introduced** — the `cmp` guard that was
+supposed to prove the validated config is the one that runs had been inserted
+into Block 8's render loop, which runs no selection check at all, so its
+message was false there and Block 10 had no guard. Four more came with it and
+are recorded where they belong: the duplicate-axis collision, the withheld
+order relation, the per-cell caveat and the selection check below, all in
+`docs/invariants/batch-passes.md`.
+
+**After Block 10 is accepted the selection check must not refuse, and the first
+version of this did.** `validate_selection()` counts the passes a selection was written against
+and errors when the request adds no observation — and it counted *all* of them,
+so once Block 10 had run, every one of the three entries reported "asks for 3
+passes and 3 already ran", because Block 10 **is** passes 2 and 3 of the
+scenarios its own selection names. A `block-9 --force` after acceptance would
+have failed with three errors about a selection carried out exactly as written.
+Simply excluding the planned block's passes fixes that and costs the guard
+entirely: the count would be pinned at 1 forever and a later selection
+re-requesting three could never be refused. So the check changes question
+rather than dropping one — before the planned block has run it asks whether the
+selection adds an observation, and after it asks whether it was carried out,
+which catches a block that ran fewer passes than the selection named and which
+nothing else here would notice. `tests/test_variance_review.py` pins all three
+states.
+
 ### Block 11: final report
 
 The report must include:

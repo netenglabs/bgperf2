@@ -230,10 +230,14 @@ claims.
 - No call that asks the world may run before the guards that read only the command line.
 
 **`docs/invariants/batch-passes.md`** — `bgperf2.py`'s `expand_batch_cells()`/`batch_report_rows()`/
-`create_batch_graphs()`, `summary.py`, `graphs.py`, `scripts/timing_variance_review.py`.
+`create_batch_graphs()`, `summary.py`, `graphs.py`, `scripts/timing_variance_review.py`,
+`scripts/check_block10_configs.py`.
 
 - A repetition repeats the whole matrix, not each cell, and is part of a run's *name*, never a
   column beside it.
+- A cell's cross-pass identity is its axes and its target, **never its ordinal** — a block that
+  repeats part of an earlier matrix moves the survivors' ordinals while they stay the same cells.
+  A pass that covers only part of a series says so, and the declaration is enforced both ways.
 - A cell id says what the cell is, never when it ran; execution order is not report order.
 - Nothing absent is published as a zero: a withheld statistic is `null` with its reason beside it,
   and an unsampled extreme is not an observation.

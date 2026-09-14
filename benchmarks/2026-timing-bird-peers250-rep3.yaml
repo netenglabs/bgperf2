@@ -1,0 +1,85 @@
+# Block 10 of the 64 GB timing validation campaign, selection 1 of 3,
+# repetition 3 of 3: BIRD session scaling at 250 peers. See
+# docs/2026-64gb-timing-validation-plan.md, "Block 10: selected repetitions",
+# and results/2026/2026-timing-validation/metadata/block10-selection.json,
+# which is the decision this file executes and the document
+# scripts/timing_variance_review.py validates it against.
+#
+# THIS IS BLOCK 8'S PEER SWEEP WITH SIX OF ITS NINE CELLS REMOVED, and the
+# removal is the whole point of the block. Block 8 swept 50, 250 and 500 peers
+# at 2,000 prefixes each, one observation per cell; Block 9 read the nine rows
+# and selected exactly the three at 250 peers:
+#
+#   50 peers   4s, 5s and 5s -- the entire comparison lies inside the 1s
+#              resolution of `elapsed (s)`, and the variance rule floors the
+#              combined deviation there, so no number of passes can separate
+#              these cells. Repeating them would spend an hour to re-measure a
+#              tie that is a property of the instrument.
+#   250 peers  112s against 54s and 49s. Gaps of 58s and 63s against that same
+#              1s resolution, and Primary Question 9's central claim: the only
+#              evidence in this campaign of BIRD 3 beating BIRD 2 at anything.
+#   500 peers  two of three rows excluded on `tester_health`, so the plan's
+#              "all existing rows pass qualification" is not met and the
+#              comparison may not be expanded. One exclusion is real (twelve
+#              hold-timer expiries under a 500-session fleet, bgperf2-599) and
+#              one was a truncated log line since fixed -- but re-measuring is
+#              not an expansion, and an accepted block's exclusions are
+#              durable.
+#
+# WHAT THE SHRUNK MATRIX COSTS, and where it is paid. These three cells sat at
+# ordinals 3-5 of Block 8's nine and sit at 0-2 here, so a review keyed on
+# ordinal would pool them with nothing and leave every comparison at one
+# observation -- the exact opposite of what this block is for. `cell_identity_key()`
+# therefore excludes `ordinal` along with `test` and `repetition`: what
+# identifies a cell is its axes and its target, which two cells of one matrix
+# cannot share. What ordinal was also doing -- catching a matrix that moved
+# between passes in silence -- moves to the pass's `covers` declaration in
+# `SCREEN_REPETITIONS`, which is enforced in both directions. So do not add
+# cells here without changing that declaration: a row this file measures
+# outside `neighbors: 250` is refused by the review rather than pooled.
+#
+# THE THREE CONFIGURATIONS are Block 8's, unchanged, and must stay that way --
+# a pass that measured a different thing is not an observation of the same
+# thing. See benchmarks/2026-timing-bird-peers.yaml for why the
+# default-threads entry is not a duplicate of the four-thread one and why each
+# needs an explicit `label`.
+#
+# ORDER. `order: shuffle` seed 202610 -- the campaign's mechanical year+block
+# rule, continuing 20268. All six of this block's configs state that same seed
+# and draw different permutations, because `batch_shuffle_key()` digests
+# `<seed>:<batch_cell_id(test_name, cell)>` and the test names differ. That is
+# also what separates repetition 2 from repetition 3: they differ in `name`
+# and in nothing else, so rebuilding either pass's sequence later needs this
+# file and not just the number.
+#
+# IDENTICAL TO REPETITION 2 EXCEPT THE TEST NAME. `diff` the `tests:` mapping
+# against 2026-timing-bird-peers250-rep2.yaml and the `name` is the whole of
+# what may differ; the headers differ and that is not drift. Block 11 reads
+# the three passes as the dispersion of one cell, so any drift in the matrix,
+# the workload or the labels between passes is a difference in the thing
+# measured arriving inside the statistic meant to measure run-to-run noise.
+tests:
+  -
+     name: 2026-timing-bird-peers250-rep3
+     neighbors: [250]
+     prefixes: [2_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 202610
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (4 threads)
+         threads: 4
+         tester_type: bird

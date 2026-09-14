@@ -118,12 +118,67 @@ SERIES = (
 # ran into its own results directory, and that separation is load-bearing --
 # reload and churn are both 50 x 50,000 with the same three run names.
 SCREEN_BLOCK = 'block8-bird-architecture-screen'
+REPETITION_BLOCK = 'block10-selected-repetitions'
+
+# Block 10 repeats three of the five screen scenarios -- exactly the three
+# `metadata/block10-selection.json` selects -- as passes 2 and 3, each into its
+# own results directory. The other two are declined there with their reasons,
+# so they stay at the one observation Block 8 measured and say so.
+#
+# `covers` is what lets the peer sweep be repeated *in part*. Block 8 swept 50,
+# 250 and 500 peers into one results directory; the selection names only the
+# three 250-peer cells, because the 50-peer comparison lies inside the 1s
+# resolution of `elapsed (s)` and no number of passes can separate it, and the
+# 500-peer comparison had two of its three rows excluded on `tester_health` --
+# which the plan does not allow expanding. Without the declaration the six
+# unrepeated cells would each be reported as work missing from passes 2 and 3;
+# with it they are `not run` for those passes, which is what they are.
+SCREEN_REPETITIONS = {
+    'peers': {'neighbors': 250},
+    'diversity': None,
+    'reload': None,
+}
+
+
+def screen_caveat(scenario):
+    if scenario not in SCREEN_REPETITIONS:
+        return ' (one observation per cell)'
+    if SCREEN_REPETITIONS[scenario]:
+        return (' (repeated only where {0}; one observation per cell '
+                'elsewhere)'.format(', '.join(
+                    '{0}={1}'.format(field, value) for field, value
+                    in sorted(SCREEN_REPETITIONS[scenario].items()))))
+    return ''
+
+
+def _screen_passes(scenario):
+    passes = [{'repetition': 1, 'block': SCREEN_BLOCK, 'results': scenario}]
+    if scenario not in SCREEN_REPETITIONS:
+        return tuple(passes)
+    covers = SCREEN_REPETITIONS[scenario]
+    for repetition in (2, 3):
+        entry = {'repetition': repetition, 'block': REPETITION_BLOCK,
+                 'results': '{0}-rep{1}'.format(scenario, repetition)}
+        if covers:
+            entry['covers'] = dict(covers)
+        passes.append(entry)
+    return tuple(passes)
+
+
 SCREEN_SERIES = tuple(
     {
         'name': 'screen-{0}'.format(scenario),
         'scope': 'scenario',
-        'workload': 'BIRD architecture screen: {0} (one observation per cell)'.format(scenario),
-        'passes': ({'repetition': 1, 'block': SCREEN_BLOCK, 'results': scenario},),
+        # What the caption promises has to be true of every cell under it.
+        # Three states, not two: `fanout` and `churn` are declined in Block 10
+        # and keep one observation throughout; `diversity` and `reload` are
+        # repeated whole; and `peers` is repeated *in part*, so six of its
+        # nine cells still have one observation while three have three. A
+        # caption saying nothing at all over that table promises a dispersion
+        # for rows that do not have one.
+        'workload': 'BIRD architecture screen: {0}{1}'.format(
+            scenario, screen_caveat(scenario)),
+        'passes': _screen_passes(scenario),
     }
     for scenario in ('peers', 'diversity', 'fanout', 'reload', 'churn')
 )
@@ -279,18 +334,44 @@ def execution_positions(cell_ids, seed, order):
     return {cell_id: index for index, cell_id in enumerate(sequence, 1)}
 
 
+# Fields of a cell id that describe the *pass* rather than the cell, and so
+# cannot be part of what makes two rows observations of one thing.
+#
+# `test` differs by construction -- the configs of a series differ in their
+# `name` and their `seed` and nothing else -- and `repetition` is absent
+# entirely from a single-pass block.
+#
+# `ordinal` is the third, and it is the one that is not obvious. It is a cell's
+# position *within its own matrix*, so it is stable across passes over the same
+# matrix and only across those. Block 10 repeats the 250-peer comparison
+# without the 50- and 500-peer cells around it, which moves those three cells
+# from ordinals 3-5 to 0-2 while they stay the same three cells -- and keyed on
+# ordinal they would pool with nothing, each pass reporting three cells missing
+# from the other two and every comparison stuck at one observation. What
+# identifies a cell is its axes and its target, which the key still carries in
+# full: two cells of one matrix cannot share them, because
+# `check_batch_run_names()` refuses two targets in one test that share a run
+# name. The report is still ordered by ordinal -- `build_groups()` takes it
+# from the first pass that holds the cell -- so a partial pass changes what
+# pools, never where it is drawn.
+#
+# What ordinal was also doing here was catching a matrix that moved between
+# passes without anyone saying so. That check is not given up: it moves to the
+# pass's own `covers` declaration, which `build_groups()` enforces in both
+# directions -- a cell missing from a pass that covers it, and a cell present
+# in a pass that does not.
+PASS_FIELDS = ('test', 'repetition', 'ordinal')
+
+
 def cell_identity_key(identity):
     '''What makes two passes' rows observations of one cell.
 
-    Everything the cell id carries except the two fields that describe the
-    *pass* rather than the cell: `test`, which differs by construction -- the
-    three configs of a series differ in their `name` and their `seed` and
-    nothing else -- and `repetition`, which a single-pass block does not carry
-    at all.  Anything else differing means the matrix moved between passes,
-    and that is reported rather than reconciled.
+    Everything the cell id carries except `PASS_FIELDS`, which describe the
+    pass rather than the cell. Anything else differing means the matrix moved
+    between passes, and that is reported rather than reconciled.
     '''
     return json.dumps({key: value for key, value in identity.items()
-                       if key not in ('test', 'repetition')}, sort_keys=True)
+                       if key not in PASS_FIELDS}, sort_keys=True)
 
 
 def read_pass(run_root, entry, problems):
@@ -369,6 +450,9 @@ def read_pass(run_root, entry, problems):
         'repetition': entry['repetition'],
         'block': entry['block'],
         'results': entry['results'],
+        # Which cells of the series this pass was asked to run, or None for
+        # "all of them". See `covered_by()`.
+        'covers': entry.get('covers'),
         'directory': directory,
         'test': test,
         'csv': csv_path,
@@ -427,6 +511,27 @@ def pair_artifacts(one_pass, problems):
                     .format(one_pass['directory'], cell['identity']['ordinal']))
 
 
+def covered_by(identity, covers):
+    '''Whether a pass that covers only part of a series should hold this cell.
+
+    A screen scenario's later passes are not always the whole scenario. Block 8
+    swept 50, 250 and 500 peers in one results directory; Block 10 repeats only
+    the 250-peer comparison, because the plan's selection names those three
+    cells and declines the other six -- the 500-peer rows cannot be expanded at
+    all, two of the three having been excluded on `tester_health`.
+
+    So a pass may declare `covers`: the identity fields the cells it ran all
+    share. A cell outside that is `not run` for this pass and nothing is wrong;
+    a cell *inside* it that the pass does not hold is the missing work the
+    error below exists to report. Declaring it is what separates the two, which
+    is why there is no inference here -- a pass with no `covers` is expected to
+    hold every cell of its series, exactly as before.
+    '''
+    if not covers:
+        return True
+    return all(identity.get(field) == value for field, value in covers.items())
+
+
 def build_groups(passes, problems):
     '''The passes of each cell, in matrix order, in `summary.py`'s own shape.
 
@@ -443,6 +548,20 @@ def build_groups(passes, problems):
                 collected[cell['key']] = {'identity': cell['identity'],
                                           'by_repetition': {}}
                 order.append(cell['key'])
+            # Two cells of *one* pass sharing an identity is a collision, not
+            # a repetition, and the assignment below would keep whichever was
+            # read last -- publishing `n` as though the other run never
+            # happened. `check_batch_test()` now refuses the config that
+            # causes it (a repeated axis value), but a progress file written
+            # before that guard existed can still hold one, so it is reported
+            # here rather than trusted not to arrive.
+            if one_pass['repetition'] in collected[cell['key']]['by_repetition']:
+                problem(problems, ERROR,
+                        'pass {0} ({1}) holds two cells with one identity '
+                        '({2}); one of the two runs would be dropped from '
+                        'every statistic'.format(
+                            one_pass['repetition'], one_pass['block'],
+                            batch_cell_description(cell['identity'])))
             collected[cell['key']]['by_repetition'][one_pass['repetition']] = cell
     groups, records = [], []
     for key in sorted(order, key=lambda k: collected[k]['identity']['ordinal']):
@@ -451,9 +570,21 @@ def build_groups(passes, problems):
         cell_passes, pass_records = [], []
         for one_pass in passes:
             cell = entry['by_repetition'].get(one_pass['repetition'])
-            if cell is None:
+            covered = covered_by(identity, one_pass.get('covers'))
+            if cell is None and covered:
                 problem(problems, ERROR,
                         'cell {0} ({1}) is absent from pass {2} ({3})'.format(
+                            identity['ordinal'], target_run_name(identity['target']),
+                            one_pass['repetition'], one_pass['block']))
+            elif cell is not None and not covered:
+                # The other direction, and it has to be checked or the
+                # declaration is decoration: a pass that ran a cell its
+                # `covers` excludes is a config that measured something the
+                # selection did not ask for, and its row would be pooled into
+                # a comparison nobody planned.
+                problem(problems, ERROR,
+                        'cell {0} ({1}) is in pass {2} ({3}), which does not '
+                        'cover it'.format(
                             identity['ordinal'], target_run_name(identity['target']),
                             one_pass['repetition'], one_pass['block']))
             cell_passes.append({'repetition': one_pass['repetition'],
@@ -545,6 +676,15 @@ def review_series(run_root, series, unavailable, problems):
         return None
     header = passes[0]['header']
     positions_known = all(one_pass['positions_known'] for one_pass in passes)
+    # An execution position is a place in *this pass's* sequence, so it is only
+    # comparable across passes that ran the same sequence length. Block 10
+    # repeats three cells of Block 8's nine, so pass 1's positions run 1-9 and
+    # passes 2-3 run 1-3: sorted onto one scale, the pass that ran first
+    # chronologically can come out "latest" purely because its matrix was
+    # larger, and `order_relation()` would publish "rises with position" off an
+    # artifact of matrix size. Withheld by name instead -- a relation that
+    # cannot be read is not a relation of `neither`.
+    comparable_positions = len({one_pass['rows'] for one_pass in passes}) == 1
 
     groups, records = build_groups(passes, problems)
     try:
@@ -630,9 +770,13 @@ def review_series(run_root, series, unavailable, problems):
         record['stdev'] = decision.get('stdev')
         record['expansion'] = expansion_prospect(
             summary_cell, rivals_of.get(record['ordinal']) or [])
-        record['order_relation'] = (
-            order_relation(observations) if positions_known
-            else 'order withheld: a superseded sequence')
+        if not positions_known:
+            record['order_relation'] = 'order withheld: a superseded sequence'
+        elif not comparable_positions:
+            record['order_relation'] = (
+                'order withheld: the passes ran matrices of different sizes')
+        else:
+            record['order_relation'] = order_relation(observations)
         relations[record['order_relation']] = relations.get(record['order_relation'], 0) + 1
         record['intervals'] = interval_statistics(artifacts, record['passes'],
                                                   ARTIFACT_INTERVALS)
@@ -833,7 +977,20 @@ def churn_statistics(artifacts, pass_records):
     return result
 
 
-def review_blocks(run_root, problems):
+def blocks_of(series_list):
+    '''The blocks a set of series reads, in the order they are named.
+
+    `INPUT_BLOCKS` is the whole campaign; this is what one review actually
+    read. The difference matters as soon as `--series` is used: a review of the
+    three screen scenarios Block 10 repeats has no business demanding a
+    COMPLETE marker on the MRT blocks, and reporting one as missing would be a
+    refusal about rows the review never opened.
+    '''
+    return tuple(dict.fromkeys(entry['block'] for series in series_list
+                               for entry in series['passes']))
+
+
+def review_blocks(run_root, problems, keys=INPUT_BLOCKS):
     '''What measured the passes: the markers, the hosts and the images.
 
     Three questions a per-block document cannot answer on its own, and all
@@ -867,7 +1024,7 @@ def review_blocks(run_root, problems):
     review = {'schema': REVIEW_SCHEMA, 'manifest': os.path.relpath(
         manifest_path, run_root), 'blocks': {}, 'images': {}}
 
-    for key in INPUT_BLOCKS:
+    for key in keys:
         marker = os.path.join(run_root, key, 'COMPLETE')
         entry = blocks.get(key) or {}
         host = entry.get('host') or {}
@@ -939,8 +1096,11 @@ def review_blocks(run_root, problems):
         if len(distinct) == 1 and not unrecorded:
             continue
         for series in ALL_SERIES:
-            keys = [entry['block'] for entry in series['passes']]
-            within = {key: ids[key] for key in keys if key in ids}
+            # Not `keys`: that is this function's parameter now, and rebinding
+            # it here works only for as long as nothing below the earlier loop
+            # reads it.
+            series_blocks = [entry['block'] for entry in series['passes']]
+            within = {key: ids[key] for key in series_blocks if key in ids}
             if len(set(within.values())) > 1:
                 problem(problems, ERROR,
                         '{0}: {1} is a different image in different passes '
@@ -1211,11 +1371,39 @@ def validate_selection(document, reviews, excluded, problems, attempted=None):
             if unresolvable:
                 problem(problems, ERROR, '{0}: {1}'.format(name, unresolvable))
 
-        observed = len(review['passes'])
+        # A selection is a *plan*, and what may be asked of it depends on
+        # whether the block it plans has run.
+        #
+        # Before: the question is whether it adds an observation. A selection
+        # asking for three where three already ran adds nothing and is refused.
+        #
+        # After: the question is whether it was carried out. Asking the first
+        # question again is a category error, and it fired as one -- Block 10
+        # **is** passes 2 and 3 of the scenarios its own selection names, so
+        # once it ran, every entry reported "asks for 3 passes and 3 already
+        # ran", and a `block-9 --force` after acceptance failed with three
+        # errors about a selection executed exactly as written. Simply
+        # excluding the planned block's passes fixes that and costs the guard
+        # entirely: `observed` would be pinned at 1 forever and a later
+        # selection re-requesting three could never be refused. So the check
+        # changes question rather than dropping one, and the second question
+        # is the more useful of the two -- it catches a block that ran fewer
+        # or more passes than the selection asked for, which nothing else
+        # here would notice.
+        planned = [one_pass for one_pass in review['passes']
+                   if one_pass.get('block') == REPETITION_BLOCK]
+        observed = len(review['passes']) - len(planned)
         requested = entry.get('passes_requested')
         if not isinstance(requested, int) or isinstance(requested, bool):
             problem(problems, ERROR, '{0}: `passes_requested` is not a number'
                     .format(name))
+        elif planned:
+            if len(review['passes']) != requested:
+                problem(problems, ERROR,
+                        '{0}: asks for {1} passes and {2} ran ({3} in {4}), so '
+                        '{5} was not carried out as written'.format(
+                            name, requested, len(review['passes']),
+                            len(planned), REPETITION_BLOCK, REPETITION_BLOCK))
         elif requested <= observed:
             problem(problems, ERROR,
                     '{0}: asks for {1} passes and {2} already ran, so it adds '
@@ -1474,7 +1662,12 @@ def main(argv=None):
         for name in sorted(wanted - attempted):
             problem(problems, ERROR, 'no such series: {0}'.format(name))
 
-    blocks = review_blocks(args.run_root, problems)
+    # Scoped to what was actually reviewed, so `--series` narrows the marker,
+    # host and image checks with it rather than reporting on blocks whose rows
+    # nobody opened.
+    reviewed_blocks = blocks_of([series for series in ALL_SERIES
+                                 if not wanted or series['name'] in wanted])
+    blocks = review_blocks(args.run_root, problems, keys=reviewed_blocks)
     excluded = rejected_rows(args.run_root, problems)
 
     if args.selection:

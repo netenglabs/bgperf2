@@ -169,7 +169,25 @@ def held_runner(tmp_path):
     # runner `--workdir` and `--allow-root-workdir`, so a guard that regressed
     # would put a 14-cell full-table MRT batch inside the Docker-free suite
     # before the `returncode == 2` assertion ever ran.
-    index = unbuilt_block()[0]
+    # Two blocks that cannot run, made by removing the two highest `case`
+    # branches from the copy.
+    #
+    # These tests need a block that will not really run even if the guard they
+    # are testing regresses, and one of them needs *two* -- a held one and an
+    # unheld one. For most of this campaign the unbuilt blocks supplied both.
+    # They cannot any more: Block 11 is the last block there is, so once Block
+    # 10 was built there was one unbuilt index, and once Block 11 is built
+    # there will be none and `unbuilt_block()` will assert. Unbuilding two in
+    # the copy makes the fixture independent of how much of the campaign has
+    # been written, without ever pointing a test at a block that would really
+    # run -- which is the hazard `unbuilt_block()` exists to avoid, and it is
+    # not softened here: the indices are discovered from the script, never
+    # written down, so they move on their own as blocks land.
+    index, unbuilt = sorted(_built_blocks()[-2:], reverse=True)
+    for number in (index, unbuilt):
+        branch = re.compile(r'^  %d\)\n.*?^    ;;\n' % number, re.M | re.S)
+        text, removed = branch.subn('', text, count=1)
+        assert removed == 1, 'could not unbuild block %d in the copy' % number
     text = text.replace(
         'declare -A BLOCK_HELD=(',
         'declare -A BLOCK_HELD=(\n  [%d]="a reason the operator has to read"'
@@ -178,7 +196,7 @@ def held_runner(tmp_path):
     target.write_text(text)
     target.chmod(source.stat().st_mode)
     try:
-        yield target, index
+        yield target, index, unbuilt
     finally:
         target.unlink(missing_ok=True)
 
@@ -198,7 +216,7 @@ def test_a_held_block_is_refused_and_says_what_decision_it_is_waiting_on(
     unattended session to run the next block -- and the whole point of holding
     one is that its rows are already known not to mean what they appear to.
     """
-    runner, index = held_runner
+    runner, index, unbuilt = held_runner
     results, work = roots
     result = held_block(runner, 'block-%d' % index, results_root=results,
                         workdir=work)
@@ -213,7 +231,7 @@ def test_a_held_block_is_refused_and_says_what_decision_it_is_waiting_on(
 
 
 def test_next_does_not_select_a_held_block(held_runner, roots):
-    runner, index = held_runner
+    runner, index, unbuilt = held_runner
     results, work = roots
     root = os.path.join(results, '2026-timing-validation')
     for key in _block_keys()[:index]:
@@ -231,7 +249,7 @@ def test_the_held_override_is_refused_by_an_action_that_runs_nothing(
         held_runner, roots):
     """`accept` is the slip that matters: a held block's refusal is about what
     its rows would mean, which is the judgement `accept` records."""
-    runner, index = held_runner
+    runner, index, unbuilt = held_runner
     results, _ = roots
     for action in (['accept', str(index), '--note', 'why'], ['status'],
                    ['list']):
@@ -243,7 +261,7 @@ def test_the_held_override_is_refused_by_an_action_that_runs_nothing(
 
 def test_a_held_block_is_reported_as_held_rather_than_not_started(
         held_runner, roots):
-    runner, index = held_runner
+    runner, index, unbuilt = held_runner
     results, _ = roots
     result = held_block(runner, 'status', results_root=results)
     assert result.returncode == 0, result.stderr
@@ -875,7 +893,7 @@ def test_the_held_override_accepts_every_spelling_of_a_block(held_runner,
     the override it reaches the "not built yet" branch and exits, rather than
     starting a benchmark.
     """
-    runner, index = held_runner
+    runner, index, unbuilt = held_runner
     results, work = roots
     for spelling in (str(index), 'block%d' % index, 'block-%d' % index):
         result = held_block(runner, spelling, '--run-held-block',
@@ -905,14 +923,18 @@ def test_the_held_override_is_refused_on_a_block_that_is_not_held(held_runner,
     take the override path, and exit 2 at "not built yet" -- failing this
     assertion for a reason that has nothing to do with what it tests.
     """
-    runner, index = held_runner
+    runner, index, unbuilt = held_runner
     results, work = roots
-    built = set(_built_blocks())
+    # The copy's second unrunnable block, not the repository's. Block 11 is
+    # the last block of the campaign, so from Block 10 onward there are not two
+    # unbuilt indices to be had -- the fixture unbuilds two in its copy and
+    # hands both back, and they are discovered from the script rather than
+    # named here for the same reason `unbuilt_block()` is discovered: a literal
+    # would become a benchmark launcher the day the arrangement changed.
     held = _held_blocks()
-    candidates = [i for i in range(len(_block_keys()))
-                  if i not in built and i not in held and i != index]
-    assert candidates, 'no unbuilt, unheld block to test the refusal on'
-    other = candidates[0]
+    assert unbuilt not in held and unbuilt != index, (
+        'the unbuilt candidate must be neither held nor the held block')
+    other = unbuilt
     result = held_block(runner, 'block-%d' % other, '--run-held-block',
                         results_root=results, workdir=work)
     assert result.returncode == 1, result.stdout

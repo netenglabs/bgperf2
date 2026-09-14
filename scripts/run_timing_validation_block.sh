@@ -1310,6 +1310,133 @@ run_bird_architecture_screen() {
   done
 }
 
+# Block 10 repeats the three comparisons Block 9 selected, and nothing else.
+#
+# Its matrix was decided by a different block. `metadata/block10-selection.json`
+# was written between Block 9's first reading of the statistics and the run
+# that validated them, and it names three comparisons to repeat with a
+# hypothesis and a variance reason each, and seven to decline with reasons. So
+# the first thing here is `check_block10_configs.py`, which reads that document
+# against these configs and refuses a mismatch before any container starts:
+# the cells each config runs must be exactly the cells its selection names, the
+# two passes of a comparison must differ in the test `name` and nothing else,
+# and the pass arithmetic must come to what the selection asked for. A block
+# that ran the wrong matrix would produce rows that look exactly like the right
+# ones, which is the same reason the case below refuses to improvise one.
+#
+# That check is deliberately *not* the variance review. The review needs Block
+# 10's own passes to carry a COMPLETE marker, which they cannot until after the
+# block it would be guarding has run -- so the pooled read of the three passes
+# happens at acceptance, not here, and what runs here is the narrower question
+# a pure document check can answer.
+#
+# ORDER: all three second passes, then all three third passes. Running
+# `peers-rep2` and `peers-rep3` back to back would put the two observations of
+# one comparison minutes apart on one thermal state and one page cache, and
+# the run-to-run spread this block exists to measure is exactly what that
+# hides. It is the same rule as "a repetition repeats the whole matrix, not
+# each cell", applied to the three comparisons this block treats as its
+# matrix; Blocks 2-4 and 5-7 get it from being separate blocks hours apart,
+# and this block has to arrange it itself.
+run_selected_repetitions() {
+  local selection="$METADATA_DIR/block10-selection.json"
+
+  # Before the render, the preflight and the first container: this reads only
+  # documents, and a block whose configs do not execute the selection must not
+  # spend an hour finding that out.
+  #
+  # Captured with `> file 2>&1`, not `| tee file`. Every problem line goes to
+  # stderr and only the success line to stdout, so a `tee` of stdout alone
+  # leaves the durable artifact **empty on the one path it exists for** -- the
+  # reasons scroll past on the console and the block records nothing about why
+  # it refused. `verify` below does it this way for the same reason.
+  local check_log="$METADATA_DIR/selection-check-$BLOCK_KEY.txt"
+  if ! "$PYTHON_BIN" scripts/check_block10_configs.py \
+        --selection "$selection" > "$check_log" 2>&1; then
+    echo "the configs do not execute $selection; see $check_log" >&2
+    cat "$check_log" >&2
+    exit 1
+  fi
+  cat "$check_log"
+
+  # key -> config, in execution order. The key is the rendered config's name,
+  # the results directory and the evidence label, so all three agree by
+  # construction -- and the results directory is what
+  # `timing_variance_review.py`'s SCREEN_REPETITIONS names as each pass's
+  # `results`, so a renamed directory here fails the review rather than
+  # quietly reviewing two passes.
+  local -a scenarios=(
+    "peers-rep2:benchmarks/2026-timing-bird-peers250-rep2.yaml:3"
+    "diversity-rep2:benchmarks/2026-timing-bird-diversity-rep2.yaml:3"
+    "reload-rep2:benchmarks/2026-timing-bird-reload-rep2.yaml:3"
+    "peers-rep3:benchmarks/2026-timing-bird-peers250-rep3.yaml:3"
+    "diversity-rep3:benchmarks/2026-timing-bird-diversity-rep3.yaml:3"
+    "reload-rep3:benchmarks/2026-timing-bird-reload-rep3.yaml:3"
+  )
+
+  local -a rendered=()
+  # `--config <path>` is two words; built as pairs for the reason Block 8's
+  # loop states.
+  local -a preflight_args=()
+  local entry key config
+  for entry in "${scenarios[@]}"; do
+    key="${entry%%:*}"
+    config="${entry#*:}"
+    config="${config%:*}"
+    campaign_render_config "$BLOCK_KEY-$key" "$config" \
+      "$RENDERED_CONFIG_DIR/$BLOCK_KEY-$key.yaml"
+    # The check above read `benchmarks/`; this is what actually runs. They are
+    # the same file today -- `campaign_render_config` copies verbatim unless
+    # `--mrt-file` is set, and no config of this block names an MRT input --
+    # but "the validated document is the one that runs" is worth one `cmp`
+    # rather than an argument, and the day someone passes `--mrt-file` to a
+    # BIRD block it is the difference between a refusal and a silent one.
+    if ! cmp -s "$config" "$RENDERED_CONFIG_DIR/$BLOCK_KEY-$key.yaml"; then
+      echo "rendered $key differs from the $config that was validated;" >&2
+      echo "the selection check did not read what this block would run" >&2
+      exit 1
+    fi
+    rendered+=("$RENDERED_CONFIG_DIR/$BLOCK_KEY-$key.yaml")
+    preflight_args+=(--config "$RENDERED_CONFIG_DIR/$BLOCK_KEY-$key.yaml")
+  done
+  capture_metadata "${rendered[@]}"
+
+  scripts/preflight_2026_suite.sh --workdir "$WORKDIR" --run-root "$RUN_ROOT" \
+    "${preflight_args[@]}" \
+    | tee "$METADATA_DIR/preflight-$BLOCK_KEY.txt"
+
+  echo "Verifying built images"
+  "${BGPERF_CMD[@]}" verify > "$METADATA_DIR/verify-$BLOCK_KEY.txt" 2>&1 || {
+    echo "verify failed; see $METADATA_DIR/verify-$BLOCK_KEY.txt" >&2
+    tail -20 "$METADATA_DIR/verify-$BLOCK_KEY.txt" >&2
+    exit 1
+  }
+  tail -5 "$METADATA_DIR/verify-$BLOCK_KEY.txt"
+
+  retract_forced_markers
+
+  # Each pass is checked as soon as it has run and a failure does not take the
+  # other five with it -- Block 8's reasoning exactly, and it applies harder
+  # here: a pass lost to a non-zero batch exit would leave its comparison at
+  # two observations, which is a dispersion the variance rule can compute and
+  # an operator would have no reason to distrust.
+  local expect batch_status
+  for entry in "${scenarios[@]}"; do
+    key="${entry%%:*}"
+    expect="${entry##*:}"
+    batch_status=0
+    run_batch "$BLOCK_KEY-$key" "$BLOCK_DIR/$key" || batch_status=$?
+    if [[ $batch_status -ne 0 ]]; then
+      echo "pass $key: batch exited $batch_status; the remaining passes" >&2
+      echo "still run and the block is recorded as having run" >&2
+      EVIDENCE_FAILURES=$((EVIDENCE_FAILURES + 1))
+    fi
+    # No --expect-limiting, for Block 8's reason: which component limits a
+    # given BIRD configuration is the measurement, not the setup.
+    check_evidence "$BLOCK_DIR/$key" "$expect" "$key"
+  done
+}
+
 # Block 9 reviews; it measures nothing. Every number it reads was published
 # by a block that has already been accepted, so this runs no preflight, no
 # `verify` and no container -- and it deliberately depends on no Docker daemon
@@ -1500,6 +1627,9 @@ case "$BLOCK_INDEX" in
     ;;
   9)
     run_variance_review
+    ;;
+  10)
+    run_selected_repetitions
     ;;
   *)
     cat >&2 <<MSG

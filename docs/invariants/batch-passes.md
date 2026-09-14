@@ -2,7 +2,7 @@
 
 How a matrix becomes an ordered list of runs, and what the passes of one cell are allowed to say about each other.
 
-**Read this before editing:** `bgperf2.py` (`expand_batch_cells()`, `batch_report_rows()`, `bench_output_prefix()`, `create_batch_graphs()`), `summary.py`, `graphs.py`, `scripts/timing_variance_review.py`
+**Read this before editing:** `bgperf2.py` (`expand_batch_cells()`, `batch_report_rows()`, `bench_output_prefix()`, `create_batch_graphs()`), `summary.py`, `graphs.py`, `scripts/timing_variance_review.py`, `scripts/check_block10_configs.py`
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 
@@ -51,6 +51,74 @@ run the matrix unfiltered.
   single-pass id has exactly its pre-repetition shape, so `BATCH_PROGRESS_SCHEMA_VERSION` did not
   have to move and an in-flight batch from an older build still resumes instead of costing the
   operator every completed cell.
+
+## Pooling the passes of a partial repetition
+
+A campaign block does not always repeat the whole of what an earlier block ran. Block 10 repeats
+three of Block 8's five screen scenarios, and within the peer sweep only the three 250-peer cells —
+the 50-peer comparison lies inside the 1s resolution of `elapsed (s)` and no number of passes can
+separate it, and the 500-peer comparison had two of its three rows excluded on `tester_health`,
+which the plan does not allow expanding. Two rules hold that together, and each replaces something
+that used to be implicit.
+
+- **A cell's cross-pass identity is its axes and its target, never its ordinal.**
+  `cell_identity_key()` drops `test`, `repetition` *and* `ordinal`. The first two are obvious; the
+  third is the one that bites. `ordinal` is a cell's position within its own matrix, so it is stable
+  across passes over the same matrix and only across those: dropping six of nine cells moves the
+  survivors from ordinals 3–5 to 0–2 while they stay the same three cells, and keyed on ordinal they
+  pool with nothing — each pass reporting three cells missing from the other two, every comparison
+  stuck at one observation, which is the exact opposite of what a repetition block is for. Two cells
+  of one matrix cannot share axes and target, because `check_batch_run_names()` refuses two targets
+  in one test that share a run name, so nothing is lost by dropping it. Report order is unaffected:
+  `build_groups()` takes the ordinal from the first pass that holds the cell.
+- **A pass that runs part of a series must declare what it covers**, and the declaration is checked
+  in both directions. Dropping ordinal from the key also drops what ordinal was quietly doing —
+  catching a matrix that moved between passes with nothing saying so — so that check moves somewhere
+  it can be stated rather than inferred. A pass entry's `covers` names the identity fields its cells
+  all share; a cell inside that coverage which the pass does not hold is still missing work and is
+  reported, and a cell the pass holds which its coverage excludes is refused, because otherwise the
+  declaration is decoration and a config that ran more than was asked has its extra row pooled into
+  a comparison nobody planned. A pass with no `covers` is expected to hold every cell of its series,
+  exactly as before.
+
+Three consequences follow from dropping `ordinal`, and each was found by review rather than
+foreseen.
+
+- **A matrix axis lists each value once.** `neighbors: [250, 250]` produced two cells with distinct
+  ids and *one* cross-pass identity, so `build_groups()` kept whichever it read last and published
+  `n` as though the other run never happened — where `ordinal` used to keep them apart.
+  `check_batch_test()` refuses a repeated value now (`repetitions:` is the mechanism for measuring a
+  cell twice, and it names its passes), and `build_groups()` reports a collision anyway, because a
+  progress file written before that guard can still hold one.
+- **An execution position is comparable only across passes of the same length.** Pass 1 of the peer
+  sweep has positions 1–9 and passes 2–3 have 1–3; sorted onto one scale, the pass that ran first
+  can come out "latest" purely because its matrix was larger, and `order_relation()` would publish
+  "rises with position" off an artifact of matrix size. It is withheld by name for a series whose
+  passes ran different-sized matrices — a relation that cannot be read is not a relation of
+  `neither`.
+- **What a series' caption promises has to be true of every cell under it.** `screen-peers` is
+  repeated *in part*, so three of its nine cells have three observations and six still have one.
+  Dropping "(one observation per cell)" because the scenario gained passes promises a dispersion for
+  rows that do not have one; the caveat says which cells were repeated instead.
+
+And one about the selection document: **a selection is a plan, and what may be asked of it depends on
+whether the block it plans has run.** Before, the question is whether it adds an observation — asking
+for three where three already ran is refused. After, the question is whether it was *carried out*,
+and asking the first question again fires on the selection being executed: Block 10 **is** passes 2
+and 3 of the scenarios its own selection names, so every entry reported "asks for 3 passes and 3
+already ran". Simply excluding the planned block's passes fixes that and costs the guard entirely —
+the count would be pinned at 1 forever and a later selection could never be refused. The check
+changes question instead, and the second question catches a block that ran fewer passes than the
+selection asked for, which nothing else here would notice.
+
+The same split shows up one level out. `review_blocks()` checks COMPLETE markers, host class and
+image ids for **the blocks the reviewed series actually read**, not for every block in the campaign:
+under `--series`, demanding a marker on blocks whose rows nobody opened is a refusal about evidence
+the review never looked at. And a block's own passes cannot be in the pooled read until that block
+is accepted — which is why Block 10 guards its matrix with `check_block10_configs.py`, a pure
+document check that the cells each config runs are exactly the cells its selection names and that
+the passes of a comparison differ in the test `name` and nothing else. The pooled read of those
+passes happens at acceptance, not during the block.
 
 ## Order
 

@@ -1,0 +1,57 @@
+# Block 10 of the 64 GB timing validation campaign, selection 2 of 3,
+# repetition 3 of 3: BIRD competing-path selection. See
+# docs/2026-64gb-timing-validation-plan.md, "Block 10: selected repetitions",
+# and results/2026/2026-timing-validation/metadata/block10-selection.json,
+# which is the decision this file executes.
+#
+# THE MATRIX IS BLOCK 8'S, UNCHANGED. All three cells of this scenario were
+# selected, so unlike the peer sweep nothing is removed here -- benchmarks/2026-timing-bird-diversity.yaml
+# and this file differ in the test `name` and the `seed` and in nothing else.
+# `diff` the `tests:` mapping against it; the headers differ and that is not
+# drift. Block 11 reads the three passes as the dispersion of one cell, so any
+# drift in the matrix, the workload or the labels between passes is a
+# difference in the thing measured arriving inside the statistic meant to
+# measure run-to-run noise.
+#
+# WHY THIS COMPARISON EARNED REPETITIONS.
+# 7s, 13s and 19s for the identical 5,000,000 paths, the last at 223% CPU. The
+# gaps are 6s and 12s against the 1s resolution of `elapsed (s)`, so
+# repetitions can decide it -- and this is the only measurement in the campaign
+# where more CPU bought more *time* rather than less, the reverse of the
+# peer-scaling result measured on the same three binaries in the same block.
+# Primary Questions 9 and 10 both turn on which of the two shapes is the
+# property of the daemon.
+#
+# ORDER. `order: shuffle` seed 202610 -- the campaign's mechanical year+block
+# rule, continuing 20268. All six of this block's configs state that same seed
+# and draw different permutations, because `batch_shuffle_key()` digests
+# `<seed>:<batch_cell_id(test_name, cell)>` and the test names differ. That is
+# also what separates repetition 2 from repetition 3, which differ in `name`
+# and in nothing else, so rebuilding either pass's sequence later needs this
+# file and not just the number.
+tests:
+  -
+     name: 2026-timing-bird-diversity-rep3
+     neighbors: [50]
+     prefixes: [100_000]
+     filter_test: [None]
+     path_diversity: 50
+     order: shuffle
+     seed: 202610
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (4 threads)
+         threads: 4
+         tester_type: bird

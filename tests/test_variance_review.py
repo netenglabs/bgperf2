@@ -97,14 +97,32 @@ class TestCellIdentity:
         assert review.cell_identity_key(an_identity()) != \
             review.cell_identity_key(an_identity(neighbors=250))
 
+    def test_a_cell_keeps_its_identity_when_the_matrix_around_it_shrinks(self):
+        """Block 10 repeats the 250-peer comparison without the 50- and
+        500-peer cells around it, which moves those three cells from ordinals
+        3-5 to 0-2 while they stay the same three cells. Keyed on ordinal they
+        would pool with nothing and every comparison would stay at one
+        observation -- the exact opposite of what the block is for."""
+        assert review.cell_identity_key(an_identity(ordinal=3, neighbors=250)) \
+            == review.cell_identity_key(an_identity(ordinal=0, neighbors=250))
 
-def a_pass(repetition, cells, block='block', results='synthetic'):
+    def test_ordinal_is_not_what_tells_two_cells_apart(self):
+        """It is redundant with the axes and the target, which is what makes
+        dropping it safe: two cells of one matrix cannot share those, because
+        `check_batch_run_names()` refuses two targets in one test that share a
+        run name."""
+        assert review.PASS_FIELDS == ('test', 'repetition', 'ordinal')
+        assert review.cell_identity_key(an_identity(ordinal=0)) \
+            == review.cell_identity_key(an_identity(ordinal=7))
+
+
+def a_pass(repetition, cells, block='block', results='synthetic', covers=None):
     return {'repetition': repetition, 'block': block, 'results': results,
-            'cells': cells}
+            'cells': cells, 'covers': covers}
 
 
-def a_cell(ordinal=0, row=None, position=1, target=None):
-    identity = an_identity(ordinal=ordinal, target=target)
+def a_cell(ordinal=0, row=None, position=1, target=None, neighbors=50):
+    identity = an_identity(ordinal=ordinal, target=target, neighbors=neighbors)
     return {'cell_id': json.dumps(identity, sort_keys=True),
             'key': review.cell_identity_key(identity),
             'identity': identity, 'row': row or ['bird'], 'position': position}
@@ -128,6 +146,70 @@ class TestGrouping:
         missing = [group for group in groups if group['ordinal'] == 1][0]
         assert [entry['row'] for entry in missing['passes']] == [['bird'], None]
         assert len(records) == 2
+
+    def test_a_partial_pass_declares_what_it_covers(self):
+        """Block 10 repeats the 250-peer comparison and not the rest of Block
+        8's peer sweep, so its passes hold three of nine cells. Declared, the
+        six it never ran are `not run` for those passes rather than six
+        reports of missing work."""
+        problems = []
+        groups, _ = review.build_groups(
+            [a_pass(1, [a_cell(0, neighbors=50), a_cell(1, neighbors=250)]),
+             a_pass(2, [a_cell(1, neighbors=250)], block='block-ten',
+                    covers={'neighbors': 250})],
+            problems)
+        assert problems == []
+        outside = [group for group in groups if group['ordinal'] == 0][0]
+        inside = [group for group in groups if group['ordinal'] == 1][0]
+        # Counted, not dropped: `summarize_cell()` reads the None as a pass
+        # that did not run, which is kept apart from one that failed.
+        assert [entry['row'] for entry in outside['passes']] == [['bird'], None]
+        assert [entry['row'] for entry in inside['passes']] == [['bird'], ['bird']]
+
+    def test_a_covered_cell_the_pass_does_not_hold_is_still_missing_work(self):
+        """The declaration narrows what is expected; it does not excuse a cell
+        inside it."""
+        problems = []
+        review.build_groups(
+            [a_pass(1, [a_cell(0, neighbors=250),
+                        a_cell(1, neighbors=250, target=a_target('gobgp'))]),
+             a_pass(2, [a_cell(0, neighbors=250)], block='block-ten',
+                    covers={'neighbors': 250})],
+            problems)
+        assert [entry['severity'] for entry in problems] == [review.ERROR]
+        assert 'absent from pass 2' in problems[0]['message']
+
+    def test_a_pass_holding_a_cell_it_does_not_cover_is_refused(self):
+        """Or the declaration is decoration: a config that ran more than the
+        selection named would have its extra row pooled into a comparison
+        nobody planned."""
+        problems = []
+        review.build_groups(
+            [a_pass(1, [a_cell(0, neighbors=50), a_cell(1, neighbors=250)]),
+             a_pass(2, [a_cell(0, neighbors=50), a_cell(1, neighbors=250)],
+                    block='block-ten', covers={'neighbors': 250})],
+            problems)
+        assert [entry['severity'] for entry in problems] == [review.ERROR]
+        assert 'does not cover it' in problems[0]['message']
+
+    def test_a_pass_with_no_declaration_is_expected_to_hold_everything(self):
+        assert review.covered_by({'neighbors': 50}, None) is True
+        assert review.covered_by({'neighbors': 50}, {}) is True
+        assert review.covered_by({'neighbors': 50}, {'neighbors': 250}) is False
+        assert review.covered_by({'neighbors': 250}, {'neighbors': 250}) is True
+
+    def test_two_cells_of_one_pass_with_one_identity_are_reported(self):
+        """`ordinal` used to keep them apart. Without it the later one
+        overwrites the earlier in `by_repetition`, so one of two real runs
+        vanishes from every statistic and `n` reports 1 where two ran.
+        `check_batch_test()` now refuses the config that causes it, but a
+        progress file written before that guard can still hold one."""
+        problems = []
+        review.build_groups(
+            [a_pass(1, [a_cell(0, neighbors=250), a_cell(1, neighbors=250)])],
+            problems)
+        assert [entry['severity'] for entry in problems] == [review.ERROR]
+        assert 'two cells with one identity' in problems[0]['message']
 
     def test_cells_are_grouped_in_matrix_order(self):
         problems = []
@@ -222,11 +304,16 @@ class TestExclusionLookup:
 
 
 def a_review(series='synthetic', cells=('bird 2.19.2', 'frr_c 10.7'), passes=3,
-             scope='matrix'):
+             scope='matrix', block=None):
+    # Each pass carries the block that measured it, as the real document does:
+    # `validate_selection()` counts the passes a selection was written
+    # *against*, which means excluding the block the selection plans.
     return {
         'series': series,
         'scope': scope,
-        'passes': [{'repetition': n + 1} for n in range(passes)],
+        'passes': [{'repetition': n + 1,
+                    'block': block or 'block{0}'.format(n + 2)}
+                   for n in range(passes)],
         'cells': [{'ordinal': n, 'name': name, 'expansion': None,
                    # Far enough apart that the comparison itself is always
                    # resolvable; the tests that care set their own.
@@ -346,6 +433,43 @@ class TestSelection:
         document['repetitions'][0]['passes_requested'] = 3
         assert any('adds no observation' in message
                    for message in errors_for(document))
+
+    def test_a_selection_is_not_refused_for_having_been_carried_out(self):
+        """The passes counted are the ones the selection was written against.
+
+        Block 10 *is* passes 2 and 3 of the screen scenarios it repeats, so
+        once it has run, `screen-peers` has the three passes its own selection
+        asked for. Counted whole, every entry reported "asks for 3 passes and
+        3 already ran, so it adds no observation" -- three false errors about
+        a selection executed exactly as written, on any `block-9 --force`
+        after Block 10 was accepted.
+        """
+        before = a_review(passes=1, block='block8-bird-architecture-screen')
+        after = {**before,
+                 'passes': [{'repetition': 1,
+                             'block': 'block8-bird-architecture-screen'},
+                            {'repetition': 2, 'block': review.REPETITION_BLOCK},
+                            {'repetition': 3, 'block': review.REPETITION_BLOCK}]}
+        document = a_selection()
+        document['repetitions'][0]['passes_requested'] = 3
+        for reviewed in (before, after):
+            assert errors_for(document, reviews=[reviewed]) == []
+
+    def test_a_selection_whose_block_ran_is_judged_on_being_carried_out(self):
+        """The question changes rather than going away. Excluding the planned
+        block's passes and leaving the old test would pin `observed` at 1 for
+        those series forever, so the refusal could never fire again; asking
+        instead whether the block ran what was asked keeps a live check, and
+        catches a block that ran fewer passes than the selection named --
+        which nothing else here would notice."""
+        document = a_selection()
+        document['repetitions'][0]['passes_requested'] = 3
+        short = {**a_review(passes=1, block='block8-bird-architecture-screen'),
+                 'passes': [{'repetition': 1,
+                             'block': 'block8-bird-architecture-screen'},
+                            {'repetition': 2, 'block': review.REPETITION_BLOCK}]}
+        assert any('was not carried out as written' in message
+                   for message in errors_for(document, reviews=[short]))
 
     def test_the_expansion_stops_at_five(self):
         document = a_selection()

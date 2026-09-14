@@ -5125,6 +5125,25 @@ def check_batch_test(test):
     # `int(0 * 0.99)` -- satisfied at zero routes, so the cell wrote a row
     # that reads as a converged run. That is precisely the typo this function
     # exists to name before the first container.
+    # A repeated axis value is two cells of one matrix that are the same cell.
+    # `repetitions:` is the mechanism for measuring a cell more than once, and
+    # it names its passes; a duplicate here does not. It also collides: the
+    # two cells get distinct ids but one cross-pass identity, so the review
+    # keeps whichever it reads last and publishes `n` as though the other run
+    # never happened. Refused rather than deduplicated, because which of the
+    # two the operator meant is not this function's to guess.
+    for key in ('neighbors', 'prefixes', 'filter_test'):
+        seen, repeated = set(), []
+        for value in test[key]:
+            marker = repr(value)
+            if marker in seen and marker not in repeated:
+                repeated.append(marker)
+            seen.add(marker)
+        if repeated:
+            sys.exit(
+                "test '{0}': {1} repeats {2}; a matrix axis lists each value "
+                "once, and `repetitions:` is what measures a cell more than "
+                "once".format(test['name'], key, ', '.join(repeated)))
     for key in ('neighbors', 'prefixes'):
         bad = [v for v in test[key] if not _is_positive_count(v)]
         if bad:

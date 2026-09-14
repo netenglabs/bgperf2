@@ -1045,6 +1045,95 @@ progress file **and the versions manifest of a completed cell** survive a
 simulated hard power-off; no stray `*.tmp` is left beside a durable document;
 and the volume question above is answered and recorded.
 
+**Done 2026-09-13, and measured rather than reasoned about.** `reclaim.py`
+holds the pure part (the stop signal, the IMDS notice, the watcher);
+`bgperf2.py` holds the transport, the SIGTERM handler, and the two places that
+act on a stop. Every clause above was exercised against a real two-cell batch
+on this host, not argued from the code:
+
+| clause | how it was verified |
+|---|---|
+| SIGKILL mid-cell, then resume | killed during cell two; `--resume` skipped cell one, ran cell two, CSV carries two rows and no duplicate |
+| no orphaned containers | three `bgperf_*` containers survived the kill; `bench()`'s existing entry sweep reclaimed them on the next run |
+| SIGTERM stops at a cell boundary | exit **143**, the in-flight cell abandoned with no row recorded, only the completed cell in the progress file |
+| the manifest survives | `versions.json` of the completed cell parsed clean after the kill |
+| no stray `*.tmp` | two planted temp files swept and **named** on the next run |
+| the volume question | answered by observation on 2026-09-10 and recorded on `bgperf2-82b` |
+
+Three things are worth carrying forward, because they are not what the bullets
+above predicted.
+
+**A cell is abandoned, never finished.** Neither window -- the notice's ~120s
+nor SIGTERM's ~120s -- finishes an MRT cell that runs for tens of minutes, so
+nothing here tries. `abandon_run()` stops the samplers and *raises*, so
+`completed[cell_id] = bench(a)` never executes and the cell cannot be recorded
+as done. Stopping the samplers is the part that must not be skipped: they are
+daemon threads polling `docker exec` once a second, and leaving them running is
+how bgperf once manufactured the contention it reports.
+
+**The `.block.lock` in the runner was never stale**, and the campaign record
+saying it had to be cleared by hand is wrong in a way worth correcting. An
+`flock` is released when its holder dies -- SIGKILL included -- and does not
+survive a reboot, so a reclaim leaves an inert 0-byte file that the next block
+locks normally. Measured. What *does* hold it is an orphan: every child
+inherits fd 9, so a bgperf2 run that outlived its bench (`bgperf2-mzy`) keeps
+the lock after the script that took it is gone. The runner now names the
+holding pids and its command line, and says explicitly not to remove the file
+-- removing it while a live holder is locked on it is how two blocks end up
+running at once.
+
+**The IMDS path was verified against the real endpoint on this host**, not
+only against the injected transport: IMDSv2 token 200, `instance-action` 404,
+parsed as "nothing scheduled". 404 is the answer for the whole life of an
+instance nobody is reclaiming, which is why it is not an error and is never
+logged.
+
+**`/code-review` then found four things, two of which would have cost a
+campaign block**, and they are recorded here rather than only in the diff
+because each is a case the implementation had already reasoned about and got
+backwards.
+
+- **Only 404 means "nothing scheduled".** `parse_instance_action()` mapped
+  *every* non-200 to `None`, so on an instance with IMDSv2 enforced -- where a
+  token request that does not answer 200 leaves the action read
+  unauthenticated, and IMDS answers **401** -- the watcher read a reclaimable
+  host as quiet, counted no failures, never gave up and never fired. That is
+  precisely the failure the module's own docstring says it exists to prevent,
+  arrived at through the one status nobody thought about. Every status but 200
+  and 404 now raises `MetadataUnavailable` and is counted as a failed read.
+- **A stop at a cell boundary has to unwind the batch, not one loop.** The
+  boundary check `break`ed, which leaves only the *cell* loop: `batch()` then
+  finished that test, walked on to the next test in the config, and returned 0
+  -- the exit status the 143 exists to distinguish from a host taken away, and
+  the one `run_batch()` reads as success before stamping `RAN` over a truncated
+  matrix. Sharper still, each remaining test re-enters a preamble that unlinks
+  its progress and summary documents when the batch is not resuming, so a stop
+  would have **discarded the previous results of tests it never ran**. It
+  raises `StopRequested` now, and `tests/test_checkpoint_durability.py`'s
+  `TestAStopUnwindsTheWholeBatch` fails if it goes back to a `break`.
+- **The lock-holder report named the process asking.** The runner has already
+  run `exec 9>"$LOCK_FILE"` by the time it calls `fuser`, so it listed its own
+  pid and the command substitution's subshells beside any real holder -- under
+  advice to kill anything there that is not a block you started. It now drops
+  `$$`, `$BASHPID` and any pid with no `/proc` entry, and `fuser`'s exit 1
+  gets a `|| true`, without which `set -euo pipefail` aborted before the
+  message could print at all.
+- **`abandon_run()` assumed a local target.** `bench()` binds `target` only in
+  the non-remote branch, so a stop on a remote run raised `NameError` *before*
+  `controller_stop.set()` -- skipping the sampler shutdown, which is the one
+  thing abandoning a run may not skip. `target` is now bound to `None` ahead of
+  the branch and the call guards on it.
+
+Two smaller ones came with them. `install_stop_handlers()` and
+`start_interruption_watch()` ran only from `batch()`, so a direct `bench` run
+-- which `scripts/calibration_case.sh` drives -- installed no handler and the
+boundary check was unreachable there; both calls are idempotent and now run
+from `bench()` as well. And the watcher gave up after three *consecutive*
+failed reads, which at a 5s interval is fifteen seconds: an IMDS blip on a real
+EC2 host would have disabled reclaim detection for the rest of a batch,
+silently. Giving up is now scoped to a host that has never answered at all,
+which is the case the rule was written for.
+
 ## Traps
 
 Each of these makes the arrangement look like it is working while it is not.

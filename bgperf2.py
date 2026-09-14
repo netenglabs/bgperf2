@@ -16,7 +16,9 @@
 # limitations under the License.
 
 import argparse
+import glob
 import hashlib
+import signal
 import json
 import os
 import random
@@ -56,7 +58,9 @@ from tester import ExaBGPTester, BIRDTester
 from mrt_tester import GoBGPMRTTester, ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
 from monitor import Monitor, Receiver
+import reclaim
 from convergence import ConvergenceTracker
+from reclaim import StopRequested, StopSignal, watch_for_interruption
 from policy import (DEFAULT_POLICY_RELOAD_BLOCKS,
                     PolicyReloadConfigurationError, PolicyReloadTracker,
                     policy_reload_counts, rejected_block_indexes,
@@ -1832,6 +1836,100 @@ def controller_memory_free(queue):
 # Runs are strictly sequential, so one module-level Event is enough.
 controller_stop = threading.Event()
 
+# Why this process is stopping, if it is. Module-level for the reason
+# `controller_stop` is: runs are strictly sequential, and a batch's cell loop
+# and the run inside it have to read the same answer.
+#
+# Deliberately *not* cleared per run, unlike `controller_stop`. A stop asked
+# for during cell 7 must still be refused-upon at cell 8; clearing it between
+# cells would let a batch answer a reclaim by starting another cell.
+stop_signal = StopSignal()
+
+
+def read_instance_metadata(path, headers):
+    """One IMDS read, returning `(status, body)`. The only EC2-aware code here.
+
+    `requests` is already a dependency (docker-py pulls it, and this module
+    imports its ConnectionError). Timeouts are short and connect and read are
+    bounded separately: on a non-EC2 host the link-local address usually
+    blackholes rather than refusing, so the connect timeout is what makes the
+    first poll fail fast instead of hanging the thread that owns it.
+    """
+    import requests
+    url = reclaim.IMDS_BASE + path
+    timeout = (reclaim.IMDS_TIMEOUT_S, reclaim.IMDS_TIMEOUT_S)
+    if path == reclaim.TOKEN_PATH:
+        response = requests.put(
+            url, timeout=timeout,
+            headers={'X-aws-ec2-metadata-token-ttl-seconds':
+                     str(reclaim.TOKEN_TTL_SECONDS)})
+    else:
+        response = requests.get(url, timeout=timeout, headers=headers or {})
+    return response.status_code, response.text
+
+
+def start_interruption_watch():
+    """Begin watching for a spot reclamation notice, if this host has one.
+
+    Silent on a host that is not EC2: the watcher gives up after a few failed
+    reads and says nothing, because every developer machine is "not EC2" and a
+    warning nobody can act on is a warning everybody learns to skip.
+
+    Idempotent -- a batch calls it once and every cell's `bench()` inherits the
+    same watcher, rather than starting one per cell and leaving forty behind.
+    """
+    global interruption_watcher
+    if interruption_watcher is not None:
+        return interruption_watcher
+
+    def on_notice(notice):
+        # Printed from the watcher thread, which is the only place that knows
+        # the notice arrived rather than the stop being asked for some other
+        # way. The cell loop prints what it *does* about it.
+        print('\n{0}'.format(notice))
+        print('stopping at the next cell boundary; the cell in flight is '
+              'abandoned rather than recorded')
+
+    interruption_watcher = threading.Thread(
+        target=watch_for_interruption,
+        args=(stop_signal, read_instance_metadata),
+        kwargs={'on_notice': on_notice},
+        daemon=True)
+    interruption_watcher.start()
+    return interruption_watcher
+
+
+interruption_watcher = None
+
+
+def install_stop_handlers():
+    """Make SIGTERM an orderly stop rather than a killed process.
+
+    A spot reclaim is SIGTERM, then SIGKILL about two minutes later. Two
+    minutes does not finish a cell -- an MRT cell runs for tens of minutes --
+    so this never tries to save the cell in flight. It marks the stop, and the
+    loops that would otherwise keep running for another half hour abandon what
+    they are doing at their next check. What is saved is everything already
+    checkpointed, and the guarantee that nothing half-done is recorded as done.
+
+    **SIGINT is left alone.** Ctrl-C already raises `KeyboardInterrupt`, which
+    unwinds immediately; routing it through here would make an interactive
+    interrupt *slower* and less predictable than it is now.
+
+    Only works from the main thread, which is where the CLI entry point runs.
+    A failure to install is not worth failing a run over -- it leaves the
+    process exactly as it behaved before this existed.
+    """
+    def handle(signum, frame):
+        if stop_signal.request('SIGTERM'):
+            print('\nSIGTERM: stopping at the next cell boundary; the cell in '
+                  'flight is abandoned rather than recorded')
+
+    try:
+        signal.signal(signal.SIGTERM, handle)
+    except (ValueError, OSError):
+        pass
+
 
 def monitor_sample_monotonic_s(info, fallback_clock=None):
     '''Read a producer timestamp, falling back for legacy queue messages.'''
@@ -2253,6 +2351,15 @@ def target_holds_suffix(witness):
 
 
 def bench(args):
+    # Here as well as in `batch()`, because a `bench` run is also a thing a
+    # reclaim can take away -- `scripts/calibration_case.sh` drives one
+    # directly, and so does anyone debugging a cell. Both calls are idempotent:
+    # re-installing a signal handler replaces it with itself, and the watcher
+    # returns the thread it already started, so the forty cells of a batch
+    # share the one watcher the batch began.
+    install_stop_handlers()
+    start_interruption_watch()
+
     output_stats = {}
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
     dckr_net_name = args.docker_network_name or args.bench_name + '-br'
@@ -2608,6 +2715,12 @@ def bench(args):
                 with open('{0}/scenario.yaml'.format(config_dir), 'w') as f:
                     f.write(str_conf)
 
+    # Bound before the branch, because only one of the two branches binds it.
+    # A remote run has no target container at all, and `abandon_run()` reads
+    # this to stop the target's sampler: unbound, a stop on a remote run dies
+    # with a `NameError` *before* the samplers are stopped, which is the one
+    # thing abandoning a run may not skip.
+    target = None
     if is_remote:
         print('target is remote ({})'.format(conf['target']['local-address']))
 
@@ -2890,6 +3003,11 @@ def bench(args):
     target_table_samples = []
     tracker = ConvergenceTracker()
     while True:
+        # Checked once per queue message, which is at least once a second: a
+        # cell that would otherwise run for tens of minutes past a reclaim
+        # notice gives the window back to the batch instead.
+        if stop_signal.is_set():
+            abandon_run(stop_signal.reason, target, m, testers)
         info = q.get()
 
         if not is_remote and info['who'] == target.name:
@@ -3355,9 +3473,20 @@ def write_provenance(args, provenance, prefix):
         'filter_test': getattr(args, 'filter_test', None),
     }
     path = results_path(args.results_dir, prefix + '.versions.json')
-    with open(path, 'w') as f:
+
+    # Through `atomic_write()`, not a plain `open(path, 'w')`. A kill landing
+    # inside `json.dump` leaves a *truncated* manifest rather than the
+    # old-or-new an atomic writer guarantees -- and provenance is the one
+    # record this repository says must never guess: a half-written
+    # `versions.json` beside a completed cell is a row whose target version
+    # cannot be established, which `--resume` will then skip because its
+    # result is already in the progress file. See
+    # docs/invariants/provenance-and-verify.md.
+    def write(f):
         json.dump(doc, f, indent=2, sort_keys=True)
         f.write('\n')
+
+    atomic_write(path, write)
     return path
 
 
@@ -3675,6 +3804,43 @@ def write_tester_health_artifact(args, prefix, errors, error_samples,
               path, errors, timeouts,
               len(error_samples), len(timeout_samples)))
     return path
+
+
+def abandon_run(reason, target, m, testers=()):
+    """End a run that will not produce a result, and always raise.
+
+    The other way out of `bench()`'s loop. `finish_bench()` stops the samplers
+    on the way to publishing a row; this stops them on the way to publishing
+    nothing, and the samplers are the part that must not be skipped. They are
+    daemon threads polling `docker exec` once a second, and the one time they
+    were left running, bgperf went on sampling through the next cell and
+    **manufactured the very contention it reports** -- see
+    docs/invariants/host-and-environment.md. A reclaim that left forty of them
+    behind would do it forty times over.
+
+    Containers are deliberately *not* removed. `bench()` already calls
+    `remove_target_containers()` and `remove_old_containers()` on the way in,
+    so the next run reclaims them; removing them here instead would race the
+    SIGKILL that is two minutes away and could leave a half-removed container
+    the next run then trips over. Leaving them is also what this repository
+    does after a FAILED run, deliberately, so the wreck can be looked at.
+
+    Raises `StopRequested` rather than returning, so nothing downstream can
+    mistake an abandoned run for a row: `batch()`'s
+    `completed[cell_id] = bench(a)` never executes, and the cell stays absent
+    from the progress file rather than recorded as done.
+    """
+    m.stop_monitoring = True
+    # None on a remote run, which has no target container to sample.
+    if target is not None:
+        target.stop_monitoring = True
+    for t in testers:
+        t.stop_monitoring = True
+    controller_stop.set()
+    print('\nabandoning this run: {0}'.format(reason))
+    print('no row is recorded for it; its containers are left for the next '
+          'run to reclaim')
+    raise StopRequested(reason)
 
 
 def finish_bench(args, output_stats, bench_stats, bench_start, target, m, testers=(), fail=False,
@@ -5579,6 +5745,20 @@ def batch(args):
     it iterates through a list of targets, number of neighbors and number of prefixes
     other variables can be set, but not iterated through
     """
+    # Before anything long-running, and before the first cell: a reclaim that
+    # arrives during cell 1 should already have somewhere to be recorded.
+    install_stop_handlers()
+    start_interruption_watch()
+
+    # An interrupted checkpoint leaves its temp file behind -- `atomic_write()`
+    # cleans up in a `finally`, which SIGKILL never reaches. Swept here rather
+    # than ignored, and *reported*, because a resumed batch carrying one is the
+    # only visible trace that the last attempt was killed rather than finished.
+    swept = sweep_stale_temp_files(args.results_dir)
+    if swept:
+        print('found {0} unfinished checkpoint file(s) from an interrupted '
+              'run, removed: {1}'.format(len(swept), ', '.join(swept)))
+
     with open(args.batch_config, 'r') as f:
         batch_config = yaml.load(f, Loader=BatchLoader)
 
@@ -5662,6 +5842,35 @@ def batch(args):
                 print("resume: skipping completed cell: {0}".format(
                     batch_cell_description(cell, repetitions)))
                 continue
+
+            # The cell boundary, and the whole point of the two-minute
+            # warning: a cell begun here cannot finish before the host goes
+            # away, so beginning it spends the window on a row nobody will
+            # keep. Everything already in `completed` is on disk and
+            # `--resume` picks up exactly here.
+            #
+            # **Raised, not `break`ed**, and the difference is the whole
+            # contract. A `break` leaves only this cell loop: `batch()` then
+            # finishes this test normally, walks on to the *next* test in the
+            # config, and returns -- so the process exits 0, which is exactly
+            # what the 143 below exists to distinguish from a run that was
+            # taken away. `run_batch()` in the campaign runner reads that 0 as
+            # success and the block stamps RAN over a truncated matrix. Worse,
+            # each remaining test re-enters the preamble above, which on a
+            # batch without `--resume` unlinks that test's progress and summary
+            # documents -- so a stop would discard the previous results of
+            # tests it never ran.
+            #
+            # Nothing is lost by unwinding here: the CSV, the summary and the
+            # progress file are rewritten after every completed cell, so what
+            # is on disk is current as of the last cell that finished.
+            if stop_signal.is_set():
+                print('\nstopping before {0}: {1}'.format(
+                    batch_cell_description(cell, repetitions),
+                    stop_signal.reason))
+                print('re-invoke the identical command with --resume to '
+                      'continue from this cell')
+                raise StopRequested(stop_signal.reason)
 
             a = argparse.Namespace(**vars(args))
             a.func = bench
@@ -5864,6 +6073,33 @@ def load_batch_progress(path):
     return load_batch_progress_document(path)['cells']
 
 
+def fsync_directory(path):
+    """Make a rename in `path` durable, not merely ordered.
+
+    `os.replace()` orders the rename against the data already fsynced into the
+    temp file, so a reader never sees a half-written document. It does not make
+    the *directory entry* durable: on a hard termination -- an EC2 spot
+    instance being terminated is one -- the entry can still point at the old
+    file, or at neither. One `fsync` on the containing directory closes that,
+    and it is the whole difference between a checkpoint and a document that
+    was probably written.
+
+    Best-effort by design. A directory fsync is not portable (it raises on
+    Windows, and some filesystems refuse it), and a checkpoint that *raised*
+    where it used to succeed would cost the very run it exists to protect.
+    """
+    try:
+        fd = os.open(path or '.', os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def atomic_write(path, write):
     temp_path = '{0}.tmp'.format(path)
     try:
@@ -5872,9 +6108,42 @@ def atomic_write(path, write):
             f.flush()
             os.fsync(f.fileno())
         os.replace(temp_path, path)
+        fsync_directory(os.path.dirname(os.path.abspath(path)))
     finally:
         if os.path.exists(temp_path):
             os.unlink(temp_path)
+
+
+def sweep_stale_temp_files(directory):
+    """Remove `*.tmp` left beside a durable document by an interrupted write.
+
+    `atomic_write()` cleans its temp file in a `finally`, which a `SIGKILL`
+    never reaches -- so a hard termination leaves one behind, and nothing
+    removed it. Harmless in itself (nothing reads them, and the next write to
+    the same document truncates), but it is the visible trace of an interrupted
+    checkpoint, and a resumed batch that carries one looks exactly as clean as
+    one that was never interrupted.
+
+    Returns what it removed, so a resumed run can *say* it was interrupted
+    rather than quietly tidying the evidence away. Best-effort: a file that
+    vanishes underneath this, or a directory that cannot be listed, is not
+    worth failing a run for.
+
+    Only `<results>/*.tmp` -- not recursive, and never a bench work directory,
+    whose files belong to containers that may still be running.
+    """
+    swept = []
+    try:
+        names = sorted(glob.glob(os.path.join(directory, '*.tmp')))
+    except OSError:
+        return swept
+    for name in names:
+        try:
+            os.unlink(name)
+        except OSError:
+            continue
+        swept.append(os.path.basename(name))
+    return swept
 
 
 def write_batch_progress(path, completed, order=None, seed=None, previous_seeds=None):
@@ -6520,6 +6789,14 @@ if __name__ == '__main__':
 
     try:
         args.func(args)
+    except StopRequested as e:
+        # An orderly stop, not a crash: a spot reclaim or a SIGTERM asked for
+        # it, everything already checkpointed is on disk, and re-invoking the
+        # identical command resumes. Exit 143 -- 128 + SIGTERM -- so a shell
+        # driver can tell "the host was taken away" from "the run failed",
+        # which a 0 would hide and a 1 would misattribute to the benchmark.
+        print('stopped: {0}'.format(e.reason))
+        sys.exit(143)
     except (ImageNotBuilt, VersionNotSupported, ImageBuildFailed) as e:
         # A missing, unselectable or unbuildable image is a setup mistake, not a
         # crash -- the message already carries the command that fixes it.

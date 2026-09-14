@@ -661,11 +661,63 @@ campaign_guard_workdir "$WORKDIR" "$ALLOW_ROOT_WORKDIR"
 # concurrently" is not advisory: two blocks share one Docker bridge naming
 # scheme and one set of fixed container names, so the second would remove the
 # first's target mid-run and publish both results as though nothing happened.
+#
+# The lock is the flock, never the file's existence. An flock is released when
+# the holding process dies -- SIGKILL included -- and does not survive a
+# reboot, so a host reclaim leaves a 0-byte `.block.lock` behind that is
+# **inert**: the next block acquires it normally. Measured, because the
+# campaign record for the 2026-09-10 reclaim reads as though the file itself
+# had to be cleared by hand. Never `rm` it to "unstick" a run: that removes the
+# name a live holder is locked on without removing the lock, and the next block
+# then creates a *new* file, acquires a lock nobody else holds, and runs
+# concurrently with the very block the refusal was protecting.
+#
+# What does survive is an orphan. Every child inherits fd 9, so a bgperf2 run
+# that outlived its bench (bgperf2-mzy) still holds this lock after the script
+# that took it is gone -- which is the case that actually looks stuck, and the
+# one a bare "another block is running" cannot tell from a healthy refusal. So
+# say who holds it.
 LOCK_FILE="$RUN_ROOT/.block.lock"
 mkdir -p "$RUN_ROOT"
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
   echo "another block is running under $RUN_ROOT (lock: $LOCK_FILE)" >&2
+  # This script has already run `exec 9>"$LOCK_FILE"`, so it holds the file
+  # open itself and `fuser` reports *its own* pid alongside any real holder --
+  # together with whatever subshell the command substitution forks. Printed
+  # unfiltered, under the advice below, that invites an operator to kill the
+  # block they just started, or a pid that is already gone. So drop this
+  # process and its subshell, and report only what is left.
+  #
+  # `|| true` because `fuser` exits 1 when nothing holds the file, which under
+  # `set -euo pipefail` would abort here -- taking with it the very message
+  # this branch exists to print.
+  holders=""
+  if command -v fuser >/dev/null 2>&1; then
+    raw="$(fuser "$LOCK_FILE" 2>/dev/null || true)"
+    for pid in $raw; do
+      # This shell, and the transient subshells the command substitution
+      # itself forked -- which `fuser` sees because they inherit fd 9, and
+      # which have already exited by the time this loop runs. A pid with no
+      # /proc entry cannot be the live holder anyone is being asked to kill.
+      [[ "$pid" == "$$" || "$pid" == "$BASHPID" ]] && continue
+      [[ -d "/proc/$pid" ]] || continue
+      holders+=" $pid"
+    done
+  fi
+  if [[ -n "${holders// /}" ]]; then
+    echo "held by pid(s):${holders}" >&2
+    for pid in $holders; do
+      [[ -r "/proc/$pid/cmdline" ]] || continue
+      printf '  %s  %s\n' "$pid" \
+        "$(tr '\0' ' ' < "/proc/$pid/cmdline" | cut -c1-120)" >&2
+    done
+    echo "if none of those is a block you started, it is an orphan (see" >&2
+    echo "bgperf2-mzy): kill the process -- do not remove the lock file." >&2
+  else
+    echo "no holder could be identified; if this persists with no bgperf2" >&2
+    echo "process running, report it rather than removing the lock file." >&2
+  fi
   exit 1
 fi
 

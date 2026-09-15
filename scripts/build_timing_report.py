@@ -703,9 +703,25 @@ def render_metric_table(section):
                           'CV {2}%</span>').format(
                     number(entry.get('min')), number(entry.get('max')),
                     number(entry.get('cv_percent')))
-            cells_html.append('<td>{0}<span class="sub"> (n={1})</span>{2}</td>'
-                              .format(number(entry['median']),
-                                      number(entry.get('n')), spread))
+            observations = ''
+            if entry['metric'] == section['decision_metric'] \
+                    and entry.get('values') and entry.get('n', 0) > 1:
+                # The passes themselves, on the decision metric, because the
+                # campaign's own sharpest finding is one a median hides: five
+                # passes of bird 2.19.2 at 250 sessions read 112/32/58/117/58,
+                # which is bimodal rather than merely wide, and "58 (n=5),
+                # 32-117" describes both that and a cell scattered evenly
+                # across the range. The plan asks for raw observations to be
+                # preserved; report.json has always had them, and this is the
+                # human-facing half of the same requirement.
+                observations = ('<br><span class="sub obs">{0}</span>'.format(
+                    html.escape(' / '.join(
+                        '{0:g}'.format(value) if isinstance(value, float)
+                        else str(value) for value in entry['values']))))
+            cells_html.append(
+                '<td>{0}<span class="sub"> (n={1})</span>{2}{3}</td>'.format(
+                    number(entry['median']), number(entry.get('n')), spread,
+                    observations))
         rows.append('<tr><th class="cell">{0}</th>{1}</tr>'.format(
             html.escape(str(cell['description'])), ''.join(cells_html)))
     return ('<div class="scroll"><table><thead><tr><th>cell</th>{0}</tr>'
@@ -792,6 +808,7 @@ th.cell { font-weight: 500; white-space: nowrap; }
 .whisker { stroke: var(--ink); stroke-width: 1.5; }
 .bar-label { font-size: 12px; fill: var(--ink); }
 .bar-value { font-size: 12px; fill: var(--dim); }
+.obs { font-variant-numeric: tabular-nums; opacity: 0.85; }
 img { max-width: 100%; }
 '''
 

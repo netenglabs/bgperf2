@@ -443,3 +443,31 @@ class TestTheOrderRelation:
             notes = builder.collect_withheld([section])
             assert not [note for note in notes
                         if 'no order relation' in note], relation
+
+
+class TestRawObservationsAreOnThePage:
+    """A median hides bimodality, which is the campaign's own sharpest finding.
+
+    Five passes of bird 2.19.2 at 250 sessions read 112/32/58/117/58 -- three
+    of them within 55-57s, one at 31s and one at 116s. "58 (n=5), 32-117"
+    describes that and also describes a cell scattered evenly across the
+    range, and only one of the two is what was measured.
+    """
+
+    def test_the_decision_metrics_passes_are_rendered(self):
+        section = builder.build_section(
+            a_series(median=58.0, values=(112, 32, 58, 117, 58)))
+        html = builder.render_metric_table(section)
+        assert '112 / 32 / 58 / 117 / 58' in html
+
+    def test_a_single_observation_is_not_dressed_up_as_a_series(self):
+        section = builder.build_section(a_series(values=(90,)))
+        html = builder.render_metric_table(section)
+        assert 'class="sub obs"' not in html
+
+    def test_only_the_decision_metric_carries_them(self):
+        """Every metric's passes would be four more number lists per row, and
+        the point is the one comparison the report is decided on."""
+        section = builder.build_section(a_series())
+        html = builder.render_metric_table(section)
+        assert html.count('class="sub obs"') == 1

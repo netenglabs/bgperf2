@@ -2534,6 +2534,23 @@ the same script, so neither is a summary of the other. Both are staged and
 moved into place only once they qualify, per the rule Block 11's review found
 the hard way.
 
+**Ran and accepted 2026-09-15, and the campaign is complete.** 15 claims and
+83 citations, every one resolved against a review regenerated over all seven
+series and nine input blocks. The exit criterion was checked mechanically
+rather than by eye: the build refuses a citation that does not match (it did,
+eight times, on the first attempt), no claim cites or names `testers (s)` --
+its nine appearances in the page are all disclaimers saying it is not
+published -- the charts carry full workload labels, and the page is standalone
+with no external resources.
+
+One thing was added after the block first ran and before it was accepted: the
+raw per-pass observations for the decision metric are now on the page, not only
+in `report.json`. The plan asks for raw observations to be preserved, and the
+campaign's own sharpest finding is one a median hides -- `58 (n=5), 32-117`
+describes bird 2.19.2's five passes at 250 sessions and equally describes a
+cell scattered evenly across that range, and only one of those was measured.
+The page now shows `112 / 32 / 58 / 117 / 58`.
+
 **What the report says, in one paragraph.** On the synthetic table RustyBGP's
 pinned build leads at 66s, FRR 10.7 leads the conventional daemons at 85s,
 BIRD 2.19.2 is 90s and OpenBGPD is 624s (8.8) and 733s (9.2). On full-internet

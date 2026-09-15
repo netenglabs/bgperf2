@@ -1,6 +1,6 @@
 # Termination detection
 
-When a run is CONVERGED, when it is FAILED, and the four rules that were each broken once.
+When a run is CONVERGED, when it is FAILED, and the five rules that were each broken once.
 
 **Read this before editing:** `convergence.py`, `bgperf2.py` (the monitor loop that feeds `update()`)
 
@@ -95,3 +95,69 @@ and `summary.py` published `0 of 3 passes observed`; after it, 5 of 5 single run
   alone fails three of them, that all four converge once the target is asked, and that the same
   series with the target's own count falling still fails. `results/` is gitignored, so the series
   lives in the test.
+
+**A fifth rule says which witnesses may end a run, and it is the one that failed a finished run for
+half an hour.** The target's own per-neighbour counters exist to **shorten** the assurance window
+from `ASSURANCE_SAMPLES` (20) to `ASSURANCE_SAMPLES_AFTER_CHECKPOINT` (5); they are not what makes
+convergence possible. The gate required `neighbors_checkpoint` outright, so a target that delivered
+its whole table — with the monitor confirming it — had no terminating path but `STUCK_SAMPLES`.
+
+Measured: Block 2 of the timing campaign, `rustybgp default` at 50 × 100,000. The monitor reached the
+check-point at 137.34s holding 5,000,000 against a required 4,950,000, the run polled on for a
+further ~2,000 seconds, and it was failed as `stuck received count 5000000 neighbors_checked 16` —
+`elapsed (s)` 2194 for a run that had finished at 137. RustyBGP reported ≥ 100,000 accepted for 16 of
+its 50 peers while demonstrably holding the whole table.
+
+This is the BIRD 3 defect one layer on. BIRD 3 reported `accepted` 0 for every neighbour, which
+killed one route to the checkpoint *quietly* — those runs still converged through
+`neighbors_received_full`. Here both routes are dead at once, and a gate with one input fails the
+run rather than waiting longer.
+
+- **Either checkpoint opens the gate; neither being set does not.** `recved_checkpoint` is the
+  monitor having actually reached the configured count, so a target that never delivered still has
+  neither witness and still fails. Nothing converges a run on stability alone — a target parked at a
+  tenth of its table is exactly as steady as one that finished.
+- **The short window needs both witnesses.** `assurance_samples` keyed on `recved_checkpoint` alone,
+  which was harmless only because the gate separately required the other one: a run with a single
+  witness could not converge at all, so the window it would have used never came up. Twenty samples
+  is the price of one account of the run, and five is what a second account buys.
+- **The looser gate does not weaken the zero-monitor case.** The drop branch still requires this
+  sample's own `checked`, and a collapsed session is not at or above the check-point, so a run whose
+  monitor went to zero while the target held everything is still failed rather than converged.
+- **A run decided on one witness says so**, in the artifact's top-level `convergence_rule`, absent
+  for every run that had both. Nothing in the stats row can carry it: `elapsed (s)` is the monitor's
+  convergence either way, so a run decided on one account of itself is otherwise indistinguishable
+  afterwards from one decided on two. **Top-level and not under `target_table`**, which exists only
+  for a daemon that reports a table witness — BIRD and FRR. Filed there it was dropped for every
+  other daemon, RustyBGP included, which is the one this rule was written for: the run that provoked
+  it would have published nothing at all about how it was decided.
+
+- **A run with no neighbour reading at all still terminates**, which took a second change. The
+  stability counter advanced only while `neighbors_checked` or `neighbors_received_full` was above
+  zero, so a sampler that failed on its *first* read left both at zero for the whole run — and
+  `STUCK_SAMPLES` keys on that same counter, so the run reached neither verdict and polled forever.
+  With no bench timeout, under `batch()`, that is the rest of the matrix. `recved > 0` is the third
+  way of knowing the run is under way; a count of zero is untouched, since
+  `NO_PROGRESS_DEADLINE_SECONDS` already trips that. 16 of 50 peers reporting and 0 of 50 are the
+  same defect, and the fix for one has to cover the other.
+
+**What the looser gate costs, stated rather than hidden.** `recved_checkpoint` latches on the first
+sample at or above the check-point and never clears, and the check-point is a fraction (99%, or 93%
+for a GoBGP MRT run) of a *declared* total. So on a multi-generator run whose target never reports
+its neighbours, the monitor's count can plateau — a late injector replaying prefixes that overlap
+what is already in the table adds nothing to it — and twenty stable samples then end the run while
+that injector is still sending. The old gate held such a run until every generator reported done.
+
+Three things bound it. It reaches only targets whose per-neighbour counters are broken, since every
+other run still gets `neighbors_checkpoint` and is decided exactly as before. The window is the full
+twenty samples rather than the five a second witness buys, which is the reason the two constants were
+separated. And the run says so: `convergence_rule` names it, and `tester_fleet`'s `injection_s` and
+signed `post_injection_tail_s` are what a reader checks it against — a tail that is negative by more
+than the poll gap is a run whose generators were still sending. Closing it properly means giving the
+tracker the offering evidence, which it does not currently see; until then this paragraph is the
+honest version.
+
+One consequence worth stating: this makes `bgperf2-sl1` — a target poll thread that dies and freezes
+the neighbour counts — cost a longer assurance window instead of the whole run, *provided* at least
+one reading arrived. A sampler that never reads at all is the case the second change above covers.
+

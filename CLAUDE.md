@@ -330,11 +330,14 @@ component, and `bgperf2.py`'s `write_event_artifact()`, which catches for it.
 **`docs/invariants/convergence.md`** — `convergence.py`'s `ConvergenceTracker`, and the `bench()`
 loop that feeds it.
 
-- Four rules hold it up and each was broken once: stability is tracked on **every** sample;
+- Five rules hold it up and each was broken once: stability is tracked on **every** sample;
   regression is measured against the **high-water mark**, not the previous sample; a count more
   than `DROP_FRACTION` below its peak is never reported CONVERGED however steady it looks; and the
   target's own table witness excuses a monitor decline the target does not share — but a monitor
   count of zero never attests, and a run the witness alone is keeping alive still ends.
+- The target's per-neighbour counters **shorten** the assurance window; they are not what makes
+  convergence possible. Either checkpoint opens the gate, neither does not, and a run decided on one
+  witness says so.
 
 
 ## Targets and images

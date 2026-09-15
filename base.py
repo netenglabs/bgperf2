@@ -726,16 +726,23 @@ class Container(object):
                 except Exception as exc:
                     # This loop used to have no guard at all, and one bad read
                     # ended the thread for the rest of the run -- silently.
-                    # What that costs is not a missing sample: it is the whole
-                    # convergence verdict. `neighbors_checked` freezes at its
-                    # last value, `note_neighbors_checkpoint()` never fires, and
-                    # `ConvergenceTracker`'s CONVERGED gate requires that
-                    # checkpoint -- so the run has no terminating path except
-                    # STUCK_SAMPLES and is published FAILED with a complete,
+                    # What that costs is not a missing sample: `neighbors_checked`
+                    # freezes at its last value and `note_neighbors_checkpoint()`
+                    # never fires. That used to cost the whole convergence
+                    # verdict, because the CONVERGED gate *required* that
+                    # checkpoint -- so the run had no terminating path except
+                    # STUCK_SAMPLES and was published FAILED with a complete,
                     # stable table in hand. Measured: the 2026-timing-validation
                     # campaign's `rustybgp default` cell at 50 x 100,000 burned
                     # 2194s that way while the target held all 5,000,000 routes
                     # and the monitor had every one of them.
+                    #
+                    # The gate now takes either checkpoint (see
+                    # `docs/invariants/convergence.md`), so a frozen counter
+                    # costs the full assurance window instead of the run. It is
+                    # still worth avoiding: that window is 20 samples rather
+                    # than 5, and the run is decided on one account of itself
+                    # rather than two, which it has to publish.
                     #
                     # So the thread survives the read, and -- the other half of
                     # the same lesson -- it is never quiet about it. A sampler

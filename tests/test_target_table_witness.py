@@ -14,7 +14,7 @@ import pytest
 
 from base import Target
 from bgperf2 import target_holds_suffix, target_table_unmeasured
-from convergence import ConvergenceTracker
+from convergence import ASSURANCE_SAMPLES, ConvergenceTracker
 from bird import BIRDTarget, neighbors_state, table_witness
 from measurements import (
     EventKind,
@@ -412,3 +412,55 @@ class TestTargetHoldsSuffix:
         line = target_holds_suffix(
             {'best_paths': 0, 'imported_paths': 0, 'exported_to_monitor': 0})
         assert '0 prefixes' in line
+
+
+def test_a_run_decided_on_one_witness_says_so_in_its_artifact():
+    '''A target whose per-neighbour counters never all report full converges
+    on the monitor alone, and the artifact carries which run that was --
+    nothing in the stats row can, since `elapsed (s)` is the monitor's
+    convergence either way.'''
+    tracker = ConvergenceTracker()
+    # No note_neighbors_checkpoint(): the counters never filled.
+    for i in range(ASSURANCE_SAMPLES + 2):
+        status = tracker.update(i + 1, 5_000_000, 16, 16, True)
+    assert status == ConvergenceTracker.CONVERGED
+    rule = tracker.convergence_rule()
+    assert rule['neighbors_checked_at_convergence'] == 16
+
+    artifact = event_artifact(_converged_events(), 'converged',
+                              target_table=OVERSHOOT_SAMPLES,
+                              convergence_rule=rule)
+    assert artifact['convergence_rule'] == rule
+
+
+def test_the_rule_survives_a_target_with_no_table_witness():
+    '''Top-level, because `target_table` exists only for BIRD and FRR.
+
+    Filed under that section the rule was dropped for every other daemon --
+    RustyBGP included, which is the daemon it was written for. The run that
+    provoked the whole change would have published nothing about how it was
+    decided.
+    '''
+    tracker = ConvergenceTracker()
+    for i in range(ASSURANCE_SAMPLES + 2):
+        tracker.update(i + 1, 5_000_000, 16, 16, True)
+    rule = tracker.convergence_rule()
+    assert rule is not None
+    # No target_table at all: what a RustyBGP run produces.
+    artifact = event_artifact(_converged_events(), 'converged',
+                              convergence_rule=rule)
+    assert 'target_table' not in artifact
+    assert artifact['convergence_rule'] == rule
+
+
+def test_an_ordinary_run_carries_no_convergence_rule():
+    '''The shape every run with both witnesses has always had.'''
+    tracker = ConvergenceTracker()
+    tracker.note_neighbors_checkpoint()
+    for i in range(ASSURANCE_SAMPLES + 2):
+        tracker.update(i + 1, 1000, 2, 2, True)
+    assert tracker.convergence_rule() is None
+    artifact = event_artifact(_converged_events(), 'converged',
+                              target_table=OVERSHOOT_SAMPLES,
+                              convergence_rule=None)
+    assert 'convergence_rule' not in artifact

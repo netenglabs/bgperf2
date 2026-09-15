@@ -3194,7 +3194,8 @@ def bench(args):
                     target_table=target_table_samples,
                     target_table_unmeasured_reason=target_table_unmeasured(
                         target, target_table_samples),
-                    target_table_witness_rule=tracker.witness_rule())
+                    target_table_witness_rule=tracker.witness_rule(),
+                    convergence_rule=tracker.convergence_rule())
 
             if status == ConvergenceTracker.CONVERGED:
                 # Before the post-convergence workloads, which take this queue
@@ -3283,7 +3284,8 @@ def bench(args):
                     target_table=target_table_samples,
                     target_table_unmeasured_reason=target_table_unmeasured(
                         target, target_table_samples),
-                    target_table_witness_rule=tracker.witness_rule())
+                    target_table_witness_rule=tracker.witness_rule(),
+                    convergence_rule=tracker.convergence_rule())
 
             if elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
                 # The same stem the final graphs use. Built from args.target
@@ -3590,7 +3592,8 @@ def write_event_artifact(args, events, prefix, status, testers=None,
                          host=None, churn=None, policy_reload=None,
                          export=None, target_table=None,
                          target_table_unmeasured_reason=None,
-                         target_table_witness_rule=None, instrument=None):
+                         target_table_witness_rule=None,
+                         convergence_rule=None, instrument=None):
     '''Atomically preserve lifecycle evidence before post-run collection.
 
     Returns the document it wrote, so the caller can print the findings it
@@ -3625,6 +3628,7 @@ def write_event_artifact(args, events, prefix, status, testers=None,
         # fire, which is how it stays legible that the rule is not a filter
         # every run passes through.
         target_table_witness_rule=target_table_witness_rule,
+        convergence_rule=convergence_rule,
         instrument=instrument)
     # Derived from the finished document rather than from the events, so the
     # policy can only ever reason about intervals this artifact published.
@@ -3852,7 +3856,8 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
                  export_thread=None,
                  churn_evidence=None, policy_reload_evidence=None,
                  target_table=None, target_table_unmeasured_reason=None,
-                 target_table_witness_rule=None):
+                 target_table_witness_rule=None,
+                 convergence_rule=None):
 
     bench_stop = time.time()
     output_stats['total_time'] = bench_stop - bench_start
@@ -3919,6 +3924,7 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
         export=export_evidence, target_table=target_table,
         target_table_unmeasured_reason=target_table_unmeasured_reason,
         target_table_witness_rule=target_table_witness_rule,
+        convergence_rule=convergence_rule,
         instrument=sampler_read_failures(target, m))
 
     # Scan the tester logs only after the clock has stopped. These used to run

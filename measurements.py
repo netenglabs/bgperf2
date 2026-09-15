@@ -2282,7 +2282,8 @@ def target_table_section(samples, unmeasured_reason=None, witness_rule=None):
 def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
                    churn=None, policy_reload=None, export=None,
                    target_table=None, target_table_unmeasured_reason=None,
-                   target_table_witness_rule=None, instrument=None):
+                   target_table_witness_rule=None,
+                   convergence_rule=None, instrument=None):
     '''Build the stable JSON-compatible event artifact document.
 
     `testers` maps a generator's producer name to whatever evidence it holds
@@ -2302,6 +2303,16 @@ def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
         'measurements': monitor_metrics(events),
         'events': [event.to_dict() for event in events],
     }
+    # Beside `status`, because it qualifies the verdict rather than describing
+    # the target's table -- and because `target_table` exists only for a
+    # daemon that reports a table witness (BIRD and FRR). Filed there, the
+    # rule was dropped for every other daemon, RustyBGP included, which is the
+    # one this rule was written for: the run that provoked it would have
+    # published nothing at all about how it was decided. Absent whenever the
+    # ordinary two witnesses were both present, so an ordinary run keeps
+    # exactly the document it had.
+    if convergence_rule:
+        artifact['convergence_rule'] = convergence_rule
     if testers:
         artifact['testers'] = {
             producer: _tester_section(events, producer, evidence)

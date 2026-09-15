@@ -134,11 +134,28 @@ class ConvergenceTracker(object):
         self.max_excused_decline = 0.0
         self.max_excused_witness_decline = 0.0
         self.converged_below_monitor_peak = False
+        # Whether the verdict rested on the monitor alone because the target's
+        # own per-neighbour counters never all reported full. Such a run is
+        # converged on one account of itself rather than two, and waited the
+        # full assurance window for it.
+        self.converged_without_neighbors_checkpoint = False
 
     @property
     def assurance_samples(self):
-        '''How long the count must hold steady before we call it converged.'''
-        if self.recved_checkpoint:
+        '''How long the count must hold steady before we call it converged.
+
+        The short window needs **both** witnesses: the monitor at or above the
+        check-point, and the target saying every neighbour has finished
+        sending. Either one alone leaves the full window, which is what the
+        two constants have always meant -- 20 samples is the price of having
+        only one account of the run, and 5 is what a second account buys.
+
+        It used to key on `recved_checkpoint` alone, which was harmless only
+        because the convergence gate separately *required* the neighbour
+        checkpoint: a run with one witness could not converge at all, so the
+        window it would have used never came up.
+        '''
+        if self.recved_checkpoint and self.neighbors_checkpoint:
             return ASSURANCE_SAMPLES_AFTER_CHECKPOINT
         return ASSURANCE_SAMPLES
 
@@ -243,6 +260,33 @@ class ConvergenceTracker(object):
             # count: excusing samples keeps a run alive, and this says the
             # final verdict rested on the witness.
             'converged_below_monitor_peak': self.converged_below_monitor_peak,
+        }
+
+    def convergence_rule(self):
+        '''What decided this run, when that was not the ordinary two witnesses.
+
+        None for every run whose target reported its neighbours finished --
+        which is nearly all of them -- so an ordinary run's artifact keeps
+        exactly the shape it had before this existed, on the rule
+        `witness_rule()` follows.
+
+        It is published rather than left to be inferred from the row because
+        nothing in the row can carry it: `elapsed (s)` is the monitor's
+        convergence either way, and a run decided on one account of itself is
+        not distinguishable afterwards from one decided on two.
+        '''
+        if not self.converged_without_neighbors_checkpoint:
+            return None
+        return {
+            'policy': ('the target\'s per-neighbour counters never all '
+                       'reported full, so the run was decided on the '
+                       'monitor\'s check-point alone, after the full '
+                       'assurance window rather than the shortened one'),
+            'assurance_samples_required': ASSURANCE_SAMPLES,
+            'assurance_samples_after_checkpoint': (
+                ASSURANCE_SAMPLES_AFTER_CHECKPOINT),
+            'neighbors_checked_at_convergence': self.last_neighbors_checked,
+            'monitor_peak': self.peak_recved,
         }
 
     def update(self, elapsed_seconds, recved, neighbors_checked,
@@ -361,7 +405,25 @@ class ConvergenceTracker(object):
         # STUCK_SAMPLES either. A real 10-peer MRT run peaked at 973368 and
         # settled at 971957 -- 0.145% down -- and hung there indefinitely with
         # the target long since idle.
-        if (self.last_neighbors_checked > 0 or neighbors_received_full > 0) \
+        # `recved > 0` is the third way of knowing the run is under way, and
+        # without it the gate above cannot fire in the case it was widened
+        # for. A target whose neighbour sampler fails on its *first* read
+        # leaves both counters at 0 for the whole run (`bgperf2-sl1`, and a
+        # remote target, where the dispatch block is skipped entirely), so the
+        # stability counter never left zero -- and `STUCK_SAMPLES` keys on the
+        # same counter, so the run reached neither verdict. With no bench
+        # timeout that is forever, and under `batch()` it is the rest of the
+        # matrix. Reproduced: 650 samples of a complete table at `checked`,
+        # counters at 0, status still `continue`.
+        #
+        # 16 of 50 peers reporting and 0 of 50 are the same defect, so the fix
+        # for one has to cover the other; a run stable at a count the monitor
+        # never checkpointed still only reaches STUCK_SAMPLES, because the
+        # convergence gate needs a checkpoint and stability alone is not one.
+        # A count of zero is not affected: NO_PROGRESS_DEADLINE_SECONDS
+        # already trips that case, and it requires `recved == 0`.
+        if (self.last_neighbors_checked > 0 or neighbors_received_full > 0
+                or recved > 0) \
                 and recved == self.last_recved:
             self.last_recved_count += 1
         else:
@@ -412,13 +474,46 @@ class ConvergenceTracker(object):
         # costs at most a poll here: the count is flat by then, so the next
         # sample carrying a fresh read converges. Measured, the witness is
         # re-read on all but one monitor sample in 159.
-        if (self.neighbors_checkpoint
+        # Either checkpoint opens this gate; neither being set does not.
+        #
+        # It required `neighbors_checkpoint` alone, and that made the target's
+        # own per-neighbour counters *necessary* for convergence when they
+        # exist to **shorten** the assurance window. A target that delivered
+        # its whole table, and whose delivery the monitor confirmed, then had
+        # no terminating path but STUCK_SAMPLES. Seen for real: Block 2 of the
+        # timing campaign, `rustybgp default` at 50 x 100,000 -- the monitor
+        # reached the check-point at 137.34s holding 5,000,000 of a required
+        # 4,950,000, the run polled on for a further ~2,000 seconds, and was
+        # failed as `stuck received count 5000000 neighbors_checked 16`.
+        # RustyBGP reported >= 100,000 accepted for 16 of 50 peers while
+        # demonstrably holding the whole table. `elapsed (s)` 2194 for a run
+        # that finished at 137.
+        #
+        # This is the BIRD 3 defect one layer on. BIRD 3 reported `accepted` 0
+        # for every neighbour, which killed one route to the checkpoint
+        # quietly -- those runs still converged through
+        # `neighbors_received_full`. Here both routes are dead at once, and a
+        # gate with one input fails the run instead of waiting longer.
+        #
+        # What guards the looser gate is the window above: without the second
+        # witness the run holds steady for the full ASSURANCE_SAMPLES rather
+        # than the 5 a second account buys. And `recved_checkpoint` is the
+        # monitor having actually reached the configured count, so a target
+        # that never delivered still has neither checkpoint and still fails --
+        # nothing here converges a run on stability alone.
+        if ((self.neighbors_checkpoint or self.recved_checkpoint)
                 and self.last_recved_count >= self.assurance_samples
                 and (dropped <= DROP_FRACTION
                      or (witness_holds and checked
                          and self.witness_carried_samples == 0))):
             if dropped > DROP_FRACTION:
                 self.converged_below_monitor_peak = True
+            if not self.neighbors_checkpoint:
+                # Said out loud, never inferred from the row. This run has one
+                # account of itself where every other run has two, and a
+                # reader comparing its timing against a run that had both is
+                # entitled to know which one this was.
+                self.converged_without_neighbors_checkpoint = True
             return self.CONVERGED
 
         if (elapsed_seconds > NO_PROGRESS_DEADLINE_SECONDS

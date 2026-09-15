@@ -1,0 +1,64 @@
+# Block 11 of the 64 GB timing validation campaign: BIRD session scaling at
+# 250 peers, repetition 4 of 5. See docs/2026-64gb-timing-validation-plan.md,
+# "Block 11: screen-peers repetitions 4 and 5", and
+# results/2026/2026-timing-validation/metadata/block11-expansion.json, which
+# is the decision this file executes and the document
+# scripts/check_repetition_configs.py validates it against.
+#
+# THIS IS THE ONE COMPARISON THAT REVERSED. Block 8 measured 112s for 2.19.2
+# against 54s and 49s for the two 3.3.2 configurations -- Primary Question 9's
+# central claim, and the campaign's only evidence of BIRD 3 beating BIRD 2 at
+# anything. Block 10's repetitions 2 and 3 measured 32s and 58s for 2.19.2
+# against 57/56s and 50/73s, so pass 2 has 2.19.2 converging a 250-session
+# fleet in *half* 3.3.2's time and pass 1 has it taking twice as long. Three
+# passes give 2.19.2 a CV of 60.6% and 3.3.2 default 2.7%.
+#
+# So this block is not asking the question Block 8 asked. What three passes
+# establish is that the dispersion is **asymmetric**, and repetitions 4 and 5
+# are what decide whether that asymmetry is the finding -- five observations
+# per cell is where the plan stops, and an unseparated pair there is a result
+# rather than a sixth pass.
+#
+# IDENTICAL TO REPETITIONS 2 AND 3 EXCEPT THE TEST NAME AND THE SEED. The
+# matrix, the workload and the three labels are Block 8's, unchanged: a pass
+# that measured a different thing is not an observation of the same thing, and
+# the five passes are read as the dispersion of one cell.
+#
+# ORDER. `order: shuffle` seed 202611 -- the campaign's mechanical year+block
+# rule, continuing 202610. Both of this block's configs state that seed and
+# draw different permutations, because `batch_shuffle_key()` digests
+# `<seed>:<batch_cell_id(test_name, cell)>` and the test names differ. A new
+# seed per block is what keeps repetitions 4-5 from re-running repetitions 2-3
+# in the same order and applying one position bias twice more.
+#
+# WHAT THIS MATRIX MAY NOT GAIN. Block 8 swept 50, 250 and 500 peers into one
+# results directory and these are its 250-peer cells alone, at ordinals 0-2
+# here and 3-5 there. The review pools them on axes and target rather than on
+# ordinal, and the narrowing is declared as `covers: {neighbors: 250}` in
+# `SCREEN_REPETITIONS`: a row this file measured outside that coverage is
+# refused by the review rather than pooled into a comparison nobody planned.
+tests:
+  -
+     name: 2026-timing-bird-peers250-rep4
+     neighbors: [250]
+     prefixes: [2_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 202611
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (4 threads)
+         threads: 4
+         tester_type: bird

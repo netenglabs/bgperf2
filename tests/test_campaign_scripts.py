@@ -108,11 +108,12 @@ def test_the_block_order_is_the_plans_order():
     result = run([BLOCK_RUNNER, 'list'])
     assert result.returncode == 0, result.stderr
     lines = [l for l in result.stdout.splitlines() if l.strip()]
-    assert len(lines) == 12
+    assert len(lines) == 13
     assert lines[0].split()[1] == 'block0-preflight-and-smoke'
     assert lines[1].split()[1] == 'block1-generator-calibration'
     assert lines[5].split()[1] == 'block5-mrt-rep1'
-    assert lines[11].split()[1] == 'block11-final-report'
+    assert lines[11].split()[1] == 'block11-peers-expansion'
+    assert lines[12].split()[1] == 'block12-final-report'
 
 
 def test_status_reports_every_block_before_anything_has_run(roots):
@@ -1126,14 +1127,31 @@ def test_a_pass_that_never_started_is_not_reported_as_one_that_failed():
     body = BLOCK_RUNNER.read_text()
     loops = [seg for seg in body.split('|| batch_status=$?')[1:]
              if seg.lstrip().startswith('if [[ $batch_status -ne 0 ]]; then')]
-    assert len(loops) == 2, len(loops)
+    # Every such loop, however many blocks have one -- a count written down
+    # here is a number that has to be edited each time a block lands, and the
+    # edit that silences it is indistinguishable from the one that hides a
+    # loop which stopped following the rule. Two is the floor: blocks 8 and 10
+    # both have one and neither is going away.
+    assert len(loops) >= 2, len(loops)
     for seg in loops:
         head = seg.split('\n    check_evidence', 1)[0]
         assert 'if [[ $STOPPED -eq 1 ]]; then' in head
         counted = head.split('if [[ $STOPPED -eq 1 ]]; then', 1)[1]
-        skip, failed = counted.split('else', 1)
+        # The skip branch ends at the first `elif` or `else` at that
+        # indentation, not at the first `else` anywhere: a block that tells
+        # its *last* pass apart from the rest has an `elif` between them, and
+        # splitting on `else` put that branch inside the skip and read its
+        # counting as the skip's.
+        boundary = re.search(r'^      (?:elif |else$)', counted, re.M)
+        assert boundary, counted
+        skip, failed = counted[:boundary.start()], counted[boundary.start():]
         assert 'EVIDENCE_FAILURES' not in skip, skip
         assert 'EVIDENCE_FAILURES' in failed
+        # And every branch that is not the skip counts, so a pass that failed
+        # is never lost because it happened to be the last one.
+        for branch in re.split(r'^      (?:elif .*|else)$', failed,
+                               flags=re.M)[1:]:
+            assert 'EVIDENCE_FAILURES' in branch, branch
 
 
 def test_a_reclaim_does_not_start_the_passes_after_it():
@@ -1416,3 +1434,50 @@ def test_the_interrupted_advice_names_force_for_a_pass_that_really_failed():
                    'ones that never ran are outstanding.'):
         advice = body.split(marker, 1)[1][:400]
         assert '--force' in advice, marker
+
+
+def _blocks_that_measure_nothing():
+    """The indices the runner says produce no rows at all."""
+    table = BLOCK_RUNNER.read_text().split(
+        'declare -A BLOCK_MEASURES_NOTHING=(', 1)
+    assert len(table) == 2, 'the measures-nothing table is gone'
+    return set(int(n) for n in re.findall(
+        r'^\s*\[(\d+)\]=', table[1].split('\n)', 1)[0], re.M))
+
+
+def test_the_blocks_that_measure_nothing_are_the_review_and_the_report():
+    """The table is keyed by index and the claim is about a block.
+
+    Inserting a block below an entry moves that entry onto a different block,
+    silently and in the accepting direction: when the peer-sweep expansion
+    became block 11, the report's `[11]` would have sat on a block that runs
+    six benchmarks and told `next` it produced no rows -- the three messages
+    the table feeds are all failure paths, so nobody would see it until one
+    fired. Nothing else pins these to the blocks they are about; the indices
+    were hand-shifted, which is exactly the edit this catches.
+    """
+    keys = _block_keys()
+    named = sorted(keys[index] for index in _blocks_that_measure_nothing())
+    assert named == ['block12-final-report', 'block9-variance-review'], named
+
+
+def test_a_failed_review_does_not_destroy_the_one_already_on_disk():
+    """`rm -rf "$out_dir"` came before the regeneration, and the regeneration
+    refuses whenever a later block has been built and not yet accepted --
+    which is the ordinary state of the campaign, since a pass is declared as
+    soon as its block is built. So a `block-9 --force` deleted an accepted
+    block's published review and could not rebuild it, and the expansion
+    document cites that review by path as its own evidence.
+    """
+    body = BLOCK_RUNNER.read_text()
+    procedure = body.split('run_variance_review() {', 1)[1].split('\n}', 1)[0]
+    # Comments out: this one explains the defect by quoting the line that
+    # caused it, and a test that reads prose as code fails on the paragraph
+    # describing the fix.
+    procedure = '\n'.join(line for line in procedure.splitlines()
+                          if not line.strip().startswith('#'))
+    staged = procedure.split('--out "$staging"', 1)
+    assert len(staged) == 2, 'the review no longer regenerates into staging'
+    assert 'rm -rf "$out_dir"' not in staged[0], staged[0]
+    # And the move into place happens only after the non-zero path returned.
+    assert procedure.index('return') < procedure.index('mv "$staging"')

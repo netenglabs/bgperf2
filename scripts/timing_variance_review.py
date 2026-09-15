@@ -19,8 +19,10 @@ Four things it deliberately does not do:
 - **It writes nothing into a block's results.**  Those passes are finished,
   reviewed and accepted; this reads them.
 - **It decides no selection.**  Whether a comparison has earned repetitions
-  4-5 is the operator's call, recorded in `metadata/block10-selection.json`,
-  which this *validates* and never writes.  A tool that both proposed an
+  4-5 is the operator's call, recorded in a selection document
+  (`metadata/block10-selection.json`, and `metadata/block11-expansion.json`
+  for the one comparison that earned 4-5), which this *validates* and never
+  writes.  A tool that both proposed an
   expansion and approved it is the "re-run the results you dislike" failure
   the variance rule exists to prevent.
 - **It publishes nothing absent as a zero.**  A withheld statistic is `null`
@@ -73,7 +75,17 @@ from bgperf2 import (batch_cell_description, target_run_name,  # noqa: E402
                      unsampled_row_values)
 
 REVIEW_SCHEMA = 'bgperf2/timing-variance-review/v1alpha1'
-SELECTION_SCHEMA = 'bgperf2/block10-selection/v1alpha1'
+# A selection document is a plan for one block, and there is more than one of
+# them now: Block 9 wrote `metadata/block10-selection.json` and Block 10's
+# pooled read wrote `metadata/block11-expansion.json`. The shape is the same
+# one, so the schema is named for the shape rather than for the first block
+# that had it.
+SELECTION_SCHEMA = 'bgperf2/campaign-selection/v1alpha1'
+# The name that shape was given while Block 10's was the only selection there
+# was. It is accepted, not rewritten: that document is the durable record of a
+# decision an accepted block carried out, and editing a field of it to satisfy
+# a rename would make the record younger than the block it planned.
+LEGACY_SELECTION_SCHEMAS = ('bgperf2/block10-selection/v1alpha1',)
 
 # The canonical workloads, and which block ran which pass of each.  Nothing
 # inside a block says it is one pass of three -- a repetition is part of a
@@ -119,11 +131,20 @@ SERIES = (
 # reload and churn are both 50 x 50,000 with the same three run names.
 SCREEN_BLOCK = 'block8-bird-architecture-screen'
 REPETITION_BLOCK = 'block10-selected-repetitions'
+# Passes 4 and 5 of the peer sweep, and of nothing else. Block 10's pooled
+# read settled `diversity` and `reload` at three passes and left all three of
+# the 250-peer cells on `expand to 5` -- the comparison reversed between
+# passes 1 and 2 rather than tightening -- so exactly one of the three
+# selections is expanded. `metadata/block11-expansion.json` is the decision.
+EXPANSION_BLOCK = 'block11-peers-expansion'
 
 # Block 10 repeats three of the five screen scenarios -- exactly the three
 # `metadata/block10-selection.json` selects -- as passes 2 and 3, each into its
 # own results directory. The other two are declined there with their reasons,
-# so they stay at the one observation Block 8 measured and say so.
+# so they stay at the one observation Block 8 measured and say so. Block 11
+# then adds passes 4 and 5 of the peer sweep alone, so the three scenarios no
+# longer have the same number of passes as each other -- see
+# SCREEN_PASS_BLOCKS, which is where a pass and its block are joined.
 #
 # `covers` is what lets the peer sweep be repeated *in part*. Block 8 swept 50,
 # 250 and 500 peers into one results directory; the selection names only the
@@ -151,19 +172,44 @@ def screen_caveat(scenario):
     return ''
 
 
+# Which block ran which pass after the screen, per scenario. A scenario is not
+# repeated the same number of times as its neighbours any more: Block 10 ran
+# passes 2 and 3 of all three selected scenarios, and Block 11 runs passes 4
+# and 5 of the peer sweep alone. Written out rather than derived from a count,
+# because the block a pass ran in is the thing a reader has to be able to
+# check -- `results/<block>/<results>` is where its rows are.
+SCREEN_PASS_BLOCKS = {
+    'peers': ((2, REPETITION_BLOCK), (3, REPETITION_BLOCK),
+              (4, EXPANSION_BLOCK), (5, EXPANSION_BLOCK)),
+    'diversity': ((2, REPETITION_BLOCK), (3, REPETITION_BLOCK)),
+    'reload': ((2, REPETITION_BLOCK), (3, REPETITION_BLOCK)),
+}
+
+
 def _screen_passes(scenario):
     passes = [{'repetition': 1, 'block': SCREEN_BLOCK, 'results': scenario}]
     if scenario not in SCREEN_REPETITIONS:
         return tuple(passes)
     covers = SCREEN_REPETITIONS[scenario]
-    for repetition in (2, 3):
-        entry = {'repetition': repetition, 'block': REPETITION_BLOCK,
+    for repetition, block in SCREEN_PASS_BLOCKS[scenario]:
+        entry = {'repetition': repetition, 'block': block,
                  'results': '{0}-rep{1}'.format(scenario, repetition)}
         if covers:
             entry['covers'] = dict(covers)
         passes.append(entry)
     return tuple(passes)
 
+
+# The two tables are one table split by what they answer -- which cells a
+# repetition covers, and which block ran it -- so a scenario in one and not
+# the other is a scenario whose passes nobody can locate. A missing key raises
+# in `_screen_passes` on import; an extra one would not, and would be a block
+# quietly reviewing a pass of a scenario it never ran.
+if set(SCREEN_PASS_BLOCKS) != set(SCREEN_REPETITIONS):
+    raise RuntimeError(
+        'SCREEN_PASS_BLOCKS and SCREEN_REPETITIONS name different scenarios: '
+        '{0!r} against {1!r}'.format(sorted(SCREEN_PASS_BLOCKS),
+                                     sorted(SCREEN_REPETITIONS)))
 
 SCREEN_SERIES = tuple(
     {
@@ -386,6 +432,14 @@ def read_pass(run_root, entry, problems):
     only for the *artifacts*, where no such mapping exists.
     '''
     directory = os.path.join(run_root, entry['block'], entry['results'])
+    if not os.path.isdir(directory):
+        # A pass that has not run, said as that. A pass is declared here as
+        # soon as its block is built, so this is the ordinary state of the
+        # block the campaign is about to run -- and "expected one progress
+        # file, found 0" describes a directory that exists and is wrong.
+        problem(problems, ERROR, '{0}: this pass has not run; there is no '
+                'such directory'.format(directory))
+        return None
     found = sorted(glob.glob(os.path.join(directory, '*.progress.json')))
     if len(found) != 1:
         problem(problems, ERROR, '{0}: expected one progress file, found {1}'
@@ -1029,7 +1083,21 @@ def review_blocks(run_root, problems, keys=INPUT_BLOCKS):
         entry = blocks.get(key) or {}
         host = entry.get('host') or {}
         accepted = os.path.isfile(marker)
-        if not accepted:
+        # Three states, not two. A block with rows nobody reviewed and a block
+        # that has not run are both refusals, and describing them in one
+        # clause is the conflation this campaign forbids everywhere else: the
+        # first is work to review, the second is work to do. A pass is
+        # declared in the tables above as soon as its block is *built*, so the
+        # second state is the ordinary one for the block the campaign is about
+        # to run, and it said "its rows have not been reviewed" about a
+        # directory that does not exist.
+        ran = os.path.isdir(os.path.join(run_root, key))
+        if not ran:
+            problem(problems, ERROR,
+                    '{0} has not run, so this series has no rows for its '
+                    'pass(es) yet; it is work to do rather than work to '
+                    'review'.format(key))
+        elif not accepted:
             problem(problems, ERROR,
                     '{0} has no COMPLETE marker, so its rows have not been '
                     'reviewed and may not be read together with the '
@@ -1045,15 +1113,22 @@ def review_blocks(run_root, problems, keys=INPUT_BLOCKS):
                                for attempt in attempts],
             'mrt_inputs': entry.get('mrt_inputs'),
         }
+        review['blocks'][key]['ran'] = ran
         if attempts:
             problem(problems, NOTE,
                     '{0} was measured across {1} attempt(s); a reclaim inside '
                     'a block is a finding in that block\'s record, not grounds '
                     'to discard it'.format(key, len(attempts) + 1))
 
+    # Only the blocks that ran. A block with no directory recorded no host and
+    # no image, and reporting that as a provenance gap describes work that has
+    # not happened in the words used for work that happened unrecorded -- on
+    # top of the one refusal above, which has already said the useful thing.
+    measured = {key: entry for key, entry in review['blocks'].items()
+                if entry.get('ran')}
     for field, path in HOST_CLASS_FIELDS:
         values = {key: dig(entry['host'], path)
-                  for key, entry in review['blocks'].items()}
+                  for key, entry in measured.items()}
         present = {key: value for key, value in values.items() if value is not None}
         absent = sorted(key for key in values if key not in present)
         described = ', '.join('{0}={1}'.format(key, value)
@@ -1086,7 +1161,7 @@ def review_blocks(run_root, problems, keys=INPUT_BLOCKS):
         # two loops up follows: an absent check reads as one that passed.  A
         # tag recorded by two passes of three tells you nothing about the
         # third, and "identical in every block" counted it as agreeing.
-        unrecorded = sorted(key for key in review['blocks'] if key not in ids)
+        unrecorded = sorted(key for key in measured if key not in ids)
         if unrecorded:
             problem(problems, NOTE,
                     '{0} has no recorded image id in {1}, so those blocks say '
@@ -1248,7 +1323,7 @@ def validate_selection(document, reviews, excluded, problems, attempted=None):
     What it does not check is the *hypothesis*.  That it is present, named and
     written down is mechanical; whether it is a good one is the review.
     '''
-    if document.get('schema') != SELECTION_SCHEMA:
+    if document.get('schema') not in (SELECTION_SCHEMA,) + LEGACY_SELECTION_SCHEMAS:
         problem(problems, ERROR, 'the selection is not {0}: {1!r}'.format(
             SELECTION_SCHEMA, document.get('schema')))
         return
@@ -1390,20 +1465,44 @@ def validate_selection(document, reviews, excluded, problems, attempted=None):
         # is the more useful of the two -- it catches a block that ran fewer
         # or more passes than the selection asked for, which nothing else
         # here would notice.
-        planned = [one_pass for one_pass in review['passes']
-                   if one_pass.get('block') == REPETITION_BLOCK]
+        # And the count is taken *through* the planned block, never over every
+        # pass the series will ever have. A series can be expanded again --
+        # Block 11 adds passes 4 and 5 of the peer sweep -- and counting all
+        # five against Block 10's selection reported "asks for 3 passes and 5
+        # ran", which is a later block falsifying an earlier selection that
+        # was carried out exactly as written. What a selection can be held to
+        # is the campaign up to the end of the block it planned.
+        planned_block = str(document.get('planned_block')
+                            or REPETITION_BLOCK)
+        positions = [index for index, one_pass in enumerate(review['passes'])
+                     if one_pass.get('block') == planned_block]
+        if document.get('planned_block') and not positions:
+            # Two things look identical here and only one is a fault: a block
+            # whose passes have not been declared yet -- the ordinary state of
+            # a selection written before the block it plans is built -- and a
+            # block name with a typo in it, which silently falls through to
+            # the "adds an observation" question and reports that a selection
+            # carried out exactly as written added nothing. Neither can be
+            # told from the other by anything here, so it is said out loud
+            # rather than guessed at.
+            problem(problems, NOTE,
+                    '{0}: names `planned_block` {1!r} and this series has no '
+                    'pass from it, so it is read as a selection whose block '
+                    'has not been built'.format(name, planned_block))
+        planned = [review['passes'][index] for index in positions]
+        through = positions[-1] + 1 if positions else 0
         observed = len(review['passes']) - len(planned)
         requested = entry.get('passes_requested')
         if not isinstance(requested, int) or isinstance(requested, bool):
             problem(problems, ERROR, '{0}: `passes_requested` is not a number'
                     .format(name))
         elif planned:
-            if len(review['passes']) != requested:
+            if through != requested:
                 problem(problems, ERROR,
-                        '{0}: asks for {1} passes and {2} ran ({3} in {4}), so '
-                        '{5} was not carried out as written'.format(
-                            name, requested, len(review['passes']),
-                            len(planned), REPETITION_BLOCK, REPETITION_BLOCK))
+                        '{0}: asks for {1} passes and {2} ran through {3} ({4} '
+                        'in it), so {3} was not carried out as written'.format(
+                            name, requested, through, planned_block,
+                            len(planned)))
         elif requested <= observed:
             problem(problems, ERROR,
                     '{0}: asks for {1} passes and {2} already ran, so it adds '

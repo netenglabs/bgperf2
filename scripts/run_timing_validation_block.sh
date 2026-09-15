@@ -20,7 +20,10 @@ Runs the 64 GB timing validation campaign
 
 Actions:
   next        Run the first block that has not been accepted
-  block-N     Run block N specifically (0 through 11)
+  block-N     Run block N specifically; `list` prints the numbers. No range
+              is named here: the bound comes from BLOCK_KEYS, which is defined
+              after this text and grows as blocks are built, so a number
+              written here refuses a block the script accepts.
   list        Print the block order and what each one is
   status      Print each block's durable state under this run ID
   accept N    Record block N as reviewed and accepted, after you have read its
@@ -212,7 +215,8 @@ BLOCK_KEYS=(
   block8-bird-architecture-screen
   block9-variance-review
   block10-selected-repetitions
-  block11-final-report
+  block11-peers-expansion
+  block12-final-report
 )
 BLOCK_TITLES=(
   "preflight and timing smoke"
@@ -226,6 +230,7 @@ BLOCK_TITLES=(
   "BIRD architecture screen"
   "variance, version, and BIRD-screen review"
   "selected repetitions"
+  "screen-peers repetitions 4 and 5"
   "final report"
 )
 
@@ -238,12 +243,18 @@ BLOCK_TITLES=(
 # probe gets both cases backwards.
 declare -A BLOCK_MEASURES_NOTHING=(
   [9]=1
-  # Block 11 writes the campaign's report and runs no benchmark either. Listed
+  # Block 12 writes the campaign's report and runs no benchmark either. Listed
   # before it is built, deliberately: an unbuilt block exits 2 long before any
   # of these paths, so the entry changes nothing until the block lands -- and
   # the alternative is four messages that go wrong on the day it does, which
   # is the defect this table was added to fix.
-  [11]=1
+  #
+  # It was [11] until Block 11 became the peer-sweep expansion. An index in
+  # this table is a claim about one block, and a block inserted below one
+  # moves every claim above it: left alone, the report's entry would have sat
+  # on a block that runs eighteen containers and tells `next` it produced no
+  # rows.
+  [12]=1
 )
 
 # A block can be *built* and still not be the right thing to run, and those are
@@ -1671,7 +1682,7 @@ run_bird_architecture_screen() {
 # was written between Block 9's first reading of the statistics and the run
 # that validated them, and it names three comparisons to repeat with a
 # hypothesis and a variance reason each, and seven to decline with reasons. So
-# the first thing here is `check_block10_configs.py`, which reads that document
+# the first thing here is `check_repetition_configs.py`, which reads that document
 # against these configs and refuses a mismatch before any container starts:
 # the cells each config runs must be exactly the cells its selection names, the
 # two passes of a comparison must differ in the test `name` and nothing else,
@@ -1706,8 +1717,8 @@ run_selected_repetitions() {
   # reasons scroll past on the console and the block records nothing about why
   # it refused. `verify` below does it this way for the same reason.
   local check_log="$METADATA_DIR/selection-check-$BLOCK_KEY.txt"
-  if ! "$PYTHON_BIN" scripts/check_block10_configs.py \
-        --selection "$selection" > "$check_log" 2>&1; then
+  if ! "$PYTHON_BIN" scripts/check_repetition_configs.py \
+        --block 10 --selection "$selection" > "$check_log" 2>&1; then
     echo "the configs do not execute $selection; see $check_log" >&2
     cat "$check_log" >&2
     exit 1
@@ -1802,6 +1813,122 @@ run_selected_repetitions() {
   done
 }
 
+# Block 11 expands one comparison of Block 10's three and nothing else.
+#
+# Its shape is `run_selected_repetitions()` with two passes instead of six,
+# and it is a separate function rather than a parameter on that one for the
+# reason the configs are separate files: what a block ran is read afterwards
+# off the block, and a shared launcher whose behaviour depends on
+# `$BLOCK_INDEX` is a place where the two blocks can quietly become each
+# other. What *is* shared is the guard, which is where a copy would actually
+# have cost something -- `check_repetition_configs.py --block 11`.
+#
+# The two passes are repetitions 4 and 5 of the 250-peer peer sweep. Block
+# 10's pooled read left all three of its cells on `expand to 5`: the
+# comparison reversed between passes 1 and 2 rather than tightening, and five
+# observations is where the plan stops -- an unseparated pair there is a
+# result rather than a sixth pass.
+run_peers_expansion() {
+  local selection="$METADATA_DIR/block11-expansion.json"
+
+  # Documents before containers, exactly as Block 10 does it, and captured
+  # with `> file 2>&1` for the same reason: the problem lines go to stderr, so
+  # a `tee` of stdout alone leaves the durable artifact empty on the one path
+  # it exists for.
+  local check_log="$METADATA_DIR/selection-check-$BLOCK_KEY.txt"
+  if ! "$PYTHON_BIN" scripts/check_repetition_configs.py \
+        --block 11 --selection "$selection" > "$check_log" 2>&1; then
+    echo "the configs do not execute $selection; see $check_log" >&2
+    cat "$check_log" >&2
+    exit 1
+  fi
+  cat "$check_log"
+
+  # key -> config -> expected runs. The key is the rendered config's name, the
+  # results directory and the evidence label, and it is what
+  # `SCREEN_PASS_BLOCKS` names as each pass's `results`, so a renamed
+  # directory fails the review rather than quietly reviewing four passes.
+  local -a scenarios=(
+    "peers-rep4:benchmarks/2026-timing-bird-peers250-rep4.yaml:3"
+    "peers-rep5:benchmarks/2026-timing-bird-peers250-rep5.yaml:3"
+  )
+
+  local -a rendered=()
+  local -a preflight_args=()
+  local entry key config
+  for entry in "${scenarios[@]}"; do
+    key="${entry%%:*}"
+    config="${entry#*:}"
+    config="${config%:*}"
+    campaign_render_config "$BLOCK_KEY-$key" "$config" \
+      "$RENDERED_CONFIG_DIR/$BLOCK_KEY-$key.yaml"
+    # The validated document has to be the one that runs. Same `cmp` as Block
+    # 10's, and it belongs here rather than in a shared helper for the reason
+    # review found the first time: that guard was written once and inserted
+    # into the render loop of a block that runs no selection check at all, so
+    # its message was false there and the block it was written for had none.
+    if ! cmp -s "$config" "$RENDERED_CONFIG_DIR/$BLOCK_KEY-$key.yaml"; then
+      echo "rendered $key differs from the $config that was validated;" >&2
+      echo "the selection check did not read what this block would run" >&2
+      exit 1
+    fi
+    rendered+=("$RENDERED_CONFIG_DIR/$BLOCK_KEY-$key.yaml")
+    preflight_args+=(--config "$RENDERED_CONFIG_DIR/$BLOCK_KEY-$key.yaml")
+  done
+  capture_metadata "${rendered[@]}"
+
+  scripts/preflight_2026_suite.sh --workdir "$WORKDIR" --run-root "$RUN_ROOT" \
+    "${preflight_args[@]}" \
+    | tee "$METADATA_DIR/preflight-$BLOCK_KEY.txt"
+
+  echo "Verifying built images"
+  "${BGPERF_CMD[@]}" verify > "$METADATA_DIR/verify-$BLOCK_KEY.txt" 2>&1 || {
+    echo "verify failed; see $METADATA_DIR/verify-$BLOCK_KEY.txt" >&2
+    tail -20 "$METADATA_DIR/verify-$BLOCK_KEY.txt" >&2
+    exit 1
+  }
+  tail -5 "$METADATA_DIR/verify-$BLOCK_KEY.txt"
+
+  retract_block_markers
+
+  # Pass 4 in full before pass 5 starts, which is what the two directories
+  # already are -- but stated because the reason is not the arithmetic. Two
+  # passes of one comparison run back to back sit on one thermal state and one
+  # page cache, and the run-to-run spread these passes exist to measure is
+  # exactly what that hides. There is nothing else to interleave them with
+  # here, so the separation this block gets is the separation between its own
+  # two batches and no more; the block record says so rather than claiming the
+  # separation Blocks 2-4 got from being separate blocks.
+  local expect batch_status
+  for entry in "${scenarios[@]}"; do
+    key="${entry%%:*}"
+    expect="${entry##*:}"
+    batch_status=0
+    run_batch "$BLOCK_KEY-$key" "$BLOCK_DIR/$key" || batch_status=$?
+    if [[ $batch_status -ne 0 ]]; then
+      if [[ $STOPPED -eq 1 ]]; then
+        echo "pass $key: not measured -- $STOP_REASON" >&2
+      elif [[ "$key" == "${scenarios[-1]%%:*}" ]]; then
+        # The last pass has nothing after it, and saying "the remaining pass
+        # still runs" of it promises work that will not happen -- to an
+        # operator deciding whether to wait or to go and read the failure.
+        echo "pass $key: batch exited $batch_status; it was the last pass" >&2
+        echo "and the block is recorded as having run" >&2
+        EVIDENCE_FAILURES=$((EVIDENCE_FAILURES + 1))
+      else
+        echo "pass $key: batch exited $batch_status; the remaining pass" >&2
+        echo "still runs and the block is recorded as having run" >&2
+        EVIDENCE_FAILURES=$((EVIDENCE_FAILURES + 1))
+      fi
+    fi
+    # No --expect-limiting: which component limits a given BIRD configuration
+    # is the measurement, not the setup. Blocks 8 and 10 both say so, and a
+    # pinned expectation here would be this block asserting the answer to the
+    # question it was built to ask.
+    check_evidence "$BLOCK_DIR/$key" "$expect" "$key"
+  done
+}
+
 # Block 9 reviews; it measures nothing. Every number it reads was published
 # by a block that has already been accepted, so this runs no preflight, no
 # `verify` and no container -- and it deliberately depends on no Docker daemon
@@ -1840,17 +1967,35 @@ run_variance_review() {
   # The review is regenerated whole from documents that cannot change, so a
   # leftover series document from an earlier build would be a statistic nobody
   # computed sitting beside the ones somebody did.
-  rm -rf "$out_dir"
+  #
+  # It is regenerated into a staging directory and moved into place only once
+  # it has qualified, which is not tidiness. `rm -rf "$out_dir"` came first
+  # here, and a review that then refuses -- which is the *expected* answer
+  # whenever a later block has been built and not yet accepted, since its
+  # passes are declared before it runs -- destroyed the accepted review and
+  # could not rebuild it. That is an accepted block's own published record,
+  # and `metadata/block11-expansion.json` cites it by path as the evidence for
+  # the block that has to run before the review can succeed again: the one
+  # document the campaign cannot afford to lose is the one this deleted first
+  # and asked questions about second.
+  local staging="$BLOCK_DIR/.review-staging"
+  rm -rf "$staging"
 
   local status=0
   "$PYTHON_BIN" scripts/timing_variance_review.py \
-    --run-root "$RUN_ROOT" --out "$out_dir" --selection "$selection" \
+    --run-root "$RUN_ROOT" --out "$staging" --selection "$selection" \
     > "$METADATA_DIR/variance-review-$BLOCK_KEY.txt" 2>&1 || status=$?
   cat "$METADATA_DIR/variance-review-$BLOCK_KEY.txt"
   if [[ $status -ne 0 ]]; then
     EVIDENCE_FAILURES=$((EVIDENCE_FAILURES + 1))
-    echo "the variance review did not qualify; read $out_dir" >&2
+    echo "the variance review did not qualify; read $staging" >&2
+    if [[ -d "$out_dir" ]]; then
+      echo "the review already on disk is untouched: $out_dir" >&2
+    fi
+    return
   fi
+  rm -rf "$out_dir"
+  mv "$staging" "$out_dir"
 }
 
 case "$BLOCK_INDEX" in
@@ -1995,6 +2140,9 @@ case "$BLOCK_INDEX" in
     ;;
   10)
     run_selected_repetitions
+    ;;
+  11)
+    run_peers_expansion
     ;;
   *)
     cat >&2 <<MSG

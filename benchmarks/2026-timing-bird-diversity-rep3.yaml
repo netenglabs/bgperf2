@@ -8,7 +8,7 @@
 # selected, so unlike the peer sweep nothing is removed here -- benchmarks/2026-timing-bird-diversity.yaml
 # and this file differ in the test `name` and the `seed` and in nothing else.
 # `diff` the `tests:` mapping against it; the headers differ and that is not
-# drift. Block 11 reads the three passes as the dispersion of one cell, so any
+# drift. The final report reads the passes as the dispersion of one cell, so any
 # drift in the matrix, the workload or the labels between passes is a
 # difference in the thing measured arriving inside the statistic meant to
 # measure run-to-run noise.

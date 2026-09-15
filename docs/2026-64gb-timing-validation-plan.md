@@ -1471,10 +1471,11 @@ amendment above forbids. Both are derivable retroactively from the Block 5-7
 artifacts on disk, so the cost of waiting is nothing. Land them before Block 9
 reads the three passes.
 
-### Blocks 10-11
+### Blocks 10-12
 
-Not started. Each block's configs and procedure are its own change set. Blocks
-8 and 9 are recorded under Execution Blocks below, where their sections are.
+Blocks 10 and 11 are recorded under Execution Blocks below, where their
+sections are, as blocks 8 and 9 are. Block 12 -- the final report -- is not
+started, and its procedure is its own change set like every other block's.
 
 ## Execution Blocks
 
@@ -2224,7 +2225,9 @@ here and at 3–5 in Block 8:
 `docs/invariants/batch-passes.md` carries both arguments.
 
 **The block validates its own matrix before it runs a container.**
-`scripts/check_block10_configs.py` reads `metadata/block10-selection.json`
+`scripts/check_repetition_configs.py --block 10` (named
+`check_block10_configs.py` until Block 11 was built, and generalised rather
+than copied) reads `metadata/block10-selection.json`
 against the six configs and refuses a mismatch: the cells each config runs must
 be exactly the cells its selection names, the pass arithmetic must come to
 `passes_requested` counting Block 8's pass 1, and every config must state the
@@ -2279,7 +2282,112 @@ which catches a block that ran fewer passes than the selection named and which
 nothing else here would notice. `tests/test_variance_review.py` pins all three
 states.
 
-### Block 11: final report
+### Block 11: screen-peers repetitions 4 and 5
+
+**Built 2026-09-15.** Block 10's pooled read settled two of its three
+selections and left all three cells of the third on `expand to 5`, so this
+block runs repetitions 4 and 5 of the 250-peer peer sweep and nothing else:
+two batches of three cells, six runs. `metadata/block11-expansion.json` is the
+decision it executes, written from that read the way Block 9's selection was
+written from its own.
+
+| pass | config | cells | results |
+|---|---|---|---|
+| peers 4 | `benchmarks/2026-timing-bird-peers250-rep4.yaml` | 3 × 250 peers × 2,000 | `peers-rep4` |
+| peers 5 | `benchmarks/2026-timing-bird-peers250-rep5.yaml` | as pass 4 | `peers-rep5` |
+
+`order: shuffle` seed 202611 in both — the campaign's year+block rule,
+continuing 202610 — and the two draw different permutations because
+`batch_shuffle_key()` digests the test name along with the seed. A new seed
+per block is the point of the rule here: re-running repetitions 2 and 3's
+permutation would apply one position bias twice more rather than averaging it
+out. Work directory `/data/bgperf-work`. Procedure is `run_peers_expansion()`.
+
+**This block is not asking Block 8's question.** The hypothesis the selection
+was written against — BIRD 3.3.2 converges a 250-session fleet faster than
+2.19.2 — did not survive repetition: 2.19.2 measured 112/32/58, so pass 2 has
+it converging in half 3.3.2's time and pass 1 has it taking twice as long. What
+three passes establish is that the dispersion is **asymmetric** (2.19.2 CV
+60.6%, 3.3.2 default 2.7%, four threads 23.7%), and repetitions 4 and 5 are
+what decide whether that asymmetry is the finding. Five is where the plan
+stops: an unseparated pair after this block is a result rather than a sixth
+pass, and `bgperf2-599` — 2.19.2 expiring generator hold timers under a
+500-peer load — is a candidate mechanism to check against these rows, not a
+finding this campaign has made.
+
+**What repeating one comparison twice more cost the machinery**, all of it in
+the seams Block 10 opened rather than in new ones:
+
+- The scenarios no longer have the same number of passes as each other, so
+  `SCREEN_PASS_BLOCKS` joins a pass to the block that ran it instead of a loop
+  over `(2, 3)`. `diversity` and `reload` stay at three passes and say so.
+- **A selection's arithmetic counts the passes through its own planned block,
+  never every pass the series will ever have.** Counting all of them,
+  `validate_selection()` reported "asks for 3 passes and 5 ran" against Block
+  10's selection — a later block falsifying an earlier one that was carried
+  out exactly as written. A selection can be held to the campaign up to the
+  end of the block it planned and no further; the document names that block
+  (`planned_block`), and an absent one still means Block 10's.
+- `check_block10_configs.py` is now `scripts/check_repetition_configs.py` with
+  a `--block` it refuses to default, because the block and its selection are
+  two halves of one statement and a defaulted half is the mistake the script
+  exists to catch, made by the script itself. One table rather than a second
+  copy: a copied check stops being run against the block it was copied for.
+- Its pass arithmetic reads `prior_passes` instead of a literal 1. Three
+  passes exist before this block, and the Block 10 form of the check would
+  have accepted a selection asking for three — satisfied by a block that added
+  no observation at all.
+- The final report moves to Block 12. An index in `BLOCK_MEASURES_NOTHING` is
+  a claim about one block, and a block inserted below one moves every claim
+  above it: left alone, the report's entry would have sat on a block that runs
+  six benchmarks and told `next` it produced no rows.
+
+One consequence to state plainly, the same one Block 10 had: **the pooled read
+of `screen-peers` now requires Block 11 to be complete**, because the series
+has five passes where it had three. A `--force 9`, or any `--series
+screen-peers` review, refuses until this block is accepted — and that refusal
+is correct rather than a fault.
+
+**`/code-review` on this change set found eight things, and the first of them
+was that "Block 9's `review/` is on disk and nothing is lost" was false.**
+`run_variance_review()` did `rm -rf "$out_dir"` *before* regenerating, and the
+regeneration refuses whenever a later block has been built and not yet
+accepted — which is the ordinary state of this campaign, because a pass is
+declared as soon as its block is built. So a `block-9 --force` deleted an
+accepted block's published review and could not rebuild it, and
+`block11-expansion.json` cites that review by path as its own evidence: the
+one document the campaign could not afford to lose was the one it deleted
+first and asked questions about second. The review now regenerates into
+staging and is moved into place only once it has qualified. The other seven:
+
+- A block that has **not run** was described in the words used for a block
+  whose rows nobody reviewed, with ~24 notes asserting provenance gaps about
+  images in a directory that does not exist. Those are different refusals —
+  work to do against work to review — and the host and image checks now read
+  only the blocks that ran.
+- The expansion document was validated by nothing: the review's
+  `validate_selection()` cannot run for a series whose newest block has not
+  run, so a typo in its brand-new `schema` string would have been silent. The
+  checks that need no measurement — schema, provenance fields, a hypothesis
+  and a variance reason per repetition, a reason per declined comparison —
+  moved into `check_repetition_configs.py`, which runs before the first
+  container.
+- The `through`-the-planned-block fix was pinned by no test: mutating it back
+  left 173 tests green. It is pinned now, and a `planned_block` no pass of the
+  series comes from is said out loud rather than falling through to the wrong
+  question.
+- `prior_passes` was a per-block constant applied per comparison. Correct
+  today by coincidence; a block expanding one comparison with three prior
+  passes while newly repeating another with one would have checked the second
+  against the first's history, in the accepting direction. It is per
+  comparison now.
+- Nothing pinned `BLOCK_MEASURES_NOTHING` to block *keys*, and its entries
+  were hand-shifted in this change set. A test names them.
+- The "the remaining pass still runs" message was printed for the last pass
+  too, promising work that will not happen.
+- The usage text still said `0 through 11` while the script accepted 12.
+
+### Block 12: final report
 
 The report must include:
 

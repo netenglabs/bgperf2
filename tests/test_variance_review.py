@@ -471,6 +471,55 @@ class TestSelection:
         assert any('was not carried out as written' in message
                    for message in errors_for(document, reviews=[short]))
 
+    def test_a_later_expansion_does_not_falsify_an_earlier_selection(self):
+        """The count is taken *through* the planned block, never over every
+        pass the series will ever have.
+
+        `screen-peers` has passes 1, 2-3 and 4-5 in three different blocks.
+        Counted whole, Block 10's selection -- which asked for three and got
+        exactly three -- reported "asks for 3 passes and 5 ran" the moment
+        Block 11 was built: a later block falsifying an earlier one that was
+        carried out as written, on any `block-9 --force`.
+        """
+        expanded = {**a_review(passes=1,
+                               block='block8-bird-architecture-screen'),
+                    'passes': [{'repetition': 1,
+                                'block': 'block8-bird-architecture-screen'},
+                               {'repetition': 2,
+                                'block': review.REPETITION_BLOCK},
+                               {'repetition': 3,
+                                'block': review.REPETITION_BLOCK},
+                               {'repetition': 4,
+                                'block': review.EXPANSION_BLOCK},
+                               {'repetition': 5,
+                                'block': review.EXPANSION_BLOCK}]}
+        block_ten = a_selection()
+        block_ten['repetitions'][0]['passes_requested'] = 3
+        assert errors_for(block_ten, reviews=[expanded]) == []
+
+        # And the expansion itself is judged on its own block: five passes
+        # through Block 11, which is what it asked for.
+        block_eleven = a_selection(planned_block=review.EXPANSION_BLOCK)
+        block_eleven['repetitions'][0]['passes_requested'] = 5
+        assert errors_for(block_eleven, reviews=[expanded]) == []
+
+        # A short expansion is still caught, which is what the check is for.
+        block_eleven['repetitions'][0]['passes_requested'] = 6
+        assert any('was not carried out as written' in message
+                   for message in errors_for(block_eleven, reviews=[expanded]))
+
+    def test_a_planned_block_this_series_has_no_pass_from_is_said_out_loud(self):
+        """A typo in `planned_block` and a block not yet built look identical
+        -- `positions` is empty either way, and the selection falls through to
+        the "adds an observation" question. Nothing here can tell them apart,
+        so the reading is stated rather than guessed at."""
+        document = a_selection(planned_block='block99-nonesuch')
+        problems = []
+        review.validate_selection(document, [a_review()], NO_EXCLUSIONS,
+                                  problems)
+        assert any('has not been built' in entry['message']
+                   for entry in problems if entry['severity'] == review.NOTE)
+
     def test_the_expansion_stops_at_five(self):
         document = a_selection()
         document['repetitions'][0]['passes_requested'] = 6
@@ -595,8 +644,21 @@ class TestSelection:
                    for message in messages)
 
     def test_a_selection_of_the_wrong_schema_is_refused(self):
-        assert any('is not bgperf2/block10-selection' in message
+        assert any('is not {0}'.format(review.SELECTION_SCHEMA) in message
                    for message in errors_for(a_selection(schema='something/else')))
+
+    def test_the_schema_the_block_10_selection_was_written_under_is_read(self):
+        '''An accepted decision document is not rewritten to satisfy a rename.
+
+        `metadata/block10-selection.json` is on disk under the name the shape
+        had when it was the only selection there was, and Block 10 carried it
+        out. Refusing it now would make the record of an accepted block
+        unreadable by the tool that validated it.
+        '''
+        for schema in review.LEGACY_SELECTION_SCHEMAS:
+            assert not [message for message
+                        in errors_for(a_selection(schema=schema))
+                        if 'is not' in message]
 
     def test_two_repetitions_may_not_share_an_id(self):
         document = a_selection()

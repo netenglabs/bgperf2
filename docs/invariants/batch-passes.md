@@ -2,7 +2,7 @@
 
 How a matrix becomes an ordered list of runs, and what the passes of one cell are allowed to say about each other.
 
-**Read this before editing:** `bgperf2.py` (`expand_batch_cells()`, `batch_report_rows()`, `bench_output_prefix()`, `create_batch_graphs()`), `summary.py`, `graphs.py`, `scripts/timing_variance_review.py`, `scripts/check_block10_configs.py`
+**Read this before editing:** `bgperf2.py` (`expand_batch_cells()`, `batch_report_rows()`, `bench_output_prefix()`, `create_batch_graphs()`), `summary.py`, `graphs.py`, `scripts/timing_variance_review.py`, `scripts/check_repetition_configs.py`
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 
@@ -115,10 +115,38 @@ The same split shows up one level out. `review_blocks()` checks COMPLETE markers
 image ids for **the blocks the reviewed series actually read**, not for every block in the campaign:
 under `--series`, demanding a marker on blocks whose rows nobody opened is a refusal about evidence
 the review never looked at. And a block's own passes cannot be in the pooled read until that block
-is accepted — which is why Block 10 guards its matrix with `check_block10_configs.py`, a pure
-document check that the cells each config runs are exactly the cells its selection names and that
-the passes of a comparison differ in the test `name` and nothing else. The pooled read of those
-passes happens at acceptance, not during the block.
+is accepted — which is why Blocks 10 and 11 guard their matrices with `check_repetition_configs.py`,
+a pure document check that the cells each config runs are exactly the cells its selection names and
+that the passes of a comparison differ in the test `name` and the seed and nothing else. The pooled
+read of those passes happens at acceptance, not during the block. One script and one table for both
+blocks, with a `--block` it refuses to default: the block and its selection are two halves of one
+statement, a defaulted half is the mistake the script exists to catch made by the script itself, and
+a copied check is one that stops being run against the block it was copied for.
+
+**A regenerated review is staged, never deleted first.** `run_variance_review()` rebuilds the whole
+of `review/` because a leftover series document is a statistic nobody computed sitting beside ones
+somebody did — but it refuses whenever a later block has been built and not yet accepted, which is
+the ordinary state of the campaign, since a pass is declared as soon as its block is built. Deleting
+first meant a `block-9 --force` destroyed an accepted block's published review and could not rebuild
+it; the next block's own decision document cites that review by path as its evidence. It is written
+to staging and moved into place once it has qualified.
+
+**A block that has not run and a block whose rows nobody reviewed are different refusals**, at this
+level as at every other. The first is work to do and the second is work to review, and the host and
+image checks read only the blocks that ran: a block with no directory recorded no host and no image,
+and reporting that as a provenance gap describes work that has not happened in the words used for
+work that happened unrecorded.
+
+**A selection's arithmetic is counted through its own planned block, never over every pass the
+series will ever have.** A series can be expanded twice — `screen-peers` has passes 1, 2–3 and 4–5 in
+three different blocks — and counting all five against Block 10's selection reported "asks for 3
+passes and 5 ran", a later block falsifying an earlier one that was carried out exactly as written.
+What a selection can be held to is the campaign up to the end of the block it planned; the document
+names that block (`planned_block`), and an absent one means Block 10's, which is the only selection
+written before there was a second. The same shape holds in the config check: what a block adds is
+`len(configs)`, and what already exists is `prior_passes`, so the Block 10 form of the arithmetic —
+a literal `+ 1` — would have accepted a Block 11 selection asking for three passes, satisfied by a
+block that added no observation at all.
 
 ## Order
 

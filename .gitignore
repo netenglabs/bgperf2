@@ -4,6 +4,12 @@ __pycache__/
 
 # generated graphs and CSVs
 results/
+# and any archive of them. `results/` is gitignored, so a tarball of it is the
+# obvious way to back it up -- and a `git add -A` then stages 26 MB of binary
+# that a later `git rm` cannot shrink out of the pack. Caught by review once.
+results*.tgz
+results*.tar.gz
+results*.tar.zst
 
 # MRT files downloaded by new_vm.sh, and out-of-band NOS images/licenses
 mrt/

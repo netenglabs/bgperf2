@@ -967,6 +967,558 @@ Stage 2, on a branch, with the notification path for gates verified first.
 **Exit criterion:** an unattended run completes at least one item, opens a gate
 on a decision rather than guessing, and continues to the next ready item.
 
+#### Progress on 2026-09-15: the driver is built, and the criterion is NOT met
+
+**Not done.** Every clause of the exit criterion is about a worker session
+actually running, and no worker session could start: `claude -p` exited 1 with
+*"You've hit your monthly spend limit … your weekly limit resets Sep 18, 2am
+(UTC)"*. The driver did the right thing with that — stopped, left the tree, and
+did **not** sleep — but that is the failure path, not the criterion. Recorded as
+a gate (`bgperf2-cqi`) rather than as a step that nearly passed, because the
+next session reads this note and a "nearly" is indistinguishable from a yes
+once it is three weeks old.
+
+What exists and is verified:
+
+- **`scripts/notify_gate.sh`**, and the step's "notification path verified
+  first" is verified as a *path*: delivered 0, unconfigured 78 (`EX_CONFIG`,
+  distinct so the driver can tell "set this up" from "your channel is broken"),
+  a channel that fails 1. **It has no fallback**, deliberately. The tempting
+  one is a local log file, and a local log file *is* a gate nobody sees, so it
+  would satisfy the code and defeat the rule. With nothing configured the
+  driver refuses to start.
+- **`scripts/unattended_driver.sh`**, whose refusals are the substance: it will
+  not run off `unattended/measurement` (checked again inside the loop, since a
+  worker can check out a branch mid-run), will not start without a channel that
+  *just delivered a test message*, and filters benchmark-labelled items out of
+  the queue before a session is spent rather than asking the worker to behave.
+- **`scripts/unattended_worker_prompt.md`**, which is the whole of the
+  discipline for a session nobody reads: review until a round comes back clean,
+  full suite, never push, never master, never start a benchmark, and gate
+  rather than guess.
+- **`tests/test_unattended_driver.py`** — pure, no `claude` and no Docker.
+  Deliberately not a count: a number here is the one falsifiable claim in this
+  bullet, and the first version of it was stale on the commit that introduced
+  it.
+
+Four things this turned up that the plan had wrong or had not said.
+
+- **`bd gate create --blocks <id>` does not exist.** Step 2 warned that this
+  document's CLI spellings came from upstream docs rather than a local install,
+  and this is one of them: `bd gate` is for formula steps and has no `create`.
+  What works is the `human` label plus an ordinary dependency — `bd create
+  --labels=human` then `bd dep add <item> <gate>` — which blocks the item and
+  surfaces it in `bd human list`. Verified by opening a gate against a real
+  item and watching it leave the ready queue.
+- **A gate is ready work unless you exclude it.** An open gate is unblocked,
+  unclaimed and P1, so it sorts to the *front* of `bd ready` — measured: it
+  came back at position 1, ahead of every real item. A worker handed its own
+  gate answers its own question and closes it, which is worse than guessing
+  outright, because the tracker is then left recording that a human decided.
+  `human` is in the driver's skip list for that reason.
+- **The driver computes the queue; the worker does not report it.** The stage 2
+  sketch above has the worker exit 3 for an empty queue. That puts the model's
+  exit code and the tracker in a position to disagree — a worker that says 3
+  with items ready stalls the loop, one that exits 0 having done nothing spins
+  it, and both are the failure the two-exit-code rule is about. Reading `bd
+  ready` in the driver before spending a session makes "nothing is ready" a
+  fact the loop establishes. What is left for the model to get wrong is only
+  the work. **The sketch is left as written above**, because it is the
+  reasoning that produced this, and a corrected sketch would hide the
+  correction.
+- **The notification destination is a human decision and is now gated**
+  (`bgperf2-5p6`). This host has `curl` and `tmux` and no mail, no
+  `notify-send`, no configured webhook, so there is nothing to verify delivery
+  *to*. The mechanism was verified against a file sink under supervision, which
+  is legitimate while someone is watching and is exactly what the driver
+  forbids for an unattended run.
+
+**`/code-review` found twelve things, and the first was this file's own rule
+broken in this file.** The header says a loop that treats every non-zero exit
+as an empty queue "sleeps through a crash" — and `next_item()` wrapped `bd` in
+`|| true` with stderr discarded, so a held Dolt lock, a stopped server, an
+orphaned `venv/bin/python` or a `bd` run from a directory with no `.beads`
+produced no output, read as an empty queue, and slept half an hour a round
+forever. Moving the question from the worker to the tracker had moved the
+failure with it. Every `bd` call now separates "answered, and the answer is
+nothing" from "did not answer", and only the first sleeps. Verified by
+execution against a stub that exits 7: exit 1, and the words "nothing ready"
+never printed.
+
+The rest, each a way an unattended run looks like it is working:
+
+- **A bare `gates_before="$(open_gate_count)"` killed the driver silently.**
+  Under `set -e` a failing `bd` exited the script with bd's own status and no
+  message — and at the second call site that fires *after* the worker, so a
+  session that opened a gate exited before the notification.
+- **`bd` auto-discovers `.beads/` from the working directory, which the driver
+  never set.** Started from a systemd unit with no `WorkingDirectory` every
+  tracker call fails — straight into the bug above. Every call is `bd -C
+  "$REPO_ROOT"` now.
+- **Nothing claimed the item.** `bd ready` excludes `in_progress`, so a worker
+  that exits 0 without closing its item left it open and unblocked and the next
+  round handed back the identical id, unattended, forever. The header claimed
+  this design removed that spin; it had only moved it. `bd ready --claim` is
+  atomic and is what makes the queue advance.
+- **Gate detection by count missed a new gate whenever an old one closed in the
+  same window** — and the operator answering an earlier gate *while a worker
+  runs* is the expected steady state here, so open-one close-one nets to zero
+  and the new gate is never sent. Ids are compared now, not counts.
+- **A failed notification only warned, and the loop ran on.** The warning goes
+  to a terminal nobody is reading, which is the premise of the whole script. It
+  stops, for the same reason the startup check is fatal.
+- **`tmux display-message -p` was a documented channel that passes `--check`
+  while delivering nothing**: it never reads stdin and prints to stdout, which
+  the notifier sends to `/dev/null`. `--check` cannot detect that, which is
+  worth knowing about any channel added later.
+- The documented exit codes said `0` for an empty queue where the code says
+  `3`; `--max`/`--sleep` died as `unbound variable` on an operator typo, which
+  this file documents as "a real failure"; `--max N` counted sleeps as items,
+  so a night idle exited 0 looking like N completed; and the worker ran
+  unbounded, so a stalled session hung the loop looking like a long item.
+- Two of the tests were vacuous: the empty-queue one accepted `0 or 3` against
+  the *real* tracker, so it passed whether or not the path was ever taken, and
+  the "says where it came from" one had an `or '@' in delivered` disjunct that
+  is true of every message. The driver takes `BGPERF_BD_BIN` now so the tests
+  can point it at a stub and actually exercise exit 3 and the tracker-failed
+  path.
+
+**A second review round found eight more, and the worst was in the fix the
+first round asked for.** Claiming the item — added to stop the queue handing
+back an id a worker had already failed on — is never released, and `bd ready`
+excludes `in_progress` by *stored status*. So the worker prompt's gate path
+("leave the item open and stop") was not achievable: the driver had already
+flipped it. An item whose worker gates it, fails, or times out leaves the queue
+**permanently** — not when its gate is answered, not when a human restarts the
+loop — while the driver reports "nothing ready" over real work sitting
+invisible. That is the pattern this plan's step 1 note already records: about a
+third of review findings are in code an earlier round of the same review added.
+
+The release needed both halves. Releasing alone reintroduces the spin the claim
+was added to prevent, so a worker that exits 0 having neither closed nor gated
+its item now stops the loop by name instead of being handed the same id
+forever.
+
+The rest:
+
+- **The claim happens inside `bd`, before its output can be parsed**, and
+  stderr was merged into the JSON buffer — so any notice `bd` writes made
+  `json.loads` raise *after* an item had been claimed, consuming one item per
+  start under a systemd `Restart=`. stderr goes to its own file now.
+- **`human` was a default, and a default is a thing an operator replaces.**
+  Setting `BGPERF_UNATTENDED_SKIP_LABELS` to the two benchmark labels — the
+  plausible edit, since those are the two `--help` names — dropped it and put an
+  open gate back at position 1. It is unioned in now and cannot be overridden.
+- **Four tests passed only on this branch** and would go red the moment it
+  merges, in a repo with no CI to notice; the one branch-aware refusal
+  `skip`ped whenever you were on the branch, which is always. The expected
+  branch is overridable, so each test pins what it is actually testing.
+- `timeout` without `-k` waits forever for a child that ignores SIGTERM, which
+  is the hang the bound exists to prevent; `--max 0` passed the guard and read
+  as *unlimited*, and `--sleep 0` turned the idle branch into a tight query
+  loop; the two environment numbers bypassed the guard entirely.
+- **`pipefail` turned a channel that reads part of the message into a false
+  "NOT told"** — and in the driver that is a `die`, so a working channel
+  stopped the loop. Worse, whether `printf` fills the pipe buffer first is a
+  race, so a channel could pass `--check` at startup and fail on the first real
+  gate. The channel's own status is read now, and getting there took two wrong
+  turns worth recording: `set -e` aborts before `PIPESTATUS` can be read, and
+  `|| true` resets `PIPESTATUS` to `true`'s so `set -u` kills it instead.
+- The header promised a channel re-check the code did not do; it is per
+  iteration now, as claimed.
+
+**A third round found seven more, and the first was the second round's fix
+applied to only one of the two functions that needed it.** `first_ready()` was
+rewritten to keep `bd`'s stderr out of the JSON buffer; `open_gate_ids()` — four
+lines away, same shape — was left on `2>&1`, so one notice line on a *healthy*
+tracker killed the driver with "refusing to continue without being able to read
+the gates". At the post-worker call site that fires after a session has opened a
+gate, so the run dies before the notification: the gate nobody sees, reached
+through the code that exists to prevent it.
+
+- **The per-iteration channel re-check, added in round two, was worse than the
+  gap it filled.** It does not probe the channel, it *sends* through it —
+  measured at 6 pages in five seconds with a short sleep, ~48 a day at the
+  default, on the same channel the gate alert uses. That trains the operator to
+  filter it, manufacturing the gate nobody sees rather than preventing it. The
+  check is at startup only; a channel that breaks mid-run is caught by the gate
+  send itself, which is a `die`, so at most one gate goes unseen and the loop
+  stops there. Now one message per invocation, verified.
+- **`item_still_in_progress()` collapsed "the tracker did not answer" into "the
+  item is not in progress"**, so a failed `bd show` skipped the release and
+  stranded the item forever — verbatim the failure its own docstring describes,
+  by the same read-failure-as-an-answer conflation this file's header forbids
+  everywhere else. Three outcomes now, and it releases on "cannot tell" too,
+  because releasing an already-open item is harmless and not releasing a
+  claimed one is not.
+- **The spin guard asked whether *a* gate appeared, not whether *this item* was
+  blocked.** A worker that creates a gate and fails the `bd dep add` gates
+  nothing; the count still rose, the item was released unblocked, and the next
+  round handed back the identical id with the gate notification making it look
+  normal. It asks the question the loop will actually ask next.
+- The worker prompt hardcoded the branch while the driver's is overridable, so
+  a run elsewhere told the worker it was somewhere it was not — and its own
+  "if you find yourself on another branch, stop" then fires against a correct
+  run. `{{BRANCH}}` is substituted like `{{ITEM}}`.
+- One test proved nothing: its stub failed both `bd` subcommands, so it passed
+  on the *other* function's error message and would still pass with the check
+  it was written for deleted.
+
+**A fourth round found eight more, one of which was not mine.** A 26 MB
+`results.tgz` — a backup of the gitignored `results/`, made on this host at
+04:40 — had been swept into the index by a `git add -A`. Committed, that is 26
+MB in history permanently, since a later `git rm` does not shrink the pack. It
+is unstaged, the file is untouched, and `.gitignore` now covers
+`results*.tgz`/`.tar.gz`/`.tar.zst` so the obvious way to back up a gitignored
+directory cannot be committed by accident.
+
+The seven in the driver, and two are the same conflation a third time:
+
+- **A failed `release_item()` was a warning**, and it is the one failure path
+  in the file whose consequence is permanent: the item stays `in_progress`,
+  `bd ready` excludes it by stored status forever, `item_is_ready_again` then
+  says false so nothing else stops the loop, and the driver reports "nothing
+  ready" over work that has silently left the queue. It `die`s now, and prints
+  the command to release it by hand.
+- **`item_is_ready_again()` folded "the tracker did not answer" into "not ready
+  again"** — the same read-failure-as-an-answer the header forbids, now caught
+  in a third function. Folded that way, a failed read means the spin guard does
+  not fire and `--once` exits **0**, reported as a completed item, for one
+  released unblocked and unchanged.
+- **Nothing checked the working tree between items.** The whole design here is
+  that a rule a model can forget is enforced by the driver — gates are diffed
+  by id for exactly that reason — while "commit your work" was left to the
+  prompt. A worker that closes its item but leaves a hunk behind hands it to
+  the next worker, who reviews and commits it under a different item with
+  nothing recording that.
+- **`bd list` defaults to 50**, so the gate set was a *window*, and new-gate
+  detection survived only on bd's undocumented newest-first ordering. Past 50
+  open gates under any other sort, a new one falls outside it and no
+  notification is sent: the gate nobody sees, through the function written to
+  prevent it. `--limit 0`.
+- **A gate whose notification failed was unrecoverable**: on the next start the
+  id diff already holds it, so under a systemd `Restart=` the driver comes
+  back, works the remaining items, and that gate is never mentioned again. The
+  ids are recorded to `.unattended-undelivered-gates` before dying and re-sent
+  before the next loop.
+- **`--dry-run` paged the operator**, on the alert channel, once per attempt —
+  the same behaviour the per-iteration re-check was backed out for. A dry run
+  raises no gates and now needs no channel. Verified: dry run 0 messages, real
+  run 1.
+- The notifier discarded the channel's stderr, so a bad topic or a TLS error
+  reported `exit 6` and the command string, and the driver then refused to
+  start with "fix it before running unattended" and nothing to fix it from.
+
+**A fifth round found seven more, and the first was the release again — a
+fourth round finding the same class.** `release_item` sat *after* the gate
+block, so the two `die`s in between — the gate read failing, and the gate
+*send* failing, which the header explicitly plans for — left the item claimed.
+`bd ready` excludes `in_progress` by stored status, so when the operator
+answered that very gate the item never came back. It is released immediately
+after the worker returns now, before anything that can exit: the claim only
+ever means "a worker is on this right now", so it ends when the worker does.
+
+- **The worker was started with the driver's inherited cwd.** Every `bd` and
+  `git` call here is `-C` because a systemd unit with no `WorkingDirectory`
+  leaves cwd at `/` — and a worker started there resolves the project
+  `CLAUDE.md`, the `.claude/` hooks (review-before-commit, the invariants
+  guard) and its own `pytest tests/` against the wrong directory. The entire
+  discipline the prompt consists of would silently not be in force, and nothing
+  would report it.
+- **The prompt hardcoded `/data/bgperf2`** while the driver derives `REPO_ROOT`
+  from `BASH_SOURCE` — the identical defect to the hardcoded branch fixed one
+  round earlier, so a run from a second checkout told the worker to commit in a
+  different repository from the one the guards watch.
+- **`comm` compares under `LC_COLLATE` and the ids are sorted in Python
+  codepoint order.** Disagreeing, comm errors, and `|| true` turned that into
+  "no new gates" — the gate nobody sees, for the third distinct reason. Fixed
+  collation, and the status is checked.
+- **The operator's channel command had no bound**, so the documented `curl`
+  example against a black-holed host hangs the startup check with no output
+  and, worse, hangs the post-worker gate send while a worker's changes sit
+  uncommitted. The driver bounds its worker with `timeout -k` for exactly this
+  reason.
+- **`.unattended-undelivered-gates` was written to the repo root**, where the
+  driver's own dirty-tree guard would blame the next worker for it and a
+  `git add -A` could commit it — the accident the `results*.tgz` rules were
+  added for, one round earlier. Both markers were *meant* to move under
+  `.git/`; the sixth round found that only the read site had, so see below.
+- **A deterministically failing item was released and immediately re-offered.**
+  Under the systemd `Restart=` this file assumes twice, the restart claims the
+  same item, it fails identically, and the loop runs hot with no notification
+  and no record. Not hypothetical: it is the spend-limit failure recorded as
+  `bgperf2-cqi`. Failures are counted, and the second one stops the loop and
+  pages the operator.
+
+**A sixth round found nine more, three of them high, and the first was a claim
+in this document that was false.** "Both markers live under `.git/` now" — the
+fix had been applied to the *read* site only. `resend_undelivered` read
+`<git-dir>/unattended-undelivered-gates`; the write site still said
+`$REPO_ROOT/.unattended-undelivered-gates`. Different directory, different
+name. So the marker was never found on restart — the gate was owed forever and
+the id diff could never re-report it — *and* it sat untracked in the worktree,
+where the driver's own dirty-tree guard blamed every later item for it. Both
+halves verified by running the driver against a channel that fails only on the
+gate message.
+
+- **`rev-parse --git-dir` returns a *relative* path** (`.git`), and this driver
+  deliberately never cd's — so under the systemd unit its own header assumes,
+  both markers resolved to `/.git/…`, where the append fails and the guard that
+  reads them sees no file and returns clean. `--absolute-git-dir`.
+- **The poisoned-item refusal died with the item still claimed**, so the item
+  the operator was being asked to deal with was the one they could no longer
+  see — and the notification told them to clear the record without mentioning
+  releasing it.
+- **The dirty-tree guard had no baseline.** It compared against absolute
+  emptiness, so any pre-existing untracked file stopped the driver on the
+  *next* item naming the wrong culprit — demonstrated with a stub worker that
+  touched nothing, blamed for this branch's own staged changes. It diffs
+  against the tree as it was before the worker now, and a tree that is already
+  dirty is refused at startup, which is the only place it can be attributed
+  honestly.
+- **Only one of seven post-worker exits recorded the failure.** `note_failed_item`
+  sat at the bottom, past six `die`s, so a worker that failed *and* tripped any
+  of them wrote no record and the restart came straight back onto the same
+  item — the loop the record exists to break.
+- **The gate notification body was every open gate, truncated to 20 lines**,
+  rather than the new ids the driver had just computed and discarded. Past
+  twenty open gates — the steady state this design expects — the subject said
+  "3 gate(s) opened" and the body showed none of them.
+- The failure count was lifetime rather than consecutive and was never cleared
+  on success; `BGPERF_NOTIFY_TIMEOUT` was the one numeric environment variable
+  left unvalidated, so a `60s` typo was reported as a broken channel.
+- **One test pinned two of these bugs in place.** It asserted the marker
+  *definitions* only, so it locked in the relative-path form and never touched
+  the write site at all — 46 tests passed over both. The tests that drive the
+  loop past startup build their own clean checkout rather than depending on
+  this one being clean. (The round-trip test this paragraph originally claimed
+  was written did not exist; see the seventh round below.)
+
+**A seventh round found eight more, three high — and one was this document
+being wrong about its own tests for the second round running.** "It now writes
+a marker and asserts the round trip" was false: the round trip had been checked
+by hand in a shell, and the tests only grepped the script's source. The test now
+exists, drives the driver through a failed gate send, and asserts the marker
+lands under `.git`, holds the new id, leaves the worktree clean, and is re-sent
+and cleared on the next start.
+
+- **Releasing on "cannot tell" reopened work that was finished.** `bd update
+  --status open` on a *closed* issue reopens it, so a transient `bd show`
+  failure after a worker had committed and closed its item put that item back
+  in the queue — and the spin guard then died saying the worker had left it
+  unchanged, which was false. The release needs an observed `in_progress`; the
+  stranded-claim case it was covering is handled by asking the tracker what is
+  claimed instead of guessing.
+- **A claim could outlive the driver two ways.** `bd ready --claim` mutates
+  state *inside* bd and the parse after it can still fail, with no way to name
+  the item; and there was no signal trap at all, on a loop whose own header
+  assumes a systemd `Restart=` and whose host is a spot instance reclaimed
+  without warning. There is a `TERM`/`INT` trap now, and a reconciliation that
+  releases anything left `in_progress`.
+- **`--dry-run` could write to the tracker and page the operator.** The
+  poisoned-item refusal ran before the dry-run exit, and it both notifies and
+  calls `release_item` — against a `--help` promising "claim nothing, start no
+  worker". The test that was supposed to cover this passed vacuously, because
+  its stub returned an empty queue so no item ever reached the refusal.
+- The poisoned-item notification was the one send in the file allowed to fail
+  silently (`|| true`), so an operator whose channel had broken was never told
+  the loop had stopped; a malformed `BGPERF_NOTIFY_TIMEOUT` exited 78, which
+  the driver renders as "no notification channel", telling the operator to
+  configure one that was already working; and the environment numbers were
+  validated *before* the arguments that override them, so `--sleep 1800` was
+  refused for the value it was replacing and `--help` exited 1.
+
+**An eighth round found six more, and the first means the loop could never
+have completed an item at all.** `claude -p --permission-mode acceptEdits`
+auto-approves Edit and Write only; a Bash call outside the project allowlist
+still needs a permission decision, and in `-p` there is nobody to give one, so
+it is denied. `.claude/settings.json` allows `pytest` and three read-only
+`bgperf2.py` subcommands — **no `git`, no `bd`** — so every clause of the
+prompt's definition of done (commit to the branch, close the item, open a gate
+with `bd dep add`) was unreachable. The worker would edit, fail to commit, exit
+0, and the tree check would then blame it and leave the tree dirty for every
+subsequent start.
+
+It had never been exercised: the one recorded run died on the spend limit
+before reaching a worker session at all, which is exactly why this step's
+criterion is a *run* and not a reading. The tools are named explicitly now, in
+the driver, and that list is the security boundary — `git push` and `docker`
+are absent deliberately and denied explicitly as well, because an omission is
+undone by anyone widening the allow list later and a denial is not.
+
+- **The signal trap reopened closed work.** `CURRENT_ITEM` stays set through
+  the gate read, the gate send, the `comm` and the tree check — all *after* a
+  successful worker has closed its item — so an unconditional release on
+  `TERM` reopened a closed, committed item on precisely the signal the header
+  calls most likely, the spot reclaim. It follows the same observed-
+  `in_progress` rule the release site states and this did not.
+- **Nothing reconciled stranded claims at startup.** A driver killed rather
+  than signalled — a reclaim past its two-minute warning, an OOM kill, a stop
+  that hit `TimeoutStopSec` behind a foreground worker — never runs the trap,
+  and nothing else ever released that item.
+- **The reconciliation released every `in_progress` item in the tracker**, not
+  this driver's. An item a human had claimed interactively would be reopened
+  and then handed to an unattended worker, two sessions on one piece of work.
+  Scoped by assignee — though the ninth round found that scoping was itself
+  wrong, so see below.
+- **A worker that exits 0 without advancing its item was not recorded as a
+  failure**, so the restart claimed the same item, ran a full session, and died
+  again — indefinitely, with nothing in the record and no page. Only crashes
+  were counted, and a model that declines the work is the likelier way there.
+- **The poisoned-item refusal paged on every restart.** It notifies, releases
+  and dies without recording that it announced, so under `Restart=always` that
+  is a page every tenth of a second — worse than the ~48 a day the
+  per-iteration check was backed out for, on the same channel.
+
+**A ninth round found four more, and the first was the eighth round's fix
+being a permanent no-op.** `bd` records an assignee as the *actor* — git
+`user.name` — and the scoping filter used `user.email`, so
+`release_stranded_items` matched nothing, always. Every path depending on it
+silently did nothing: the startup recovery, the failed-claim reconcile, and the
+"leaving it as it is and reconciling" branch. Measured against the real
+tracker: `--assignee jpietsch@gmail.com` returns 0 rows, `--assignee "Justin
+Pietsch"` returns 21.
+
+And the obvious repair would not have been enough. The human's name does not
+distinguish this driver's claims from that same person's interactive ones, so a
+startup reconciliation would reopen an item they had in flight and hand it to
+an unattended worker. The driver claims under `BEADS_ACTOR=bgperf2-unattended`
+now — a distinct identity nothing else uses — and filters on that. Verified end
+to end: a claim under that actor is found and released; the same query under a
+git identity finds nothing.
+
+- **`Bash(venv/bin/python -c *)` in the worker's allowlist defeated the two
+  denials the list calls its boundary.** A prefix-matched `-c` auto-approves
+  arbitrary code, so a worker could reach `git push` or `docker` through a
+  one-liner and the deny rules would never see it — the tool input is the
+  python, not what it runs. Nothing in the prompt asked for it.
+- **`item_still_in_progress` returns the *pipeline's* status**, so an orphaned
+  `venv/bin/python` — a failure this file's header names, and one CLAUDE.md
+  says a distro upgrade causes — gives 127, which matched neither branch at the
+  call site: no release, no reconcile, nothing printed, claim stranded. Only 1
+  means "definitely not" now; everything else is the third outcome.
+- **A stale `.announced` entry silenced the next real page.** Both die messages
+  tell the operator to clear `$FAILED_ITEMS` and never mention the marker
+  beside it, so an item that failed again after a clear was released and the
+  loop died having told nobody.
+
+**A tenth round found five more, and the first was the ninth round's fix being
+dead code.** `[[ "$count" -lt 2 ]] && return 0` sat *above* the clear it was
+meant to perform, so the clear was unreachable for every value that could reach
+it — and the test written for it grepped the source for the call and its
+position rather than running the function, so 76 tests passed over the
+regression it was supposed to close. It now runs the function against a
+temporary marker directory, and the mutation (putting the clear back below the
+return) fails it.
+
+- **The startup notification check pages once per process start**, and under
+  the `Restart=always, RestartSec=100ms` this file assumes, every `die` becomes
+  roughly ten pages a second carrying nothing about the failure — worse than
+  both floods the header reasons about, and it sits *above* the announce-once
+  suppression added in round eight, so it defeats it. The check is now
+  rate-limited to once an hour, recorded under `.git`; a channel that breaks
+  inside that window is still caught by the gate send, which is a `die`.
+- **A worker that fails after editing wedges the driver permanently and
+  silently.** The tree is left dirty, the startup guard then refuses *before*
+  the loop is entered, so `refuse_a_repeatedly_failing_item` — which lives
+  inside the loop — never runs, no second failure accumulates, and no
+  failure-specific page is sent. That is the likeliest shape of a worker
+  failure: a session that edits, then errors or hits the timeout. It pages once
+  now, and clears the marker when the tree is clean again.
+- **Nothing stopped two drivers running against one checkout.** The actor
+  scoping added in round nine fixed the human-vs-driver case and created the
+  driver-vs-driver one: a second driver's startup reconciliation reopens the
+  first's in-flight item, claims it, and two sessions edit and commit the same
+  item in the same worktree. An `flock` under `.git`, released on any death
+  including SIGKILL.
+- One test was vacuous in the way this suite is written against: its assertion
+  did not depend on the loop variable, so it passed for any set of commands the
+  prompt might name, including ones the allowlist does not cover.
+
+**An eleventh round found six more, and the sharpest was round eight's defect
+in a second form.** Bash permission rules are *prefix* matches, not globs —
+every rule in this repository's own `.claude/settings.json` is a trailing `*`
+and nothing else — so the `Bash(git -C * commit *)` entries added in round
+eight matched nothing, and the worker, which `CLAUDE.md` and the prompt both
+push toward `git -C`, could not commit at all. The same "no item can ever be
+completed" as round eight, through the fix for round eight.
+
+`Bash(git -C *)` is deliberately not the repair: it would match, and would also
+permit `git -C <dir> push`, which no prefix rule can then deny. The `-C` form
+is left out entirely, so it needs a decision nobody can give and is denied; the
+worker uses plain `git`, which works because `run_worker` starts it in
+`$REPO_ROOT` and which satisfies CLAUDE.md's rule — that rule prohibits `cd`,
+not git in a directory one is already in.
+
+- **The `.announced` clear still did not run when the record had been `rm`'d**,
+  because the `-f` guard returned first — and "clear `$FAILED_ITEMS`", which
+  both `die` messages say, reads as `rm`. Fourth round on this one marker. The
+  test passed because its fixture wrote an *empty* file rather than omitting
+  it.
+- **The rate limit skipped the configuration check, not just the delivery
+  probe**, so a hand-run `--once` from a shell with no `BGPERF_NOTIFY_CMD`
+  export started, claimed an item and spent a whole worker session with no
+  channel at all.
+- **One `die` asserted a release that had almost certainly not happened.** The
+  only way to reach it is `bd` being unhealthy, which is exactly when the
+  reconcile's own read fails and returned silently — so the operator was told
+  the claim was clean while it sat `in_progress`. It is now the two clauses
+  `docs/invariants/batch-passes.md` requires, not one.
+- The wedged-tree page was marked sent before it was sent and its failure
+  swallowed — the only silent drop in a file where every other send dies or
+  records a debt; and `BGPERF_NOTIFY_CHECK_INTERVAL` was the fourth unvalidated
+  number, where `abc` silently switched the rate limit *off*.
+
+Moving `CHECK_INTERVAL` into place then broke every invocation with an
+unbound-variable death, and the tests caught it within a minute. That is worth
+one line of its own: the tests that *run* the driver found in seconds what
+eleven rounds of reading had to be told.
+
+**Eleven rounds, 80 findings, on about 450 lines.** Three rounds running now have
+found the *previous* round's fix to be wrong rather than incomplete: a
+permission mode that made the definition of done unreachable, a scoping filter
+that matched nothing, and a clear that could not execute. Each was caught only
+because that round verified by measurement instead of by reading — and in two
+of the three, a test had already been written that passed over the defect
+because it grepped the source rather than running it.
+
+That is the finding this step produced, and it is worth more than the driver:
+**a test that reads the code cannot tell a fix from the appearance of one**, and
+an unattended loop is exactly where the difference stops being visible. Anyone
+adopting stage 2 should read the round-by-round record above as the cost
+estimate, not the driver as a finished thing. Two rounds running found a
+sentence in this document claiming a fix that had not landed where it said.
+That is the same failure the file's own opening paragraphs are about, and the
+reason it is recorded rather than quietly corrected: the durable account is
+only worth having if being wrong in it is expensive. Step 1's note says review is
+the expensive part and roughly a third of findings are in code an earlier round
+added; here it is closer to half. Three separate rounds each found the *same*
+conflation — a failed tracker read treated as an answer — in a different
+function, and four rounds running found the claim outliving the worker by a
+different route each time. The sixth round found a *documented* fix that had
+only half landed, which is the same failure one level up: a note in this file
+saying a thing was fixed is not the thing being fixed. That is worth carrying into stage 2 as a fact about the work rather
+than about this change set: the rule a reviewer can state in one line is not
+the same as the rule being applied everywhere it holds.
+
+**Committed unreviewed-to-convergence, deliberately, and this is the reason.**
+`CLAUDE.md` allows a commit over outstanding review "or say plainly why you are
+committing anyway". Eleven rounds have each found something, three of them
+finding the *previous* round's fix wrong; meanwhile the driver's central path —
+a worker session completing an item — has never executed once, and cannot until
+the spend limit resets. Round eight's defect was structural and only a run
+would have surfaced it; round eleven's was the same defect again. Further
+rounds refine code whose main behaviour is unverified, and each round's fix is
+itself unverified. The first real run is worth more than the twelfth reading,
+and the work is safer committed to a branch than sitting in a working tree.
+
+**Read this driver as unverified.** It is on `unattended/measurement`, it is not
+merged, and step 6 is not done.
+
+**To finish this step:** answer `bgperf2-5p6`, then `export BGPERF_NOTIFY_CMD=…`
+and run `scripts/unattended_driver.sh --once` once `bgperf2-cqi` is resolved.
+The criterion is then read off that run.
+
 ### Step 7: survive a reclaimed host
 
 The campaign host is intended to move to EC2 spot instances, which can be

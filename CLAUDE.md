@@ -231,7 +231,7 @@ claims.
 
 **`docs/invariants/batch-passes.md`** — `bgperf2.py`'s `expand_batch_cells()`/`batch_report_rows()`/
 `create_batch_graphs()`, `summary.py`, `graphs.py`, `scripts/timing_variance_review.py`,
-`scripts/check_repetition_configs.py`.
+`scripts/check_repetition_configs.py`, `scripts/build_timing_report.py`.
 
 - A repetition repeats the whole matrix, not each cell, and is part of a run's *name*, never a
   column beside it.
@@ -244,6 +244,8 @@ claims.
 - **A pass that failed and a pass that has not run are never described by one clause**, at any level
   of aggregation. Collapsed three times.
 - `summary.py` reads the stats row by column name and must not import `bgperf2`.
+- The report computes no statistic; every claim cites figures resolved against the review before it
+  is written, matched exactly, and `testers (s)` is neither published nor cited.
 
 **`docs/invariants/target-state.md`** — `frr.py`, `bird.py`, `gobgp.py`, `base.py`'s
 `sample_target_state()`, `measurements.py`'s `target_table_section()`/`delivery_metrics()`,

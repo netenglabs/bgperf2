@@ -266,6 +266,16 @@ ARTIFACT_INTERVALS = (
     ('offered_in_interval', ('tester_fleet', 'offered_in_interval')),
     ('delivery_complete_s', ('target_table', 'delivery', 'complete_s')),
     ('delivery_monitor_lag_s', ('target_table', 'delivery', 'monitor_lag_s')),
+    # The policy-reload half of the BIRD screen, and the one measurement in
+    # this campaign whose comparison is not read off `elapsed (s)` at all: a
+    # reload happens after convergence, inside a run whose elapsed time is
+    # dominated by the table it loaded first. Added when the report went to
+    # cite it and found the review did not carry it -- the Block 10 record had
+    # read it out of the artifacts by hand, which is a number in a document
+    # with nothing checking it against the rows. Absent from every series but
+    # `screen-reload`, where it is `None` and published as withheld.
+    ('reload_s', ('policy_reload', 'reload_s')),
+    ('reload_resolution_s', ('policy_reload', 'reload_resolution_s')),
 )
 
 # The workload controls' own completion measurements, which are the numbers

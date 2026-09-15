@@ -1929,6 +1929,81 @@ run_peers_expansion() {
   done
 }
 
+# Block 12 writes the campaign's report. It measures nothing, and it computes
+# nothing either: the report is rendered from the variance review, which was
+# rendered from the blocks' own published summaries.
+#
+# It regenerates the review into its own block directory rather than reading
+# Block 9's. Block 9's review is that block's record of what was known when
+# its selection was made -- it was taken before Blocks 10 and 11 existed and
+# it must keep saying so -- while the report has to describe every pass the
+# campaign ran. Two documents, two questions, and neither is a copy of the
+# other: both are derived from the same rows by the same script.
+#
+# Like Block 9's, the review is staged and moved into place only once it has
+# qualified, and the report is written only from a review that did.
+run_final_report() {
+  local review_dir="$BLOCK_DIR/review"
+  local report_dir="$BLOCK_DIR/report"
+  local claims="$METADATA_DIR/block12-claims.json"
+
+  if [[ ! -f "$claims" ]]; then
+    # Refused before anything is generated, on the rule Block 10's selection
+    # check follows: the prose is the part of a report that cannot be derived
+    # from the rows, so it is written first and checked against them -- not
+    # improvised by whatever is rendering the page.
+    echo "no claims document at $claims; the report's prose is written by" >&2
+    echo "hand and checked against the review, so there is nothing to" >&2
+    echo "render without it" >&2
+    exit 1
+  fi
+
+  capture_metadata
+
+  retract_block_markers
+
+  local staging="$BLOCK_DIR/.review-staging"
+  rm -rf "$staging"
+  local status=0
+  "$PYTHON_BIN" scripts/timing_variance_review.py \
+    --run-root "$RUN_ROOT" --out "$staging" \
+    > "$METADATA_DIR/variance-review-$BLOCK_KEY.txt" 2>&1 || status=$?
+  cat "$METADATA_DIR/variance-review-$BLOCK_KEY.txt"
+  if [[ $status -ne 0 ]]; then
+    EVIDENCE_FAILURES=$((EVIDENCE_FAILURES + 1))
+    echo "the review the report is rendered from did not qualify; read" >&2
+    echo "$staging -- no report was written" >&2
+    if [[ -d "$review_dir" ]]; then
+      echo "the review already on disk is untouched: $review_dir" >&2
+    fi
+    return
+  fi
+  rm -rf "$review_dir"
+  mv "$staging" "$review_dir"
+
+  # The previous report described the previous review, and the review has
+  # just been replaced. If the build now refuses -- which is the failure this
+  # block is designed to have, a number having moved under a sentence
+  # somebody wrote -- a stale report.html left beside the new review is a
+  # published report contradicting its own evidence, in a directory the
+  # epilogue tells the operator to go and read.
+  rm -rf "$report_dir"
+
+  status=0
+  "$PYTHON_BIN" scripts/build_timing_report.py \
+    --review "$review_dir" --claims "$claims" --out "$report_dir" \
+    --run-id "$RUN_ID" --revision "$(git -C . rev-parse HEAD)" \
+    > "$METADATA_DIR/report-$BLOCK_KEY.txt" 2>&1 || status=$?
+  cat "$METADATA_DIR/report-$BLOCK_KEY.txt"
+  if [[ $status -ne 0 ]]; then
+    # A claim whose figure no longer matches the review is the failure this
+    # block is built to have: it means a number moved under a sentence
+    # somebody wrote. Loud, and the report is not written.
+    EVIDENCE_FAILURES=$((EVIDENCE_FAILURES + 1))
+    echo "the report was not written; see $METADATA_DIR/report-$BLOCK_KEY.txt" >&2
+  fi
+}
+
 # Block 9 reviews; it measures nothing. Every number it reads was published
 # by a block that has already been accepted, so this runs no preflight, no
 # `verify` and no container -- and it deliberately depends on no Docker daemon
@@ -2143,6 +2218,9 @@ case "$BLOCK_INDEX" in
     ;;
   11)
     run_peers_expansion
+    ;;
+  12)
+    run_final_report
     ;;
   *)
     cat >&2 <<MSG

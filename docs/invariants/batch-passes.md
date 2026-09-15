@@ -2,7 +2,7 @@
 
 How a matrix becomes an ordered list of runs, and what the passes of one cell are allowed to say about each other.
 
-**Read this before editing:** `bgperf2.py` (`expand_batch_cells()`, `batch_report_rows()`, `bench_output_prefix()`, `create_batch_graphs()`), `summary.py`, `graphs.py`, `scripts/timing_variance_review.py`, `scripts/check_repetition_configs.py`
+**Read this before editing:** `bgperf2.py` (`expand_batch_cells()`, `batch_report_rows()`, `bench_output_prefix()`, `create_batch_graphs()`), `summary.py`, `graphs.py`, `scripts/timing_variance_review.py`, `scripts/check_repetition_configs.py`, `scripts/build_timing_report.py`
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 
@@ -147,6 +147,61 @@ written before there was a second. The same shape holds in the config check: wha
 `len(configs)`, and what already exists is `prior_passes`, so the Block 10 form of the arithmetic —
 a literal `+ 1` — would have accepted a Block 11 selection asking for three passes, satisfied by a
 block that added no observation at all.
+
+## Publishing the passes — the report
+
+The campaign's report is the last thing to read these documents, and it is the place where a number
+that has drifted becomes a sentence somebody quotes. Four rules hold it, and the first is what the
+other three are for.
+
+- **The report computes no statistic of its own.** Not a median, not a percentage, not a difference
+  between two medians. Every figure is read from a series document, which read it from
+  `summary.py`, which is the module each block used on its own passes. A report that re-derived its
+  numbers would disagree with the blocks eventually, on exactly the rows a reader cared about, and
+  nothing would say which of the two was wrong.
+- **Every claim cites the figures it rests on, and the citations are resolved before the report is
+  written.** The prose is the part that cannot be derived from the rows, so it is written by hand in
+  a claims document naming series, cell, metric, field and the value the author believes is there; a
+  citation that is absent or disagrees refuses the build and names both numbers. This is not
+  hypothetical hygiene — the first real build refused eight citations, every one of them a figure
+  transcribed from a rounded table into prose that would have been published beside a table
+  contradicting it.
+- **A citation is matched exactly, never rounded into agreement.** The review has already rounded
+  these; a tolerance here would be the report deciding how far a published number may sit from the
+  one it cites, which is the judgement the whole arrangement exists to remove.
+- **`testers (s)` is neither published nor cited.** It is a real column in every stats row and it is
+  the legacy field whose reading this campaign replaced, so the plan's exit criterion is that no
+  claim depends on it. The decomposition is published in its place, and a claim whose *text* names
+  the field is refused along with one that cites it.
+
+Two refusals that look like polish and are not. **A citation must state the value it rests on**, or
+nothing compares the prose to the review — the citation resolves, publishes whatever the review says,
+and the claim above it is unchecked while looking checked. And **a claim may not rest on a figure the
+review withheld**: that citation resolves too, and renders as "= withheld" directly beneath the
+conclusion it supposedly supports. **A claim's section must be one the page actually renders**, for
+the same family of reason: a section that is neither the summary nor a series name passes every
+check, is counted, is written to the machine-readable artifact, and then never appears — a validated
+invisible conclusion, which is worse than a missing one.
+
+And the withholding carries all the way to the page: a dispersion over one observation is printed as
+the reason it has none, an interval a cell never published is `withheld` rather than blank, and
+everything the report declined to publish is gathered into a section of its own — a reader should
+not have to find every empty cell to learn what is missing. **The reason is the review's own**, never
+one derived from the observation count: `summary.py` distinguishes five, and four of them are not
+"fewer than two observations" — the never-sampled sentinel in particular has a full set of
+observations and is the case that sentinel exists for. **A withheld figure and a published figure
+with no dispersion are separate statements**, or the inventory fills with notes about a withholding
+the report does not make: 132 of the first build's 207 were that.
+
+**An interval is a duration of something only if something crossed it.** `injection_s` comes back
+`0.0` from a BIRD 2.19 generator whose offered count is queue-side and saturates before the first
+poll, so the span is one nothing crossed and not a send that took no time. The witness
+(`offered_in_interval`) is published beside it and the interval is withheld by name where that
+witness is zero — the first real build printed the bare `0` on 34 cells, under a column header
+promising "where a table crossed it", on a page whose own preamble promises no absent figure is
+printed as a zero. An optional interval appears only in the
+series that measured it, because a column of `withheld` in six other series says nothing except that
+a policy reload is not part of an MRT playback.
 
 ## Order
 

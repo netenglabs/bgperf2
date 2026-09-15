@@ -2452,6 +2452,101 @@ The report must include:
 Exit criterion: the report passes calculation, source, chart, and narrative QA,
 and no claim depends on the legacy `testers (s)` interpretation.
 
+**Built 2026-09-15.** `scripts/build_timing_report.py` renders
+`report.json` and `report.html` from the variance review, and
+`metadata/block12-claims.json` is its prose. Procedure is
+`run_final_report()`, which regenerates the review, then builds the report
+from it and from nothing else.
+
+**The exit criterion is code, not a checklist someone ran down.** "Calculation
+QA" for a report whose every figure is copied is the question of whether the
+copy is faithful, so the report computes **no statistic of its own** — not a
+median, not a percentage, not a difference between two medians — and every
+claim in the claims document names the series, cell, metric, field and value
+it rests on. The builder resolves each citation against the review and refuses
+the report if any is missing or disagrees, naming both numbers. Source QA is
+the same mechanism: every published figure carries the document path it came
+from, and the HTML shows them under each claim.
+
+**That refusal fired on the first real build, eight times.** Every one was a
+figure transcribed into prose from a rounded table —
+`convergence_s` cited as 71.936246 where the review says 71.906846, and seven
+more like it. They would have been published beside a table that contradicted
+them, in a report whose numbers are otherwise all correct, which is exactly
+the failure that makes a benchmark report untrustworthy rather than wrong.
+
+**`testers (s)` is neither published nor cited**, which is the plan's own exit
+criterion made mechanical: a claim citing it is refused, and so is a claim
+whose *text* merely names it. The decomposition stands in its place, and
+`reload_s` had to be added to `ARTIFACT_INTERVALS` to make that true — the
+Block 10 record had read the policy-reload figures out of the artifacts by
+hand, so the campaign's answer to Primary Question 10 rested on numbers no
+document checked. They now come through the review like everything else, and
+the medians the report publishes (23.64 / 11.80 / 12.15) are the same ones
+that record quoted.
+
+**`/code-review` found nine things, and the first was the report telling its
+own reader a number it had promised not to.** `injection_s` was published as a
+bare `0` on 34 cells whose `offered_in_interval` is also 0 — a BIRD 2.19
+queue-side count that saturates before the first poll, so the span is one
+nothing crossed rather than a send that took no time — on a page whose preamble
+says nothing absent is printed as a zero and under a column header reading
+"generator send, where a table crossed it". The witness is published beside the
+interval now, and the interval is withheld by name where nothing crossed it.
+The other eight:
+
+- The review's own withholding reason was discarded and replaced with one
+  derived from `n`. `summary.py` distinguishes five, and four of them are not
+  "fewer than two observations" — including the never-sampled sentinel, which
+  has three observations and is exactly the case that sentinel exists for. The
+  reason is carried through now.
+- "Withheld" and "has no dispersion" were one key, so 132 of the first build's
+  207 "not published" notes were about figures that *are* published. They are
+  two keys, and the inventory is the plan's section again rather than noise.
+- A claim whose `section` was neither `summary` nor a series name — a typo, or
+  the old `'findings'` default — passed every check, was counted, was written
+  to `report.json`, and then never rendered. A conclusion that is validated and
+  invisible is worse than a missing one; it is refused.
+- **The headline refusal was opt-in.** A citation omitting `value` was never
+  compared to anything, so the claim above it went unchecked while looking
+  checked; and a citation resolving to a figure the review *withheld* rendered
+  as "= withheld" directly beneath the conclusion it supposedly supported. Both
+  refused.
+- A failed report build left the previous `report.html` beside the freshly
+  replaced `review/` — a published report contradicting its own evidence, in
+  the directory the epilogue tells the operator to read. Removed before
+  rebuilding.
+- `limiting_reason` is a list when the passes disagree, and `str()` of it
+  published a Python list repr mid-sentence. The disagreement is said out loud.
+- A dead `continue` wore the shape of an intention (noting a withheld order
+  relation). Implemented — and the first attempt tested for `'withheld'`, which
+  that field never holds, since its withheld cases are sentences.
+- A citation naming neither a metric nor an interval reported "publishes no
+  None"; a review document with no `series` raised `KeyError` instead of being
+  reported; two documents claiming one series silently replaced each other.
+
+**Two review documents, not one copy.** The report regenerates the review into
+its own block directory rather than reading Block 9's. Block 9's is that
+block's record of what was known when its selection was made — taken before
+Blocks 10 and 11 existed, and it must keep saying so — while the report has to
+describe every pass the campaign ran. Both are derived from the same rows by
+the same script, so neither is a summary of the other. Both are staged and
+moved into place only once they qualify, per the rule Block 11's review found
+the hard way.
+
+**What the report says, in one paragraph.** On the synthetic table RustyBGP's
+pinned build leads at 66s, FRR 10.7 leads the conventional daemons at 85s,
+BIRD 2.19.2 is 90s and OpenBGPD is 624s (8.8) and 733s (9.2). On full-internet
+playback the order changes and the reading weakens: RustyBGP 25s, BIRD 32s,
+OpenBGPD 9.2 80s, every pinned FRR 103–104s, OpenBGPD 8.8 123s — with the
+generator named as the limiting component for all four BIRD cells, so those
+are bgpdump2 measurements rather than BIRD ones. BIRD 3.3.2 is slower than
+2.19.2 on every workload measured; its threads buy the policy reload (11.8s
+against 23.6s, at half the CPU) and nothing else. FRR 10.7's improvement
+repeats and sits in `convergence_s`. OpenBGPD 9.2 halves 8.8's memory in both
+workloads and is slower in one and faster in the other. 8.8's 37.4 GB peak
+leaves 12.4 GB free, which is the closest anything came to the guardrail.
+
 ## Primary Questions
 
 The campaign should answer:

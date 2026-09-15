@@ -29,8 +29,8 @@ def run(args, **kwargs):
                           **kwargs)
 
 
-def block(*args, results_root, workdir=None):
-    argv = [BLOCK_RUNNER, *args, '--results-root', results_root]
+def block(*args, results_root, workdir=None, runner=None):
+    argv = [runner or BLOCK_RUNNER, *args, '--results-root', results_root]
     if workdir is not None:
         argv += ['--workdir', workdir, '--allow-root-workdir']
     return run(argv)
@@ -68,20 +68,46 @@ def _held_blocks():
     return set(int(n) for n in re.findall(r'^\s*\[(\d+)\]=', table[1].split('\n)', 1)[0], re.M))
 
 
-def unbuilt_block():
-    """The lowest block with no branch: the one a guard test may safely run.
+@pytest.fixture
+def unbuilt(tmp_path):
+    """A copy of the runner with its last block unbuilt, and that block's number.
 
-    Every test that drives the runner all the way to its `case` uses this, so
-    landing a new block moves them along instead of pointing them at a real
-    matrix.
+    Every test that drives the runner all the way to its `case` needs a block
+    that will not really run even if the guard it is testing regresses. For
+    most of this campaign the unbuilt blocks supplied one for free; they no
+    longer can, because Block 12 is the last block there is and the campaign
+    has now built all of them, at which point the old helper asserted and took
+    seven tests with it.
+
+    So the block is made rather than found, the way `held_runner` already
+    makes one: remove the highest `case` branch from a copy. The index is
+    still discovered from the script and never written down, so it moves on
+    its own as blocks land -- which is the property that matters, and the
+    reason this is not simply a literal. A literal here becomes a *benchmark
+    launcher* the day that block is built: these tests hand the runner
+    `--workdir` and `--allow-root-workdir`, so a 14-cell full-table MRT batch
+    would start inside the Docker-free suite before the `returncode == 2`
+    assertion ever ran.
+
+    The copy has to sit in `scripts/`: the runner resolves `SCRIPT_DIR` from
+    `BASH_SOURCE` and sources `lib/campaign_common.sh` relative to it. Unique
+    per process, because under pytest-xdist a fixed name means two workers
+    write and unlink the same path and one can execute a half-written file.
     """
-    built = set(_built_blocks())
-    for index, key in enumerate(_block_keys()):
-        if index not in built:
-            return index, key
-    raise AssertionError(
-        'every block is built, so no guard test can reach the refusal branch '
-        'without running a benchmark; give these tests another way in')
+    index = _built_blocks()[-1]
+    key = _block_keys()[index]
+    source = BLOCK_RUNNER
+    target = source.parent / '.test_unbuilt_runner_{0}.sh'.format(os.getpid())
+    text = source.read_text()
+    branch = re.compile(r'^  %d\)\n.*?^    ;;\n' % index, re.M | re.S)
+    text, removed = branch.subn('', text, count=1)
+    assert removed == 1, 'could not unbuild block %d in the copy' % index
+    target.write_text(text)
+    target.chmod(source.stat().st_mode)
+    try:
+        yield str(target), index, key
+    finally:
+        target.unlink(missing_ok=True)
 
 
 @pytest.fixture
@@ -164,28 +190,26 @@ def held_runner(tmp_path):
     target = source.parent / '.test_held_runner_{0}.sh'.format(os.getpid())
     text = source.read_text()
     assert 'declare -A BLOCK_HELD=(' in text, 'the held-block table is gone'
-    # The block held for the test is the lowest one with no `case` branch, for
-    # the reason `unbuilt_block()` exists at all: a literal number here becomes
-    # a *benchmark launcher* the day that block is built. These tests hand the
+    # Two blocks that cannot run, made by removing the two highest `case`
+    # branches from the copy: these tests need one block that will not really
+    # run even if the guard they are testing regresses, and one of them needs
+    # *two* -- a held one and an unheld one.
+    #
+    # The campaign's own unbuilt blocks used to supply them for free. They
+    # cannot any more, because Block 12 is the last block there is and all of
+    # them are now built -- which is why the `unbuilt` fixture below makes its
+    # block the same way. Unbuilding in a copy keeps both fixtures independent
+    # of how much of the campaign has been written.
+    #
+    # The hazard neither of them softens: a literal number here becomes a
+    # *benchmark launcher* the day that block is built. These tests hand the
     # runner `--workdir` and `--allow-root-workdir`, so a guard that regressed
     # would put a 14-cell full-table MRT batch inside the Docker-free suite
-    # before the `returncode == 2` assertion ever ran.
-    # Two blocks that cannot run, made by removing the two highest `case`
-    # branches from the copy.
-    #
-    # These tests need a block that will not really run even if the guard they
-    # are testing regresses, and one of them needs *two* -- a held one and an
-    # unheld one. For most of this campaign the unbuilt blocks supplied both.
-    # They cannot any more: Block 11 is the last block there is, so once Block
-    # 10 was built there was one unbuilt index, and once Block 11 is built
-    # there will be none and `unbuilt_block()` will assert. Unbuilding two in
-    # the copy makes the fixture independent of how much of the campaign has
-    # been written, without ever pointing a test at a block that would really
-    # run -- which is the hazard `unbuilt_block()` exists to avoid, and it is
-    # not softened here: the indices are discovered from the script, never
-    # written down, so they move on their own as blocks land.
-    index, unbuilt = sorted(_built_blocks()[-2:], reverse=True)
-    for number in (index, unbuilt):
+    # before the `returncode == 2` assertion ever ran. So the indices are
+    # discovered from the script, never written down, and they move on their
+    # own as blocks land.
+    index, second = sorted(_built_blocks()[-2:], reverse=True)
+    for number in (index, second):
         branch = re.compile(r'^  %d\)\n.*?^    ;;\n' % number, re.M | re.S)
         text, removed = branch.subn('', text, count=1)
         assert removed == 1, 'could not unbuild block %d in the copy' % number
@@ -197,7 +221,7 @@ def held_runner(tmp_path):
     target.write_text(text)
     target.chmod(source.stat().st_mode)
     try:
-        yield target, index, unbuilt
+        yield target, index, second
     finally:
         target.unlink(missing_ok=True)
 
@@ -278,17 +302,19 @@ def test_an_unknown_block_is_refused_by_name(roots):
     assert 'no such block' in result.stderr
 
 
-def test_a_block_that_is_not_built_yet_says_so_rather_than_inventing_one(roots):
+def test_a_block_that_is_not_built_yet_says_so_rather_than_inventing_one(
+        roots, unbuilt):
     '''A block that ran the wrong matrix produces rows that look exactly like
     the right ones.'''
     results, work = roots
-    index, _ = unbuilt_block()
-    result = block('block-%d' % index, results_root=results, workdir=work)
+    runner, index, _ = unbuilt
+    result = block('block-%d' % index, results_root=results, workdir=work,
+                   runner=runner)
     assert result.returncode == 2
     assert 'not built yet' in result.stderr
 
 
-def test_an_unbuilt_blocks_refusal_leaves_no_directory_behind(roots):
+def test_an_unbuilt_blocks_refusal_leaves_no_directory_behind(roots, unbuilt):
     """`status` must not report a block nobody can run as interrupted work.
 
     The block directory is created for every invocation, well before the
@@ -299,8 +325,9 @@ def test_an_unbuilt_blocks_refusal_leaves_no_directory_behind(roots):
     that holds results is ever touched by that path.
     """
     results, work = roots
-    index, key = unbuilt_block()
-    result = block('block-%d' % index, results_root=results, workdir=work)
+    runner, index, key = unbuilt
+    result = block('block-%d' % index, results_root=results, workdir=work,
+                   runner=runner)
     assert result.returncode == 2
     assert not os.path.exists(
         os.path.join(results, '2026-timing-validation', key)), (
@@ -340,7 +367,7 @@ def test_a_block_that_measures_nothing_is_not_told_to_re_measure(roots):
 def _review_block():
     """The block that measures nothing, discovered rather than named.
 
-    Same reason `unbuilt_block()` is discovered: a test that hardcoded an
+    Same reason the `unbuilt` fixture discovers its block: a test that hardcoded an
     index would be testing the wrong block the day the list changes.
     """
     keys = _block_keys()
@@ -493,7 +520,7 @@ def test_an_invalid_run_id_is_refused(runner, roots):
     assert 'invalid run ID' in result.stderr
 
 
-def test_a_recorded_workdir_wins_over_the_one_invoked_with(roots):
+def test_a_recorded_workdir_wins_over_the_one_invoked_with(roots, unbuilt):
     '''The campaign contract's rule: the recorded manifest wins and the
     discrepancy is a finding to report, not a path to silently switch.'''
     import json
@@ -503,8 +530,9 @@ def test_a_recorded_workdir_wins_over_the_one_invoked_with(roots):
     with open(os.path.join(metadata, 'manifest.json'), 'w') as f:
         json.dump({'workdir': '/data/somewhere-else'}, f)
 
-    index, _ = unbuilt_block()
-    result = block('block-%d' % index, results_root=results, workdir=work)
+    runner, index, _ = unbuilt
+    result = block('block-%d' % index, results_root=results, workdir=work,
+                   runner=runner)
     assert result.returncode != 0
     assert 'recorded under workdir' in result.stderr
 
@@ -582,7 +610,7 @@ def test_a_zero_padded_block_number_is_read_in_base_ten(roots):
     assert os.path.exists(os.path.join(block0, 'COMPLETE'))
 
 
-def test_a_force_that_replaced_nothing_retracts_nothing(roots):
+def test_a_force_that_replaced_nothing_retracts_nothing(roots, unbuilt):
     '''The retraction belongs where results start being replaced, not beside
     the marker checks that let --force past them. An unbuilt block measures
     nothing -- and deleting the acceptance of results that are still there
@@ -590,13 +618,13 @@ def test_a_force_that_replaced_nothing_retracts_nothing(roots):
     be redone.'''
     results, work = roots
     run_root = os.path.join(results, '2026-timing-validation')
-    index, key = unbuilt_block()
+    runner, index, key = unbuilt
     target = os.path.join(run_root, key)
     os.makedirs(target)
     open(os.path.join(target, 'RAN'), 'w').close()
     open(os.path.join(target, 'COMPLETE'), 'w').close()
 
-    result = run([BLOCK_RUNNER, 'block-%d' % index, '--force',
+    result = run([runner, 'block-%d' % index, '--force',
                   '--results-root', results,
                   '--workdir', work, '--allow-root-workdir'])
     assert result.returncode == 2
@@ -604,17 +632,17 @@ def test_a_force_that_replaced_nothing_retracts_nothing(roots):
     assert os.path.exists(os.path.join(target, 'RAN'))
 
 
-def test_a_refused_force_does_not_retract_anything(roots):
+def test_a_refused_force_does_not_retract_anything(roots, unbuilt):
     '''A forced run turned away by the workdir guard never replaced the
     results whose acceptance it would have retracted.'''
     results, _ = roots
     run_root = os.path.join(results, '2026-timing-validation')
-    index, key = unbuilt_block()
+    runner, index, key = unbuilt
     target = os.path.join(run_root, key)
     os.makedirs(target)
     open(os.path.join(target, 'COMPLETE'), 'w').close()
 
-    result = run([BLOCK_RUNNER, 'block-%d' % index, '--force',
+    result = run([runner, 'block-%d' % index, '--force',
                   '--results-root', results,
                   '--workdir', '/nonexistent-bgperf-campaign-test/work'])
     assert result.returncode != 0
@@ -930,7 +958,7 @@ def test_the_held_override_is_refused_on_a_block_that_is_not_held(held_runner,
     # the last block of the campaign, so from Block 10 onward there are not two
     # unbuilt indices to be had -- the fixture unbuilds two in its copy and
     # hands both back, and they are discovered from the script rather than
-    # named here for the same reason `unbuilt_block()` is discovered: a literal
+    # named here for the same reason the `unbuilt` fixture discovers its: a literal
     # would become a benchmark launcher the day the arrangement changed.
     held = _held_blocks()
     assert unbuilt not in held and unbuilt != index, (
@@ -983,7 +1011,7 @@ def test_a_reclaimed_block_is_pointed_at_the_resume_not_at_a_re_measure(
     # Block 0, because `next` selects the first block with no COMPLETE and a
     # `next` that reached an earlier one would *run* it -- this suite needs no
     # Docker, and a test that launches a smoke benchmark is the failure
-    # `unbuilt_block` exists for.
+    # the `unbuilt` fixture exists for.
     _reclaimed_block(root, 'block0-preflight-and-smoke')
     result = block('next', '--run-id', 'tvtest', results_root=root,
                    workdir=str(tmp_path / 'work'))
@@ -1018,25 +1046,25 @@ def test_a_resume_is_refused_for_a_block_that_was_not_reclaimed(tmp_path):
     assert 'did not stop at a cell boundary' in result.stderr
 
 
-def test_a_resume_of_a_block_that_never_ran_is_refused(roots):
+def test_a_resume_of_a_block_that_never_ran_is_refused(roots, unbuilt):
     """There is no interrupted run to continue, and the plain form is what
     starts one."""
     results, work = roots
-    index, _ = unbuilt_block()
+    runner, index, _ = unbuilt
     result = block('block-%d' % index, '--resume-after-stop',
-                   results_root=results, workdir=work)
+                   results_root=results, workdir=work, runner=runner)
     assert result.returncode != 0
     assert 'nothing to continue' in result.stderr
 
 
-def test_force_and_resume_are_refused_together(roots):
+def test_force_and_resume_are_refused_together(roots, unbuilt):
     """One discards this block's measured cells and the other keeps them.
     Whichever won silently, the operator would learn which by reading the
     results afterwards -- and one of the two answers destroys them."""
     results, work = roots
-    index, _ = unbuilt_block()
+    runner, index, _ = unbuilt
     result = block('block-%d' % index, '--force', '--resume-after-stop',
-                   results_root=results, workdir=work)
+                   results_root=results, workdir=work, runner=runner)
     assert result.returncode != 0
     assert 'opposites' in result.stderr
 

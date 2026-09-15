@@ -2131,7 +2131,53 @@ For canonical initial-table comparisons, these are repetitions 4–5. For the
 BIRD architecture screen, run repetitions 2–3 first and expand to five only
 when variance could change the conclusion.
 
-**Built 2026-09-14, not yet run.** All three selections are in the BIRD
+**Ran and accepted 2026-09-15.** 18 of 18 runs qualified, no rejected rows and
+no shortfalls. It was stopped at a cell boundary by an EC2 spot interruption
+notice (terminate 2026-09-14T05:40:43Z) after 13 rows and resumed on a
+replacement host of the same class, so the block spans two instances:
+`i-0d2bb0a85cf00defa` carries `peers-rep2`, `diversity-rep2`, `reload-rep2`,
+`peers-rep3` and `diversity-rep3`'s default-threads row; `i-0a6eab994598f75b6`
+carries `diversity-rep3`'s other two rows and all of `reload-rep3`. The
+campaign's host rule allows that and requires it stated, which is what this
+paragraph is; the review names it too. The stop predates the runner that
+records one, so `RAN`'s stop line was backfilled by `record-stop` and is marked
+`stopped_backfilled`. Contention peaked at 7% foreign CPU; min free memory
+never fell below 54.3 GB of 61.4.
+
+**The pooled read decided two of the three selections and expanded the third.**
+
+- `screen-diversity`: **separated** on all three cells. 2.19.2 7/7/7, 3.3.2
+  default 13/10/13, 3.3.2 four-thread 19/21/18. The hypothesis holds as
+  written -- BIRD 3.3.2 is slower at selecting among competing paths for one
+  prefix, and adding workers makes it slower still.
+- `screen-reload`: **separated** on all three cells, and the tightest series in
+  the campaign: 2.19.2 43/43/41, 3.3.2 default 59/59/59, four-thread 56/54/54,
+  with `reload_s` medians 23.64 / 11.80 / 12.15 against a ~2.0s sampler
+  resolution. The CPU half holds too -- `reload_cpu_percent_mean` medians
+  89.19% / 44.93% / 117.12% -- so BIRD 3.3.2 recalculates policy in half the
+  time at half the CPU, and its four-thread configuration buys nothing for more
+  than twice the CPU.
+- `screen-peers` at 250 sessions: **expand to 5** on all three cells, and the
+  reason is that the comparison reversed. 2.19.2 measured 112/32/58 (CV 60.6%)
+  against 3.3.2 default's 54/57/56 (CV 2.7%), so pass 2 has 2.19.2 converging a
+  250-session fleet in *half* 3.3.2's time and pass 1 has it taking twice as
+  long. The four-thread cell moved too (49/50/73, CV 23.7%). The selection's
+  variance reason had bet against exactly this -- "two more passes can separate
+  the pair unless the run-to-run spread is fifty times anything this campaign
+  has measured" -- and the spread is 80s on a 1s-resolution measurement. What
+  the three passes do establish is that the dispersion is **asymmetric**: BIRD
+  3.3.2's 250-session convergence is tight and 2.19.2's is not, which is a
+  different claim from the one Primary Question 9 asked and is worth carrying
+  into repetitions 4-5 rather than losing. Note `bgperf2-599` -- 2.19.2
+  expiring generator hold timers under a 500-peer load -- as a candidate
+  mechanism to check against those rows, not as a finding this block made.
+
+So the campaign's only evidence of BIRD 3 beating BIRD 2 at anything does not
+survive repetition at n=3, and repetitions 4-5 of `screen-peers` are the next
+benchmark work. Blocks 9's review may now be re-run, since Block 10 is
+complete.
+
+**Built 2026-09-14.** All three selections are in the BIRD
 architecture screen, so this block runs repetitions 2 and 3 of each — six
 batches of three cells, eighteen runs — and expands to five only if the three
 passes leave a comparison undecided.

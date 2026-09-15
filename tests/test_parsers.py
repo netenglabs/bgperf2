@@ -14,6 +14,7 @@ import pytest
 
 from bird import BIRDTarget
 from frr import FRRoutingTarget
+from rustbgpd import RustBGPdTarget
 
 
 def build(target_class, output):
@@ -119,4 +120,38 @@ def test_frr_handles_non_json_output():
 def test_frr_handles_summary_without_ipv4_unicast():
     target = build(FRRoutingTarget, json.dumps({}).encode('utf-8'))
     received, accepted = target.get_neighbors_state()
+    assert accepted == {}
+
+
+# --- rustbgpd: 'rbgp --json neighbor' ---------------------------------------
+
+RBGP_NEIGHBORS = [
+    {'address': '10.10.0.3', 'remote_asn': 1003, 'state': 'Established', 'prefixes_received': 500},
+    {'address': '10.10.0.4', 'remote_asn': 1004, 'state': 'Established', 'prefixes_received': 500},
+    {'address': '10.10.0.5', 'remote_asn': 1005, 'state': 'Active', 'prefixes_received': 0},
+]
+
+
+def test_rustbgpd_parses_prefix_counts():
+    target = build(RustBGPdTarget, json.dumps(RBGP_NEIGHBORS).encode('utf-8'))
+    received, accepted = target.get_neighbors_state()
+
+    assert accepted == {'10.10.0.3': 500, '10.10.0.4': 500, '10.10.0.5': 0}
+    # rustbgpd reports one received count per neighbor and does not separate
+    # received from accepted.
+    assert received == accepted
+
+
+def test_rustbgpd_handles_no_output():
+    '''rbgp writes nothing to stdout until the daemon opens its socket.'''
+    received, accepted = build(RustBGPdTarget, b'').get_neighbors_state()
+    assert received == {}
+    assert accepted == {}
+
+
+def test_rustbgpd_handles_non_json_output():
+    '''rbgp prints a plain-text connection error while the daemon is starting.'''
+    target = build(RustBGPdTarget, b'cannot reach rustbgpd at unix:///var/lib/rustbgpd/grpc.sock\n')
+    received, accepted = target.get_neighbors_state()
+    assert received == {}
     assert accepted == {}

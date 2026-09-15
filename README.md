@@ -8,6 +8,7 @@ bgperf2 is a performance measurement tool for BGP implementation. This was forke
 * [How bgperf2 works](https://github.com/netenglabs/bgperf2/blob/master/docs/how_bgperf_works.md)
 * [Benchmark remote target](https://github.com/netenglabs/bgperf2/blob/master/docs/benchmark_remote_target.md)
 * [MRT injection](https://github.com/netenglabs/bgperf2/blob/master/docs/mrt.md)
+* [rustbgpd target](https://github.com/netenglabs/bgperf2/blob/master/docs/rustbgpd.md)
 * [Running on AWS EC2 spot instances](https://github.com/netenglabs/bgperf2/blob/master/docs/howto_aws.md)
 
 ## Updates from original bgperf
@@ -279,6 +280,10 @@ Currently, `bgperf2` supports [BIRD](http://bird.network.cz/) and [FRRouting](ht
 (other than GoBGP. There is very intial support for[RustyBGP](https://github.com/osrg/rustybgp), partly
 because RustyBGP doesn't support all policy that Bgperf2 tries to use for policy testing. If you just want to
 do routes and neighbors then RustyBGP works.
+
+[rustbgpd](https://github.com/lance0/rustbgpd) is supported the same way, and with the same
+caveat: it does routes and neighbors, not policy, so it refuses a `--filter_test` run rather
+than reporting an unfiltered one under a filter label. See [docs/rustbgpd.md](docs/rustbgpd.md).
 
 ```bash
 $ ./bgperf2.py bench -t gobgp

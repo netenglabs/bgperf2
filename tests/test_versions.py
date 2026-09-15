@@ -4,6 +4,8 @@ The whole point of the mechanism is that `--version 10.1` reaches the right
 FRR branch and the right image, so each hop is pinned here. None of it needs
 Docker -- the mapping is pure.
 '''
+import re
+
 import pytest
 
 from argparse import Namespace
@@ -19,6 +21,7 @@ from frr_compiled import FRRoutingCompiled
 from gobgp import GoBGP
 from junos import Junos
 from openbgp import OpenBGP
+from rustbgpd import RustBGPd
 from rustybgp import RustyBGP
 
 
@@ -95,6 +98,31 @@ class TestResolveRef:
             build = RustyBGP.build_vars(v)
             assert build['base_image'].endswith('-bookworm')
             assert build['runtime_image'] == 'debian:bookworm'
+
+    @pytest.mark.parametrize('version,ref', [
+        ('0.66.0', 'v0.66.0'),
+        ('0.64.0', 'v0.64.0'),
+        ('main', 'main'),          # raw refs pass through
+        ('deadbeef', 'deadbeef'),
+    ])
+    def test_rustbgpd(self, version, ref):
+        '''rustbgpd tags releases as v<version>.'''
+        assert RustBGPd.resolve_ref(version) == ref
+
+    def test_rustbgpd_default_is_a_release_not_a_branch(self):
+        '''rustbgpd releases roughly weekly, so a default of 'main' would make
+        two runs a week apart incomparable with nothing in the results saying
+        so. The default tag has to name a release.
+        '''
+        ref = RustBGPd.resolve_ref(None)
+        assert re.fullmatch(r'v\d+(\.\d+)+', ref), ref
+
+    def test_rustbgpd_toolchain_is_pinned_to_the_declared_msrv(self):
+        '''The workspace declares rust-version = 1.95; a floating 'rust:1' base
+        would silently move under the pin, and anything older does not compile
+        at all.
+        '''
+        assert RustBGPd.build_vars(None)['base_image'] == 'rust:1.95-bookworm'
 
 
 class TestOpenBGP:

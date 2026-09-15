@@ -49,6 +49,7 @@ from bird import BIRD, BIRDTarget
 from frr import FRRoutingTarget
 from frr_compiled import FRRoutingCompiled, FRRoutingCompiledTarget
 from rustybgp import RustyBGP, RustyBGPTarget
+from rustbgpd import RustBGPd, RustBGPdTarget
 from openbgp import OpenBGP, OpenBGPTarget
 from flock import Flock, FlockTarget
 from srlinux import SRLinux, SRLinuxTarget
@@ -96,6 +97,7 @@ BUILDABLE_IMAGES = {
     'gobgp': GoBGP,
     'bird': BIRD,
     'rustybgp': RustyBGP,
+    'rustbgpd': RustBGPd,
     'openbgp': OpenBGP,
     'flock': Flock,
     'frr_c': FRRoutingCompiled,
@@ -105,7 +107,7 @@ BUILDABLE_IMAGES = {
 # What `prepare` builds, in order. Flock and the commercial NOSes are left out:
 # they are downloaded rather than compiled.
 PREPARE_IMAGES = ['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'rustybgp',
-                  'openbgp', 'frr_c', 'bgpdump2']
+                  'rustbgpd', 'openbgp', 'frr_c', 'bgpdump2']
 
 # Targets `bench -t` accepts. The class both selects the daemon's behaviour and
 # supplies the image naming used to resolve --version.
@@ -127,6 +129,7 @@ TARGET_CLASSES = {
     'bird': BIRDTarget,
     'frr_c': FRRoutingCompiledTarget,
     'rustybgp': RustyBGPTarget,
+    'rustbgpd': RustBGPdTarget,
     'openbgp': OpenBGPTarget,
     'flock': FlockTarget,
     'srlinux': SRLinuxTarget,

@@ -2284,6 +2284,53 @@ states.
 
 ### Block 11: screen-peers repetitions 4 and 5
 
+**Ran and accepted 2026-09-15.** 6 of 6 runs qualified, no rejected rows and
+no shortfalls, one attempt on `i-0873be3f8faf3ef28` — a new instance of the
+campaign's class (m7a.4xlarge, AMD EPYC 9R14, 16 threads, 64425440 kB), which
+is a host change *between* blocks and so expected and recorded. Run from
+committed `2025a20` with a clean tree. Contention peaked at 6% foreign CPU;
+min free memory 58.1 GB of 61.4.
+
+**The pooled read of five passes returns `unseparated at the expansion limit`
+on all three cells, and that is the answer rather than a sixth pass.**
+
+| cell | five passes of `elapsed (s)` | median | CV |
+|---|---|---|---|
+| bird 2.19.2 | 112 / 32 / 58 / 117 / 58 | 58 | 49.4% |
+| bird 3.3.2 (default threads) | 54 / 57 / 56 / 57 / 54 | 56 | 2.7% |
+| bird 3.3.2 (4 threads) | 49 / 50 / 73 / 49 / 48 | 49 | 20.0% |
+
+Three things follow, and the first is a retraction:
+
+- **Primary Question 9's central claim does not survive.** "BIRD 3.3.2
+  converges a 250-session fleet faster than 2.19.2" rested on Block 8's 112s
+  against 54s, and at five passes the medians are 58s and 56s — inside the 1s
+  resolution of the measurement. Block 8 compared 2.19.2's *slow mode* against
+  3.3.2's only mode. The campaign's one piece of evidence for BIRD 3 beating
+  BIRD 2 on session scaling is withdrawn; what remains is the four-thread
+  cell's 49s median, which is separated from both, at twice the CPU (204%
+  against 101%).
+- **The asymmetry is the finding, and it is bimodality rather than width.**
+  2.19.2 is not scattered across its range: three of five passes converge in
+  55–57s, one in 31s and one in 116s. 3.3.2 default is the tightest cell in
+  the campaign (stdev 1.5s, and `convergence_s` alternates between exactly
+  50.5s and 52.7s). The four-thread cell's 20% CV is carried entirely by a
+  single 70.8s convergence among four at 45–47s.
+- **The two slow 2.19.2 runs are not one mechanism, and saying they are would
+  be the easy mistake here.** Pass 1's 112s is a 57.4s convergence followed by
+  a 58.8s `assurance_s` — the run converged on time and then spent a minute
+  failing to hold still — while pass 4's 117s is a 115.8s convergence with an
+  ordinary 6.0s assurance. One is instability after arrival and the other is
+  slow arrival. `bgperf2-599` (2.19.2 expiring generator hold timers under a
+  500-session fleet) remains a candidate mechanism to check against these
+  rows, and it is a candidate for at most one of the two shapes.
+
+One decomposition oddity the report should read rather than repeat: 3.3.2
+default carries a `post_injection_tail_s` of 41–43s in every pass, against
+0.1–0.4s for 2.19.2's fast passes, so the two daemons are not dividing the
+same wall clock the same way. Nothing here attributes that; it is the kind of
+claim the final block has the whole series to support.
+
 **Built 2026-09-15.** Block 10's pooled read settled two of its three
 selections and left all three cells of the third on `expand to 5`, so this
 block runs repetitions 4 and 5 of the 250-peer peer sweep and nothing else:

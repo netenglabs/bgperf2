@@ -34,9 +34,9 @@ nothing in the long-term programme has begun.
 1. **`bgperf2-5p6`** — pick the gate notification channel (yours to decide).
 2. **`bgperf2-cqi`** — spend limit; the reset date has passed, so unattended step 6 can be
    verified with one command.
-3. **Unattended step 7** — `atomic_write()` directory fsync, and route `write_provenance()`
-   through it. Small, and it is what makes a spot reclaim cost one cell instead of a
-   truncated artifact.
+3. ~~**Unattended step 7** — `atomic_write()` directory fsync, and route
+   `write_provenance()` through it.~~ **Already done 2026-09-13** (`b1e8470`); this entry was
+   wrong when written.
 4. **`bgperf2-bgg`** — make `tester_limited` separable. This is the highest-value measurement
    work left and it is why §4b.1 no longer asks for a faster generator.
 5. **`bgperf2-0ma`** — `-s/--single-table` is inert for BIRD and two published baseline rows
@@ -52,6 +52,50 @@ nothing in the long-term programme has begun.
 
 ---
 
+## 0a. What happened on 2026-09-28, and what is next
+
+Recorded here because the branches below are not merged, so `git log master` does not show
+them, and because the "next" list is a decision rather than something derivable from `bd ready`.
+
+**Four branches exist on `origin`, three of them reviewed and green:**
+
+| branch | commit | state |
+|---|---|---|
+| `master` | `8953db3` | the timing-plan archive |
+| `fix/silent-read-failures` | `4e20012` | reviewed (`/code-review high`, 8 findings acted on), 1987 tests green, **ready to merge** |
+| `measurement/separate-tester-limited` | `880502b` | reviewed (3 findings acted on), **ready to merge** |
+| `unattended/measurement` | `3b4a596` | the unverified driver; do not merge until step 6 is verified, which is the reason it is on a branch |
+
+**Closed this day:** `bgperf2-bgg` (documented, not fixed -- see §3 and the dictionary),
+`bgperf2-qhx`, `bgperf2-wq2`, `bgperf2-52e` (all in `4e20012`), and `bgperf2-sl1`, which had
+been fixed by `5251847` months earlier and never closed.
+
+**Filed:** `bgperf2-ylb` (cross-cell discriminator for `tester_limited`), `bgperf2-zt5`
+(`event_artifact()` is called unguarded, split out rather than overclaimed).
+
+**`bgperf2-app` is now blocked by `bgperf2-0ma`, deliberately.** They are one defect from two
+ends and both beads carry the finding: `bird.py:645,652`, inside the dead per-neighbour path,
+is the only BIRD code expressing what `--single-table` means per session, and the live dynamic
+path never reads it. So `app`'s "or delete the path" option destroys what `0ma` needs.
+
+### Next, in the operator's own order (stated 2026-09-28)
+
+1. **`bgperf2-0ma` together with `bgperf2-app`.** The only open item where something
+   *published* is wrong: two baseline rows claim `--single-table` did something for BIRD when
+   the code honouring it never ran. The one real decision in it is what `--single-table`
+   *should* mean for BIRD's dynamic path -- a question about BIRD semantics, not about
+   bgperf2, and worth reading BIRD's own documentation for rather than guessing the way the
+   dead code does. Do not close `app` by deletion.
+2. **`bgperf2-4pm`** -- the monitor costing more CPU than the daemon under test
+   (`gobgp neighbor -j` is O(table), polled 1/s). This is Primary Question 8's refusal in
+   mechanical form, and the one piece of work that makes a *future* campaign more readable
+   rather than only more correct. A cheaper monitor read shrinks the `target_or_monitor`
+   interval; only a second host removes it.
+
+Still parked, and genuinely the operator's: `bgperf2-5p6` (which channel unattended gates page)
+and `bgperf2-cqi` (the Claude spend limit, now past its reset date). Together they are the only
+thing standing between the driver and a verified step 6. Nothing else waits on them.
+
 ## 1. The four plans, in one line each
 
 | plan | state | continuation prompt |
@@ -59,7 +103,7 @@ nothing in the long-term programme has begun.
 | `docs/2026-bgp-performance-test-plan.md` | **superseded/complete.** Produced the `2026-baseline` campaign; its >64 GB phases are retained as historical design only | `continue the 2026 benchmark campaign` (nothing left to run) |
 | `docs/bgperf2-measurement-implementation-plan.md` | **all phases complete** (0, 1, 2, 3, 4, 5, 5A, 6 — last on 2026-09-08). Two P3 design questions still open under the Phase 5A epic | `continue the bgperf2 measurement implementation plan` |
 | `docs/completed/2026-64gb-timing-validation-plan.md` | **complete and archived 2026-09-28.** Blocks 0–12 all carry `RAN` **and** `COMPLETE`; Block 12 (final report) built and accepted 2026-09-15 | the prompt now reports completion and starts nothing |
-| `docs/unattended-execution-plan.md` | **steps 0–5 done; step 6 explicitly NOT met; step 7 not started** | `continue the unattended execution plan` |
+| `docs/unattended-execution-plan.md` | **steps 0–5 and 7 done; step 6 is the only one outstanding, and its criterion is unmet for a reason outside the code** | `continue the unattended execution plan` |
 
 `bd stats`: 75 issues total, 46 closed, **29 open, 0 in progress, 0 blocked**.
 
@@ -163,7 +207,16 @@ Also learned here: **`bd gate create --blocks <id>` does not exist.** `bd gate` 
 steps. The working spelling is the `human` label plus an ordinary dependency
 (`bd create --labels=human`, then `bd dep add <item> <gate>`).
 
-**Step 7 (survive a reclaimed host)** — not started, tracked as `bgperf2-82b`. Most of it
+**Step 7 (survive a reclaimed host)** — **done 2026-09-13**, reviewed, commit `b1e8470`;
+`bgperf2-82b` is closed, and `atomic_write()` fsyncs the directory at `bgperf2.py:6128`. Its
+exit criteria were measured against a real two-cell batch, and review found four defects
+including a 401 read as "nothing scheduled" and a cell-boundary break that exited 0 while
+discarding unrun tests' results.
+
+**An earlier revision of this file said "not started", three times.** The plan's step-7
+section states the *problem* it was written to solve, and its top `Status:` line still said
+"steps 0 through 5"; reading the two together gives the wrong answer. Both are corrected now.
+What that section describes, and what was fixed:
 already exists and must not be rebuilt: `batch()` already checkpoints per cell, `--resume`
 already skips durable cells, cell identity is already stable across passes and order. What is
 missing is durability across a *hard* termination:
@@ -513,8 +566,7 @@ a cloud caveat that matters here: instance sizes change CPU allocation along wit
 - Unattended step 6 verification, now unblocked by the spend-limit reset — needs
   `bgperf2-5p6` (notification channel) answered first, because the driver refuses to start
   without one.
-- Unattended step 7: `atomic_write()` directory fsync, and route `write_provenance()` through
-  it (§1c).
+- ~~Unattended step 7~~ — done 2026-09-13, see §1c.
 
 ---
 

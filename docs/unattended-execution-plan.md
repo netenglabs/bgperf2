@@ -1,6 +1,13 @@
 # Unattended Execution Plan
 
-Status: proposed on 2026-09-03; steps 0 through 5 taken the same day.
+Status: proposed on 2026-09-03; steps 0 through 5 taken the same day. **Step 7 was
+taken on 2026-09-13** (`bgperf2-82b`, reviewed, commit `b1e8470`; its own section
+below states the problem it solved, not its status). **Step 6 is the only step
+outstanding**, and its exit criterion is unmet for a reason outside the code -- see
+its progress note of 2026-09-15 and the two `human` gates `bgperf2-cqi` and
+`bgperf2-5p6`. This line is the one a reader checks first, so it carries the whole
+answer: a later session read "steps 0 through 5" here and reported step 7 as never
+started, three times.
 The continuation prompt at the end of this document is now an operator contract,
 carried by the `unattended-execution` skill (`.claude/skills/unattended-execution/SKILL.md`)
 and named in `CLAUDE.md`'s contract table. It settles two things this document

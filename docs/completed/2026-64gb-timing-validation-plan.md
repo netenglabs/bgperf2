@@ -1,5 +1,18 @@
 # 2026 64 GB Timing Validation Campaign Plan
 
+**COMPLETE — accepted 2026-09-15. Archived 2026-09-28; this plan is not live work.**
+All thirteen execution blocks (0-12) carry both `RAN` and `COMPLETE`, all ten Primary
+Questions are dispositioned, and Block 12's report was built and accepted. Nothing here is
+left to run, and `scripts/run_timing_validation_block.sh next` has no block to select.
+
+**It is archived rather than deleted because it is the only committed record of the
+campaign.** `results/` is gitignored and the campaign host is a spot instance, so
+`report.json`, `report.html` and every block CSV live on one disk that a reclaim erases.
+The block records below, the Primary Question answers, the three excluded rows and the
+host-class rule are the durable account. Read it as a record; do not restart it. A further
+campaign on this host needs a new plan, and the two refusals this one ends on
+(`bgperf2-bgg`, `bgperf2-4pm`) are the argument for what that plan should fix first.
+
 ## Purpose
 
 This plan defines the follow-up campaign that validates version differences
@@ -19,7 +32,7 @@ semantics and must use a new durable run identity.
 ## Dependency Gate
 
 Do not start this campaign until the release gate in
-[`bgperf2-measurement-implementation-plan.md`](./bgperf2-measurement-implementation-plan.md)
+[`bgperf2-measurement-implementation-plan.md`](../bgperf2-measurement-implementation-plan.md)
 passes.
 
 If the user invokes the campaign prompt before that gate passes, do not run a
@@ -2589,7 +2602,7 @@ The campaign should answer:
 - More than 10 full-internet peers.
 - Larger synthetic cells than `50 × 100k`.
 - Historical 192/384 GB capacity-cliff experiments; see
-  [`2026-memory-capacity-options.md`](./2026-memory-capacity-options.md) for the
+  [`2026-memory-capacity-options.md`](../2026-memory-capacity-options.md) for the
   deferred 128/192/256/384 GB planning envelopes.
 - Broad route-server or route-reflector matrices.
 - Full withdrawal/churn matrices beyond the bounded BIRD architecture screen.

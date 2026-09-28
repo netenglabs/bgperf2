@@ -16,7 +16,7 @@ Usage:
   scripts/run_timing_validation_block.sh <next|list|status|block-N|accept|record-stop> [options]
 
 Runs the 64 GB timing validation campaign
-(docs/2026-64gb-timing-validation-plan.md) one execution block at a time.
+(docs/completed/2026-64gb-timing-validation-plan.md) one execution block at a time.
 
 Actions:
   next        Run the first block that has not been accepted
@@ -2227,7 +2227,7 @@ case "$BLOCK_INDEX" in
 block-$BLOCK_INDEX (${BLOCK_TITLES[$BLOCK_INDEX]}) is not built yet.
 
 Each block's configs and procedure are its own change set, written when the
-campaign reaches it -- see docs/2026-64gb-timing-validation-plan.md, section
+campaign reaches it -- see docs/completed/2026-64gb-timing-validation-plan.md, section
 "Execution Blocks". Nothing here should invent one: a block that ran the wrong
 matrix would produce rows that look exactly like the right ones.
 MSG

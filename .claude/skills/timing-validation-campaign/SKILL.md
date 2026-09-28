@@ -5,12 +5,31 @@ description: Run, monitor, resume or accept exactly one block of the 64 GB timin
 
 # 64 GB timing validation campaign operator contract
 
-When the user says `continue the 64 GB timing validation campaign`, follow
-`docs/2026-64gb-timing-validation-plan.md` with run ID
-`2026-timing-validation`, results root `results/2026`, and work directory `/data/bgperf-work`. Verify the measurement
-release gate first. Never run cells or blocks concurrently. Monitor or resume an active block; otherwise run exactly
-one next block, review timing evidence, correctness, provenance, contention, and memory, then stop at the reviewed
-block boundary. The local 64 GB host is a hard ceiling; do not schedule a larger-memory workload.
+**THE CAMPAIGN IS COMPLETE — accepted 2026-09-15, plan archived 2026-09-28.** All thirteen
+blocks (0-12) carry `RAN` and `COMPLETE`, all ten Primary Questions are dispositioned, and
+Block 12's report was built and accepted. **There is no next block**, and
+`scripts/run_timing_validation_block.sh next` has nothing to select.
+
+When the user says `continue the 64 GB timing validation campaign`, **do not start a
+benchmark.** Report that the campaign is complete, point at
+`docs/completed/2026-64gb-timing-validation-plan.md` for the record and at
+`results/2026/2026-timing-validation/block12-final-report/report/report.html` for the
+findings, and say that a further campaign on this host needs a new plan rather than another
+block of this one. The two refusals this campaign ends on -- `bgperf2-bgg` (a slow generator
+and a back-pressured one produce the same evidence) and `bgperf2-4pm` (the monitor can cost
+more CPU than the target) -- are what such a plan should fix first.
+
+Everything below is retained as the record of how the campaign was run, because it is the
+only committed account of several rules that were settled the hard way, and the **host-class
+rule in particular still governs any future work on this machine**. Read it as history; the
+one thing it no longer licenses is running a block.
+
+The contract as it stood: follow the plan with run ID `2026-timing-validation`, results root
+`results/2026`, and work directory `/data/bgperf-work`. Verify the measurement release gate
+first. Never run cells or blocks concurrently. Monitor or resume an active block; otherwise
+run exactly one next block, review timing evidence, correctness, provenance, contention, and
+memory, then stop at the reviewed block boundary. The local 64 GB host is a hard ceiling; do
+not schedule a larger-memory workload.
 
 **The entry point is `scripts/run_timing_validation_block.sh`** (`status`, `next`,
 `accept N --note "..."`), which carries that identity as its defaults and holds a lock so two blocks
@@ -104,9 +123,10 @@ fill the root hours in and take Docker and journald down with it, losing the *fi
 artifacts rather than the current run. The `2026-baseline` contract's "unless durable run metadata
 already records different values" clause still wins for that campaign, so anything in flight keeps
 the directory it recorded. **The timing-validation campaign has no such clause** -- its work
-directory is part of Fixed Campaign Identity -- but it has not started, so there is nothing to
-contradict; if a block is ever found mid-flight against `/var/tmp/bgperf`, the recorded manifest
-wins and the discrepancy is a finding to report, not a path to silently switch.
+directory is part of Fixed Campaign Identity -- and every one of its thirteen blocks ran
+against `/data/bgperf-work`, so there is nothing that contradicts it and nothing left in
+flight. (This sentence read "but it has not started" until 2026-09-28, which was true when
+it was written and false for the eleven blocks after it.)
 
 ---
 

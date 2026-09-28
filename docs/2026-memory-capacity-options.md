@@ -3,11 +3,16 @@
 ## Status and Scope
 
 This note records what 128, 192, 256, and 384 GB hosts would add beyond the
-current 64 GB server. It is a planning aid, not an amendment to the active
-[`2026 64 GB Timing Validation Campaign Plan`](./2026-64gb-timing-validation-plan.md).
-That campaign retains its 64 GB ceiling, and larger-memory work must not begin
-until the measurement implementation release gate and the 64 GB validation
-work establish trustworthy timing and bottleneck attribution.
+current 64 GB server. It is a planning aid, not an amendment to the
+[`2026 64 GB Timing Validation Campaign Plan`](./completed/2026-64gb-timing-validation-plan.md),
+which **completed on 2026-09-15 and is archived**. Both preconditions this note
+set for larger-memory work are therefore met: the measurement implementation
+release gate passed on 2026-09-08, and the 64 GB validation campaign ran to its
+final report. What that campaign established about the two gating questions is
+in "RAM Is Not the Only Ceiling" below and in the Execution Order at the end --
+in short, it confirmed the anchors this note projects from, and it did **not**
+establish trustworthy bottleneck attribution, which is now known to be a
+property of where the instrument sits rather than of how many passes are run.
 
 The estimates below are conservative memory-only envelopes derived from the
 completed `2026-baseline` observations. They are not promises that a workload
@@ -193,10 +198,18 @@ daemons faster or more representative.
 
 ## Execution Order
 
-1. Complete the measurement implementation release gate.
-2. Complete and review the bounded 64 GB timing validation campaign.
+1. ~~Complete the measurement implementation release gate.~~ **Done 2026-09-08.**
+2. ~~Complete and review the bounded 64 GB timing validation campaign.~~ **Done
+   2026-09-15.**
 3. Use its repeated memory, CPU, tester, and monitor evidence to revise these
-   envelopes.
+   envelopes. **This is the live step.** First pass: the campaign re-measured
+   both anchors across three passes and reproduced them -- OpenBGPD 8.8 peaked
+   at 37.437 GB against the 37.439 GB recorded here, and the worst MRT target
+   peak was 11.472 GB against 11.46 GB -- so the envelope table needs no
+   revision on that evidence. What the campaign *adds* is that memory was never
+   the binding constraint: the closest row to the guardrail stayed inside it at
+   20.2% free, while the export fan-out scenario was abandoned for host **CPU**
+   saturation on sixteen threads. Revise the emphasis, not the numbers.
 4. If larger hardware is available, calibrate one workload dimension at a
    time and preserve the 20% memory guardrail.
 5. Prefer 256 GB for a durable general-purpose host, 128 GB for the lowest-cost

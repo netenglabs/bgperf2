@@ -22,8 +22,10 @@ The implementation objective is:
 ## Relationship to the Follow-Up Campaign
 
 The follow-up campaign is specified in
-[`2026-64gb-timing-validation-plan.md`](./2026-64gb-timing-validation-plan.md).
-That campaign must not begin until the release gate in this document passes.
+[`completed/2026-64gb-timing-validation-plan.md`](./completed/2026-64gb-timing-validation-plan.md).
+That campaign could not begin until the release gate in this document passed; the
+gate passed on 2026-09-08, the campaign ran, and it **completed on 2026-09-15 and
+is archived**.
 
 The completed `2026-baseline` results remain historical end-to-end evidence.
 Do not rewrite their CSV rows or reinterpret their `testers (s)` values as

@@ -15,12 +15,13 @@ Follow-on work is split into two execution plans:
 
    > continue the bgperf2 measurement implementation plan
 
-2. [`2026-64gb-timing-validation-plan.md`](./2026-64gb-timing-validation-plan.md)
-   repeats the most useful synthetic and full-internet comparisons that fit
-   on the existing host. After the implementation release gate passes,
-   continue it with:
-
-   > continue the 64 GB timing validation campaign
+2. [`completed/2026-64gb-timing-validation-plan.md`](./completed/2026-64gb-timing-validation-plan.md)
+   repeated the most useful synthetic and full-internet comparisons that fit
+   on the existing host. **It completed on 2026-09-15 and is archived**, so
+   `continue the 64 GB timing validation campaign` now reports that and starts
+   nothing. Its findings are in its Block records and in
+   `results/2026/2026-timing-validation/block12-final-report/` (gitignored, so
+   the plan is the durable account).
 
 ## Purpose
 

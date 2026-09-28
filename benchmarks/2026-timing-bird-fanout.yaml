@@ -1,5 +1,5 @@
 # Block 8 of the 64 GB timing validation campaign, scenario 3 of 5: export
-# fan-out. See docs/2026-64gb-timing-validation-plan.md, "Block 8: BIRD
+# fan-out. See docs/completed/2026-64gb-timing-validation-plan.md, "Block 8: BIRD
 # architecture screen".
 #
 # The plan's scenario: 50 ingress peers feeding 10 receiver sessions, with

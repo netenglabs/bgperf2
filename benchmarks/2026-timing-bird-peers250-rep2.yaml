@@ -1,6 +1,6 @@
 # Block 10 of the 64 GB timing validation campaign, selection 1 of 3,
 # repetition 2 of 3: BIRD session scaling at 250 peers. See
-# docs/2026-64gb-timing-validation-plan.md, "Block 10: selected repetitions",
+# docs/completed/2026-64gb-timing-validation-plan.md, "Block 10: selected repetitions",
 # and results/2026/2026-timing-validation/metadata/block10-selection.json,
 # which is the decision this file executes and the document
 # scripts/timing_variance_review.py validates it against.

@@ -441,7 +441,7 @@ invocation. Nothing about them has been condensed and the plan documents they dr
 |---|---|---|
 | `continue the 2026 benchmark campaign` | `2026-benchmark-campaign` | run ID `2026-baseline`, `results/2026`, `/data/bgperf-work` |
 | `continue the bgperf2 measurement implementation plan` | `measurement-implementation` | `docs/bgperf2-measurement-implementation-plan.md` and its decision log |
-| `continue the 64 GB timing validation campaign` | `timing-validation-campaign` | `docs/2026-64gb-timing-validation-plan.md`, `scripts/run_timing_validation_block.sh` |
+| `continue the 64 GB timing validation campaign` | `timing-validation-campaign` | **complete 2026-09-15, plan archived** — `docs/completed/2026-64gb-timing-validation-plan.md`, `scripts/run_timing_validation_block.sh`. The skill refuses a new block and says so; the host-class rule it carries still governs. |
 | `continue the unattended execution plan` | `unattended-execution` | `docs/unattended-execution-plan.md` |
 
 All four have one shape: inspect durable state first, never run two things concurrently, complete

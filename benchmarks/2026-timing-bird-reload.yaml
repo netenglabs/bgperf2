@@ -1,5 +1,5 @@
 # Block 8 of the 64 GB timing validation campaign, scenario 4 of 5: loaded
-# policy recalculation. See docs/2026-64gb-timing-validation-plan.md, "Block 8:
+# policy recalculation. See docs/completed/2026-64gb-timing-validation-plan.md, "Block 8:
 # BIRD architecture screen".
 #
 # The plan's scenario: reload a nontrivial import policy with 50 peers x 50,000

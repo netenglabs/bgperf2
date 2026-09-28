@@ -1,5 +1,5 @@
 # Block 8 of the 64 GB timing validation campaign, scenario 1 of 5: peer
-# scaling. See docs/2026-64gb-timing-validation-plan.md, "Block 8: BIRD
+# scaling. See docs/completed/2026-64gb-timing-validation-plan.md, "Block 8: BIRD
 # architecture screen".
 #
 # The plan's scenario: 50, 250 and then 500 peers with 2,000 unique prefixes

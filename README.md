@@ -232,7 +232,7 @@ revision and schema versions that produced them.
 
 The measurement implementation and 64 GB validation plans
 ([implementation](docs/bgperf2-measurement-implementation-plan.md),
-[validation](docs/2026-64gb-timing-validation-plan.md)) add the remaining
+[validation](docs/completed/2026-64gb-timing-validation-plan.md)) add the remaining
 evidence before drawing new bottleneck or fine version-ranking conclusions.
 Why each piece of that measurement work was built the way it was, and what was
 measured to decide it, is in the

@@ -217,6 +217,45 @@ def rm_line():
     print('\x1b[1A\x1b[2K\x1b[1D\x1b[1A')
 
 
+class CliDecodeError(ValueError):
+    """A daemon's CLI answered with bytes that are not UTF-8."""
+
+
+def decode_cli_output(raw, container=None, cmd=None, window=8):
+    """Decode one CLI read, or say enough about the bytes to diagnose it.
+
+    A bare `.decode('utf-8')` on a `docker exec` result raises
+    `UnicodeDecodeError`, which names a byte offset into a buffer nobody kept:
+    Block 3 of the timing campaign recorded "invalid start byte" at position
+    13585 of the openbgp 9.2 neighbour sampler's `bgpctl -j show neighbor`, and
+    what produced a 0x80 there is still unknown because the read was gone by
+    the time anyone looked. The sampler's own guard caught it and the run was
+    fine; the diagnosis was what was lost.
+
+    So this raises too -- `errors='replace'` is deliberately not used, because
+    the caller is usually about to `json.loads()` the result and a substituted
+    replacement character turns a read that failed into a parse of corrupted
+    JSON, which is the worse failure. What it adds is the evidence: which
+    container, which command, and the bytes either side of the offending one,
+    in a message the sampler's failure record then carries into the artifact.
+    """
+    if isinstance(raw, str):
+        return raw
+    try:
+        return raw.decode('utf-8')
+    except UnicodeDecodeError as exc:
+        start = max(exc.start - window, 0)
+        end = min(exc.end + window, len(raw))
+        where = ' '.join('{0:02x}'.format(b) for b in raw[start:end])
+        raise CliDecodeError(
+            '{container}: {cmd!r} returned bytes that are not UTF-8: '
+            '{reason} at byte {start} of {total}; bytes {lo}-{hi} are {where}'
+            .format(container=container or 'unknown container',
+                    cmd=cmd or 'unknown command', reason=exc.reason,
+                    start=exc.start, total=len(raw), lo=start, hi=end - 1,
+                    where=where)) from exc
+
+
 class Container(object):
     # --- image naming and daemon versions ---------------------------------
     #
@@ -789,7 +828,8 @@ class Container(object):
         '''
         version = self.get_version_cmd()
         i = dckr.exec_create(container=self.name, cmd=version, stderr=stderr)
-        return dckr.exec_start(i['Id'], stream=False, detach=False).decode('utf-8')
+        raw = dckr.exec_start(i['Id'], stream=False, detach=False)
+        return decode_cli_output(raw, container=self.name, cmd=version)
 
     def version_string(self):
         '''This daemon's version, or an explicit UNKNOWN saying why not.

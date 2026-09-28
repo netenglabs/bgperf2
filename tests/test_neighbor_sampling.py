@@ -289,6 +289,12 @@ def test_wait_established_treats_a_bad_payload_as_not_yet_established(payload):
     import io
 
     class Flaky(monitor_module.Monitor):
+        # A real Monitor always carries `name`, and this stand-in did not.
+        # It is needed on *every* iteration, not only the error path: the
+        # establishment wait decodes through `decode_cli_output(raw,
+        # container=self.name, ...)`, which evaluates it on success too.
+        name = 'bgperf_monitor'
+
         def __init__(self, bad):
             self._bad = bad
             self.reads = 0

@@ -1,6 +1,16 @@
 
 from base import *
+# Explicit, though `import *` above would resolve it: reached only through the
+# star import, a future `__all__` in base.py would turn this into a NameError
+# at poll time, inside neighbor_stats()'s broad `except Exception` -- every
+# sample lost, the neighbour count frozen, and one warning line to show for it.
+# Which is the failure class this module was edited to fix.
+from base import CliDecodeError, decode_cli_output  # noqa: F401
 import json
+
+class OpenBGPNeighborReadError(RuntimeError):
+    '''`bgpctl show neighbor` could not be read for this poll.'''
+
 
 class OpenBGP(Container):
     CONTAINER_NAME = None
@@ -157,7 +167,22 @@ fib-update no
     def get_neighbors_state(self):
         neighbors_accepted = {}
         neighbors_received_full = {}
-        neighbor_received_output = json.loads(self.local("/usr/sbin/bgpctl -j show neighbor").decode('utf-8'))
+        cmd = "/usr/sbin/bgpctl -j show neighbor"
+        raw = self.local(cmd)
+        if not raw:
+            # An empty read is not an empty fleet -- `gobgp.py` names the same
+            # failure for the same reason. Polling can start before bgpd
+            # answers, and `json.loads('')` raises "Expecting value: line 1
+            # column 1", which says nothing about which container went quiet.
+            raise OpenBGPNeighborReadError(
+                '{0}: `{1}` returned nothing'.format(self.name, cmd))
+        # The read that produced the campaign's only decode failure. Decoded
+        # through the helper so the next one names the bytes instead of an
+        # offset into a buffer that is already gone -- and still raises, since
+        # substituting a replacement character here would hand `json.loads()`
+        # corrupted JSON rather than failing the poll.
+        neighbor_received_output = json.loads(
+            decode_cli_output(raw, container=self.name, cmd=cmd))
         for neigh in neighbor_received_output['neighbors']:
             neighbors_accepted[neigh['remote_addr']] = neigh['stats']['prefixes']['received']
             neighbors_received_full[neigh['remote_addr']] = False if neigh['stats']['update']['received']['eor'] == 0 else True

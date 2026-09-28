@@ -1,6 +1,6 @@
 # What the run was waiting for
 
-The only thing allowed to name a limiting component, and the six rules that stop it guessing.
+The only thing allowed to name a limiting component, and the seven rules that stop it guessing.
 
 **Read this before editing:** `findings.py`, `bgperf2.py` (`write_event_artifact()`)
 
@@ -28,7 +28,7 @@ the rule it applied (`policy`) and the durations it applied it to (`evidence`),
 because a verdict that cannot be argued with is a validity boolean with extra
 words.
 
-Six rules hold the thing up:
+Seven rules hold the thing up:
 
 - **Half the offered table must cross the measured interval before that
   interval may be read as the generator's send** — or the generator must have
@@ -53,6 +53,19 @@ Six rules hold the thing up:
   as backpressure would withhold every BIRD 3 verdict there is. Only
   `max_blocked_writes` and `max_send_stalls` are read, and which end of a
   blocked write was at fault is not in those numbers.
+- **`tester` means the run was waiting for the generators, never that the
+  generators were the weak component.** A generator throttled from outside and
+  a generator blocked writing to a target that is not draining are the same
+  measurement, and `tester_limited` names `tester` for both: three controlled
+  BIRD 3.3.2 runs at 2 x 500,000 -- nothing constrained, generator capped at 4
+  mbit, target capped at 0.25 CPU -- all return it, at 253,773 / 24,940 /
+  61,291 pps. Blocked-write counters do not separate them either, because an
+  egress cap blocks writes exactly as an undrained peer does, which is why
+  `backpressure_observed` withholds rather than attributes. Per-role,
+  time-aligned CPU would; it does not exist. Do not add a rule that names the
+  target here from two runs -- that is how all three convergence rules were
+  broken. `docs/measurement-dictionary.md` carries the evidence and
+  `bgperf2-bgg` the tracking.
 - **An unsampled minimum is not a measurement.** `min_free` starts at a
   sentinel above every real value so the first sample can only lower it; a run
   whose memory sampler never fired would otherwise publish a machine with a

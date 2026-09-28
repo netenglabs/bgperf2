@@ -616,7 +616,7 @@ interval supports).
 
 | Finding | Kind | When it fires |
 |---|---|---|
-| `tester_limited` | attribution | The generators were measured sending for longer than the poll that bounds the interval, at a rate this instrument could observe, and the monitor reached the required count within one poll of their completion or before it. It requires that at least `INJECTION_COVERAGE` (half) of the offered table crossed the measured interval, which is what keeps a queue-side counter from being read as a send rate — BIRD 2.19 puts at most about 15% of its table inside that interval, and where the first poll lands decides how much. |
+| `tester_limited` | attribution | The generators were measured sending for longer than the poll that bounds the interval, at a rate this instrument could observe, and the monitor reached the required count within one poll of their completion or before it. It requires that at least `INJECTION_COVERAGE` (half) of the offered table crossed the measured interval, which is what keeps a queue-side counter from being read as a send rate — BIRD 2.19 puts at most about 15% of its table inside that interval, and where the first poll lands decides how much. **It says the run was waiting for the generators to deliver; it does not say the generators were the weak component.** A generator throttled from outside and a generator blocked writing to a target that is not draining produce the same evidence, and this finding names `tester` for both — see "What `tester_limited` does not separate" below. |
 | `post_injection_tail` | attribution | The run continued past the last generator's completion by more than the polls bounding that interval. The time was spent somewhere between the target and the monitor, and nothing published here separates the two: the monitor is the instrument, so its own polling is inside the number. |
 | `injection_unresolved` | qualification | The fleet injection was no wider than the look that bounds it. Every MRT run has this shape — a 10,000-prefix walk is over in about a millisecond — so it forbids reading the injection as the run's cost and forbids nothing about the tail. |
 | `injection_boundary_unresolved` | confounder | Neither most of the table crossed the measured interval nor did any generator time its own send, so the generator's completion may sit anywhere inside its real sending and the boundary between injection and tail cannot be trusted. This is the BIRD 2.19 case. |
@@ -627,6 +627,55 @@ interval supports).
 | `host_cpu_saturated` | confounder | Host idle fell to `HOST_IDLE_PERCENT` (5%) or below. `min idle%` is host-wide and includes bgperf2's own load, so it says the machine had nothing spare and not whose work that was — see the CPU attribution boundary in the implementation plan. Per-role, time-aligned CPU would be needed to say more, and no such measurement exists. |
 | `foreign_cpu_contention` | confounder | `max foreign cpu %` reached `contention.CONTENTION_PERCENT` (one core). A run sharing the machine is not comparable with one that did not, and a version ranking read off it would be an artifact of the neighbour. Its `evidence.processes` names the heaviest competing commands from the sample that set that maximum — aggregated by command name with a `process_count`, since the canonical competitor is a parallel build of thousands of short-lived processes rather than one large one. They are recorded during the run and never re-derived here: a competitor that has since exited is exactly the case this fires on. An artifact written before that was recorded carries no `processes` key at all, which is deliberately not an empty list. |
 | `low_free_memory` | confounder | Free memory fell below `LOW_FREE_MEMORY_FRACTION` (5%) of the host's total, so the intervals include page pressure. A fraction rather than a constant because the column is also moved by bgperf2's own logging when the bench directory is tmpfs. |
+
+### What `tester_limited` does not separate
+
+**A slow generator and a back-pressured one are the same measurement, and
+`tester_limited` names `tester` for both.** The verdict is not false either way
+-- the run really was waiting for the generators to deliver -- but a reader
+takes `tester` to mean the generator was the weak component, and half the time
+it was the target.
+
+Three controlled runs make the point, all BIRD 3.3.2 with two bgpdump2
+injectors at 2 x 500,000, differing only in what was constrained from outside
+bgperf2. bgperf2 was told about none of it:
+
+| run | what was constrained | offered rate | generator's own send | verdict |
+|---|---|---:|---:|---|
+| `block1-generator-calibration/tester-baseline` | nothing | 253,773 pps | 2.021s | `tester` / `tester_limited` |
+| `block1-generator-calibration/slow-tester` | generator egress, 4 mbit | 24,940 pps | 32.390s | `tester` / `tester_limited` |
+| `phase6-calibration/target-starved-probe-500k` | **target**, 0.25 CPU | 61,291 pps | 11.907s | `tester` / `tester_limited` |
+
+One verdict, three situations: a generator that was the constraint, a target
+that was the constraint, and a shape that is generator-bound with nothing
+constrained at all. The starved target does not drain its sessions, so the
+injectors block on their writes and their measured send rate falls exactly as a
+throttled generator's does.
+
+**Nothing a run publishes today separates them**, and two things that look like
+they would, do not:
+
+- **Blocked-write counters do not, because shaping blocks writes too.** A
+  generator blocked on write tells you its peer is not reading *only* when the
+  path to that peer is otherwise clear; an egress cap produces the identical
+  counter. That is the same reason `backpressure_observed` is a confounder
+  rather than an attribution, and bgpdump2 reports those counters only under
+  `--tester-trace-io`, which inflates the interval beside them by 56%.
+- **Comparing offered against what the target holds does not**, because TCP
+  bounds the backlog to the socket buffers. A blocked generator cannot run far
+  ahead of a slow target, so the two curves stay together in both cases.
+
+**What would separate them: per-role, time-aligned CPU** -- the target at its
+own ceiling through the interval is a target that was the constraint; a target
+with headroom while the generators sent slowly is not. That is the
+[CPU attribution boundary](bgperf2-measurement-implementation-plan.md#cpu-attribution-boundary),
+and until that instrumentation exists this finding may not be read as a
+statement about the generator. A second candidate, cheaper and weaker, is a
+cross-cell comparison within one series: a fleet that reached 623,727 pps on
+one cell of the Block 5-7 MRT matrix was not at its ceiling on the cell where
+it managed 345,720 pps with identical generator configuration. That is a
+review-layer statistic over several runs, not something `findings.py` can see
+from one artifact, and it is not implemented (`bgperf2-bgg`).
 
 A run whose policy raised still writes its artifact: `write_event_artifact()`
 catches, and publishes `limiting_component: inconclusive` with the exception in

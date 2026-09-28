@@ -299,6 +299,9 @@ component, and `bgperf2.py`'s `write_event_artifact()`, which catches for it.
 - Half the offered table must cross the measured interval before that interval may be read as the
   generator's send — or the generator must have timed its own send.
 - A confounder withholds the verdict, not the evidence.
+- `tester` says the run was waiting for the generators, never that the generator was the weak
+  component: a throttled generator and one blocked writing to an undrained target are the same
+  measurement, and three controlled runs of one shape all return it.
 
 **`docs/invariants/host-and-environment.md`** — `contention.py`, the controller threads, and the
 `-d` warnings.

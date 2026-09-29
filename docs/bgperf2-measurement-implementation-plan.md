@@ -651,6 +651,9 @@ count.
   pass-to-pass dispersion. It says which old rows can be read against new ones,
   with what correction, and which cannot. This is not a re-run of the
   completed campaign; its question is the instrument.
+  **It runs inside the 2026 daemon comparison's Phase 3 first block**, beside
+  that plan's pinned/unpinned bias check and on the same cells, so the host is
+  taken once (`docs/2026-daemon-comparison-plan.md` §5).
 - **7d — flip the default** to `sink` once 7c is accepted. Keep the GoBGP
   monitor as a selectable reference, because it is the only thing the bridge can
   be re-checked against.

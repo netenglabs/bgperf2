@@ -109,14 +109,22 @@ Progress: item 2 done 2026-09-29.
 
 Code changes, verified by the test suite and by `-n1 -p1` smoke runs.
 
-1. **Decision (operator): change the monitor, or keep it.** Scope set 2026-09-08 on `bgperf2-4pm`
-   is "watch it, do not fix it", because any fix changes the instrument and breaks comparability
-   with every published row. Phase 1.2 found that no CLI read avoids the lock. Phase 3 is a new
-   run ID anyway, so this plan is the natural place to change the instrument, if it is ever
-   changed. If the answer is "keep", Phase 2.2's pinning still removes the monitor from the
-   target's CPU.
+1. ~~**Decision (operator): change the monitor, or keep it.**~~ **Answered by the operator
+   2026-09-29: change it**, by replacing GoBGP with a purpose-built sink. The work is
+   [measurement plan Phase 7](bgperf2-measurement-implementation-plan.md#phase-7-replace-the-monitor-with-a-purpose-built-sink)
+   (`abce4a0`, epic `bgperf2-8gg.10`), not this plan's. The reasons are recorded in the decision
+   log's Phase 7 section. The decisive one for *this* plan is resolution. In the timing-validation
+   review, most cells' pass-to-pass stdev is 0.0–0.6 s against a 1 s poll, and several version
+   pairs differ by one or two seconds (MRT 103/104, 80/81, 25/27). The current monitor cannot
+   resolve the differences this plan exists to publish. A second reason: a sink ingests far
+   faster than any target, so it may resolve the `target_or_monitor` cells on one host, which is
+   what the §5 gate would otherwise send to Phase 4.
 2. **Pin each role to its own cores (new).** Today target, generators, monitor and receivers
-   share all 16 vCPU, and the monitor can out-consume the target. Add an opt-in per-role
+   share all 16 vCPU, and the monitor can out-consume the target. **Pin the sink, not GoBGP.**
+   GoBGP's per-poll table walk and its garbage collection spread across every core it can
+   reach. Squeezed onto two, each walk would likely take longer and hold the monitor's lock for
+   longer. That is inferred from the source, not measured, and it is moot once the sink is the
+   monitor. Add an opt-in per-role
    `cpuset`, for example `--pin target=0-7,monitor=8-9,testers=10-15`. It must:
    - be recorded in the run's provenance and reach `bench_output_prefix()` (a pinned run and an
      unpinned run are different cells);
@@ -145,7 +153,8 @@ Code changes, verified by the test suite and by `-n1 -p1` smoke runs.
 **Exit:** tests green; a pinned smoke run and an unpinned smoke run both complete, with distinct
 artifact names; all matrix images verify clean.
 
-Progress: —
+Progress: item 1 answered by the operator 2026-09-29 (change the monitor; the work is measurement
+plan Phase 7). No other Phase 2 work has started.
 
 ---
 
@@ -153,8 +162,13 @@ Progress: —
 
 **Tracked by:** `bgperf2-0y5.4` · **Status:** not started
 
+**Requires measurement plan Phase 7 through 7b** (`bgperf2-8gg.10.2`). Phase 3 runs on the sink
+monitor at its finer resolution, passed explicitly as `--monitor sink` if 7d has not yet flipped
+the default.
+
 **Host:** one `m7a.4xlarge`, the same class as the timing-validation campaign. The rows are
-comparable with that campaign and with nothing older (`benchmarks/baseline/baseline-benchmark.csv` was a different CPU).
+comparable with that campaign **through Phase 7's bridge block** (a different monitor is a different
+instrument), and with nothing older (`benchmarks/baseline/baseline-benchmark.csv` was a different CPU).
 
 Workloads, three passes each, matrix repeated as a whole (`docs/invariants/batch-passes.md`),
 new run ID `2026-comparison`:
@@ -163,6 +177,11 @@ new run ID `2026-comparison`:
 2. MRT 10 × 1.05 M (bgpdump2), pinned;
 3. **one bias check:** a small subset of both, unpinned, so pinned and unpinned can be compared
    on identical builds and the effect of co-location is measured rather than assumed.
+4. **Phase 7's bridge block (7c, `bgperf2-8gg.10.3`), in the same block as item 3**, so the host
+   is taken once. It uses the same cells with `--monitor gobgp` added as a second axis. Monitor
+   and pinning stay separate dimensions of the cell identity, so each effect is read on its own.
+   It publishes the offset the instrument alone introduces, which is what lets these rows be read
+   against the timing-validation campaign's.
 
 Every run is on-demand or checkpointed. A spot reclaim mid-block has already cost two blocks
 their continuity (`docs/completed/2026-64gb-timing-validation-plan.md`).
@@ -173,7 +192,7 @@ After Phase 3, look at the MRT and fan-out cells and decide with this table:
 
 | what Phase 3 shows | conclusion |
 |---|---|
-| MRT cells resolve to `target` (or are named cleanly), and the pinned/unpinned subset agrees within the 1 s resolution | **No new hardware.** Co-location is not biasing the result. Publish from §6. |
+| MRT cells resolve to `target` (or are named cleanly), and the pinned/unpinned subset agrees within the published resolution | **No new hardware.** Co-location is not biasing the result. Publish from §6. |
 | cells still resolve to `target_or_monitor`, **or** pinned and unpinned disagree by more than resolution | **Co-location is biasing the result.** Go to Phase 4 on new hardware. |
 | export fan-out still shows host CPU saturation with the monitor and receivers pinned apart from the target | **Phase 4** — the receivers need their own host. |
 
@@ -247,4 +266,5 @@ compare.
 
 Epic `bgperf2-0y5`. Phases, each blocked by the one before: Phase 0 `bgperf2-0y5.1` (also blocked by
 `bgperf2-es0` and `bgperf2-0ma`), Phase 1 `bgperf2-0y5.2`, Phase 2 `bgperf2-0y5.3`, Phase 3 `bgperf2-0y5.4`,
-Phase 4 `bgperf2-0y5.5`.
+Phase 4 `bgperf2-0y5.5`. Phase 3 is also blocked by measurement plan Phase 7b (`bgperf2-8gg.10.2`), and
+it carries Phase 7c (`bgperf2-8gg.10.3`) out in its first block.

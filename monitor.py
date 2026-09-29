@@ -16,7 +16,14 @@
 from json.decoder import JSONDecodeError
 import sys
 
-from base import Container
+from docker.errors import APIError
+
+from base import CliDecodeError, Container, decode_cli_output
+
+
+class SessionUnavailable(RuntimeError):
+    '''A session this run requires cannot be asked whether it is established.'''
+
 from gobgp import GoBGP
 import os
 from  settings import dckr
@@ -94,7 +101,25 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
                  rm_line()
             print(f"Waiting {n} seconds for {role}")
 
-            neighbor_data = self.local('gobgp neighbor {0} -j'.format(neighbor)).decode('utf-8')
+            cmd = 'gobgp neighbor {0} -j'.format(neighbor)
+            # The missing arm beside the parse one below. That one is for a
+            # bad *answer*, which is "not established yet" and retried; this is
+            # for a failed *exec*, where there is nothing to wait for. Killing
+            # bgperf_receiver2 during a 4x250000 establishment wait ended the
+            # run in a docker-py traceback: dying is right, the shape was not.
+            #
+            # It names no cause, because `APIError` is every non-2xx the daemon
+            # can answer with and not just "no such container" -- a host out of
+            # pids answers `500 OCI runtime exec failed: resource temporarily
+            # unavailable` for a container that is running perfectly well.
+            try:
+                raw = self.local(cmd)
+            except APIError as exc:
+                raise SessionUnavailable(
+                    '{0} ({1}) could not be asked for its session state: '
+                    'docker refused the exec with {2}. The {1} session cannot '
+                    'be shown to be established, so the run cannot proceed as '
+                    'configured.'.format(self.name, role, exc)) from exc
 
             # The third read of `gobgp neighbor -j` in this run, and it needs
             # the same guard as the other two for a reason the JSONDecodeError
@@ -109,9 +134,15 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
             # the RPC endpoint is least likely to be up. A session that is not
             # answering yet is what this loop is for, so a bad payload is
             # "not established yet", not an error.
+            #
+            # Which is why the decode sits inside this arm rather than ahead of
+            # it: a partial or binary answer at that same moment is the same
+            # event as an unparseable one, and decoding outside would have ended
+            # the batch cell on the payload this loop exists to wait out.
             try:
-                neigh = json.loads(neighbor_data)
-            except JSONDecodeError:
+                neigh = json.loads(decode_cli_output(
+                    raw, container=self.name, cmd=cmd))
+            except (JSONDecodeError, CliDecodeError):
                 neigh = None
             if not isinstance(neigh, dict) or not isinstance(
                     neigh.get('state'), dict):
@@ -167,8 +198,9 @@ gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1
                 # freezes, and `ConvergenceTracker` fails the run as stuck with
                 # no target-side guard able to save it.
                 try:
-                    payload = json.loads(
-                        self.local('gobgp neighbor -j').decode('utf-8'))
+                    payload = json.loads(decode_cli_output(
+                        self.local('gobgp neighbor -j'),
+                        container=self.name, cmd='gobgp neighbor -j'))
                     if not isinstance(payload, list) or not payload:
                         raise MonitorReadError(
                             '`gobgp neighbor -j` returned {0}, not a list of '
@@ -287,7 +319,9 @@ class Receiver(Monitor):
         # container, so unlike a BIRD tester's peers this cannot be collapsed
         # into a single exec. That cost is what `export_poll_can_stop()` exists
         # to bound.
-        neighbors = json.loads(self.local('gobgp neighbor -j').decode('utf-8'))
+        neighbors = json.loads(decode_cli_output(
+            self.local('gobgp neighbor -j'),
+            container=self.name, cmd='gobgp neighbor -j'))
         state = neighbors[0]['afi_safis'][0]['state']
         # Absent means zero, exactly as the monitor's own loop reads it: gobgp
         # omits the field until the session has accepted something.

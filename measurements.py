@@ -1867,7 +1867,7 @@ def _sample_time(sample):
     return sample.get('monotonic_s')
 
 
-def _delivery(reason=None, **values):
+def _delivery(reason=None, detail=None, **values):
     '''Every field present on every path, absent ones null.
 
     A section whose keys come and go cannot be read by a consumer without
@@ -1879,6 +1879,12 @@ def _delivery(reason=None, **values):
         'derived_from': 'target_table.samples',
         'rule': DELIVERY_RULE,
         'unresolved_reason': reason,
+        # Always present, null on every ordinary path. `unresolved_reason` is a
+        # closed vocabulary of stable tokens -- `check_timing_evidence.py` reads
+        # it as "the series cannot support an answer" -- so the one reason that
+        # is a *bug* rather than a refusal must not arrive as free-form English
+        # in that field, or nothing downstream can tell the two apart.
+        'unresolved_detail': detail,
     }
     section.update({field: values.get(field) for field in _DELIVERY_FIELDS})
     return section
@@ -2270,8 +2276,23 @@ def target_table_section(samples, unmeasured_reason=None, witness_rule=None):
     # monitor's own intervals is the first step towards being mistaken for
     # one. `delivery_metrics()` says so itself: `derived` is true, the rule is
     # named, and it carries the samples it was computed from one key over.
-    section = {'samples': samples, 'series': series,
-               'delivery': delivery_metrics(samples)}
+    # Guarded for the reason `write_event_artifact()` guards `derive_findings()`
+    # two lines from where it calls this: by the time either runs, this document
+    # is the only record a converged run happened, and on the FAILED path it is
+    # the only account of the failure. No raising input is constructible from
+    # today's two witnesses -- both type-guard their sums -- so this is the rule
+    # applied before it is needed rather than after an artifact is lost.
+    #
+    # It covers this derivation and not the whole section: the `series` loop
+    # above and `event_artifact()`'s other sections are still unguarded, and
+    # `bgperf2.py` calls `event_artifact()` itself with no `try` (bgperf2-zt5).
+    # Claiming more than that here would be the overclaim, not the gap.
+    try:
+        delivery = delivery_metrics(samples)
+    except Exception as exc:
+        delivery = _delivery('derivation_raised', detail='{0}: {1}'.format(
+            type(exc).__name__, exc))
+    section = {'samples': samples, 'series': series, 'delivery': delivery}
     if unmeasured_reason:
         section['unmeasured_reason'] = unmeasured_reason
     if witness_rule:

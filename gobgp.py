@@ -189,7 +189,9 @@ class GoBGPTarget(GoBGP, Target):
         neighbors_received = {}
         neighbor_received_output = self.local("/root/gobgp neighbor -j")
         if neighbor_received_output:
-            neighbor_received_output = json.loads(neighbor_received_output.decode('utf-8'))
+            neighbor_received_output = json.loads(decode_cli_output(
+                neighbor_received_output, container=self.name,
+                cmd='/root/gobgp neighbor -j'))
         else:
             # An empty read is not an empty fleet. Falling through left this as
             # the original `bytes`, which iterates as nothing, so every peer

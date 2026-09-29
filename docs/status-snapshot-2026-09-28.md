@@ -105,7 +105,8 @@ thing standing between the driver and a verified step 6. Nothing else waits on t
 | `docs/completed/2026-64gb-timing-validation-plan.md` | **complete and archived 2026-09-28.** Blocks 0–12 all carry `RAN` **and** `COMPLETE`; Block 12 (final report) built and accepted 2026-09-15 | the prompt now reports completion and starts nothing |
 | `docs/unattended-execution-plan.md` | **steps 0–5 and 7 done; step 6 is the only one outstanding, and its criterion is unmet for a reason outside the code** | `continue the unattended execution plan` |
 
-`bd stats`: 75 issues total, 46 closed, **29 open, 0 in progress, 0 blocked**.
+`bd stats` when written: 75 issues total, 46 closed, **29 open, 0 in progress, 0 blocked** (by
+2026-09-29: 80 total, 29 open, 1 blocked — run `bd stats`, do not trust this line).
 
 ### 1a. Measurement implementation plan — detail
 
@@ -243,10 +244,15 @@ missing is durability across a *hard* termination:
 
 ### 1e. Git state
 
-- Branch `unattended/measurement` = `master` + one commit (`46c716b`, the unattended driver,
-  deliberately unverified and off master).
-- `master` at `ce9dc0a`, level with `origin/master`.
-- Stale branch `fix/sampler-reads-and-block2` at `4b43ebf`.
+**Corrected 2026-09-29** — the original three lines here disagreed with §0a's table and with
+git: `master` was already past `ce9dc0a`, and `unattended/measurement` is at `3b4a596`, not
+`46c716b`. `git branch -a -vv` owns this; §0a's table is the record of 2026-09-28's branches.
+
+- `unattended/measurement` at `3b4a596`: the unattended driver, deliberately unverified and off
+  master.
+- `fix/silent-read-failures` and `measurement/separate-tester-limited`: reviewed, not merged
+  as of 2026-09-29.
+- The stale `fix/sampler-reads-and-block2` was fully merged and was deleted 2026-09-29.
 
 ---
 

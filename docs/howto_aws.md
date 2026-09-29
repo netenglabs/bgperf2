@@ -243,7 +243,10 @@ cd /data/bgperf2
 
 `new_vm.sh` handles the rest of the OS setup: `docker.io`, `python3-venv`, `sysstat` (for
 `mpstat`, which `bench` shells out to), adds you to the `docker` group, creates the venv, and
-downloads `mrt/rib.20210801.0000` from RouteViews in the background.
+downloads `mrt/rib.20210801.0000` from RouteViews in the background. That is only the table the
+older configs (`benchmarks/bench.yaml`, `frr.yaml`, `benchmark.yaml`) use; every 2026 campaign
+config reads the pinned `mrt/rib.20260808.0000`, which `new_vm.sh` does not fetch — run
+`scripts/prepare_mrt.sh` with the URL in its usage text for that one.
 
 Log out and back in for the `docker` group, then:
 

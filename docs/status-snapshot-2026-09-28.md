@@ -581,7 +581,7 @@ a cloud caveat that matters here: instance sizes change CPU allocation along wit
 - **Baseline rows may never be compared across hosts.** `benchmarks/baseline/baseline-benchmark.csv`
   (51 data rows) was produced on a different CPU than this one. That rule is in the
   timing-validation skill and in memory.
-- `docs/follow-ups.md` still holds two deliberately-descoped items (stamp the real
-  pre-sanitize version as a build-time label; consolidate `doctor`/`images`/`prepare` status
-  formatting). Its own header says they belong in `bd` now that `bd` works — that migration
-  has not happened, and the file should empty out rather than grow.
+- ~~`docs/follow-ups.md` still holds two deliberately-descoped items.~~ **Migrated
+  2026-09-29** to `bgperf2-zpn` (pre-sanitize version label) and `bgperf2-611` (shared
+  `doctor`/`images`/`prepare` status formatting), and the file removed; `TODO.md` went the
+  same day.

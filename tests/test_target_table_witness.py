@@ -107,7 +107,7 @@ def test_no_monitor_address_leaves_the_export_unread():
 def test_a_session_that_has_not_connected_withholds_the_sums():
     '''The guard has to count configured sessions, not visible protocols.
 
-    `BIRDTarget.DYNAMIC_NEIGHBORS` is True, so BIRD spawns a `dynbgp` protocol
+    `BIRDTarget` peers through one `neighbor range`, so BIRD spawns a `dynbgp` protocol
     per *connected* peer and takes it away again when the session drops.
     Comparing measured against the protocols on show is therefore vacuous: the
     denominator shrinks with the numerator, and a tester that flaps mid-run

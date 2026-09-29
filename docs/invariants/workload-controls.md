@@ -343,6 +343,35 @@ withdraws the rejected ones from every export session, with the sessions staying
   `policy_reload_metrics()` derives a `complete` off the event stream, and
   `_policy_reload_section()` refuses a caller that lands on a derived name.
 
+## `-s/--single-table` — refused, because nothing has honoured it since 2021
+
+`-s` (batch: `single_table` on a target; scenario: `single-table` on the target) is refused at all
+four entry points, and `False`/absent is accepted so an older file that spells the default out
+still runs. It is refused rather than removed so the operator is told why instead of meeting
+argparse's bare `unrecognized arguments`.
+
+- **It never did what its name says.** The only reader was `BIRDTarget`'s per-neighbour
+  path, which built a per-peer table and a `protocol pipe` copying `master4` into it -- but no
+  session used that table, and the `sorted` and `secondary` values it computed were passed to
+  format strings that never referenced them. So even when it ran, the only effect of *omitting*
+  `-s` was N extra copies of the table -- a real difference, so rows from before the date below
+  (the README's 2021-08-02 output) do measure two layouts.
+- **That path stopped running on 2021-08-13**, when BIRD moved to one `neighbor range` protocol
+  behind a `DYNAMIC_NEIGHBORS` switch nothing ever flipped back; a later edit made it raise on any
+  call (bgperf2-app). Every BIRD run since is the single-table shape with or without `-s`, and no
+  other daemon read the key at all. `benchmarks/baseline/baseline-benchmark.csv` therefore holds
+  `bird -s` and `bird` rows that are **one configuration measured twice** -- max mem 0.556 GB in
+  both at 50x100k. Read them as a repeat, never as a table-layout comparison.
+- The dead path and the switch were deleted together with the flag, which is safe only because
+  of the second point: the rendered BIRD config is byte-identical before and after (verified
+  across threads, filter test and policy reload).
+- **The `-f` refusal reads the scenario before the teardown.** The main parse sits after it, so a
+  refusal there would already have cost the previous run's containers -- the rule every guard in
+  `bench()` follows. A batch `file:` target's scenario is read in `check_batch_test()` for the
+  same reason one level up: refused at its cell, the `SystemExit` would end the whole matrix.
+- `gen_conf()` no longer writes `single-table` into the scenario; the stats row keeps its `flags`
+  column (always empty) for the stats contract.
+
 ## `--threads N` — worker threads on the target
 
 `--threads N` sets worker threads on the target (`conf['target']['threads']`). Only BIRD reads it

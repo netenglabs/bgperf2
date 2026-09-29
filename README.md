@@ -708,6 +708,13 @@ frr 8,frr_c,FRRouting 8.0-bgperf (74ac3704b034).,100,10000,1,8,1,7,70.46,103,1.1
 rustybgp,rustybgp,exec,100,10000,6,16,0,16,80.37,597,1.253,,2021-08-02,32,62.82GB
 ```
 
+That example and its output are from 2021-08-02 and are kept as they were; this config no longer
+runs. The `frr` target has since been removed, and `single_table` is now refused. On that date `-s`
+still changed BIRD's config: without it, each peer got its own table and a pipe copying the whole
+table into it. From 2021-08-13 BIRD built one shared table whether or not `-s` was given, so any
+`bird -s` row from after that date is the same configuration as a `bird` row. See
+`docs/invariants/workload-controls.md`.
+
 It will create graphs and a CSV file of the output.
 
 And some graphs. These are some of the important ones

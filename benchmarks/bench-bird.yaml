@@ -21,12 +21,9 @@ tests:
          version: 2.19.2
          label: bird 2
          tester_type: bird
-       -
-         name: bird
-         version: 2.19.2
-         label: bird 2 -s
-         tester_type: bird
-         single_table: True
+       # There was a `bird 2 -s` here. -s was never honoured -- BIRD has built
+       # one shared table either way since 2021 -- so it ran `bird 2` twice.
+       # It is refused now (bgperf2-0ma).
        -
          # bird 3 is the multi-threaded rewrite, but it runs one worker unless
          # told otherwise -- without threads: it benches like bird 2

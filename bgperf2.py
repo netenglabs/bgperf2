@@ -566,6 +566,41 @@ def surplus_receiver_names(container_names, wanted):
     return surplus
 
 
+SINGLE_TABLE_REFUSAL = (
+    '{0} is refused: no target implements it, so it would change nothing that '
+    'runs. BIRD, the only daemon that ever read it, has built one shared table '
+    'with or without it since it moved to dynamic neighbours in 2021, and every '
+    'other target never read it at all. Remove it; see bgperf2-0ma.')
+
+
+def refuse_single_table(value, where):
+    """Refuse a request for single-table mode, wherever it arrives.
+
+    The flag reached nothing: `BIRDTarget` held the only code that read it, in
+    a per-neighbour path nothing had run since 2021, and even that dropped the
+    `sorted` and `secondary` it computed. A flag that quietly does nothing is
+    read next time as one that did something -- the baseline published `bird
+    -s` and `bird` as two configurations that were one -- so it is refused at
+    all four entry points rather than accepted. A YAML `false` or an absent
+    key is not a request, so an older file that spells the default out still
+    runs; anything else truthy is -- including a quoted `"false"`, which the
+    old code also read as true and published as `-s`.
+    """
+    if value:
+        raise ValueError(SINGLE_TABLE_REFUSAL.format(where))
+
+
+def render_scenario(text):
+    return yaml.safe_load(Template(text).render())
+
+
+def refuse_scenario_single_table(scenario, where):
+    """The same refusal, for a parsed scenario's own `single-table` key."""
+    target = scenario.get('target') if isinstance(scenario, dict) else None
+    refuse_single_table(
+        target.get('single-table') if isinstance(target, dict) else None, where)
+
+
 def scenario_receivers(conf):
     """The receiver list a parsed scenario declares, checked before it is used.
 
@@ -2365,6 +2400,13 @@ def bench(args):
     dckr_net_name = args.docker_network_name or args.bench_name + '-br'
 
     target_image_name = None
+    # First, and outside the `-f` branch: the flag reaches nothing on either
+    # path, and it reads only the command line.
+    try:
+        refuse_single_table(getattr(args, 'single_table', False),
+                            '-s/--single-table')
+    except ValueError as e:
+        sys.exit(str(e))
     # Above the teardown, and before anything reads `prefix_num`: the row, the
     # artifact names and the scenario all take the per-peer count, so the
     # division happens once, here. A scope that cannot be applied should cost a
@@ -2516,6 +2558,26 @@ def bench(args):
         target_image_name = target_image(args.target,
                                          getattr(args, 'version', None),
                                          args.image)
+    else:
+        # A scenario file is checked before the teardown too, so a refusal
+        # costs a message rather than the previous run's containers. The file
+        # is read once, here, so the check and the run see the same text; it is
+        # rendered again below rather than reused, because that render has
+        # always sat inside `total time` and moving it out would shorten every
+        # `-f` run's column relative to the rows it is compared with.
+        with open(args.file) as f:
+            scenario_text = f.read()
+        try:
+            early = render_scenario(scenario_text)
+            refuse_scenario_single_table(
+                early, "the scenario's target `single-table`")
+            # Here rather than after the parse below, for the same reason
+            # (bgperf2-urp): `resolve_receivers()` guards every path that
+            # builds a scenario; this guards the one path handed one.
+            scenario_receivers(early)
+        except ValueError as e:
+            sys.exit(str(e))
+        del early
     remove_target_containers()
 
     if not args.repeat:
@@ -2533,8 +2595,7 @@ def bench(args):
 
     bench_start = time.time()
     if args.file:
-        with open(args.file) as f:
-            conf = yaml.safe_load(Template(f.read()).render())
+        conf = render_scenario(scenario_text)
     else:
         conf = gen_conf(args)
 
@@ -2548,14 +2609,8 @@ def bench(args):
     # of the ways the flag reaches nothing.
     warn_if_trace_io_reaches_no_generator(args, conf)
 
-    # Same place, and for both halves the same reason: a `-f` run's fan-out is
-    # whatever the file says, so neither the check nor the notice can be made
-    # before the file has been read. `resolve_receivers()` guards every path
-    # that builds the scenario; this guards the one path that is handed one.
-    try:
-        scenario_receivers(conf)
-    except ValueError as e:
-        sys.exit(str(e))
+    # A `-f` run's fan-out is whatever the file says, so the notice waits for
+    # the parse; the file's receivers were validated before the teardown.
     fanout_cost = describe_export_fanout_cost(len(conf.get('receivers') or []))
     if fanout_cost:
         print(fanout_cost)
@@ -4836,7 +4891,8 @@ def create_output_stats(args, target_version, stats, fail=False, provenance=None
                 float(format(stats['total_time'], ".2f"))])
     out.extend([round(stats['max_cpu']), row_gb(stats['max_mem'])])
     out.extend ([round(stats['min_idle']), row_gb(stats['min_free'])])
-    out.extend(['-s' if args.single_table else '', d, str(stats['cores']), mem_human(stats['memory'])])
+    # `flags` stays for the stats contract; it held `-s`, which is now refused.
+    out.extend(['', d, str(stats['cores']), mem_human(stats['memory'])])
     out.extend([stats['tester_errors'],stats['tester_timeouts']])
     out.extend(['FAILED']) if fail else out.extend([''])
     out.extend([row_message(stats.get('fail_msg'))])
@@ -5228,6 +5284,26 @@ def check_batch_test(test):
                 'Set tester_type to one of {4}'.format(
                     test['name'], target['name'], ' and '.join(named_mrt),
                     tester, ', '.join(MRT_TESTER_TYPES)))
+        try:
+            refuse_single_table(target.get('single_table'), "test '{0}': target "
+                                '{1!r} carries single_table, which'.format(
+                                    test['name'], target.get('label')
+                                    or target.get('name')))
+            # A `file:` target's scenario is read here as well, because
+            # `bench()` would otherwise refuse it at that cell -- and a
+            # `SystemExit` there leaves `batch()`, ending the matrix hours in.
+            # A file that is not there is left to fail at its cell as it always
+            # has: refusing that up front is a separate change from this one.
+            if target.get('file') and os.path.isfile(target['file']):
+                with open(target['file']) as f:
+                    scenario = render_scenario(f.read())
+                refuse_scenario_single_table(
+                    scenario, "test '{0}': target {1!r}'s scenario file {2!r} "
+                    'sets single-table, which'.format(
+                        test['name'], target.get('label') or target.get('name'),
+                        target['file']))
+        except ValueError as e:
+            sys.exit(str(e))
         misplaced = sorted(k for k in target if k in BATCH_TEST_ONLY_KEYS)
         if misplaced:
             sys.exit(
@@ -5933,7 +6009,9 @@ def batch(args):
             a.repetition = cell['repetition']
             # read any config attribute that was specified in the yaml batch file
             a.local_address_prefix = t['local_address_prefix'] if 'local_address_prefix' in t else '10.10.0.0/16'
-            for field in ['single_table', 'docker_network_name', 'repeat', 'file', 'target_local_address',
+            # Refused by `check_batch_test()` when true, so it is never copied.
+            a.single_table = False
+            for field in ['docker_network_name', 'repeat', 'file', 'target_local_address',
                             'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
                             'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
                             'tester_type', 'license_file', 'version', 'threads',
@@ -6290,7 +6368,6 @@ def gen_conf(args):
         'as': 1000,
         'router-id': str(target_router_id),
         'local-address': str(target_local_address),
-        'single-table': args.single_table,
     }
     if getattr(args, 'threads', None):
         conf['target']['threads'] = args.threads
@@ -6524,6 +6601,11 @@ def check_generator_matches_workload(args):
 
 
 def config(args):
+    try:
+        refuse_single_table(getattr(args, 'single_table', False),
+                            '-s/--single-table')
+    except ValueError as e:
+        sys.exit(str(e))
     # The same guard `bench()` applies, and this is the path that most needs
     # it: `bench -f` deliberately skips the check on the reasoning that a
     # scenario file states its own neighbours, so a scenario stating *none* --
@@ -6628,7 +6710,10 @@ def create_args_parser(main=True):
         parser.add_argument('-e', '--prefix-list-num', default=0, type=int)
         parser.add_argument('-c', '--community-list-num', default=0, type=int)
         parser.add_argument('-x', '--ext-community-list-num', default=0, type=int)
-        parser.add_argument('-s', '--single-table', action='store_true')
+        # Kept only so a run asking for it is told why, rather than being
+        # met by argparse's bare `unrecognized arguments`.
+        parser.add_argument('-s', '--single-table', action='store_true',
+                            help='refused: no target implements it (bgperf2-0ma)')
         parser.add_argument('--prefix-scope', choices=PREFIX_SCOPES,
                             default='per-peer',
                             help='how to read --prefix-num. per-peer (the '

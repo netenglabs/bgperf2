@@ -219,6 +219,7 @@ claims.
 - Session count and table size are one axis. `--prefix-scope total`, `--path-diversity D`,
   `--receivers N`, `--churn-prefixes C`/`--churn-bursts B`, `--policy-reload-blocks N` and
   `--threads N` are the controls that separate them, and each is refused for a named list of things.
+  `-s/--single-table` is refused outright: no target has honoured it since 2021.
 - **A rule that refuses something must be applied at every entry point, and there are four**:
   `bench`, `bench -f`, `config`, and `batch`, which synthesizes args and bypasses argparse *and*
   `bench`'s own guards. The peer-scaling change got this wrong seven times in review.

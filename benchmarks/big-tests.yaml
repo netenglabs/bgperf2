@@ -8,8 +8,6 @@ tests:
     targets:
       -
         name: bird
-        label: bird -s
-        single_table: True
       -
         name: frr_c
       -
@@ -23,8 +21,6 @@ tests:
     targets:
       -
         name: bird
-        label: bird -s
-        single_table: True
       -
         name: frr_c
       -
@@ -38,8 +34,6 @@ tests:
     targets:
       -
         name: bird
-        label: bird -s
-        single_table: True
       -
         name: frr_c
       -

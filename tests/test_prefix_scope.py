@@ -346,7 +346,7 @@ class TestWhatTheBatchPathMustNotAccept:
         bgperf2.check_batch_test(a_test(targets=[{
             'name': 'bird', 'label': 'bird 3', 'version': '3.3.2',
             'threads': 4, 'tester_type': 'bird', 'image': 'x',
-            'single_table': True, 'license_file': 'l'}]))
+            'license_file': 'l'}]))
         # `mrt_file` belongs on a target too -- with a generator that reads it.
         bgperf2.check_batch_test(a_test(targets=[{
             'name': 'bird', 'tester_type': 'bgpdump2', 'mrt_file': '/x.mrt',

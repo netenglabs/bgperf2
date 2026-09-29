@@ -361,7 +361,7 @@ def table_witness(text, monitor_address=None, expected_peerings=None,
 
     `expected_peerings` is that configured count, and comparing against the
     protocols BIRD is *showing* instead would be vacuous here.
-    `BIRDTarget.DYNAMIC_NEIGHBORS` is True, so a peer that has not connected is
+    `BIRDTarget` peers through one `neighbor range`, so a peer that has not connected is
     not a protocol at all and one whose session drops takes its `dynbgp`
     protocol away with it: the denominator would shrink with the numerator and
     the guard would always be satisfied, so a flapping tester would publish a
@@ -550,7 +550,6 @@ class BIRDTarget(BIRD, Target):
 
     CONTAINER_NAME = 'bgperf_bird_target'
     CONFIG_FILE_NAME = 'bird.conf'
-    DYNAMIC_NEIGHBORS = True
     SUPPORTS_POLICY_RELOAD = True
     POLICY_RELOAD_MECHANISM = 'birdc configure'
     # Verified on bgperf/bird:2.19.2 and bgperf/bird:3.3.2, two peers each: the
@@ -576,15 +575,7 @@ class BIRDTarget(BIRD, Target):
         return policy_reload_failure(output)
 
     def import_filter_clause(self, reject_peer_asns=None):
-        '''What a session's `import` says, in one place rather than two.
-
-        Both config paths read it -- the dynamic `neighbor range` protocol that
-        every BIRD target actually runs, and the per-neighbour one behind
-        `DYNAMIC_NEIGHBORS = False`. Nothing sets that today and the
-        per-neighbour path does not currently run at all (its format string
-        mixes manual and automatic field numbering and raises), so this serves
-        one live caller and one dormant one; it is written for both so that
-        fixing the dormant path does not also mean remembering this.
+        '''What the session's `import` says.
 
         A policy reload and `--filter_test` are refused together at every entry
         point -- the target's import filter is the policy under test, and a
@@ -608,49 +599,14 @@ class BIRDTarget(BIRD, Target):
         if self.conf.get('threads'):
             threads = 'threads {0};\n'.format(int(self.conf['threads']))
 
-        config = '''{2}router id {0};
+        config = '''{1}router id {0};
 protocol device {{ }}
 protocol direct {{ disabled; }}
 protocol kernel {{ ipv4 {{ import none; export none; }}; }}
 
 log stderr all;
 #debug protocols all; # this seems to add a lot of extra load especially in internet/mrt tests
-'''.format(self.conf['router-id'], ' sorted' if self.conf['single-table'] else '', threads)
-
-        def gen_filter_assignment(n):
-            if 'filter' in n:
-                c = []
-                if 'in' not in n['filter'] or len(n['filter']['in']) == 0:
-                    c.append('import all;')
-                else:
-                    c.append('import where {0};'.format( '&&'.join(x + '()' for x in n['filter']['in'])))
-
-                if 'out' not in n['filter'] or len(n['filter']['out']) == 0:
-                    c.append('export all;')
-                else:
-                    c.append('export where {0};'.format( '&&'.join(x + '()' for x in n['filter']['out'])))
-
-                return '\n'.join(c)
-            return '''import all;
-export all;
-'''
-
-        def gen_neighbor_config(n):
-            filter = self.import_filter_clause(reject_peer_asns)
-            return ('''ipv4 table table_{0};
-protocol pipe pipe_{0} {{
-    table master4;
-    peer table table_{0};
-}}
-'''.format(n['as']) if not self.conf['single-table'] else '') + '''protocol bgp bgp_{0} {{
-    local as {1};
-    neighbor {2} as {0};
-
-    ipv4 {{ import {}; export all; }};
-    rs client;
-}}
-'''.format(n['as'], self.conf['as'], n['local-address'], 'secondary' if self.conf['single-table'] else '', filter)
-
+'''.format(self.conf['router-id'], threads)
 
         def gen_prefix_filter(name, match):
             return '''function {0}()
@@ -729,16 +685,13 @@ return true;
                             f.write(gen_ext_community_filter(n, match))
                         match_info.append((match['type'], n))
                     f.write(gen_filter(k, match_info))
-            if self.DYNAMIC_NEIGHBORS:
-                config = self.get_dynamic_neighbor_config(reject_peer_asns)
-                f.write(config)
-                f.flush()
+            # One `neighbor range` protocol for every session, on the one
+            # `master4` table. A per-neighbour path with per-peer piped tables
+            # sat behind a `DYNAMIC_NEIGHBORS` switch nothing had flipped since
+            # 2021; it raised on any call and held the only code that read
+            # `--single-table`, and went with that flag (bgperf2-0ma, -app).
+            f.write(self.get_dynamic_neighbor_config(reject_peer_asns))
 
-            else:
-                for n in self.scenario_neighbors():
-                    f.write(gen_neighbor_config(n))
-
-            
     def get_dynamic_neighbor_config(self, reject_peer_asns=None):
         filter = self.import_filter_clause(reject_peer_asns)
         config = '''protocol bgp everything {{

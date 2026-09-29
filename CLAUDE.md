@@ -124,7 +124,9 @@ Every `bench` run creates containers on a dedicated Docker bridge network (`<ben
   `bench` polls `gobgp neighbor -j` once a second and reads `afi_safis[0].state.accepted` to see how
   many routes the target has re-advertised. This is what "recved" means in the output.
 - **testers** — one or more route generators peered with the target. BIRD (default) or ExaBGP for
-  synthetic prefixes; GoBGP, ExaBGP-mrtparse, or bgpdump2 for MRT file playback.
+  synthetic prefixes; bgpdump2 or ExaBGP-mrtparse for MRT file playback. GoBGP is **only** the
+  monitor (and the export receivers) — it was removed as a target and as an MRT generator on
+  2026-09-29 as too slow, and `GoBGPTarget` survives solely as `RustyBGPTarget`'s config writer.
 
 Routes flow tester → target → monitor. Timing is measured at the monitor, so it captures full
 propagation, not just reception.

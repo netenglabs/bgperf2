@@ -14,7 +14,6 @@
 # limitations under the License.
 
 from tester import Tester
-from gobgp import GoBGP
 from exabgp import ExaBGP_MRTParse
 import os
 import yaml
@@ -178,82 +177,3 @@ class ExaBGPMrtTester(Tester, ExaBGP_MRTParse, MRTTester):
                 ]
 
         return '\n'.join(startup)
-
-
-class GoBGPMRTTester(Tester, GoBGP, MRTTester):
-
-    CONTAINER_NAME_PREFIX = 'bgperf_gobgp_mrttester_'
-
-    def __init__(self, name, host_dir, conf, image='bgperf/gobgp'):
-        super(GoBGPMRTTester, self).__init__(name, host_dir, conf, image)
-
-    def configure_neighbors(self, target_conf):
-        conf = list(self.conf.get('neighbors', {}).values())[0]
-
-        config = {
-            'global': {
-                'config': {
-                    'as': conf['as'],
-                    'router-id': conf['router-id'],
-                }
-            },
-            'neighbors': [
-                {
-                    'config': {
-                        'neighbor-address': target_conf['local-address'],
-                        'peer-as': target_conf['as']
-                    }
-                }
-            ]
-        }
-
-        with open('{0}/{1}.conf'.format(self.host_dir, self.name), 'w') as f:
-            f.write(yaml.dump(config, default_flow_style=False))
-            self.config_name = '{0}.conf'.format(self.name)
-
-    def get_startup_cmd(self):
-        conf = list(self.conf.get('neighbors', {}).values())[0]
-
-        mrtfile = '/root/mrt_file'
-        if not mrtfile:
-            mrtfile = self.get_mrt_file(self.conf, self.name)
-
-        startup = '''#!/bin/bash
-ulimit -n 65536
-gobgpd -t yaml -f {1}/{2} -l {3} > {1}/gobgpd.log 2>&1 &
-'''.format(conf['local-address'], self.guest_dir, self.config_name, 'info')
-        startup += 'sleep 1\n' # seems to need a wait betwee gobgpd starting and the client pushing the  mrt file
-        cmd = ['gobgp', 'mrt']
-        if conf.get('only-best', False):
-            cmd.append('--only-best')
-        cmd += ['inject', 'global', f"--nexthop {conf['local-address']}", "--no-ipv6", mrtfile]
-        if 'count' in conf:
-            cmd.append(str(conf['count']))
-        if 'skip' in conf:
-            cmd.append(str(conf['skip']))
-        cmd += [f"> {self.guest_dir}/mrt.log 2>&1", '&']
-
-        startup += '\n' + ' '.join(cmd)
-
-        #startup += '\n' + 'pkill -SIGHUP gobgpd'
-        return startup
-
-    @staticmethod
-    def find_errors(log_dirs=(), samples=None):
-        '''Count expired-session messages across the injector logs.
-
-        bench() calls this on the class with the tester host directories, so it
-        has to match the signature in base.Tester -- it used to take no
-        arguments and glob /tmp/bgperf2 itself, which raised TypeError and
-        crashed every MRT run *after* it had already converged.
-        '''
-        return count_matching_lines(log_dirs, 'expired', samples)
-
-    @staticmethod
-    def find_timeouts(log_dirs=(), samples=None):
-        '''gobgp is the default MRT injector, so without this it inherited
-        base.Tester's hardcoded 0 while a bgpdump2 run of the same scenario
-        reported real counts -- the tester timeouts column was not comparable
-        between two rows of the same batch CSV.
-        '''
-        return count_matching_lines(log_dirs, 'timeout', samples)

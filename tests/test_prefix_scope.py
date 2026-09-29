@@ -496,7 +496,7 @@ class TestAnUnstatedGenerator:
         eliminate it.
         """
         with pytest.raises(SystemExit) as raised:
-            bgperf2.check_batch_test(a_test(targets=[{'tester_type': 'gobgp'}]))
+            bgperf2.check_batch_test(a_test(targets=[{'tester_type': 'bgpdump2'}]))
         assert 'needs a `name`' in str(raised.value)
 
     def test_a_scenario_target_is_not_refused_for_its_generator(self):
@@ -505,7 +505,7 @@ class TestAnUnstatedGenerator:
         a config that would have run.
         """
         bgperf2.check_batch_test(a_test(targets=[
-            {'name': 'bird', 'file': 's.yaml', 'tester_type': 'gobgp'}]))
+            {'name': 'bird', 'file': 's.yaml', 'tester_type': 'bgpdump2'}]))
 
     def test_an_unstated_filter_type_matches_the_cli(self):
         """`batch()` handed `bench()` None, `gen_conf()` writes
@@ -545,12 +545,11 @@ class TestAnUnstatedGenerator:
     def test_an_injector_that_disagrees_with_the_generator_is_refused(self):
         """`gen_conf()` derives the injector from `tester_type` and never reads
         `mrt_injector`, so one that disagrees is not a second opinion -- it is
-        a line the run ignores. `tester_type: gobgp` beside `mrt_injector:
-        bgpdump2` played back through gobgp, against a 0.93 check-point factor
-        instead of 0.99, and wrote a row that reads as a bgpdump2 run.
+        a line the run ignores, and the row would read as one injector's run
+        when another played the table back.
         """
-        test = a_test(targets=[{'name': 'bird', 'tester_type': 'gobgp',
-                                'mrt_injector': 'bgpdump2',
+        test = a_test(targets=[{'name': 'bird', 'tester_type': 'bgpdump2',
+                                'mrt_injector': 'exabgp',
                                 'mrt_file': '/x.mrt'}])
         with pytest.raises(SystemExit) as raised:
             bgperf2.check_batch_test(test)
@@ -564,7 +563,7 @@ class TestAnUnstatedGenerator:
     @pytest.mark.parametrize('extra', [
         {'mrt_file': '/x.mrt'},
         {'mrt_injector': 'bgpdump2'},
-        {'tester_type': 'gobgp', 'mrt_injector': 'bgpdump2'}])
+        {'tester_type': 'bgpdump2', 'mrt_injector': 'exabgp'}])
     def test_a_scenario_target_is_exempt_from_the_generator_checks(self, extra):
         """It never reaches `gen_conf()`, so its generator is inert and the
         advice these checks print would not change what runs. The sibling

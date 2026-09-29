@@ -237,8 +237,6 @@ class TestEveryTesterCanBeAsked:
             ('bird', 'find_errors'),
             ('bgpdump2', 'find_errors'),
             ('bgpdump2', 'find_timeouts'),
-            ('gobgp', 'find_errors'),
-            ('gobgp', 'find_timeouts'),
             ('exabgp_mrtparse', 'find_errors'),
             ('exabgp_mrtparse', 'find_timeouts'),
         }, scans

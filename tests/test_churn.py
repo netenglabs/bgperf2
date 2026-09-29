@@ -511,7 +511,7 @@ class TestResolvingTheWorkload:
     def test_the_whole_per_peer_table_may_be_churned(self):
         assert self.resolve(churn_prefixes=1000) == (1000, 1)
 
-    @pytest.mark.parametrize('generator', ['exa', 'gobgp', 'bgpdump2'])
+    @pytest.mark.parametrize('generator', ['exa', 'bgpdump2'])
     def test_only_the_bird_generator_can_churn(self, generator):
         '''The block is switched with that generator's own `birdc disable` on
         a static protocol bgperf2 wrote. Accepting another would start a

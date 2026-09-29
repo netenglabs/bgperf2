@@ -4039,3 +4039,69 @@ having finished exporting; a rule built on it stamps completion mid-delivery,
 permanently, at a fraction of the table. That rule was built, verified and
 removed -- see Phase 6's entry on the two backed-out online rules -- and the
 distinction is easy to lose because both are "the target's own account".
+
+### Finding on 2026-09-29: why the monitor's poll costs what it does (`bgperf2-4pm`)
+
+The 2026-09-08 entry measured the cost -- `gobgp neighbor -j` at 0.105s early in a
+10x1,050,000 MRT run and 0.44s with the table full, the monitor spiking to ~300% at
+1 Hz after the target had gone idle -- and left the mechanism as a hypothesis,
+because GoBGP's source had not been read. It has now been read, at tag `v4.9.0`
+(`01c5c4c`, 2026-09-01). The monitor image was built from `master` on 2026-09-02
+and reports `4.9.0`, so it is this code or a day past it; the image deletes its
+clone after building, so the exact commit cannot be read back from it.
+
+**What the call does.** `gobgp neighbor -j` with no address is
+`ListPeer(EnableAdvertised=false)` (`cmd/gobgp/neighbor.go:138`), so the expensive
+`advertised` count is *not* computed. For each established peer and family,
+`ListPeer` (`pkg/server/server.go:3421`) computes two numbers:
+
+- `accepted = adjRibIn.Accepted()` -- a per-family counter, **O(1)**. This is the
+  only number bgperf2 reads.
+- `received = adjRibIn.Count()` -- `walk()` over `Table.GetDestinations()`
+  (`internal/pkg/table/adj.go:186`, `table.go:530`), which builds a fresh slice
+  holding a **snapshot copy of every destination**, including a copied path list
+  for each one. At 1.05M prefixes that is a million allocations per poll, thrown
+  away at once. That is the O(table) cost, and the allocation churn is the likely
+  reason it shows up as several cores: Go's garbage collector runs in parallel. That
+  last step is an inference from the code, not a profile.
+
+bgperf2 pays for `received` on every poll and never reads it. No other read avoids
+it: `GetTable`'s adj-in summary (`AdjRib.TableInfo`, `adj.go:289`) calls the same
+`Count()`, and `neighbor <addr>` sets `EnableAdvertised` and adds a best-path walk
+on top. **In 4.9.0 there is no CLI read of the accepted count that does not also
+walk the whole table.**
+
+**What it blocks, which is the part that matters more than the CPU.** `ListPeer`
+runs as a management operation. The server's main loop takes
+`s.shared.mu.Lock()` -- the exclusive side -- for the whole of it
+(`server.go:421-424`), while every received BGP message is handled under
+`s.shared.mu.RLock()` (`handleFSMMessage`, `server.go:1638`). So **while the poll
+walks the table, the monitor cannot process an UPDATE.** With the table full,
+that is about 0.44s of every ~1.44s poll cycle, roughly 30% of wall time. The
+instrument's own count can lag what the target has sent by up to one walk.
+Beyond that, the monitor's socket buffer can fill and push back on the target's
+export session. That is part of what Primary Question 8's
+`target_or_monitor (post_injection_tail)` refusal already names: it now has a
+mechanism, but it is still not a measured share.
+
+**What bounds it today.** All 27 recorded MRT rows of the 64 GB campaign have
+`monitor_lag_s` inside `monitor_lag_resolution_s`: at completion, the monitor
+never held the table measurably later than the target finished exporting it. So
+the stall has not produced an error these rows can resolve. The poll cadence
+already includes the walk -- the loop execs and *then* sleeps, and the resolution
+published is the gap it achieved. No published row is in question.
+
+**What would remove it, and why none of it is done here.** Every option changes
+the instrument, which the 2026-09-08 scope reserves to the operator, because it
+breaks comparability with every row already taken:
+
+1. A monitor built from a GoBGP patched to skip `Count()` when `received` is not
+   wanted. This removes both the CPU and the lock hold without changing what is
+   read. It is a small upstream-shaped change, but it is still a new instrument.
+2. A longer `MONITOR_POLL_INTERVAL_S`. This lowers the duty cycle, but coarsens
+   every interval the artifacts derive from the poll, so it trades one known
+   limit for another.
+3. Keep it, and keep watching the four signals the bead lists. This is the
+   operator's standing choice, and nothing in this reading changes that choice.
+   It does change what "watch" should look for first: the sign of the stall is
+   `monitor_lag_s` leaving its resolution bound, not `min idle%`.

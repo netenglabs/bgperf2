@@ -1,15 +1,21 @@
 # 2026 daemon comparison plan
 
-**Status: not started. Written 2026-09-29.**
+**Status: Phase 0 done; Phase 1 next. Written 2026-09-29.**
+
+**Epic:** `bgperf2-0y5`
 
 This plan exists to publish one thing: **a comparison of the open-source BGP daemons and their
 versions that says what changed between releases and can be defended**. Before that, it has to
 settle what the 2026-09-15 timing-validation report
 (`results/2026/2026-timing-validation/block12-final-report/`) could not.
 
-It is a plan document in the sense `CLAUDE.md` describes. Progress is recorded here, under each
-phase's `Progress` line. The `bd` items under epic `bgperf2-0y5` link to this
-document's anchors and hold no reasoning of their own.
+It is a plan document in the sense `CLAUDE.md` describes, driven by the `2026-daemon-comparison`
+skill (`continue the 2026 daemon comparison`). Progress is recorded here, under each phase's
+`Progress` line. Each phase carries one `**Tracked by:** … · **Status:** …` line, whose status is
+`not started`, `in progress`, `done` or `not needed`. `scripts/check_plan_beads.py` fails when a
+status disagrees with its bead's, when the epic has a child no phase names, or when a bead starts
+carrying reasoning. The `bd` items link to this document's sections and hold no reasoning of their
+own.
 
 **Hardware, in one paragraph.** Phases 0–4 need **no new hardware**. They run on the current
 campaign host class (16 vCPU / 61.44 GiB AMD EPYC 9R14, `m7a.4xlarge`). New hardware is needed
@@ -54,21 +60,26 @@ BIRD, when the code path that honours it never ran (`bgperf2-0ma`, in progress).
 
 ## 2. Phase 0 — land what already exists
 
+**Tracked by:** `bgperf2-0y5.1` · **Status:** done
+
 No runs.
 
-1. Review and commit the GoBGP removal (`cleanup/remove-gobgp-target`, `bgperf2-es0`). GoBGP is
-   no longer a target or an MRT generator. It remains the monitor and the export receivers.
+1. ~~Review and commit the GoBGP removal (`cleanup/remove-gobgp-target`, `bgperf2-es0`). GoBGP is
+   no longer a target or an MRT generator. It remains the monitor and the export receivers.~~
+   **Merged 2026-09-29 (`fb69263`).**
 2. ~~Finish `bgperf2-0ma` / `bgperf2-app`.~~ **Done 2026-09-29 (`9109bda`)**: `-s` is refused at
    every entry point, and the baseline's `bird -s` and `bird` rows are recorded as one config.
 
 **Exit:** both merged. `-t gobgp` and `-g gobgp` are refused. No published row is known to be
 wrong.
 
-Progress: item 2 done 2026-09-29. Item 1 waits on `bgperf2-es0` review.
+Progress: done 2026-09-29. Item 1 merged as `fb69263` (`bgperf2-es0`); item 2 is `9109bda`.
 
 ---
 
 ## 3. Phase 1 — questions answerable from existing evidence
+
+**Tracked by:** `bgperf2-0y5.2` · **Status:** in progress
 
 No new benchmark runs. Each item is a read of source or artifacts that already exist.
 
@@ -93,6 +104,8 @@ Progress: item 2 done 2026-09-29.
 ---
 
 ## 4. Phase 2 — instrument changes on the current host
+
+**Tracked by:** `bgperf2-0y5.3` · **Status:** not started
 
 Code changes, verified by the test suite and by `-n1 -p1` smoke runs.
 
@@ -138,6 +151,8 @@ Progress: —
 
 ## 5. Phase 3 — re-run on the current host class, then the hardware gate
 
+**Tracked by:** `bgperf2-0y5.4` · **Status:** not started
+
 **Host:** one `m7a.4xlarge`, the same class as the timing-validation campaign. The rows are
 comparable with that campaign and with nothing older (`benchmarks/baseline/baseline-benchmark.csv` was a different CPU).
 
@@ -167,6 +182,8 @@ Progress: —
 ---
 
 ## 6. Phase 4 (conditional) — separate the roles across hosts
+
+**Tracked by:** `bgperf2-0y5.5` · **Status:** not started
 
 **Only if the gate in §5 says so.**
 

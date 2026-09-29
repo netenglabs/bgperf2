@@ -439,7 +439,7 @@ default), which bgperf2 then cannot clean up; `sudo rm -rf /var/tmp/bgperf2` whe
 
 ### Operator contracts
 
-Four contracts are each triggered by an exact user phrase — which is precisely what a skill
+Five contracts are each triggered by an exact user phrase — which is precisely what a skill
 description is — so each one is a skill under `.claude/skills/` and is loaded **in full** on
 invocation. Nothing about them has been condensed and the plan documents they drive are unchanged:
 
@@ -449,8 +449,9 @@ invocation. Nothing about them has been condensed and the plan documents they dr
 | `continue the bgperf2 measurement implementation plan` | `measurement-implementation` | `docs/bgperf2-measurement-implementation-plan.md` and its decision log |
 | `continue the 64 GB timing validation campaign` | `timing-validation-campaign` | **complete 2026-09-15, plan archived** — `docs/completed/2026-64gb-timing-validation-plan.md`, `scripts/run_timing_validation_block.sh`. The skill refuses a new block and says so; the host-class rule it carries still governs. |
 | `continue the unattended execution plan` | `unattended-execution` | `docs/unattended-execution-plan.md` |
+| `continue the 2026 daemon comparison` | `2026-daemon-comparison` | `docs/2026-daemon-comparison-plan.md`, epic `bgperf2-0y5`; `scripts/check_plan_beads.py` checks the plan and its beads agree before any work |
 
-All four have one shape: inspect durable state first, never run two things concurrently, complete
+All five have one shape: inspect durable state first, never run two things concurrently, complete
 exactly one reviewable unit, then stop and tell the user to use the same prompt again.
 
 **The campaign host is a class, not a machine**, and that is cross-cutting enough to state here: 16

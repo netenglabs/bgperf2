@@ -159,6 +159,17 @@ CPU. `max cpu %` is the maximum sampled CPU use of the target container, while
 monitor, controller, and kernel CPU are not reported separately, and the two
 published extrema are not time-aligned evidence that can be subtracted.
 
+**One consequence is already published and must be read with the finding:
+`tester_limited` does not separate a slow generator from one back-pressured by
+a target that is not draining its sessions.** Three controlled runs of one shape
+-- unconstrained, generator throttled, target CPU-capped -- all return `tester`,
+because a blocked write and a throttled write are the same measurement from
+outside. The verdict is sound as "the run was waiting for the generators to
+deliver" and unsound as "the generator was the weak component". The evidence,
+the two discriminators that do not work, and the two that might are in
+[`measurement-dictionary.md`](measurement-dictionary.md#what-tester_limited-does-not-separate);
+the tracking item is `bgperf2-bgg`.
+
 Reliable component attribution requires time-aligned CPU measurements for the
 target, tester, and monitor, together with host-wide CPU and explicit treatment
 of controller and kernel overhead. Until that instrumentation exists, a run

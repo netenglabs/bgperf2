@@ -539,3 +539,100 @@ def test_a_policy_that_raises_does_not_cost_the_run_its_evidence(
     assert written['findings']['limiting_component'] == INCONCLUSIVE
     assert written['findings']['reason'].startswith(
         'the qualification policy failed: ZeroDivisionError')
+
+
+class TestTesterLimitedDoesNotNameAWeakGenerator:
+    '''`tester` is not a statement about the generator, and the docs must say so.
+
+    A generator throttled from outside and a generator blocked writing to a
+    target that is not draining its sessions produce the same evidence, and
+    `tester_limited` names `tester` for both.  Three controlled runs of one
+    shape -- nothing constrained, the generator capped, the target capped --
+    all return it.  The finding stays (the run really was waiting for the
+    generators); what must not go missing is the sentence saying it does not
+    name the weak component, because a reader of `tester` takes it to.
+
+    These tests are prose assertions on purpose.  The alternative was a rule in
+    `findings.py` that names the target from those two starved runs, and a rule
+    fitted to the case in front of it is how all three convergence rules were
+    broken (`bgperf2-bgg`).
+    '''
+
+    def _doc(self, *parts):
+        from conftest import REPO_ROOT
+        return (REPO_ROOT.joinpath(*parts)).read_text()
+
+    def test_the_dictionary_states_it_and_keeps_the_runs_that_show_it(self):
+        text = self._doc('docs', 'measurement-dictionary.md')
+        assert 'What `tester_limited` does not separate' in text, (
+            'the dictionary no longer says tester_limited cannot separate a slow '
+            'generator from a back-pressured one'
+        )
+        # the three controlled rates are the whole argument; prose without them
+        # is an assertion rather than evidence
+        for rate in ('253,773', '24,940', '61,291'):
+            assert rate in text, f'the {rate} pps controlled run is no longer cited'
+
+    def test_the_dictionary_says_what_would_separate_them(self):
+        text = self._doc('docs', 'measurement-dictionary.md')
+        # split on the heading, not the phrase: the phrase's first occurrence is
+        # the cross-reference in the tester_limited table row, so splitting on
+        # it scoped this at 80 lines of table and passed on a link anywhere in
+        # them
+        assert '### What `tester_limited` does not separate' in text
+        section = text.split('### What `tester_limited` does not separate', 1)[1]
+        for boundary in ('\n### ', '\n## '):
+            section = section.split(boundary, 1)[0]
+        assert 'cpu-attribution-boundary' in section, (
+            'the dictionary states the limitation without naming per-role '
+            'time-aligned CPU as what would resolve it'
+        )
+
+    def test_the_finding_row_itself_carries_the_warning(self):
+        text = self._doc('docs', 'measurement-dictionary.md')
+        row = next(line for line in text.splitlines()
+                   if line.startswith('| `tester_limited` |'))
+        assert 'does not say the generators were the weak component' in row, (
+            'the tester_limited row can be read on its own, so the warning has '
+            'to be in the row and not only in the section below it'
+        )
+
+    def test_the_plan_states_it_at_the_cpu_attribution_boundary(self):
+        text = self._doc('docs', 'bgperf2-measurement-implementation-plan.md')
+        boundary = text.split('## CPU Attribution Boundary', 1)[1]
+        boundary = boundary.split('\n## ', 1)[0]
+        assert 'tester_limited' in boundary, (
+            "the plan's CPU attribution boundary no longer names the published "
+            'consequence it already has'
+        )
+
+    def test_the_invariant_carries_the_rule(self):
+        text = self._doc('docs', 'invariants', 'findings.md')
+        # matched against collapsed whitespace: hard-coding the line wrapping
+        # and the two-space continuation indent made an ordinary reflow fail
+        # with "the rule is gone", which is the kind of failure that gets fixed
+        # by deleting the test
+        flat = ' '.join(text.split())
+        assert ('never that the generators were the weak component' in flat), (
+            'the rule is gone from the invariant document'
+        )
+
+    def test_the_invariant_counts_its_own_rules_in_both_places(self):
+        '''It states the count twice -- subtitle and body -- and both drifted.
+
+        Asserting only the body form was worse than asserting neither: the
+        subtitle could be edited to "the five rules" with every test green,
+        which is precisely the disagreement this is here to catch.
+        '''
+        text = self._doc('docs', 'invariants', 'findings.md')
+        rules = sum(1 for line in text.splitlines() if line.startswith('- **'))
+        words = {1: 'one', 2: 'two', 3: 'three', 4: 'four', 5: 'five',
+                 6: 'six', 7: 'seven', 8: 'eight', 9: 'nine', 10: 'ten'}
+        spelled = words[rules]
+        flat = ' '.join(text.split()).lower()
+        for stated in (f'the {spelled} rules that stop it guessing',
+                       f'{spelled} rules hold the thing up'):
+            assert stated in flat, (
+                f'the document lists {rules} rules but does not say '
+                f'"{stated}" -- the two stated counts must agree with the list'
+            )

@@ -27,6 +27,10 @@ That campaign could not begin until the release gate in this document passed; th
 gate passed on 2026-09-08, the campaign ran, and it **completed on 2026-09-15 and
 is archived**.
 
+**Phase 7 (opened 2026-09-29) replaces the monitor**, so the next campaign will run
+on a different instrument from the 64 GB one; its bridge block (7c) is what keeps
+the two readable against each other.
+
 The completed `2026-baseline` results remain historical end-to-end evidence.
 Do not rewrite their CSV rows or reinterpret their `testers (s)` values as
 tester completion times.
@@ -569,6 +573,108 @@ The follow-up campaign may begin only when all are true:
 - the full unit suite remains Docker-free;
 - documentation and report generators use the new contract.
 
+### Phase 7: Replace the monitor with a purpose-built sink
+
+Status: opened 2026-09-29, not started. Planned only; no code exists. The operator
+chose on 2026-09-29 to fix the instrument now and redo the campaign's testing
+under it, and the rows already taken stay readable through a bridge block
+(7c). Why a sink rather than a patched GoBGP, and the GoBGP source reading that
+started it, are in the
+[decision log](bgperf2-measurement-decision-log.md#phase-7-replace-the-monitor-with-a-purpose-built-sink).
+
+The monitor is the instrument every published timing is read from, and bgperf2
+asks it for exactly one thing: how many prefixes it holds on its session to the
+target (`afi_safis[0].state.accepted`, the only field any consumer reads). GoBGP
+answers that as a full router. It ingests, selects and stores every path, so its
+ingest speed sits inside every interval. It is read by `docker exec` once a
+second, which floors every interval's resolution. And each read walks the whole
+table while holding the lock its own UPDATE handling needs. A sink does the one
+job: it holds the session, counts prefixes, and writes its own timestamped
+count.
+
+#### Settled design
+
+- **Go, parsing with GoBGP's `pkg/packet/bgp`**, pinned to the release the
+  current monitor image runs (4.9.0). Only the parser is reused, not the
+  server. It is built from source into `bgperf/sink:<ref>` by `prepare` like
+  every other image, with a version command that reports its own commit.
+- **It speaks only what the monitor role needs.** That is IPv4 unicast, 4-byte
+  AS, and the capabilities the GoBGP monitor advertised (read from a real OPEN,
+  not assumed). It initiates and accepts, as gobgpd did, because targets
+  differ in which side opens. Keepalives run on their own goroutine so a
+  saturated parser cannot drop the session. ROUTE-REFRESH is accepted and
+  ignored. It never sends an UPDATE.
+- **Its count is a prefix set**: announce adds, withdraw removes, and a
+  re-announcement replaces. That is what GoBGP's `accepted` meant with no import
+  policy. End-of-RIB is recorded as an event.
+- **It pushes, and nothing polls it.** It appends `(monotonic_ns, count,
+  updates, eor)` to a log in its bind-mounted directory on every change,
+  coalesced to at most one line per 10 ms, plus a heartbeat. The controller
+  reads the file on the host, with no `docker exec`. The timestamps are
+  `CLOCK_MONOTONIC`, which a container shares with the host unless a time
+  namespace is configured. That is verified, not assumed (7a).
+- **Receivers become sinks too.** `Receiver(Monitor)` keeps its contract.
+  `stats()` stays refused, and a receiver is still not a route source.
+- **The monitor is a run dimension until the bridge block is accepted:**
+  `--monitor gobgp|sink`, default `gobgp`. By `workload-controls.md`'s rules,
+  that means it reaches all four entry points, `bench_output_prefix()`, the cell
+  id, both `run` blocks and provenance. The bridge block measures both monitors
+  on the same cells, so without that the two passes would overwrite each other.
+
+#### Work, in order
+
+- **7a — the sink, behind the flag, as a drop-in.** Build the image. Add it to
+  `BGPERF_PROCESSES`, `verify` and provenance. The controller turns the sink's
+  log into the *same* queue sample the GoBGP poll produced, at the same cadence,
+  so `ConvergenceTracker`, the witness, churn and policy reload run unchanged.
+  Docker checks, each against the GoBGP monitor on the same cell:
+  1. the session establishes with every open-source target;
+  2. the final count is identical on a synthetic cell and on the 10-peer
+     1.05M MRT cell, for BIRD 2, BIRD 3, FRR, GoBGP, RustyBGP and OpenBGPD;
+  3. no session drops at 500 peers or at full table;
+  4. the sink's peak CPU is published beside the monitor's old 380%;
+  5. the controller's and the sink's monotonic clocks agree.
+- **7b — use the resolution.** Re-express the sample-count constants in
+  `convergence.py` (`ASSURANCE_SAMPLES`, `STUCK_SAMPLES`, `DROP_SAMPLES`,
+  `WITNESS_CARRY_SAMPLES`) as durations, keeping today's values at the 1 s
+  cadence. Date `monitor_first_prefix`, `monitor_required_reached` and
+  `monitor_last_change` to the sink's own timestamps, and publish the sink's
+  achieved resolution where `poll_resolution_s` is published today. Every
+  resolution rule in the invariant documents still holds; only the number
+  shrinks. `summary.py`'s quantum and the findings' resolution checks follow it.
+- **7c — the bridge block.** A representative subset of the 64 GB campaign's
+  cells, each measured with both monitors, at least three repetitions,
+  shuffled with a recorded seed. At minimum: one high-load synthetic cell per
+  daemon, the 10-peer MRT cell per daemon, and the BIRD screen's peers and
+  fan-out shapes. The review publishes, per cell and per metric, the offset the
+  instrument alone introduces and whether it exceeds the campaign's own
+  pass-to-pass dispersion. It says which old rows can be read against new ones,
+  with what correction, and which cannot. This is not a re-run of the
+  completed campaign; its question is the instrument.
+- **7d — flip the default** to `sink` once 7c is accepted. Keep the GoBGP
+  monitor as a selectable reference, because it is the only thing the bridge can
+  be re-checked against.
+
+#### Tests
+
+- The sink's counting against recorded UPDATE streams: announce, withdraw,
+  implicit replace, MP_REACH/MP_UNREACH for IPv4, End-of-RIB, malformed input.
+  These are Go unit tests in the image build, which does not affect the Python
+  suite's Docker-free property.
+- The log reader: partial last line, coalescing, heartbeat gaps, and a file
+  that stops growing. The last complete line is the rule `scan_log_lines()`
+  already follows.
+- The `--monitor` dimension at all four entry points, in the cell id and in the
+  artifact stem.
+- `convergence.py`'s duration-based rules produce identical decisions at 1 s
+  cadence on the existing test fixtures.
+
+#### Exit criterion
+
+The bridge block is reviewed and accepted, and it states for every published
+metric whether the instrument moved it. The default is `sink`. The next campaign
+may then be planned against it.
+
 ## Explicit Non-Goals
 
 - Rewriting the orchestrator.
@@ -625,6 +731,7 @@ The operator contract for that prompt is:
    workload controls.
 8. Run controlled and real calibration checks.
 9. Open the release gate for the 64 GB timing validation campaign.
+10. Replace the monitor with a sink, and bridge the old rows to the new ones (Phase 7).
 
 ## Bottom Line
 

@@ -4105,3 +4105,62 @@ breaks comparability with every row already taken:
    operator's standing choice, and nothing in this reading changes that choice.
    It does change what "watch" should look for first: the sign of the stall is
    `monitor_lag_s` leaving its resolution bound, not `min idle%`.
+
+## Phase 7: Replace the monitor with a purpose-built sink
+
+### Decision on 2026-09-29: fix the instrument now, and redo the testing under it
+
+The 2026-09-08 scope for `bgperf2-4pm` was "watch it, do not fix it", because
+swapping the instrument breaks comparability with every row already taken. On
+2026-09-29 the source reading above showed that the poll does more than burn CPU:
+it stops the monitor processing UPDATEs for about 30% of each cycle once the table
+is full. The operator reversed that scope the same day: fix it now, and accept
+redoing the campaign's testing rather than carry a known flaw in the instrument
+into the next one. Comparing against the rows already taken is still wanted.
+That is what the bridge block (7c) is for, and it is why the change is a run
+dimension until that block is accepted rather than a flag day.
+
+**Why a sink, and not a patched GoBGP.** A patch that skips the unread
+`received` count would remove the walk and the lock hold, and it is the smaller
+change. It was not chosen, because it leaves three properties of the instrument
+that the campaign had already run into:
+
+- **GoBGP's ingest speed is inside every interval.** It stores, selects and
+  applies policy to every path it receives. Primary Question 8's
+  `target_or_monitor` refusal exists because nothing could separate the target's
+  work from the monitor's. A sink that only maintains a prefix set is faster
+  than anything it measures by a wide margin, and that is the property an
+  instrument needs.
+- **A poll floors every interval's resolution at about 1 s.** That is why so much
+  of the measurement dictionary is resolution rules, and why interval after
+  interval is published as "within resolution" rather than as a duration. A sink
+  that timestamps its own changes moves that floor to tens of milliseconds. The
+  rules still hold; they stop being what most rows run into.
+- **Every export receiver is a full GoBGP holding its own copy of the table**,
+  which is how a `--receivers` run can trip `low_free_memory` on memory it
+  consumed by design.
+
+A patched GoBGP would also have changed the instrument. It would have cost the
+same bridge block and the same redone testing, and kept all three limits.
+
+**Alternatives set aside.** BIRD as the monitor has O(1) CLI counters and fast
+ingest, but it is also a daemon under test. It is still read by `docker exec`,
+so the resolution floor stays. And it would measure BIRD with BIRD. ExaBGP is
+Python and would itself be the bottleneck at 1.05M prefixes. None of the other
+off-the-shelf speakers pushes a timestamped count; every one would still be
+polled.
+
+**What stays the same.** Only the monitor role changes. The count keeps
+GoBGP's `accepted` meaning with no import policy: prefixes held, a
+re-announcement replaces. The first stage (7a) feeds the controller the same
+queue sample at the same cadence, so the first comparison between the two
+monitors changes one thing at a time. Using the finer resolution (7b) is a
+separate, later step.
+
+**Risks named before building.** The sink is new code in the most load-bearing
+place in the repository. It has to establish with every target's session
+behaviour, it must never drop a session under load, and its count must match
+GoBGP's exactly on the same cell. Each of those is a 7a check, not an
+assumption. The shared-monotonic-clock claim has the same status: containers
+share the host's `CLOCK_MONOTONIC` unless a time namespace is configured, and
+7a verifies it on this host rather than relying on it.

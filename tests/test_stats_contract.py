@@ -211,5 +211,9 @@ def test_the_checkers_mrt_generator_list_matches_bgperf2s():
         REPO_ROOT / 'scripts' / 'check_timing_evidence.py')
     checker = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(checker)
+    # The checker reads artifacts of runs that already happened, so it also
+    # knows generators bgperf2 has since retired.
     assert (tuple(checker.MRT_TESTER_TYPES)
-            == tuple(_bgperf2.MRT_TESTER_TYPES))
+            == tuple(checker.RETIRED_MRT_TESTER_TYPES)
+            + tuple(_bgperf2.MRT_TESTER_TYPES))
+    assert not set(checker.RETIRED_MRT_TESTER_TYPES) & set(_bgperf2.TESTER_TYPES)

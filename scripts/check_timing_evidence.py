@@ -480,7 +480,11 @@ SYNTHETIC_TESTER_TYPES = ('exa', 'bird')
 # file, so `required` is a statement of fact there exactly as it is for a
 # synthetic one. Reading "not synthetic" as "MRT" downgraded those rows'
 # `received >= required` from necessary to merely sufficient.
-MRT_TESTER_TYPES = ('gobgp', 'bgpdump2')
+#
+# gobgp stopped being a generator on 2026-09-29, but this reads artifacts of
+# runs that already happened, so it still recognises one.
+RETIRED_MRT_TESTER_TYPES = ('gobgp',)
+MRT_TESTER_TYPES = RETIRED_MRT_TESTER_TYPES + ('bgpdump2',)
 
 WITNESS_AGREEMENT_FRACTION = 0.01
 

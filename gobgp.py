@@ -32,7 +32,10 @@ class GoBGP(Container):
     GUEST_DIR = '/root/config'
     IMAGE_REPO = 'bgperf/gobgp'
     DAEMON_BINARY = '/go/bin/gobgpd'
-    VERSIONS = ('3.35.0', '3.37.0')
+    # No release list: GoBGP is only the monitor and the export receivers now,
+    # which run the unversioned image. Versioned builds existed to benchmark it
+    # as a target, which was dropped on 2026-09-29.
+    VERSIONS = ()
     DEFAULT_REF = 'master'
 
     def __init__(self, host_dir, conf, image='bgperf/gobgp'):
@@ -86,6 +89,9 @@ RUN rm -rf /root/gobgp && cp /go/bin/gobgp /root/gobgp
         super(GoBGP, cls).build_image(force, tag, nocache=nocache)
 
 
+# Not a selectable target any more (see bgperf2.TARGET_CLASSES). Kept because
+# RustyBGPTarget speaks the same config format and inherits this writer and
+# neighbour reader.
 class GoBGPTarget(GoBGP, Target):
 
     CONTAINER_NAME = 'bgperf_gobgp_target'

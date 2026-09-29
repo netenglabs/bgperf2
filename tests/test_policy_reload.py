@@ -347,7 +347,7 @@ class TestTheGuards:
             bgperf2.resolve_policy_reload(2, 10, 1, 'frr_c', 'bird')
         assert 'frr_c' in str(e.value) and 'bird' in str(e.value)
 
-    @pytest.mark.parametrize('tester', ['gobgp', 'bgpdump2'])
+    @pytest.mark.parametrize('tester', ['bgpdump2'])
     def test_an_mrt_generator_is_refused(self, tester):
         '''The policy selects a block by the peer AS bgperf2 assigned, and an
         MRT injector replays the AS paths in the file; -p is the whole table
@@ -419,7 +419,7 @@ class TestTheBatchPath:
         with pytest.raises(SystemExit):
             bgperf2.check_batch_test(a_test(
                 policy_reload_blocks=2,
-                targets=[{'name': 'bird'}, {'name': 'gobgp'}]))
+                targets=[{'name': 'bird'}, {'name': 'openbgp'}]))
 
     def test_every_peer_count_on_the_axis_is_checked(self):
         '''Not just the first: two blocks fit ten peers and not two, and

@@ -58,7 +58,8 @@ incomparable for years. Notes for anyone extending it:
 - Probe through the classes that really run the image — `TARGET_CLASSES` **and** `TESTER_CLASSES`,
   never the daemon base class. The rustybgp bug was invisible when the base was asked directly,
   because GoBGP is not in that MRO. `TESTER_CLASSES` exists for this: `bench` builds
-  `ExaBGPTester(Tester, ExaBGP)`, not `ExaBGP`, and bird/gobgp run as both roles with different MROs.
+  `ExaBGPTester(Tester, ExaBGP)`, not `ExaBGP`, and bird runs as both roles with different MROs.
+  gobgp is in neither table — it is only the monitor — so `MONITOR_CLASSES` probes it as `Monitor`.
 - The throwaway container is created with `entrypoint=[]`. `command` is *appended* to an
   `ENTRYPOINT`, not run instead of it, so `bgperf/bgpdump2` and `bgperf/exabgp_mrtparse`
   (`ENTRYPOINT ["/bin/bash"]`) would run `bash sleep 600`, exit 126, and every later `exec` would

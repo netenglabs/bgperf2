@@ -241,8 +241,8 @@ measured to decide it, is in the
 ### IPv4 only
 
 Everything here is IPv4, in four separate places: synthetic prefixes are
-generated as IPv4 `/32`s (`gen_paths`), the gobgp MRT injector is invoked with
-`--no-ipv6`, the monitor and gobgp read `afi_safis[0]` — the first address
+generated as IPv4 `/32`s (`gen_paths`), the (since removed) gobgp MRT injector was
+invoked with `--no-ipv6`, the monitor and gobgp read `afi_safis[0]` — the first address
 family — so v6 routes would not be counted even if they arrived, and peering
 uses an IPv4 `--local-address-prefix`. Supporting IPv6 means all four: prefix
 generation, a v6 peering plane, dropping `--no-ipv6`, and summing across
@@ -276,27 +276,10 @@ in a CSV format to easily copy and paste to do analysis later.
 
 To change a target implementation, use `-t` option.
 Currently, `bgperf2` supports [BIRD](http://bird.network.cz/) and [FRRouting](https://frrouting.org/)
-(other than GoBGP. There is very intial support for[RustyBGP](https://github.com/osrg/rustybgp), partly
+and OpenBGPD. GoBGP is not a target: it is too slow to be worth benchmarking, and serves only as
+the monitor. There is very intial support for[RustyBGP](https://github.com/osrg/rustybgp), partly
 because RustyBGP doesn't support all policy that Bgperf2 tries to use for policy testing. If you just want to
 do routes and neighbors then RustyBGP works.
-
-```bash
-$ ./bgperf2.py bench -t gobgp
-run monitor
-run gobgp
-Waiting 19 seconds for monitor
-run tester tester type bird
-launched 1 testers
-elapsed: 6sec, cpu: 5.28%, mem: 40.15MB, mon recved: 10000, neighbors_received: 100, neighbors_accepted: 100, %idle 57.0, free mem 56.04GB
-gobgp: 3.37.0
-Max cpu: 893.00, max mem: 40.15MB
-Min %idle 57.0, Min mem free 56.04GB
-Time since first received prefix: 5
-total time: 33.27s
-
-name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date, cores, Mem (GB), tester errors, tester timeouts, failed, MSG, filters
-gobgp,gobgp,3.37.0,100,100,9900,10000,19,6,1,5,33.27,893,0.04,57,56.039,,2026-08-07,32,60.73GB,0,0,,,
-```
 
 To change a load, use following options.
 

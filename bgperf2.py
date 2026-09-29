@@ -44,7 +44,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from base import *
 from exabgp import ExaBGP, ExaBGP_MRTParse
-from gobgp import GoBGP, GoBGPTarget
+from gobgp import GoBGP
 from bird import BIRD, BIRDTarget
 from frr import FRRoutingTarget
 from frr_compiled import FRRoutingCompiled, FRRoutingCompiledTarget
@@ -55,7 +55,7 @@ from srlinux import SRLinux, SRLinuxTarget
 from junos import Junos, JunosTarget
 from eos import Eos, EosTarget
 from tester import ExaBGPTester, BIRDTester
-from mrt_tester import GoBGPMRTTester, ExaBGPMrtTester
+from mrt_tester import ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
 from monitor import Monitor, Receiver
 import reclaim
@@ -119,11 +119,19 @@ TESTER_CLASSES = {
     'exabgp_mrtparse': ExaBGPMrtTester,
     'bgpdump2': Bgpdump2Tester,
     'bird': BIRDTester,
-    'gobgp': GoBGPMRTTester,
+}
+
+# GoBGP is only ever the measurement instrument -- the monitor, and the export
+# receivers, which subclass it. It was removed as a target and as an MRT
+# generator on 2026-09-29: too slow to be worth benchmarking, and as a
+# generator it became the bottleneck itself. Its image is still built and must
+# still be probed, and through the class that really runs it, for the same
+# reason TESTER_CLASSES exists.
+MONITOR_CLASSES = {
+    'gobgp': Monitor,
 }
 
 TARGET_CLASSES = {
-    'gobgp': GoBGPTarget,
     'bird': BIRDTarget,
     'frr_c': FRRoutingCompiledTarget,
     'rustybgp': RustyBGPTarget,
@@ -240,7 +248,7 @@ PREFIX_SCOPES = ('per-peer', 'total')
 # these `-p` is already the size of the whole table -- `gen_conf()` sets the
 # monitor check-point from it directly rather than multiplying -- so a scope
 # has nothing to divide and asking for one is a mistake worth naming.
-MRT_TESTER_TYPES = ('gobgp', 'bgpdump2')
+MRT_TESTER_TYPES = ('bgpdump2',)
 
 # Every generator `-g` accepts, and the single source for the CLI's `choices`.
 # `gen_conf()` branches on `not in ('exa', 'bird')` rather than on
@@ -1299,7 +1307,8 @@ def verify(args):
         # rustybgp. De-duplicated so a daemon that is only ever one role is
         # still probed once, via the base class.
         roles = []
-        for label, table in (('target', TARGET_CLASSES), ('tester', TESTER_CLASSES)):
+        for label, table in (('target', TARGET_CLASSES), ('tester', TESTER_CLASSES),
+                             ('monitor', MONITOR_CLASSES)):
             cls = table.get(name)
             if cls is not None and cls not in [c for _, c in roles]:
                 roles.append((label, cls))
@@ -1600,15 +1609,25 @@ def update(args):
                                 checkout=args.checkout or cls.DEFAULT_REF,
                                 nocache=args.no_cache)
 
+# Containers of roles bgperf2 no longer runs. A host whose last run used one
+# can still have it holding that role's address on the bench bridge, and the
+# next run would fail to attach there with nothing in the teardown saying why.
+# GoBGP stopped being a target and an MRT generator on 2026-09-29.
+RETIRED_TARGET_CONTAINERS = ('bgperf_gobgp_target',)
+RETIRED_TESTER_PREFIXES = ('bgperf_gobgp_mrttester_',)
+
+
 def remove_target_containers():
     # Derived from TARGET_CLASSES so registering a target in one place is
     # enough. A target missing from this list leaves its container behind and
     # the next bench fails on the duplicate name -- FRRoutingTarget is included
     # explicitly because frr_c inherits its container name from it.
-    for target_class in set(TARGET_CLASSES.values()) | {FRRoutingTarget}:
-        if ctn_exists(target_class.CONTAINER_NAME):
-            print('removing target container', target_class.CONTAINER_NAME)
-            dckr.remove_container(target_class.CONTAINER_NAME, force=True)
+    names = {c.CONTAINER_NAME
+             for c in set(TARGET_CLASSES.values()) | {FRRoutingTarget}}
+    for name in sorted(names | set(RETIRED_TARGET_CONTAINERS)):
+        if ctn_exists(name):
+            print('removing target container', name)
+            dckr.remove_container(name, force=True)
 
 def remove_old_containers():
     if ctn_exists(Monitor.CONTAINER_NAME):
@@ -1624,9 +1643,9 @@ def remove_old_containers():
         if ctn_name.startswith(Receiver.CONTAINER_NAME_PREFIX) or \
             ctn_name.startswith(ExaBGPTester.CONTAINER_NAME_PREFIX) or \
             ctn_name.startswith(ExaBGPMrtTester.CONTAINER_NAME_PREFIX) or \
-            ctn_name.startswith(GoBGPMRTTester.CONTAINER_NAME_PREFIX) or \
             ctn_name.startswith(Bgpdump2Tester.CONTAINER_NAME_PREFIX) or \
-            ctn_name.startswith(BIRDTester.CONTAINER_NAME_PREFIX):
+            ctn_name.startswith(BIRDTester.CONTAINER_NAME_PREFIX) or \
+            ctn_name.startswith(RETIRED_TESTER_PREFIXES):
             role = ('receiver'
                     if ctn_name.startswith(Receiver.CONTAINER_NAME_PREFIX)
                     else 'tester')
@@ -2350,6 +2369,28 @@ def target_holds_suffix(witness):
     return ', target holds: ' + ' / '.join(parts) if parts else ''
 
 
+def scenario_mrt_tester_class(tester):
+    '''The class that plays back a scenario's `type: mrt` tester.
+
+    There is no default injector. It used to be gobgp, which was removed as a
+    generator on 2026-09-29 -- it was slow enough to become the bottleneck
+    itself -- and silently substituting another would run a different workload
+    than the scenario was written for.
+    '''
+    injector = tester.get('mrt_injector')
+    if injector == 'exabgp':
+        return ExaBGPMrtTester
+    if injector == 'bgpdump2':
+        return Bgpdump2Tester
+    if injector == 'gobgp':
+        raise ValueError('mrt_injector gobgp was removed: GoBGP is only the '
+                         'monitor now. Use mrt_injector: bgpdump2')
+    if injector is None:
+        raise ValueError('a type: mrt tester needs an mrt_injector (bgpdump2 '
+                         'or exabgp); the old default, gobgp, was removed')
+    raise ValueError('invalid mrt_injector: {0!r}'.format(injector))
+
+
 def bench(args):
     # Here as well as in `batch()`, because a `bench` run is also a thing a
     # reclaim can take away -- `scripts/calibration_case.sh` drives one
@@ -2497,6 +2538,19 @@ def bench(args):
                 getattr(args, 'filter_test', None),
                 args.churn_prefixes, args.churn_bursts,
                 getattr(args, 'repeat', False))
+        except ValueError as e:
+            sys.exit(str(e))
+
+    if args.file:
+        # A scenario's generators are otherwise only checked in the dispatch
+        # loop, after the teardown below has already destroyed the previous
+        # run's containers and logs.
+        with open(args.file) as f:
+            early = yaml.safe_load(Template(f.read()).render()) or {}
+        try:
+            for tester in early.get('testers') or []:
+                if tester.get('type') == 'mrt':
+                    scenario_mrt_tester_class(tester)
         except ValueError as e:
             sys.exit(str(e))
 
@@ -2666,19 +2720,11 @@ def bench(args):
             elif tester_type == 'bird':
                 tester_class = BIRDTester
             elif tester_type == 'mrt':
-                if 'mrt_injector' not in tester:
-                    mrt_injector = 'gobgp'
-                else:
-                    mrt_injector = tester['mrt_injector']
-                if mrt_injector == 'gobgp':
-                    tester_class = GoBGPMRTTester
-                elif mrt_injector == 'exabgp':
-                    tester_class = ExaBGPMrtTester
-                elif mrt_injector == 'bgpdump2':
-                    tester_class = Bgpdump2Tester
-                else:
-                    print('invalid mrt_injector:', mrt_injector)
-                    sys.exit(1)
+                mrt_injector = tester.get('mrt_injector')
+                try:
+                    tester_class = scenario_mrt_tester_class(tester)
+                except ValueError as e:
+                    sys.exit(str(e))
 
             else:
                 print('invalid tester type:', tester_type)
@@ -5204,10 +5250,8 @@ def check_batch_test(test):
         # these two keys is checked against the generator that will run.
         # `gen_conf()` derives the injector from `tester_type` and never reads
         # `mrt_injector`, so one that disagrees is not a second opinion -- it
-        # is a line the run ignores. `tester_type: gobgp` beside
-        # `mrt_injector: bgpdump2` played back through gobgp, against a 0.93
-        # check-point factor instead of 0.99, and wrote a row that reads as a
-        # bgpdump2 run.
+        # is a line the run ignores: a row would read as one injector's run
+        # when another played the table back.
         injector = target.get('mrt_injector')
         if not scenario and injector and injector != tester:
             sys.exit(
@@ -6317,18 +6361,13 @@ def gen_conf(args):
                                                         diversity)],
     }
 
-    mrt_injector = None
-    if tester_type == 'gobgp' or tester_type == 'bgpdump2':
-        mrt_injector = tester_type
-        
+    mrt_injector = tester_type if tester_type in MRT_TESTER_TYPES else None
 
     if mrt_injector:
         conf['monitor']['check-points'] = [prefix]
 
-    if mrt_injector == 'gobgp': #gobgp doesn't send everything with mrt
-        conf['monitor']['check-points'][0] = int(conf['monitor']['check-points'][0] * 0.93)
-    else: #args.target == 'bird': # bird seems to reject severalhandfuls of routes
-        conf['monitor']['check-points'][0] = int(conf['monitor']['check-points'][0] * 0.99)
+    # bird seems to reject several handfuls of routes
+    conf['monitor']['check-points'][0] = int(conf['monitor']['check-points'][0] * 0.99)
 
     it = netaddr.iter_iprange('90.0.0.0', '100.0.0.0')
 

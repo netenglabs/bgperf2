@@ -78,6 +78,17 @@ class Instrument(object):
         '''
         raise NotImplementedError()
 
+    def check_point(self):
+        '''The count the poll loop calls `checked` at, or None for none.
+
+        One helper for the poll loop and for the sink log's dating, so the
+        line the log dates the check-point to and the sample that sets
+        `monitor_required_reached` judge one threshold by construction.
+        '''
+        config = getattr(self, 'config', None) or {}
+        cps = config.get('monitor', {}).get('check-points') or []
+        return int(cps[0]) if cps else None
+
     def stats(self, queue, interval=1):
         '''Poll the monitor's accepted count into the run's stats queue.
 
@@ -91,7 +102,7 @@ class Instrument(object):
         '''
         self.stop_monitoring = False
         def stats():
-            cps = self.config['monitor']['check-points'] if 'check-points' in self.config['monitor'] else []
+            required = self.check_point()
             while True:
                 if self.stop_monitoring:
                     return
@@ -123,8 +134,7 @@ class Instrument(object):
                     info = self.read_sample(sampled_at)
                     info['who'] = self.name
                     state = info['afi_safis'][0]['state']
-                    if 'accepted'in state and len(cps) > 0 and int(cps[0]) <= int(state['accepted']):
-                        #cps.pop(0)
+                    if 'accepted' in state and required is not None and required <= int(state['accepted']):
                         info['checked'] = True
                     else:
                         info['checked'] = False
@@ -410,8 +420,9 @@ exec {binary} -local-as {local_as} -peer-as {peer_as} -router-id {router_id} \\
                 os.remove(os.path.join(self.host_dir, name))
             except FileNotFoundError:
                 pass
-        self.reader = SinkLogReader(os.path.join(self.host_dir, self.LOG_NAME))
         self.config = conf
+        self.reader = SinkLogReader(os.path.join(self.host_dir, self.LOG_NAME),
+                                    required=self.check_point())
         self.exec_startup_cmd(detach=True)
         return ctn
 
@@ -469,7 +480,19 @@ exec {binary} -local-as {local_as} -peer-as {peer_as} -router-id {router_id} \\
     def read_sample(self, sampled_at):
         # The staleness check is made at the loop's own stamp, so the sample
         # and the clock it is judged by are the same instant.
-        return self.reader.sample(now_ns=int(sampled_at * 1e9))
+        sample = self.reader.sample(now_ns=int(sampled_at * 1e9))
+        # Every sample says how far the sink's clock is from the host's,
+        # because the controller dates the monitor's events to the sink's own
+        # timestamps (measurement plan 7b) and must be able to refuse to.
+        # Measured once per sink process, not per sample; see
+        # `SinkLogReader.clock_offset_ns()`.
+        sample['sink']['clock_offset_ns'] = self.clock_offset_ns()
+        return sample
+
+    def clock_offset_ns(self):
+        # The reader's, measured once per sink process: the same measurement
+        # that decides whether its lines may be held back to a sample's stamp.
+        return self.reader.clock_offset_ns()
 
     def log_evidence(self):
         '''`SinkLog.evidence()` for the whole log, read afresh.
@@ -510,6 +533,12 @@ class SinkReceiver(SinkMonitor):
 
     def stats(self, queue, interval=1):
         return Receiver.stats(self, queue, interval)
+
+    def check_point(self):
+        # A receiver is not judged by the monitor's check-point. `run()` is
+        # inherited and would otherwise hand the monitor's threshold to this
+        # receiver's log, which dates nothing anyone reads against it.
+        return None
 
     def accepted_prefixes(self):
         """How many prefixes the target has exported to this session so far.

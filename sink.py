@@ -183,6 +183,13 @@ SINK_LOG_FORMAT = 1
 SINK_HEARTBEAT_S = 1
 SINK_STALE_HEARTBEATS = 3
 
+# Past this, the sink's monotonic clock is not the host's in any sense the
+# controller could date an event by. The measured offsets are 1-3 µs; a
+# container in its own time namespace is off by its whole offset, which is
+# seconds or more. `scripts/monitor_pair_review.py` fails a pair on the same
+# number (it imports nothing from here, and a test pins the two together).
+SINK_CLOCK_OFFSET_LIMIT_NS = 1_000_000
+
 
 class SinkLogError(RuntimeError):
     '''The sink's log cannot be read as a count.
@@ -211,7 +218,11 @@ class SinkLog:
     zero at once when the session goes.
     '''
 
-    def __init__(self):
+    def __init__(self, required=None):
+        # The monitor's check-point, so the line on which the count first
+        # reached it can be dated (measurement plan 7b). None for a log read
+        # without one -- a receiver's, or the evidence read at a run's end.
+        self.required = required
         self.malformed = []
         self.malformed_lines = 0
         self.lines = 0
@@ -243,6 +254,16 @@ class SinkLog:
         self.eor = 0
         self.count_ns = None
         self.eor_ns = None
+        # The three moments the monitor's lifecycle events are dated to, each
+        # as (the C line's date, the date of the line before it, the count the
+        # line shows). A count
+        # first shown on a C line became true after the previous line and no
+        # later than its own (`sink/log.go`), so the pair is the event and the
+        # bound on it. Per process, like the count they describe: a restarted
+        # sink holds nothing, and its first prefix is a first prefix again.
+        self.first_prefix_at = None
+        self.required_at = None
+        self.changed_at = None
         if self.session is not None:
             # A process that ends holds nothing, so a session it held when
             # the next one started was lost with it.
@@ -298,8 +319,10 @@ class SinkLog:
             except ValueError:
                 return self._bad(line, 'non-integer count')
             if kind == 'C':
+                previous = self.accepted
                 self.accepted, self.updates, self.eor = fields
                 self.count_ns = ns
+                self._date_count(ns, previous)
             elif kind == 'H':
                 if fields != [self.accepted, self.updates, self.eor]:
                     return self._bad(line, 'heartbeat disagrees with the last count')
@@ -334,6 +357,39 @@ class SinkLog:
         # seen is what the next gap is measured from.
         if self.last_line_ns is None or ns > self.last_line_ns:
             self.last_line_ns = ns
+
+    def _date_count(self, ns, previous):
+        '''Date what this C line changed, to the line and the one before it.
+
+        `last_line_ns` has not moved yet, so it is the latest date of any line
+        before this one. That can be *later* than this line's own date: the
+        sink stamps an UPDATE before it takes the log's lock, and a heartbeat
+        can be written in between. The pair is kept as read, inverted or not,
+        and `measurements.SinkDates` refuses an inverted one -- a bound that
+        ends before it starts is not a resolution of zero.
+
+        Each date marks the start of the stretch the count is in now. A
+        first prefix is re-armed when the count returns to zero, and the
+        check-point when it falls below it: a session that dropped holds
+        nothing, so a crossing it lost is not the one a later poll sees.
+        '''
+        at = (ns, self.last_line_ns, self.accepted)
+        if self.accepted == previous:
+            # A C line is also written for an UPDATE that left the count where
+            # it was -- a re-announcement, a withdrawal of a prefix not held.
+            # That is not a change of the count, and `monitor_last_change`
+            # must not be dated to it.
+            return
+        self.changed_at = at
+        if self.accepted == 0:
+            self.first_prefix_at = None
+        elif self.first_prefix_at is None:
+            self.first_prefix_at = at
+        if self.required is not None:
+            if self.accepted < self.required:
+                self.required_at = None
+            elif self.required_at is None:
+                self.required_at = at
 
     def clock_offset_ns(self, host_realtime_ns, host_monotonic_ns):
         '''How far the sink's monotonic clock is from the host's, in ns.
@@ -415,6 +471,9 @@ class SinkLog:
                 'sessions_established': self.sessions_established,
                 'refused_messages': self.refused_messages,
                 'max_line_gap_ns': self.max_line_gap_ns,
+                'first_prefix_at': self.first_prefix_at,
+                'required_at': self.required_at,
+                'changed_at': self.changed_at,
             },
         }
 
@@ -439,20 +498,33 @@ class SinkLogReader:
     READ_BLOCK = 1 << 16
     READ_MAX = 4 << 20
 
-    def __init__(self, path):
+    def __init__(self, path, required=None):
         self.path = path
+        # Held here as well as on the log, because a replaced log starts a
+        # new `SinkLog` and the check-point must survive that.
+        self.required = required
         self._pos = 0
         self._log_id = None
-        self.log = SinkLog()
+        self._offset_key = None
+        self._offset = None
+        self.log = SinkLog(required)
 
-    def read(self):
-        '''Consume whatever has been appended, and return the `SinkLog`.'''
+    def read(self, until_ns=None):
+        '''Consume whatever has been appended, and return the `SinkLog`.
+
+        With `until_ns`, a line dated after it is left unread, and so is
+        everything after that line, for the next read. A poll stamps its
+        sample *before* it reads, so without this a sample would carry a count
+        and dates the sink wrote during the read, after the instant the sample
+        claims to describe -- and an event dated after its own sample is one
+        the controller has to refuse (measurement plan 7b).
+        '''
         st = os.stat(self.path)
         log_id = (st.st_dev, st.st_ino)
         if st.st_size < self._pos or (self._log_id is not None
                                       and log_id != self._log_id):
             self._pos = 0
-            self.log = SinkLog()
+            self.log = SinkLog(self.required)
         self._log_id = log_id
         if st.st_size <= self._pos:
             return self.log
@@ -474,10 +546,66 @@ class SinkLogReader:
                     self._pos += len(block)
                     consumed += len(block)
                     continue
-                self.log.feed(block[:end].decode('utf-8', 'replace'))
-                self._pos += end + 1
-                consumed += end + 1
+                if until_ns is None:
+                    self.log.feed(block[:end].decode('utf-8', 'replace'))
+                    self._pos += end + 1
+                    consumed += end + 1
+                    continue
+                taken = self._feed_until(block[:end + 1], until_ns)
+                self._pos += taken
+                consumed += taken
+                if taken < end + 1:
+                    break
         return self.log
+
+    def _feed_until(self, lines, until_ns):
+        '''Feed complete lines up to the first dated after `until_ns`.
+
+        Returns the bytes consumed. `until_ns` is on the host's clock and a
+        line's date on the sink's, so a line is held back only while the
+        sink's clock has been shown to be the host's: a V or B line never is,
+        and nothing is held before a B line has been read or when its offset
+        is past `SINK_CLOCK_OFFSET_LIMIT_NS`. Otherwise a sink whose clock ran
+        ahead would have every line held, and the run would wait forever for
+        a count -- where the rule is that such a sink's *dates* are refused,
+        not its count. A line whose date does not parse is fed, and `SinkLog`
+        refuses it as malformed: holding it back would re-read it forever.
+        '''
+        taken = 0
+        for raw in lines.splitlines(keepends=True):
+            parts = raw.split(b' ', 2)
+            if parts[0] not in (b'V', b'B') and self.clock_agrees():
+                try:
+                    if len(parts) > 1 and int(parts[1]) > until_ns:
+                        break
+                except ValueError:
+                    pass
+            self.log.feed(raw.decode('utf-8', 'replace'))
+            taken += len(raw)
+        return taken
+
+    def clock_offset_ns(self):
+        '''The sink process's clock offset from the host's, measured once.
+
+        Measured once per B line rather than per read, because CLOCK_REALTIME
+        can be stepped mid-run while both monotonic clocks run on untouched,
+        and a step of a millisecond would flip the rest of the run to refused
+        dating partway through -- one run's events dated two ways for a reason
+        that says nothing about the clock the dates are on. A new B line, a
+        restarted sink or a replaced log, is measured afresh. None before a B
+        line.
+        '''
+        log = self.log
+        key = (id(log), log.processes, log.boot_monotonic_ns)
+        if self._offset_key != key:
+            self._offset_key = key
+            self._offset = log.clock_offset_ns(time.time_ns(),
+                                               time.monotonic_ns())
+        return self._offset
+
+    def clock_agrees(self):
+        offset = self.clock_offset_ns()
+        return offset is not None and abs(offset) <= SINK_CLOCK_OFFSET_LIMIT_NS
 
     def read_all(self):
         '''Read to the last complete line, however many bounded reads it takes.
@@ -497,4 +625,6 @@ class SinkLogReader:
         '''Read, then return the count as a monitor sample (`SinkLog.sample`).'''
         if now_ns is None:
             now_ns = time.monotonic_ns()
-        return self.read().sample(now_ns, **kwargs)
+        # As of `now_ns`: the count, its dates and the staleness check all
+        # describe one instant.
+        return self.read(until_ns=now_ns).sample(now_ns, **kwargs)

@@ -4861,3 +4861,116 @@ That is `DROP_FRACTION`, the threshold below which a count is treated as wobble 
 pins the two together, because this script imports nothing from the project. All three result
 sets still pass, 12 pairs of 12. The receivers' comparison has no such excuse, and a target that
 varied would fail it. That errs toward failing, and none of these cells had receivers.
+
+### Progress on 2026-10-01: the monitor's events are dated by the sink (7b, second change set)
+
+Under `--monitor sink`, `monitor_first_prefix`, `monitor_required_reached` and
+`monitor_last_change` are now dated to the sink's own log lines, and each carries the sink's
+resolution where `poll_resolution_s` was published. A GoBGP run's events are unchanged, key for key.
+
+**The poll still decides that an event happens. The log decides when.** `MonitorEventRecorder`
+keeps its three triggers: a non-zero sample, the `checked` flag, and a count that moved. It now
+takes the sample's `SinkDates` beside them. The tracker, the CSV row and every other reader of the
+sample see what they saw before. Only the timestamps of these three events move. That keeps 7a's
+rule of changing one thing at a time. It also means a crossing the log dated but the poll never
+flagged produces no event, which a test pins.
+
+**What a line dates, and how sharply.** `SinkLog` records three moments:
+
+- the C line where the count last left zero;
+- the C line where it last rose across the check-point (`SinkLogReader(required=...)`, from
+  `Instrument.check_point()`, the helper the poll loop now uses as well);
+- the last C line that changed the count.
+
+Each is recorded as the line's date, the previous line's date and the count shown. `sink/log.go`
+gives the bound. A count first shown on a C line became true after the previous line and no
+later than its own. The event takes the line's date, the upper bound, which is the convention the
+poll already used. Its resolution is the distance to the previous line. Neither is floored at a
+poll cadence, because nothing was polled to find them. A tighter bound, line date minus the 10 ms
+coalesce interval, was available and was not taken. It assumes the sink's tick is never late, and
+a late tick under exactly the load that matters would publish a resolution sharper than the
+truth. The measured gap needs no assumption. It is about 10 ms while the table moves, and up to
+the 1 s heartbeat for a change after a quiet stretch.
+
+**Two things the log knows that the poll could not.** A C line is written for every UPDATE batch,
+including a re-announcement that leaves the count where it was. That is not a change, and
+`monitor_last_change` is not dated to it. In the other direction, a count that moved and came back
+between two polls *is* a change. The poll's rule (two samples differ) misses it, and the log does
+not. With a usable sink date, the last change is re-read from the log on every sample.
+
+**Refusals, each falling back to the poll's date, and each said.** The dates are refused, all
+three together, when the sink's clock cannot be shown to be the host's: no B line, or an offset
+past `SINK_CLOCK_OFFSET_LIMIT_NS` (1 ms). That is the pair review's `CLOCK_OFFSET_LIMIT_NS`, and a
+test pins the two together. `SinkMonitor.read_sample()` computes the offset on every sample, with the host's two
+clocks read together, because a restarted sink is a new B line. A single date is refused when it
+precedes the clock origin or follows the sample that saw it. A refused event keeps the poll's date
+and resolution, which are still a true bound, only a coarser one. It says `"dated_by": "poll"`
+with the reason in `sink_dates_refused`, so a run that lost its finer dating can be told apart
+from one that never had it.
+
+**What moves downstream.** `first_prefix_s`, `convergence_s` and their resolutions follow the
+events, and `prefix received (s)` follows `first_prefix_s`. `assurance_s` ends on the poll's
+verdict, so its resolution stays the poll's. `elapsed (s)` is still counted off the poll and is
+not touched here. `post_injection_tail_s` and the export section's `monitor_delta_s` now span a
+sink-dated monitor event and a poll-dated generator or receiver event. Their resolutions are
+already the wider of the two looks, so both remain bounded. Each now leans by up to one poll of the
+other side: the tail negative, `monitor_delta_s` positive. `tester-offering.md` and
+`export-timing.md` say so. The receivers' own dating is the next change set. The findings read
+the resolutions they are given, so their resolution checks followed without a change.
+
+**What review changed.** `/code-review` raised ten findings. Eight were acted on, and each of the
+first three was a wrong number:
+
+- **An inverted bound was published as exact.** The lower bound was the latest date of any
+  earlier line. The sink stamps an UPDATE before it takes its log's lock, so a heartbeat can be
+  written in between with a *later* date, and the first draft clamped the negative gap to a
+  resolution of 0.0. An inverted pair is now refused and falls back to the poll.
+- **A crossing a dropped session lost was still the one dated.** The first draft kept each
+  process's first crossing. A table reached, dropped and reached again would have dated
+  `monitor_required_reached` to a state the run did not hold, lengthening `assurance_s` by
+  the outage. Each date now marks the start of the stretch the count is in: the first prefix
+  re-arms at zero, and the check-point re-arms below it.
+- **Lines written during the read were refused for good.** The poll stamps before it reads, so a
+  sample could carry a C line dated after its own stamp. That date was refused as "after the
+  sample", and a first prefix or check-point is recorded only once. `SinkLogReader.read(until_ns)`
+  now leaves such lines for the next read, so a sample describes the log as of its stamp, the
+  count included.
+- **Smaller fixes.** `Instrument.check_point()` is now the one source of the threshold, so a
+  check-point of 0 dates the way the poll judges it. A `SinkReceiver` takes no check-point.
+  Sink-dated events keep `sample_interval_s`, so every monitor event has the same keys. The
+  last-change branch was folded into one construction, and equal polls move it only on a line
+  the sink could date. The clock offset is measured once per sink process, so a realtime step
+  mid-run cannot leave one run's events dated two ways. The docs no longer say the poll decides
+  `monitor_last_change`.
+
+Declined: withholding the cross-instrument intervals until the receivers are sink-dated. The
+receivers follow in the next change set, and no campaign runs from master between the two. The
+generators are not sinks and will stay poll-dated. A lean that is inside a published resolution
+has to be said, not hidden, and the invariant documents now say it.
+
+A second `/code-review`, of the fixes, found two more defects, and both were fixed:
+
+- **The hold-back could hang a run.** `read(until_ns)` compared the sink's dates with the host's
+  clock before anything had shown that the two agree. A sink whose clock ran ahead would have
+  had every line held back, V and B included. It would never have produced a count, and the
+  run would have waited forever, where the rule is that such a sink's *dates* are refused, not
+  its count. Lines are now held back only once a B line has been read and its offset is within
+  the limit, and V and B lines never are. The offset is measured once per sink process, in the
+  reader, and the monitor publishes that same measurement.
+- **Events chose their dating one by one.** A poll-dated first prefix could sit after a
+  sink-dated check-point in the same sample, which publishes `first_prefix_s` greater than
+  `convergence_s` with no error. An event the sink would date before its predecessor now falls
+  back to the poll as well. The check-point follows the first prefix, and the last change
+  follows the check-point.
+
+**Verification.** 32 new unit tests; the full suite passed (2246). Docker, BIRD 2.19,
+`-n2 -p20000`, once per monitor, in `/data/bgperf-work/7b-cs2`. Sink run,
+before review: `monitor_required_reached` was dated to the sink at `convergence_s` 0.996 s with
+a **4.3 ms** resolution, against the GoBGP run's 1.021 s at 1.021 s. `first_prefix_s` was 0.921 s
+at 0.378 s, because the first 20,000 prefixes arrived on one C line after a quiet stretch.
+`post_injection_tail_s` was −0.038 s against a 1.0 s resolution. Rerun after the review's fixes:
+all three events `dated_by: sink_log`, `convergence_s` 0.978 s at 5.1 ms, `first_prefix_s`
+0.882 s at 0.180 s, and a clock offset of 1.75 µs. After the second review's fixes, all three
+were again `sink_log`, with `convergence_s` 1.045 s at 7.5 ms and an offset of 2.4 µs. The GoBGP run's monitor events
+carried exactly `poll_resolution_s` and `sample_interval_s`, as before. These are smoke checks of
+the dating, one pass each, and not a timing result.

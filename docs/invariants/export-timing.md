@@ -155,7 +155,12 @@ still waits at least as long as it took, but a read no longer runs *inside* a re
 `docker exec` cost these bullets were written against belongs to the GoBGP receivers alone. A
 sink receiver's unreadable log raises, exactly as a failed `gobgp neighbor -j` did: a stale or
 malformed log is a missing read, never a receiver holding nothing. The receivers' timing still
-uses the 1 s round, not the sinks' own timestamps; that is 7b's to change, with the monitor's.
+uses the 1 s round, not the sinks' own timestamps. Since 7b's second change set the
+*monitor's* events are dated to its sink's log. Until the receivers follow, `monitor_delta_s`
+runs from a sink-dated monitor event to a poll-dated receiver event. That is two instruments,
+which this document says not to do. `_bounding_resolution()` still covers it, because the
+wider look, the receiver's 1 s round, bounds the difference. But the number leans positive by up
+to a round, and nothing may be read inside that resolution.
 
 **What still cannot be separated is table selection.** With this in place a run
 decomposes into ingress (measured at the generators), the target's own work, and

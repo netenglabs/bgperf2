@@ -248,6 +248,61 @@ def _validated_interval(sample_interval_s):
     return float(sample_interval_s)
 
 
+@dataclass(frozen=True)
+class SinkDates:
+    '''When the sink's own log says the monitor's count moved.
+
+    Each of `first_prefix`, `required` and `last_change` is
+    `(at_s, after_s, accepted)` on the host's monotonic clock, or None when the
+    log has no such line yet: the C line's date, the date of the line before
+    it, and the count the line shows. A count first shown on a C line became
+    true after the previous line and no later than its own, so `at_s` is the
+    event and `at_s - after_s` is how sharply the sink placed it -- the
+    measurement plan's 7b replacement for the poll's gap.
+
+    `refused` names why none of them may be used, and is None when they may.
+    '''
+    first_prefix: Optional[Tuple[float, float, int]] = None
+    required: Optional[Tuple[float, float, int]] = None
+    last_change: Optional[Tuple[float, float, int]] = None
+    refused: Optional[str] = None
+
+
+def sink_event_dates(section, max_clock_offset_ns):
+    '''Read a sink sample's `sink` section into `SinkDates`.
+
+    None for a sample with no section, which is every GoBGP sample: its run's
+    events are dated by the poll exactly as before.
+
+    The dates are refused, all three together, when the sink's clock cannot be
+    shown to be the host's: no B line read, or an offset past
+    `max_clock_offset_ns`. A container in its own time namespace is off by
+    seconds or more, and an event dated on that clock would move every
+    interval it bounds by the whole offset while looking like a sharper
+    measurement than the poll's.
+    '''
+    if not section:
+        return None
+    offset = section.get('clock_offset_ns')
+    if offset is None:
+        return SinkDates(refused='the sink log has no clock line, so its '
+                                 'clock cannot be compared with the host\'s')
+    if abs(offset) > max_clock_offset_ns:
+        return SinkDates(refused='the sink clock is {0:.3f} ms from the '
+                                 'host\'s'.format(offset / 1e6))
+
+    def seconds(at):
+        if at is None:
+            return None
+        at_ns, after_ns, accepted = at
+        return (at_ns / 1e9, None if after_ns is None else after_ns / 1e9,
+                accepted)
+
+    return SinkDates(first_prefix=seconds(section.get('first_prefix_at')),
+                     required=seconds(section.get('required_at')),
+                     last_change=seconds(section.get('changed_at')))
+
+
 class MonitorEventRecorder:
     '''Translate monitor samples into the typed lifecycle vocabulary.
 
@@ -303,8 +358,74 @@ class MonitorEventRecorder:
         events.extend(confirmed)
         return ordered_events(events)
 
-    def observe(self, monotonic_s, accepted_prefixes, required_reached=False):
-        '''Record one monitor sample and its first/threshold/change events.'''
+    def _dated(self, sink, key, sample_s, counters, not_before=None):
+        '''The time, counters and details for one event this sample records.
+
+        Without `sink` the event is the poll's, exactly as it always was. With
+        it, the event is dated to the sink's own line when that line exists,
+        falls inside this run's clock -- after the origin, and no later than
+        the sample that saw it -- and is bounded by an earlier line. Anything
+        else is dated by the poll and says why, because the poll's date is
+        still a true bound, only a coarser one, and a run that loses its finer
+        dating must be told apart from one that never had it.
+
+        `not_before` is the event this one cannot precede -- the first prefix
+        for the check-point, the check-point for the last change. Each event
+        chooses its dating alone, so one that fell back to the poll can sit
+        later than a sink-dated successor in the same sample; that successor
+        falls back too, rather than publish a `first_prefix_s` past
+        `convergence_s`.
+        '''
+        details = self._details()
+        if sink is None:
+            return sample_s, counters, details
+        reason = sink.refused
+        if reason is None:
+            line = getattr(sink, key)
+            if line is None:
+                reason = 'the sink log has no line for it'
+            else:
+                at_s, after_s, accepted = line
+                if after_s is None:
+                    after_s = self._origin_s
+                if at_s < self._origin_s:
+                    reason = 'the sink dated it before the clock started'
+                elif at_s > sample_s:
+                    reason = 'the sink dated it after the sample that saw it'
+                elif not_before is not None \
+                        and at_s < not_before.monotonic_s:
+                    reason = 'the sink dated it before {0}'.format(
+                        not_before.kind.value)
+                elif after_s > at_s:
+                    # The sink stamps an UPDATE before it takes its log's
+                    # lock, so a heartbeat can be written between the two and
+                    # carry the later date. A bound that ends before it starts
+                    # is not a resolution of zero.
+                    reason = 'the line before it in the sink log is dated later'
+                else:
+                    # The C line bounds the change from both sides, and that
+                    # is the whole of the resolution: no poll cadence floors
+                    # it, because nothing was polled to find it.
+                    details['poll_resolution_s'] = at_s - after_s
+                    details['dated_by'] = 'sink_log'
+                    return at_s, {'accepted_prefixes': accepted}, details
+        details['dated_by'] = 'poll'
+        details['sink_dates_refused'] = reason
+        return sample_s, counters, details
+
+    def observe(self, monotonic_s, accepted_prefixes, required_reached=False,
+                sink=None):
+        '''Record one monitor sample and its first/threshold/change events.
+
+        `sink` is the sample's `SinkDates`, for a run measured by the sink;
+        see `_dated()` for what it changes. The poll decides *that*
+        `monitor_first_prefix` and `monitor_required_reached` happen -- a
+        first non-zero sample, the check-point flag -- and the sink only when.
+        `monitor_last_change` is the exception, on purpose: with a usable
+        sink line it is whatever the log last dated, because the log sees a
+        count that moved and came back between two polls, which two equal
+        samples cannot.
+        '''
         if self._confirmed:
             raise MeasurementEventError(
                 'cannot observe monitor samples after convergence is confirmed')
@@ -331,36 +452,58 @@ class MonitorEventRecorder:
         self._last_sample_s = monotonic_s
 
         counters = {'accepted_prefixes': accepted_prefixes}
-        details = self._details()
         if accepted_prefixes > 0 and unique_event(
                 self._events, EventKind.MONITOR_FIRST_PREFIX) is None:
+            at_s, event_counters, details = self._dated(
+                sink, 'first_prefix', monotonic_s, counters)
             self._events.append(LifecycleEvent(
                 EventKind.MONITOR_FIRST_PREFIX,
-                monotonic_s,
+                at_s,
                 self.producer,
                 EventPhase.CONVERGENCE,
-                counters=counters,
+                counters=event_counters,
                 details=details,
             ))
 
         if required_reached and unique_event(
                 self._events, EventKind.MONITOR_REQUIRED_REACHED) is None:
+            at_s, event_counters, details = self._dated(
+                sink, 'required', monotonic_s, counters,
+                not_before=unique_event(
+                    self._events, EventKind.MONITOR_FIRST_PREFIX))
             self._events.append(LifecycleEvent(
                 EventKind.MONITOR_REQUIRED_REACHED,
-                monotonic_s,
+                at_s,
                 self.producer,
                 EventPhase.CONVERGENCE,
-                counters=counters,
+                counters=event_counters,
                 details=details,
             ))
 
+        floor = (unique_event(self._events, EventKind.MONITOR_REQUIRED_REACHED)
+                 or unique_event(self._events, EventKind.MONITOR_FIRST_PREFIX))
+        last_change = None
         if accepted_prefixes != self._last_accepted:
+            last_change = self._dated(sink, 'last_change', monotonic_s,
+                                      counters, not_before=floor)
+        elif sink is not None and sink.refused is None \
+                and sink.last_change is not None and (
+                    self._last_change is None
+                    or self._last_change.monotonic_s != sink.last_change[0]):
+            dated = self._dated(sink, 'last_change', monotonic_s, counters,
+                                not_before=floor)
+            # Only a line the sink could date moves it here: two equal polls
+            # are no evidence of a change by themselves.
+            if dated[2]['dated_by'] == 'sink_log':
+                last_change = dated
+        if last_change is not None:
+            at_s, event_counters, details = last_change
             self._last_change = LifecycleEvent(
                 EventKind.MONITOR_LAST_CHANGE,
-                monotonic_s,
+                at_s,
                 self.producer,
                 EventPhase.CONVERGENCE,
-                counters=counters,
+                counters=event_counters,
                 details=details,
             )
         self._last_accepted = accepted_prefixes

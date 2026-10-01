@@ -108,6 +108,31 @@ stamped once per run before the testers are launched.
 | `assurance_s` | seconds | Required count to the sample at which the assurance policy declared the run complete. `null` for a run that failed or was still in assurance. |
 | `assurance_resolution_s` | seconds | The wider of the two monitor polls bounding it. The confirmation carries the resolution of the sample it ruled on, not a gap to the moment the verdict was stamped: assurance is a decision about a sample, not a fresh look at the monitor. |
 
+**Under `--monitor sink` the three monitor events are dated by the sink, not the
+poll** (measurement plan 7b). The poll still decides *that* `monitor_first_prefix`
+and `monitor_required_reached` happened. Each is then dated to the sink line that
+began the stretch the poll saw: the count's return from zero, or its last rise
+across the check-point. A crossing that a dropped session lost is not the one
+dated. `monitor_last_change` is the log's last change of the count, so it
+includes a move and return between two polls that two equal samples cannot show.
+Each event's `poll_resolution_s` is its line's distance from the line before it. A count
+first shown on a C line became true after the previous line and no later than
+its own. That is typically 10 ms under load and up to the 1 s heartbeat after a
+quiet stretch, with no poll cadence flooring it. Such an event carries
+`"dated_by": "sink_log"`, and the three intervals above inherit its resolution.
+`assurance_s` still ends on the poll's verdict, so its resolution stays the
+poll's. An event the sink could not date falls back to the poll's date. It then
+says `"dated_by": "poll"` and names the reason in `sink_dates_refused`. The
+reasons are: a sink clock more than 1 ms from the host's
+(`SINK_CLOCK_OFFSET_LIMIT_NS`, measured once per sink process), no clock line, no
+such line in the log, a line dated before the clock origin or after the sample
+that saw it, or a line whose predecessor is dated later. The last comes from a
+heartbeat racing an UPDATE's stamp, and it is refused rather than published as
+a resolution of zero. A sample describes the log as of its own stamp, and lines
+dated after it are read by the next one. A GoBGP run's events carry neither key and are exactly what
+they were. `prefix received (s)` follows `first_prefix_s`, so a sink run's
+legacy column is the sink's date. `elapsed (s)` is still counted off the poll.
+
 ## Event artifact: the `testers` section
 
 Each run also writes `<prefix>.events.json` (`bgperf2/measurement-events/v1alpha1`).

@@ -58,7 +58,7 @@ from tester import ExaBGPTester, BIRDTester
 from mrt_tester import ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
 from monitor import Monitor, Receiver, SinkMonitor, SinkReceiver
-from sink import Sink
+from sink import SINK_CLOCK_OFFSET_LIMIT_NS, Sink
 import reclaim
 from convergence import ConvergenceTracker
 from reclaim import StopRequested, StopSignal, watch_for_interruption
@@ -79,7 +79,8 @@ from measurements import (EVENT_ARTIFACT_SCHEMA, ChurnEventRecorder,
                           MonitorEventRecorder, PolicyReloadEventRecorder,
                           TesterEventRecorder, event_artifact,
                           export_poll_can_stop, monitor_metrics, natural_key,
-                          tester_fleet_metrics, tester_metrics)
+                          sink_event_dates, tester_fleet_metrics,
+                          tester_metrics)
 from settings import dckr
 from summary import describe_batch_summary, summarize_batch
 from queue import Empty as QueueEmpty, Queue
@@ -3466,8 +3467,17 @@ def bench(args):
             # headline timing is worse than a missing one, which is why an
             # MRT run on a daemon that never reaches the check-point still
             # publishes none of the three rather than three plausible numbers.
+            #
+            # Under `--monitor sink` the three monitor events are dated to the
+            # sink's own log lines rather than to this poll (measurement plan
+            # 7b). The poll still decides *that* each happened, so nothing the
+            # tracker or the row reads from the sample moves; only the
+            # events' timestamps and resolutions sharpen.
             lifecycle.observe(sample_monotonic_s, int(recved),
-                              info['checked'])
+                              info['checked'],
+                              sink=sink_event_dates(
+                                  info.get('sink'),
+                                  SINK_CLOCK_OFFSET_LIMIT_NS))
             measured = monitor_metrics(lifecycle.events)
             if measured['first_prefix_s'] is not None:
                 output_stats['first_received_time'] = datetime.timedelta(

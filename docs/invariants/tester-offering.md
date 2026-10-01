@@ -71,6 +71,14 @@ carries the resolution of the sample its verdict ruled on, not a gap to the
 moment it was stamped: assurance is a decision about a sample, not a fresh
 look.
 
+**Under `--monitor sink` the monitor's events are dated by the sink's log**, not by its
+poll (measurement plan 7b). Each event goes to the C line that showed the change, and its
+resolution is the gap from the line before. The before-the-read stamp rule above still
+governs the poll that *decides* each event, and the generator side is unchanged. The tail
+therefore runs from a poll-dated completion to a sink-dated crossing. The completion is
+late by up to a generator poll, so the tail leans negative by that much, and
+`post_injection_tail_resolution_s`, the wider of the two looks, still bounds it.
+
 **A span nothing crossed is not a rate of zero**, at either level. Each MRT
 injector's sub-millisecond walk is over before its own first poll, so a fleet
 span bounded by two injectors completing at different polls contains none of

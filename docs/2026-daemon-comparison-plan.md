@@ -1,6 +1,6 @@
 # 2026 daemon comparison plan
 
-**Status: Phases 0 and 1 done; Phase 2 next. Written 2026-09-29.**
+**Status: Phases 0 and 1 done; Phase 2 in progress. Written 2026-09-29.**
 
 **Epic:** `bgperf2-0y5`
 
@@ -131,7 +131,7 @@ Progress: done 2026-10-01. Item 2 done 2026-09-29 (`21ae46c`), item 1 2026-10-01
 
 ## 4. Phase 2 — instrument changes on the current host
 
-**Tracked by:** `bgperf2-0y5.3` · **Status:** not started
+**Tracked by:** `bgperf2-0y5.3` · **Status:** in progress
 
 Code changes, verified by the test suite and by `-n1 -p1` smoke runs.
 
@@ -145,7 +145,10 @@ Code changes, verified by the test suite and by `-n1 -p1` smoke runs.
    resolve the differences this plan exists to publish. A second reason: a sink ingests far
    faster than any target, so it may resolve the `target_or_monitor` cells on one host, which is
    what the §5 gate would otherwise send to Phase 4.
-2. **Pin each role to its own cores (new).** Today target, generators, monitor and receivers
+2. ~~**Pin each role to its own cores (new).**~~ **Done 2026-10-01, `1a1bdf9`:** `--pin` on
+   `bench` and `pin:` on a batch test; rules in `docs/invariants/workload-controls.md`. Smoke runs on
+   this host (BIRD 2.19.2, `-n1 -p1`): pinned `target=0-3,monitor=4-5,testers=6-7` and unpinned both
+   converged, under distinct stems, and `docker inspect` showed each cpuset applied. Today target, generators, monitor and receivers
    share all 16 vCPU, and the monitor can out-consume the target. **Pin the sink, not GoBGP.**
    GoBGP's per-poll table walk and its garbage collection spread across every core it can
    reach. Squeezed onto two, each walk would likely take longer and hold the monitor's lock for
@@ -164,7 +167,11 @@ Code changes, verified by the test suite and by `-n1 -p1` smoke runs.
    `tester` MRT cells stay unreadable however many times they run.
 4. **Rebuild every image** with `prepare -f`. Every current image reports `recipe unknown`, so the
    recipe-drift check cannot vouch for any of them. Then run `verify` and require all ok.
-5. **Fix the version matrix.** At the time of this phase, check upstream for releases newer than
+5. ~~**Fix the version matrix.**~~ **Done 2026-10-01, `2d7bb84`:** checked upstream by `git ls-remote`
+   and the Docker Hub API. The only newer release is **OpenBGPD 9.3** (pushed 2026-09-30), now in
+   `OpenBGP.VERSIONS`. FRR's newest is `frr-10.7.1`, a patch inside the `stable/10.7` we already
+   build, with no 10.8 or 11 release. BIRD 2.19.2 and 3.3.2 are still the newest. Its image is
+   built in item 4. At the time of this phase, check upstream for releases newer than
    those below, and add at most one per daemon:
 
    | daemon | carried forward | candidate additions |
@@ -203,7 +210,7 @@ Code changes, verified by the test suite and by `-n1 -p1` smoke runs.
 artifact names; all matrix images verify clean.
 
 Progress: item 1 answered by the operator 2026-09-29 (change the monitor; the work is measurement
-plan Phase 7). Item 6 answered by the operator 2026-10-01 (keep the NO_EXPORT peer, with obligations). No other Phase 2 work has started.
+plan Phase 7). Item 6 answered by the operator 2026-10-01 (keep the NO_EXPORT peer, with obligations). Item 2 done 2026-10-01 (`1a1bdf9`), item 5 2026-10-01 (`2d7bb84`). Items 3 and 4 remain.
 
 ---
 

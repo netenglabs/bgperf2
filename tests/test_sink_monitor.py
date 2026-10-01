@@ -248,3 +248,49 @@ def test_wait_keeps_waiting_on_an_idle_session(tmp_path, monkeypatch):
     monkeypatch.setattr(monitor_module.time, 'sleep', sleep)
     write_log(mon, HEADER.format(now_ns(), SINK_LOG_FORMAT))
     assert wait(mon) == 4
+
+
+from monitor import Receiver, SinkReceiver
+
+RECEIVER_CONF = {'as': 1002, 'router-id': '10.10.0.9',
+                 'local-address': '10.10.0.9'}
+
+
+def make_receiver(tmp_path, index=3):
+    r = SinkReceiver(index, str(tmp_path / 'receiver{0}'.format(index)),
+                     RECEIVER_CONF)
+    r.config = CONF
+    return r
+
+
+def test_a_sink_receiver_is_a_receiver_by_name_and_session(tmp_path):
+    r = make_receiver(tmp_path)
+    assert r.name == 'bgperf_receiver3'
+    assert r.name.startswith(Receiver.CONTAINER_NAME_PREFIX)
+    assert r.image == 'bgperf/sink'
+    script = r.get_startup_cmd()
+    # its own AS and address, peered with the target
+    assert '-local-as 1002' in script and '-local-address 10.10.0.9' in script
+    assert '-peer-address 10.10.0.1' in script
+
+
+def test_a_sink_receiver_is_never_polled_as_the_instrument(tmp_path):
+    with pytest.raises(NotImplementedError, match='not an instrument'):
+        make_receiver(tmp_path).stats(queue.Queue())
+
+
+def test_a_sink_receiver_reads_its_count_from_its_log(tmp_path):
+    r = make_receiver(tmp_path)
+    t = now_ns()
+    write_log(r, HEADER.format(t, SINK_LOG_FORMAT) + 'C {0} 4321 7 0\n'.format(t))
+    assert r.accepted_prefixes() == 4321
+
+
+def test_an_unreadable_receiver_raises_rather_than_reading_zero(tmp_path):
+    r = make_receiver(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        r.accepted_prefixes()
+    write_log(r, HEADER.format(now_ns() - 10 * 10**9, SINK_LOG_FORMAT))
+    from sink import SinkLogError
+    with pytest.raises(SinkLogError, match='stopped'):
+        r.accepted_prefixes()

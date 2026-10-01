@@ -57,7 +57,7 @@ from eos import Eos, EosTarget
 from tester import ExaBGPTester, BIRDTester
 from mrt_tester import ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
-from monitor import Monitor, Receiver, SinkMonitor
+from monitor import Monitor, Receiver, SinkMonitor, SinkReceiver
 from sink import Sink
 import reclaim
 from convergence import ConvergenceTracker
@@ -158,8 +158,7 @@ UNMARKED_MONITOR = 'gobgp'
 # nothing reads (`monitor.Receiver`), so it follows the run's instrument.
 RECEIVER_CLASSES = {
     'gobgp': Receiver,
-    # Still GoBGP until 7a makes the receivers sinks too.
-    'sink': Receiver,
+    'sink': SinkReceiver,
 }
 
 
@@ -861,10 +860,11 @@ def scenario_receivers(conf):
     return receivers
 
 
-def describe_export_fanout_cost(receivers):
+def describe_export_fanout_cost(receivers, monitor=DEFAULT_MONITOR):
     """What the fan-out costs the host, said out loud before the run.
 
-    Each receiver is a full GoBGP holding its own copy of the table, on the
+    Under the GoBGP monitor each receiver is a full GoBGP holding its own copy
+    of the table, on the
     same host, and `min free mem (GB)` is host-wide -- so the fan-out lands in
     a published column, and `findings.py` turns a low value into the
     `low_free_memory` confounder, which withholds `limiting_component`
@@ -876,14 +876,20 @@ def describe_export_fanout_cost(receivers):
     the paths, and a number this function invented would be quoted back as
     though it had been measured. It names the mechanism and leaves the
     arithmetic to whoever knows the table.
+
+    Under the sink each receiver holds a prefix set instead: far less, but
+    still bgperf2's own memory in the same column, so the sentence names what
+    is held rather than going quiet.
     """
     if not receivers:
         return None
-    return ('export fan-out: {0} receiver{1} will each hold a full copy of the '
-            'table on this host. That memory is bgperf2\'s own and is counted '
-            'in the published `min free mem` column, where a low value becomes '
-            'the low_free_memory confounder and withholds the '
-            'verdict'.format(receivers, '' if receivers == 1 else 's'))
+    held = ('a set of the table\'s prefixes' if monitor == 'sink'
+            else 'a full copy of the table')
+    return ('export fan-out: {0} receiver{1} will each hold {2} on this host. '
+            'That memory is bgperf2\'s own and is counted in the published '
+            '`min free mem` column, where a low value becomes the '
+            'low_free_memory confounder and withholds the '
+            'verdict'.format(receivers, '' if receivers == 1 else 's', held))
 
 
 def resolve_churn(churn_prefixes, churn_bursts, neighbor_num, prefix_num,
@@ -2246,6 +2252,9 @@ RECEIVER_POLL_INTERVAL_S = MONITOR_POLL_INTERVAL_S
 # it. Patience rather than a measurement: it is taken after `total time` has
 # been stopped, so it reaches no published column, and its only job is to stop
 # a `docker exec` that never returns from hanging the teardown for ever.
+# Sized for the GoBGP receivers. A sink receiver's read is a file read on the
+# host, so under `--monitor sink` both this and the duty cycle are far more
+# than a round needs, which costs nothing.
 EXPORT_POLL_TEARDOWN_WAIT_S = 30
 EXPORT_POLL_TEARDOWN_PER_RECEIVER_S = 5
 
@@ -2938,7 +2947,8 @@ def bench(args):
 
     # A `-f` run's fan-out is whatever the file says, so the notice waits for
     # the parse; the file's receivers were validated before the teardown.
-    fanout_cost = describe_export_fanout_cost(len(conf.get('receivers') or []))
+    fanout_cost = describe_export_fanout_cost(len(conf.get('receivers') or []),
+                                              run_monitor(args))
     if fanout_cost:
         print(fanout_cost)
 

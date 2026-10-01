@@ -4590,3 +4590,45 @@ receiver's `create_container`. That is the cost the check exists to prevent. The
 is now `RECEIVER_CLASSES[monitor]`, and its image is checked whenever the run has receivers. On
 the `-f` path the count comes from the scenario's own list, and in a batch a `file:` target counts
 as having receivers. Two tests cover it.
+
+### Progress on 2026-10-01: receivers are sinks under `--monitor sink` (7a, fifth change set)
+
+`monitor.SinkReceiver` is `Receiver`'s contract on the sink. It is a session the target exports its
+table to, it announces nothing, and `stats()` is refused. It is read with `accepted_prefixes()`,
+which reads its own log on the host and raises on a log it cannot read as a count, as the GoBGP
+read did on a failed `gobgp neighbor -j`. `RECEIVER_CLASSES['sink']` now names it, so a run's
+receivers follow its monitor. The one dimension then names every instrument in the run, and the
+bridge block compares whole instruments, not a sink monitor beside GoBGP receivers. The default
+run is unchanged.
+
+**Why the receivers follow the monitor rather than getting a flag of their own.** A second
+dimension would double the bridge block for a question nobody has asked: no published number is
+read off a receiver except the export section, and that section is the instrument's as much as
+the monitor's count is. It would also allow mixed runs whose export timing compares two
+instruments against each other.
+
+**What changes for the export poll, and what does not.** The poll's rules are unchanged: one
+serialised round, a wait at least as long as the round, every receiver in every round, `None` for
+a failed read. A sink receiver's read is a file read on the host, though, not a `docker exec`
+inside the receiver. The reasons `export-timing.md` gives about exec cost are now true of the GoBGP
+receivers only, and the document says so. The round's timing still comes from the 1 s poll, not
+from each sink's own dates; using those is 7b's job, for the receivers and the monitor alike.
+
+**Verification.** 5 new unit tests and the existing receiver-image tests reworked; the full
+suite passed (2166). Docker, BIRD 2.19, `-n2 -p1000 --receivers 2`, once per monitor. Both runs
+converged at 2000 received. Both export sections showed both receivers at 2000 `accepted_prefixes`
+with no incomplete receiver. The fan-out was served within the 1.0 s resolution, and the last
+receiver was within resolution of the monitor (`monitor_delta_s` −0.019 s with GoBGP, +0.002 s with
+sinks). `docker ps` during the sink run showed `bgperf_monitor`, `bgperf_receiver0` and
+`bgperf_receiver1` all on `bgperf/sink`, and each receiver's log carried its own V, B and H lines.
+No benchmark was run.
+
+**Still open in 7a.** Checks 1 to 5 on every open-source target.
+
+**What review changed.** `/code-review` found the warning printed before a `--receivers` run still
+saying that every receiver "will each hold a full copy of the table". That is no longer true of a
+sink, which holds a prefix set. A `low_free_memory` confounder on such a run would then have been
+blamed on a mechanism the run no longer has. `describe_export_fanout_cost()` now takes the monitor
+and names what each receiver holds. It still says the memory is bgperf2's own and is counted in
+`min free mem`, because a prefix set is smaller but is not nothing. The comment that sizes the
+teardown wait around one `docker exec` per receiver now says it was sized for GoBGP receivers.

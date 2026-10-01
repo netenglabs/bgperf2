@@ -437,7 +437,9 @@ block measures the same cells with both instruments; 7d then flips `DEFAULT_MONI
 - **Recorded under `-f` too**, in both `run` blocks and as the manifest's `monitor.daemon`,
   because bgperf2 starts the monitor whatever wrote the scenario. Not a CSV column: the
   `monitor version` column already names the build.
-- **The receivers stay GoBGP** under either value until 7a makes them sinks too.
+- **The receivers follow the monitor** (`RECEIVER_CLASSES`): GoBGP under `gobgp`, sinks under
+  `sink`, so one dimension names every instrument in the run and the bridge block compares
+  whole instruments rather than a sink monitor beside GoBGP receivers.
 
 ## `--threads N` — worker threads on the target
 

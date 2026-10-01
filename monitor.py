@@ -470,3 +470,40 @@ exec {binary} -local-as {local_as} -peer-as {peer_as} -router-id {router_id} \\
         # The staleness check is made at the loop's own stamp, so the sample
         # and the clock it is judged by are the same instant.
         return self.reader.sample(now_ns=int(sampled_at * 1e9))
+
+
+class SinkReceiver(SinkMonitor):
+    '''An export receiver that is a sink (measurement plan 7a).
+
+    `Receiver`'s contract, on the sink: a session the target exports its
+    table to, which announces nothing and is never polled into the stats
+    queue -- `stats()` is refused for the reason `Receiver.stats()` is. It is
+    read with `accepted_prefixes()`, which reads its log on the host, so a
+    round of the export poll no longer costs a `docker exec` per receiver.
+
+    Every receiver was a full GoBGP holding its own copy of the table, which
+    is how a `--receivers` run could trip `low_free_memory` on memory it
+    consumed by design; a sink holds a prefix set.
+    '''
+
+    CONTAINER_NAME = None
+    CONTAINER_NAME_PREFIX = Receiver.CONTAINER_NAME_PREFIX
+
+    def __init__(self, index, host_dir, conf, image='bgperf/sink'):
+        self.index = index
+        Container.__init__(self, '{0}{1}'.format(self.CONTAINER_NAME_PREFIX, index),
+                           image, host_dir, self.GUEST_DIR, conf)
+        self.reader = SinkLogReader(os.path.join(self.host_dir, self.LOG_NAME))
+
+    def stats(self, queue, interval=1):
+        return Receiver.stats(self, queue, interval)
+
+    def accepted_prefixes(self):
+        """How many prefixes the target has exported to this session so far.
+
+        Raises where the log cannot be read as a count -- not written, stale,
+        malformed -- and the export poll records that round as unread, for
+        the reason `Receiver.accepted_prefixes()` gives: a session we failed
+        to ask and a session given no routes are different measurements.
+        """
+        return self.reader.sample()['afi_safis'][0]['state']['accepted']

@@ -2,7 +2,7 @@
 
 Export-side timing: what the receiver fan-out was served, and when.
 
-**Read this before editing:** `bgperf2.py` (`controller_export_stats()`, `finish_bench()`), `monitor.py` (`Receiver`), `measurements.py` (`ExportEventRecorder`)
+**Read this before editing:** `bgperf2.py` (`controller_export_stats()`, `finish_bench()`), `monitor.py` (`Receiver`, `SinkReceiver`), `measurements.py` (`ExportEventRecorder`)
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 
@@ -147,6 +147,15 @@ intervals under `convergence` with nothing saying which one the row describes.
   complete on the first round — publishes an `unmeasured_reason` instead:
   absent is what an older build wrote, so silence could not be told from a
   build that never took the measurement.
+
+**Under `--monitor sink` the receivers are sinks** (`monitor.SinkReceiver`, chosen through
+`RECEIVER_CLASSES`), and `accepted_prefixes()` reads each one's log on the host. The rules above
+are unchanged, and not every reason given for them survives. The round is still serialised and
+still waits at least as long as it took, but a read no longer runs *inside* a receiver, so the
+`docker exec` cost these bullets were written against belongs to the GoBGP receivers alone. A
+sink receiver's unreadable log raises, exactly as a failed `gobgp neighbor -j` did: a stale or
+malformed log is a missing read, never a receiver holding nothing. The receivers' timing still
+uses the 1 s round, not the sinks' own timestamps; that is 7b's to change, with the monitor's.
 
 **What still cannot be separated is table selection.** With this in place a run
 decomposes into ingress (measured at the generators), the target's own work, and

@@ -82,20 +82,26 @@ class TestBenchImage:
         assert asked == ['bgperf/sink:latest']
 
     def test_the_receivers_image_is_checked_when_the_run_has_receivers(self, monkeypatch):
-        '''Found in review: under the sink the receivers are their own
-        class, and a run with receivers on a host without their image used to
-        pass the check and die at `create_container` after the teardown.'''
-        asked = []
+        '''Found in review: the receivers are their own class, and when it was
+        not the monitor's, a run with receivers on a host without their image
+        passed the check and died at `create_container` after the teardown.'''
+        class OtherReceiver(base.Container):
+            IMAGE_REPO = 'bgperf/other-receiver'
+        monkeypatch.setitem(bgperf2.RECEIVER_CLASSES, 'sink', OtherReceiver)
         monkeypatch.setattr(bgperf2, 'target_image', lambda *a: 'bgperf/bird:latest')
         monkeypatch.setattr(base, 'img_exists', lambda tag, images=None:
-                            asked.append(tag) or tag.startswith('bgperf/sink'))
+                            tag.startswith('bgperf/sink'))
 
         def no_teardown():
             raise AssertionError('tore down before refusing')
         monkeypatch.setattr(bgperf2, 'remove_target_containers', no_teardown)
-        with pytest.raises(SystemExit, match=bgperf2.RECEIVER_CLASSES['sink'].IMAGE_REPO):
+        with pytest.raises(SystemExit, match='bgperf/other-receiver'):
             bgperf2.bench(self.args(receivers=2))
-        assert asked[0] == 'bgperf/sink:latest' and len(asked) == 2
+        # and not asked for when the run has none
+        monkeypatch.setattr(bgperf2, 'remove_target_containers',
+                            lambda: (_ for _ in ()).throw(StopIteration('reached')))
+        with pytest.raises(StopIteration):
+            bgperf2.bench(self.args(receivers=0))
 
 
 class TestBatch:
@@ -150,13 +156,19 @@ class TestBatch:
                 [self.test(), self.test(monitor='sink')])
 
     def test_a_missing_receiver_image_ends_the_batch_before_it_starts(self, monkeypatch):
-        receiver_repo = bgperf2.RECEIVER_CLASSES['sink'].IMAGE_REPO
+        class OtherReceiver(base.Container):
+            IMAGE_REPO = 'bgperf/other-receiver'
+        monkeypatch.setitem(bgperf2.RECEIVER_CLASSES, 'sink', OtherReceiver)
         monkeypatch.setattr(base, 'img_exists', lambda tag, images=None:
-                            not tag.startswith(receiver_repo))
-        if receiver_repo != bgperf2.MONITOR_CLASSES['sink'].IMAGE_REPO:
-            bgperf2.check_batch_monitor_images([self.test(monitor='sink')])
-        with pytest.raises(SystemExit, match=receiver_repo):
+                            not tag.startswith('bgperf/other-receiver'))
+        bgperf2.check_batch_monitor_images([self.test(monitor='sink')])
+        with pytest.raises(SystemExit, match='bgperf/other-receiver'):
             bgperf2.check_batch_monitor_images([self.test(monitor='sink', receivers=2)])
+
+    def test_the_receivers_follow_the_monitor(self):
+        assert bgperf2.RECEIVER_CLASSES['gobgp'] is bgperf2.Receiver
+        assert bgperf2.RECEIVER_CLASSES['sink'] is bgperf2.SinkReceiver
+        assert set(bgperf2.RECEIVER_CLASSES) == set(bgperf2.MONITOR_TYPES)
 
 
 class TestRecorded:

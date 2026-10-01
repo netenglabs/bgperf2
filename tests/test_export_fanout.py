@@ -332,6 +332,14 @@ class TestWhatTheFanOutCostsTheHost:
         assert 'min free mem' in said
         assert 'low_free_memory' in said
 
+    def test_sink_receivers_are_described_as_what_they_hold(self):
+        '''Found in review: a sink receiver holds a prefix set, not a copy of
+        the table, and the warning said otherwise.'''
+        assert 'full copy' in bgperf2.describe_export_fanout_cost(4, 'gobgp')
+        said = bgperf2.describe_export_fanout_cost(4, 'sink')
+        assert 'full copy' not in said and 'prefixes' in said
+        assert 'low_free_memory' in said
+
     def test_it_does_not_estimate(self):
         """For the reason `LOG_SPACE_FLOOR_GB` is not an estimate: what a GoBGP
         holds per route depends on the paths, and an invented number would be

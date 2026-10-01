@@ -4632,3 +4632,40 @@ blamed on a mechanism the run no longer has. `describe_export_fanout_cost()` now
 and names what each receiver holds. It still says the memory is bgperf2's own and is counted in
 `min free mem`, because a prefix set is smaller but is not nothing. The comment that sizes the
 teardown wait around one `docker exec` per receiver now says it was sized for GoBGP receivers.
+
+### Progress on 2026-10-01: the two hand-driven sink checks are scripts now (7a, sixth change set)
+
+Every 7a change set so far had re-typed two checks as heredocs. Both are now scripts, so the next
+change set runs the same check as the last one rather than a re-creation of it.
+
+- **`scripts/sink_go_test.sh`** runs `go vet` and `go test -race` on `sink/` in the toolchain image.
+  It reads that image from `Sink.BUILD_VARS['go_image']`, the digest the recipe pins. The
+  heredoc version had typed `golang:1.25-bookworm`, a tag that floats, so the race run and the
+  image build could use two different compilers. A test refuses a toolchain tag outside a
+  comment. The source is mounted read-only, because a `go.sum` rewritten inside a container would
+  be an unreviewed change to what the recipe hash covers.
+- **`scripts/sink_parity_check.py`** starts a GoBGP speaker, the sink run as `SinkMonitor`, and a
+  GoBGP monitor run as `Monitor`, all on a scratch network. It announces, withdraws and
+  re-announces /24s, reads both monitors through the classes' own `read_sample()`, and reports
+  the sink's clock offset from its B line. Exit 0 means every step agreed, 1 means a step did not,
+  and 2 means the check could not run.
+
+**The first version of the parity script passed a step it had not checked.** A re-announcement of
+held prefixes leaves the count where it was. Both monitors therefore "agreed" 0.017 s after the
+step began, before a single replacement had arrived, and that was all the old heredoc check ever
+showed for its re-announce row. A step now ends only once the sink has taken at least one UPDATE
+since the step began, then nothing for `--settle` (2 s). A step that agrees on counts it never
+moved is reported `undelivered`. The re-announce row now reads 500 UPDATEs at the sink, settled in
+2.48 s.
+
+**What review changed.** The setup ran outside the guard, so a second run after `--keep` died on
+removing a network that still had endpoints, with a traceback and exit 1, the code for "a step
+disagreed". Cleanup now removes the containers before the network, every step of it is guarded,
+and setup is inside the guard so a failure exits 2. A `--keep` run followed by a plain run now
+exits 0 and leaves nothing behind.
+
+**Verification.** 8 unit tests for the pure parts; the full suite passed (2175). `sink_go_test.sh`
+passed on the pinned digest. `sink_parity_check.py` at its default 3000 prefixes agreed at every
+step: 3000 → 2000 → 2000, with 3000, 1000 and 500 UPDATEs at the sink, and a clock offset of
+1.7 µs. At 500 prefixes after a `--keep` run it agreed again, with a 1.2 µs offset. No benchmark
+was run.

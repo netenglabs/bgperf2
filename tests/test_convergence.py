@@ -642,3 +642,67 @@ class TestATargetWhoseNeighbourCountersNeverFill:
         status = t.update(NO_PROGRESS_DEADLINE_SECONDS + 1, 0, 0, 0,
                           checked=False)
         assert status == ConvergenceTracker.FAILED
+
+
+# --- the windows are durations (measurement plan 7b) ------------------------
+
+import convergence as _convergence
+
+
+def test_at_the_one_second_cadence_every_window_is_what_it_was():
+    '''7b's own test: re-expressing the windows as durations changes no
+    decision at the cadence every existing run used.'''
+    t = ConvergenceTracker(sample_interval_s=1.0)
+    assert (t.assurance_samples_full, t.assurance_samples_short,
+            t.stuck_samples, t.drop_samples, t.witness_carry_samples,
+            t.witness_excused_limit) == (20, 5, 600, 10, 5, 600)
+    assert (ASSURANCE_SAMPLES, ASSURANCE_SAMPLES_AFTER_CHECKPOINT,
+            STUCK_SAMPLES, DROP_SAMPLES, WITNESS_CARRY_SAMPLES,
+            WITNESS_EXCUSED_LIMIT) == (20, 5, 600, 10, 5, 600)
+    assert ConvergenceTracker().sample_interval_s == 1.0
+
+
+def test_a_faster_cadence_keeps_the_window_and_not_the_count():
+    '''A monitor that reports ten times a second must still hold the count
+    steady for 20 s, not for 20 samples (2 s).'''
+    t = ConvergenceTracker(sample_interval_s=0.1)
+    assert t.assurance_samples_full == 200
+    assert t.assurance_samples_short == 50
+    assert t.drop_samples == 100 and t.stuck_samples == 6000
+    # the first sample sets the count; 200 unchanged ones follow it
+    status = feed(t, 200, recved=1000, checked=True)
+    assert status == ConvergenceTracker.CONTINUE
+    assert feed(t, 1, recved=1000, checked=True,
+                elapsed_start=201) == ConvergenceTracker.CONVERGED
+    # and at 1 s the same feed converges twenty-one samples in, as always
+    one = ConvergenceTracker()
+    assert feed(one, 20, recved=1000, checked=True) == ConvergenceTracker.CONTINUE
+    assert feed(one, 1, recved=1000, checked=True,
+                elapsed_start=21) == ConvergenceTracker.CONVERGED
+
+
+def test_a_sustained_drop_is_judged_over_the_same_ten_seconds():
+    t = ConvergenceTracker(sample_interval_s=0.5)
+    feed(t, 3, recved=1000)
+    assert feed(t, 19, recved=900, elapsed_start=4) == ConvergenceTracker.CONTINUE
+    assert feed(t, 1, recved=900, elapsed_start=23) == ConvergenceTracker.FAILED
+
+
+@pytest.mark.parametrize('duration,interval,samples', [
+    (20.0, 0.1, 200), (20.0, 0.3, 67), (5.0, 1.0, 5), (0.01, 1.0, 1)])
+def test_samples_for_rounds_up_and_never_below_one(duration, interval, samples):
+    assert _convergence.samples_for(duration, interval) == samples
+
+
+@pytest.mark.parametrize('interval', [0, -1.0])
+def test_a_cadence_that_is_not_positive_is_refused(interval):
+    with pytest.raises(ValueError):
+        ConvergenceTracker(sample_interval_s=interval)
+
+
+def test_the_rule_publishes_its_windows_as_durations():
+    t = ConvergenceTracker(sample_interval_s=0.1)
+    t.converged_without_neighbors_checkpoint = True
+    rule = t.convergence_rule()
+    assert rule['assurance_s'] == 20.0 and rule['sample_interval_s'] == 0.1
+    assert rule['assurance_samples_required'] == 200

@@ -4750,3 +4750,49 @@ artifacts were written by the code before the `read_all` fix, and every sink log
 
 **Still open in 7a.** Check 2 on the 10-peer 1.05M MRT cell, check 3 at 500 peers and at full
 table, and check 4 at full table.
+
+### Progress on 2026-10-01: the convergence windows are durations (7b, first change set)
+
+7b's first work item: re-express `ASSURANCE_SAMPLES`, `STUCK_SAMPLES`, `DROP_SAMPLES` and
+`WITNESS_CARRY_SAMPLES` as durations, with today's values at the 1 s cadence. They are now
+`ASSURANCE_S` (20), `ASSURANCE_AFTER_CHECKPOINT_S` (5), `STUCK_S` (600), `DROP_S` (10),
+`WITNESS_CARRY_S` (5) and `WITNESS_EXCUSED_S` (600). `ConvergenceTracker(sample_interval_s)` turns
+each into a sample count, rounded up and never below one, and `bench()` passes
+`MONITOR_POLL_INTERVAL_S`. The `*_SAMPLES` names remain, as the same computation at the default
+1 s, so every comment and test that names them still means what it says. Nothing yet runs at
+another cadence, so no published number has moved. Dating the monitor events to the sink's own
+timestamps, and the faster cadence that would use these windows, are 7b's later change sets.
+
+**Samples at the cadence asked for, not seconds of elapsed time.** This is the decision in this
+change set. A window measured in real seconds is the more literal reading of "duration". It would
+also change the GoBGP monitor's decisions today. That poll overruns its 1 s cadence under load: the
+timing campaign's first MRT pass published monitor events with an achieved `poll_resolution_s`
+of up to 1.46–1.58 s on every target, which is why every interval carries its own resolution. A 20 s window of real time then converges a run in fewer samples than the 20 it
+takes now. The bridge block (7c) measures what changing the instrument does, and it can only do
+that if the old instrument decides exactly as it did. Counting samples at the requested cadence
+keeps every GoBGP decision identical, whatever its gaps were. It gives the sink the same windows
+in time once the sink reports at its own cadence.
+
+**One place assumed a sample was a second, and it was found by asking that question.** After
+convergence, `bench()` subtracts the assurance window from `elapsed (s)`. It subtracted
+`assurance - 1` *seconds*. At a 0.1 s cadence that is 199 s off a run's published time. It is now
+`(assurance - 1) × MONITOR_POLL_INTERVAL_S`, identical at 1 s. `bench_stats` is trimmed by samples,
+which was already right. `convergence.md` now says that anything turning a window into time must
+go through the cadence.
+
+**The contract tests moved to the durations.** `check_timing_evidence.STALE_WITNESS_S` and
+`measurements.DELIVERY_WITNESS_MAX_AGE_S` were pinned to `WITNESS_CARRY_SAMPLES ×
+MONITOR_POLL_INTERVAL_S`. They are pinned to `WITNESS_CARRY_S` now, and to the tracker's count at
+the run's cadence. Their value is unchanged (5 s).
+
+**Verification.** 11 new tests, among them 7b's own: "identical decisions at 1 s cadence on the
+existing fixtures". Every existing convergence and MRT-replay test passes unchanged against the
+tracker. A 0.1 s tracker needs 200 unchanged samples where a 1 s one needs 20, and judges a drop
+over the same 10 s. The full suite passed (2209). No benchmark was run.
+
+**What review said.** `/code-review` found no defect. It named two things that matter only at a
+cadence that is not a whole second. One was an exact float comparison in the new contract test,
+which would fail at 0.3 s (17 × 0.3 is 5.1); that test now asserts the window is at least the
+duration. The other: `bench()` truncates `elapsed` to whole seconds before subtracting the window.
+That predates this change, and it is part of the next 7b change set, which dates the monitor
+events to the sink's own timestamps. It is recorded here so that change set takes it.

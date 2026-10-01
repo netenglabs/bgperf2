@@ -156,9 +156,12 @@ def test_the_stale_witness_bound_is_the_trackers_carry_bound():
         REPO_ROOT / 'scripts' / 'check_timing_evidence.py')
     checker = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(checker)
-    assert checker.STALE_WITNESS_S == (
-        convergence.WITNESS_CARRY_SAMPLES
-        * float(_bgperf2.MONITOR_POLL_INTERVAL_S))
+    assert checker.STALE_WITNESS_S == convergence.WITNESS_CARRY_S
+    # and that is the same window the tracker counts at the run's cadence
+    # (rounded up to whole samples, so at least the window, never less)
+    assert convergence.ConvergenceTracker(
+        float(_bgperf2.MONITOR_POLL_INTERVAL_S)).witness_carry_samples * float(
+            _bgperf2.MONITOR_POLL_INTERVAL_S) >= convergence.WITNESS_CARRY_S
 
 
 def test_the_delivery_age_bound_is_the_trackers_carry_bound():
@@ -173,9 +176,8 @@ def test_the_delivery_age_bound_is_the_trackers_carry_bound():
     import convergence
     import measurements
 
-    assert measurements.DELIVERY_WITNESS_MAX_AGE_S == (
-        convergence.WITNESS_CARRY_SAMPLES
-        * float(_bgperf2.MONITOR_POLL_INTERVAL_S))
+    assert measurements.DELIVERY_WITNESS_MAX_AGE_S == convergence.WITNESS_CARRY_S
+    assert _bgperf2.MONITOR_POLL_INTERVAL_S == convergence.DEFAULT_SAMPLE_INTERVAL_S
 
 
 def test_the_checkers_synthetic_generator_list_matches_bgperf2s():

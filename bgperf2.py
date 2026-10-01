@@ -3394,7 +3394,9 @@ def bench(args):
     latest_witness = None
     latest_witness_s = None
     target_table_samples = []
-    tracker = ConvergenceTracker()
+    # The windows are durations; the tracker counts them in samples at the
+    # cadence the monitor is asked for (measurement plan 7b).
+    tracker = ConvergenceTracker(sample_interval_s=MONITOR_POLL_INTERVAL_S)
     while True:
         # Checked once per queue message, which is at least once a second: a
         # cell that would otherwise run for tens of minutes past a reclaim
@@ -3621,8 +3623,11 @@ def bench(args):
                 # TODO: recalculate all min/max stats after removing these
                 #  should move to always calculating based on bench_stats
                 print(f"last recevied: {tracker.last_recved_count}")
+                # The window is `assurance` samples, so it is that many polls
+                # of time -- not that many seconds, which it only was at 1 s.
                 output_stats['elapsed'] = datetime.timedelta(
-                    seconds=int(output_stats['elapsed'].seconds) - assurance + 1)
+                    seconds=int(output_stats['elapsed'].seconds)
+                    - round((assurance - 1) * MONITOR_POLL_INTERVAL_S))
                 bench_stats = bench_stats[0:len(bench_stats)-assurance]
                 # The second workload, run against the table this run has just
                 # been measured delivering. It is after every column of the row

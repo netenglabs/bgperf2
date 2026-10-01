@@ -24,6 +24,17 @@ over 10 samples, or nothing arriving at all within 15s. `bench()` feeds it one s
 poll via `update()` and acts on the returned status; `note_neighbors_checkpoint()` is called from the
 target branch when every neighbor has finished sending.
 
+**The windows are durations** (measurement plan 7b): `ASSURANCE_S`, `ASSURANCE_AFTER_CHECKPOINT_S`,
+`STUCK_S`, `DROP_S`, `WITNESS_CARRY_S` and `WITNESS_EXCUSED_S`. `ConvergenceTracker(sample_interval_s)`
+turns each into a sample count at the cadence the monitor is **asked** for, rounded up. At the 1 s
+poll every count is the one this document names: 20, 5, 600, 10, 5 and 600, and the `*_SAMPLES`
+names remain as exactly that. It counts samples rather than measuring elapsed time on purpose. The
+GoBGP poll overruns its cadence under load, and a window of real seconds would converge such a run
+in fewer samples than before, changing the old instrument's decisions inside the bridge block that
+measures the difference between the two. Anything else that turns a window into time has to go
+through the cadence too. `bench()`'s subtraction of the assurance window from `elapsed (s)` did
+not, and it would have subtracted 200 s from a 0.1 s-cadence run.
+
 Three rules here are load-bearing and were each broken at some point. Any change to `update()`
 should be checked against all of them:
 

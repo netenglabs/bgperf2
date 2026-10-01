@@ -300,10 +300,22 @@ is explained. "Inferred" means the evidence is a count or a reading of config, a
 named check would confirm it.
 
 1. **NO_EXPORT on eBGP export.** BIRD, OpenBGPD and FRR withhold NO_EXPORT routes from eBGP
-   neighbours, as RFC 1997 requires. **RustyBGP appears not to**: it exports the whole
-   1,081,178-prefix MRT union. *Inferred* from that count; `bgperf2-9su` confirms it from
-   source. Effect: on the MRT workload, RustyBGP exports ~24k more prefixes than BIRD and
-   OpenBGPD. Decision log "Finding on 2026-10-01".
+   neighbours, as RFC 1997 requires. **RustyBGP does not, and does not honour NO_ADVERTISE
+   either.** This is confirmed from source on 2026-10-01 (`bgperf2-9su`), at master
+   `783d6df` and at `0cc685c` (the 2026-02 build). On master, the export decision
+   (`process_nlri_change`, `daemon/src/event/export.rs:609`) checks only:
+   - echo back to the sending peer;
+   - iBGP split horizon;
+   - route-server isolation;
+   - the RTC filter;
+   - a user export policy.
+
+   NO_EXPORT and NO_ADVERTISE exist only as names a user policy can match
+   (`table/src/policy.rs`, `daemon/src/convert.rs:3915`). At `0cc685c`, `daemon/src/event.rs`
+   contains no community handling at all. bgperf2 configures no export policy (`policy: {}`).
+   Effect: on the MRT workload, RustyBGP exports ~24k more prefixes than BIRD and OpenBGPD,
+   the whole 1,081,178-prefix union. Its MRT rows therefore include export work a compliant
+   daemon would not do. Decision log "Finding on 2026-10-01".
 2. **Tie-break between otherwise-equal eBGP paths.** FRR prefers the oldest path by default.
    BIRD and OpenBGPD prefer the lower router ID; that is *inferred* from a simulation that
    predicts their export count to within 13 prefixes. Effect: on the MRT workload, FRR

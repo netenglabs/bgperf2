@@ -73,8 +73,17 @@ LEGACY_METRIC = 'testers (s)'
 # What the report publishes per cell, in this order, and where each comes from.
 # `elapsed (s)` is the decision metric and leads; the rest are the plan's "CPU
 # and memory comparisons" and its low-memory and contention findings.
+#
+# `received` sits directly beside it because a time is only comparable across
+# daemons that did the same work, and on the MRT workload they do not: one
+# injected peer tags every route NO_EXPORT, so BIRD and OpenBGPD export
+# 1,056,779 prefixes, FRR ~959k varying by arrival order, and RustyBGP the
+# whole 1,081,178. The comparison plan kept that peer on condition that every
+# MRT cell is published with its export volume beside its time (§4 item 6,
+# obligation 1). It is the monitor's accepted count when the run ended.
 PUBLISHED_METRICS = (
     ('elapsed (s)', 'end to end'),
+    ('received', 'prefixes exported to the monitor'),
     ('max cpu %', 'peak target CPU'),
     ('max mem (GB)', 'peak target memory'),
     ('min free mem (GB)', 'lowest free memory on the host'),
@@ -106,6 +115,11 @@ PUBLISHED_INTERVALS = (
 # in the first real build, on a page whose own preamble promises that nothing
 # absent is printed as a zero.
 WITNESSED_INTERVALS = {'injection_s': 'offered_in_interval'}
+
+# Metrics whose passes are printed one by one, not only as a median and range.
+# The export volume rides with the time: FRR's varies from pass to pass, and a
+# reader has to be able to set each pass's volume against that pass's time.
+PER_PASS_METRICS = ('received',)
 
 # The readings `order_relation()` returns that actually are a relation. Its
 # other answers are sentences saying why there is none ('too few
@@ -704,7 +718,8 @@ def render_metric_table(section):
                     number(entry.get('min')), number(entry.get('max')),
                     number(entry.get('cv_percent')))
             observations = ''
-            if entry['metric'] == section['decision_metric'] \
+            if (entry['metric'] == section['decision_metric']
+                    or entry['metric'] in PER_PASS_METRICS) \
                     and entry.get('values') and entry.get('n', 0) > 1:
                 # The passes themselves, on the decision metric, because the
                 # campaign's own sharpest finding is one a median hides: five

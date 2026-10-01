@@ -465,9 +465,65 @@ class TestRawObservationsAreOnThePage:
         html = builder.render_metric_table(section)
         assert 'class="sub obs"' not in html
 
-    def test_only_the_decision_metric_carries_them(self):
+    def test_only_the_decision_metric_and_the_volume_carry_them(self):
         """Every metric's passes would be four more number lists per row, and
-        the point is the one comparison the report is decided on."""
+        the point is the one comparison the report is decided on -- plus the
+        export volume that comparison has to be read against."""
         section = builder.build_section(a_series())
         html = builder.render_metric_table(section)
         assert html.count('class="sub obs"') == 1
+        section = builder.build_section(with_received(a_series()))
+        html = builder.render_metric_table(section)
+        assert html.count('class="sub obs"') == 2
+
+
+def with_received(document, values=(959100, 956893, 961057)):
+    block = {'median': float(sorted(values)[len(values) // 2]),
+             'n': len(values), 'min': min(values), 'max': max(values),
+             'mean': float(sum(values)) / len(values), 'stdev': 2081.0,
+             'cv_percent': 0.2, 'values': list(values)}
+    document['summary']['cells'][0]['metrics']['received'] = block
+    return document
+
+
+class TestTheExportVolumeRidesWithTheTime:
+    """Comparison plan §4 item 6, obligation 1: every MRT cell is published
+    with its export volume beside its time.
+
+    The MRT workload's NO_EXPORT peer means the daemons do not export the
+    same table -- BIRD and OpenBGPD 1,056,779 prefixes, FRR ~959k and
+    varying by arrival order, RustyBGP all 1,081,178 -- so a time read
+    without its volume compares different amounts of work.
+    """
+
+    def test_it_is_the_column_directly_after_the_time(self):
+        metrics = [metric for metric, _label in builder.PUBLISHED_METRICS]
+        assert metrics[:2] == ['elapsed (s)', 'received']
+
+    def test_each_passes_volume_is_on_the_page(self):
+        """FRR's volume wobbles between passes, and a median and a range
+        cannot say which pass exported what."""
+        section = builder.build_section(with_received(a_series()))
+        html = builder.render_metric_table(section)
+        assert '959100 / 956893 / 961057' in html
+        head = html.index('<th>received')
+        assert html.index('<th>elapsed (s)') < head < html.index(
+            '<th>max cpu %')
+
+    def test_a_cell_with_no_volume_is_withheld_not_zero(self):
+        section = builder.build_section(a_series())
+        entry = [one for one in section['cells'][0]['metrics']
+                 if one['metric'] == 'received'][0]
+        assert entry['median'] is None
+        assert entry['withheld']
+
+    def test_a_claim_may_cite_it(self):
+        checked, problems = check(
+            [a_claim(cites=[{'series': 'synthetic',
+                             'cell': 'bird 2.19.2, peers=50',
+                             'metric': 'received', 'field': 'median',
+                             'value': 959100.0}])],
+            {'synthetic': with_received(a_series())})
+        assert problems == []
+        assert checked[0]['cites'][0]['source'].endswith(
+            '.metrics.received.median')

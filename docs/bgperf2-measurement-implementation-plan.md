@@ -85,7 +85,8 @@ smallest realistic workload and `/data/bgperf-work`.
 
 The implementation workflow is intentionally incremental:
 
-- one reviewable change set per continuation;
+- at most three reviewable change sets per continuation, each reviewed and
+  committed on its own;
 - resume unfinished work before starting new work;
 - no benchmark concurrency;
 - no phase is complete until its tests and exit criterion pass;
@@ -98,11 +99,14 @@ Use the stable operator prompt:
 
 > continue the bgperf2 measurement implementation plan
 
-Each invocation inspects durable state and completes no more than one smallest
-reviewable change set from the first incomplete phase. It stops after tests and
-review, then tells the user to use the same prompt again. This is the
-implementation equivalent of the one-suite-at-a-time workflow used for
-`2026-baseline`.
+Each invocation inspects durable state and completes up to three of the
+smallest reviewable change sets from the first incomplete phase, one after
+another. Each is tested, reviewed, recorded and committed before the next one
+starts. It stops at three, or earlier at any operator decision, a phase boundary,
+a step that needs other hardware, a step that changes published output, or a
+review still finding real defects after two rounds. It then tells the user to
+use the same prompt again. The operator set this on 2026-10-01; before that it
+was one change set per invocation.
 
 ### Where the record goes
 
@@ -741,14 +745,18 @@ The operator contract for that prompt is:
    [`bgperf2-measurement-decision-log.md`](bgperf2-measurement-decision-log.md)
    before changing anything that phase settled.
 2. Resume unfinished work before selecting a new phase.
-3. Implement exactly one smallest reviewable change set from the first
-   incomplete phase.
+3. Implement the smallest reviewable change set from the first incomplete
+   phase. Steps 4 to 6 belong to each change set, including its own commit.
 4. Run the proportionate tests and required Docker verification.
 5. Review the complete diff and fix findings.
 6. Update the phase's `Status:` line here, and append what was decided,
    measured and verified to that phase's section of the decision log.
-7. Stop after that change set is complete and reviewed.
-8. Tell the user to use the exact same prompt for the next change set.
+7. Repeat from step 3, up to three change sets in all. Stop earlier at an
+   operator decision, a phase boundary, a step that needs other hardware, a
+   step that changes published output, or a review still finding real defects
+   after two rounds.
+8. Say what stopped the run, and tell the user to use the exact same prompt to
+   continue.
 
 ## Suggested Execution Order
 

@@ -283,6 +283,10 @@ class UnfinishedReceiver:
         time.sleep(self.READ_S)
         return 1
 
+    def read_export(self, sampled_at):
+        # `Receiver.read_export()`'s shape: a count, and no sink dates.
+        return self.accepted_prefixes(), None
+
 
 def an_export_recorder(receivers, interval=0.05):
     return ExportEventRecorder(time.monotonic(), [r.name for r in receivers],

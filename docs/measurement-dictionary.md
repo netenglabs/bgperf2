@@ -130,7 +130,9 @@ that saw it, or a line whose predecessor is dated later. The last comes from a
 heartbeat racing an UPDATE's stamp, and it is refused rather than published as
 a resolution of zero. A sample describes the log as of its own stamp, and lines
 dated after it are read by the next one. A GoBGP run's events carry neither key and are exactly what
-they were. `prefix received (s)` follows `first_prefix_s`, so a sink run's
+they were. Sink receivers' `receiver_first_prefix` and `receiver_table_reached`
+are dated the same way, so the `export` section's intervals and resolutions
+follow them. `prefix received (s)` follows `first_prefix_s`, so a sink run's
 legacy column is the sink's date. `elapsed (s)` is still counted off the poll.
 
 ## Event artifact: the `testers` section

@@ -303,6 +303,64 @@ def sink_event_dates(section, max_clock_offset_ns):
                      last_change=seconds(section.get('changed_at')))
 
 
+def sink_dated(sink, key, sample_s, origin_s, counters, details,
+               not_before=None):
+    '''Date one event to its sink log line, or to the poll and say why.
+
+    Returns `(monotonic_s, counters, details)`. Without `sink` the event is
+    the poll's, exactly as it always was. With it, the event is dated to the
+    sink's own line when that line exists, falls inside the run's clock --
+    after the origin, and no later than the sample that saw it -- and is
+    bounded by an earlier line. Anything else is dated by the poll and says
+    why, because the poll's date is still a true bound, only a coarser one,
+    and a run that loses its finer dating must be told apart from one that
+    never had it.
+
+    `not_before` is the event this one cannot precede. Each event chooses its
+    dating alone, so one that fell back to the poll can sit later than a
+    sink-dated successor in the same sample; that successor falls back too,
+    rather than publish a first prefix after the table it led to.
+
+    A sink-dated event's `accepted_prefixes` is the line's count, not the
+    sample's: the event describes the line.
+    '''
+    details = dict(details)
+    if sink is None:
+        return sample_s, counters, details
+    reason = sink.refused
+    if reason is None:
+        line = getattr(sink, key)
+        if line is None:
+            reason = 'the sink log has no line for it'
+        else:
+            at_s, after_s, accepted = line
+            if after_s is None:
+                after_s = origin_s
+            if at_s < origin_s:
+                reason = 'the sink dated it before the clock started'
+            elif at_s > sample_s:
+                reason = 'the sink dated it after the sample that saw it'
+            elif not_before is not None and at_s < not_before.monotonic_s:
+                reason = 'the sink dated it before {0}'.format(
+                    not_before.kind.value)
+            elif after_s > at_s:
+                # The sink stamps an UPDATE before it takes its log's lock, so
+                # a heartbeat can be written between the two and carry the
+                # later date. A bound that ends before it starts is not a
+                # resolution of zero.
+                reason = 'the line before it in the sink log is dated later'
+            else:
+                # The C line bounds the change from both sides, and that is
+                # the whole of the resolution: no poll cadence floors it,
+                # because nothing was polled to find it.
+                details['poll_resolution_s'] = at_s - after_s
+                details['dated_by'] = 'sink_log'
+                return at_s, dict(counters, accepted_prefixes=accepted), details
+    details['dated_by'] = 'poll'
+    details['sink_dates_refused'] = reason
+    return sample_s, counters, details
+
+
 class MonitorEventRecorder:
     '''Translate monitor samples into the typed lifecycle vocabulary.
 
@@ -361,57 +419,12 @@ class MonitorEventRecorder:
     def _dated(self, sink, key, sample_s, counters, not_before=None):
         '''The time, counters and details for one event this sample records.
 
-        Without `sink` the event is the poll's, exactly as it always was. With
-        it, the event is dated to the sink's own line when that line exists,
-        falls inside this run's clock -- after the origin, and no later than
-        the sample that saw it -- and is bounded by an earlier line. Anything
-        else is dated by the poll and says why, because the poll's date is
-        still a true bound, only a coarser one, and a run that loses its finer
-        dating must be told apart from one that never had it.
-
-        `not_before` is the event this one cannot precede -- the first prefix
-        for the check-point, the check-point for the last change. Each event
-        chooses its dating alone, so one that fell back to the poll can sit
-        later than a sink-dated successor in the same sample; that successor
-        falls back too, rather than publish a `first_prefix_s` past
-        `convergence_s`.
+        `sink_dated()`, over this recorder's origin and details. `not_before`
+        is the event this one cannot precede -- the first prefix for the
+        check-point, the check-point for the last change.
         '''
-        details = self._details()
-        if sink is None:
-            return sample_s, counters, details
-        reason = sink.refused
-        if reason is None:
-            line = getattr(sink, key)
-            if line is None:
-                reason = 'the sink log has no line for it'
-            else:
-                at_s, after_s, accepted = line
-                if after_s is None:
-                    after_s = self._origin_s
-                if at_s < self._origin_s:
-                    reason = 'the sink dated it before the clock started'
-                elif at_s > sample_s:
-                    reason = 'the sink dated it after the sample that saw it'
-                elif not_before is not None \
-                        and at_s < not_before.monotonic_s:
-                    reason = 'the sink dated it before {0}'.format(
-                        not_before.kind.value)
-                elif after_s > at_s:
-                    # The sink stamps an UPDATE before it takes its log's
-                    # lock, so a heartbeat can be written between the two and
-                    # carry the later date. A bound that ends before it starts
-                    # is not a resolution of zero.
-                    reason = 'the line before it in the sink log is dated later'
-                else:
-                    # The C line bounds the change from both sides, and that
-                    # is the whole of the resolution: no poll cadence floors
-                    # it, because nothing was polled to find it.
-                    details['poll_resolution_s'] = at_s - after_s
-                    details['dated_by'] = 'sink_log'
-                    return at_s, {'accepted_prefixes': accepted}, details
-        details['dated_by'] = 'poll'
-        details['sink_dates_refused'] = reason
-        return sample_s, counters, details
+        return sink_dated(sink, key, sample_s, self._origin_s, counters,
+                          self._details(), not_before)
 
     def observe(self, monotonic_s, accepted_prefixes, required_reached=False,
                 sink=None):
@@ -1410,8 +1423,15 @@ class ExportEventRecorder:
         '''
         return dict(self._accepted)
 
-    def observe(self, monotonic_s, accepted: Mapping[str, Optional[int]]):
-        '''Record one poll round covering every receiver in the fan-out.'''
+    def observe(self, monotonic_s, accepted: Mapping[str, Optional[int]],
+                sink: Optional[Mapping[str, 'SinkDates']] = None):
+        '''Record one poll round covering every receiver in the fan-out.
+
+        `sink` maps a receiver to its `SinkDates`, for receivers that are
+        sinks (measurement plan 7b). The round still decides *that* a
+        receiver took its first prefix or reached the table; its own log
+        line decides when, on `sink_dated()`'s rules -- the monitor's.
+        '''
         if not isinstance(monotonic_s, (int, float)) \
                 or isinstance(monotonic_s, bool) \
                 or not math.isfinite(monotonic_s):
@@ -1462,18 +1482,28 @@ class ExportEventRecorder:
             self._accepted[name] = value
             counters = {'accepted_prefixes': value,
                         'required_prefixes': self.required_prefixes}
-            if value > 0 and unique_event(
-                    self._events, EventKind.RECEIVER_FIRST_PREFIX,
-                    name) is None:
-                self._events.append(LifecycleEvent(
-                    EventKind.RECEIVER_FIRST_PREFIX, monotonic_s, name,
-                    EventPhase.EXPORT, counters=counters, details=details))
+            dates = None if sink is None else sink.get(name)
+            first = unique_event(self._events, EventKind.RECEIVER_FIRST_PREFIX,
+                                 name)
+            if value > 0 and first is None:
+                at_s, event_counters, event_details = sink_dated(
+                    dates, 'first_prefix', monotonic_s, self._origin_s,
+                    counters, details)
+                first = LifecycleEvent(
+                    EventKind.RECEIVER_FIRST_PREFIX, at_s, name,
+                    EventPhase.EXPORT, counters=event_counters,
+                    details=event_details)
+                self._events.append(first)
             if value >= self.required_prefixes and unique_event(
                     self._events, EventKind.RECEIVER_TABLE_REACHED,
                     name) is None:
+                at_s, event_counters, event_details = sink_dated(
+                    dates, 'required', monotonic_s, self._origin_s,
+                    counters, details, not_before=first)
                 self._events.append(LifecycleEvent(
-                    EventKind.RECEIVER_TABLE_REACHED, monotonic_s, name,
-                    EventPhase.EXPORT, counters=counters, details=details))
+                    EventKind.RECEIVER_TABLE_REACHED, at_s, name,
+                    EventPhase.EXPORT, counters=event_counters,
+                    details=event_details))
 
 
 def export_metrics(events: Iterable[LifecycleEvent], receivers):

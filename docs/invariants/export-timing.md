@@ -154,13 +154,21 @@ are unchanged, and not every reason given for them survives. The round is still 
 still waits at least as long as it took, but a read no longer runs *inside* a receiver, so the
 `docker exec` cost these bullets were written against belongs to the GoBGP receivers alone. A
 sink receiver's unreadable log raises, exactly as a failed `gobgp neighbor -j` did: a stale or
-malformed log is a missing read, never a receiver holding nothing. The receivers' timing still
-uses the 1 s round, not the sinks' own timestamps. Since 7b's second change set the
-*monitor's* events are dated to its sink's log. Until the receivers follow, `monitor_delta_s`
-runs from a sink-dated monitor event to a poll-dated receiver event. That is two instruments,
-which this document says not to do. `_bounding_resolution()` still covers it, because the
-wider look, the receiver's 1 s round, bounds the difference. But the number leans positive by up
-to a round, and nothing may be read inside that resolution.
+malformed log is a missing read, never a receiver holding nothing.
+
+**A sink receiver's events are dated by its own log** (7b, third change set), on the rules
+that date the monitor's (`measurements.sink_dated()`). The round still decides *that*
+`receiver_first_prefix` or `receiver_table_reached` happened. `SinkReceiver.read_export()`
+reads the count as of the round's stamp, together with the log's dates, and the event goes to
+the C line that showed it, with that line's bound as its resolution. Its threshold is
+`Instrument.check_point()`, the run's `check-points[0]`, which is `export_required`. So the
+line and the round judge one yardstick. Under `--monitor sink` both ends of `monitor_delta_s`
+and `export_spread_s` are therefore sink-dated, one instrument again, and their resolutions
+fall from a round to milliseconds: a smoke run published `monitor_delta_s` 48 µs at an 8 ms
+resolution. The round's cadence and its serialisation are unchanged; they now decide only when
+an event is *noticed*. A GoBGP fan-out is dated by the round exactly as before. The printed
+lines show a duration under 0.1 s in milliseconds (`duration_text()`) and no longer say
+"poll", because `0.0s` beside a 4 ms resolution reads as an instant.
 
 **What still cannot be separated is table selection.** With this in place a run
 decomposes into ingress (measured at the generators), the target's own work, and

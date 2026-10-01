@@ -388,11 +388,31 @@ def test_the_clock_offset_is_measured_once_per_sink_process(tmp_path,
     assert again == first
 
 
-def test_a_receiver_takes_no_check_point(tmp_path):
+def test_a_receiver_is_judged_by_the_runs_check_point(tmp_path):
+    # `ExportEventRecorder.required_prefixes` is `check-points[0]`, so the
+    # receiver's log dates its table to the same threshold.
     from monitor import SinkReceiver
     rec = SinkReceiver(0, str(tmp_path / 'r0'), CONF['monitor'])
     rec.config = CONF
-    assert rec.check_point() is None
+    assert rec.check_point() == 100
+
+
+def test_a_receiver_round_reads_its_count_and_dates_as_of_the_stamp(tmp_path):
+    from monitor import SinkReceiver
+    rec = SinkReceiver(0, str(tmp_path / 'r0'), CONF['monitor'])
+    rec.config = CONF
+    rec.reader = SinkLogReader(os.path.join(rec.host_dir, rec.LOG_NAME),
+                               required=rec.check_point())
+    mono = time.monotonic_ns()
+    with open(os.path.join(rec.host_dir, rec.LOG_NAME), 'w') as f:
+        f.write('V {0} {1} 0.1.0\nB {0} {2}\nC {3} 120 1 0\n'
+                'C {4} 150 2 0\n'.format(mono, SINK_LOG_FORMAT,
+                                         time.time_ns(), mono + 10, mono + S))
+    count, section = rec.read_export((mono + 20) / 1e9)
+    assert count == 120
+    dates = sink_event_dates(section, SINK_CLOCK_OFFSET_LIMIT_NS)
+    assert dates.refused is None
+    assert dates.required[0] == (mono + 10) / 1e9
 
 
 def test_a_sink_clock_ahead_of_the_host_still_gives_a_count(tmp_path):
@@ -431,3 +451,137 @@ def test_an_event_is_never_dated_before_the_one_it_follows():
     assert last.monotonic_s == 3.0
     metrics = monitor_metrics(events)
     assert metrics['first_prefix_s'] <= metrics['convergence_s']
+
+
+# -- the receivers -------------------------------------------------------------
+
+from measurements import ExportEventRecorder, export_metrics
+
+
+def export_recorder():
+    return ExportEventRecorder(ORIGIN, ['bgperf_receiver0', 'bgperf_receiver1'],
+                               100, sample_interval_s=1)
+
+
+def test_a_receivers_events_are_its_own_lines():
+    rec = export_recorder()
+    rec.observe(3.0, {'bgperf_receiver0': 150, 'bgperf_receiver1': 0}, sink={
+        'bgperf_receiver0': SinkDates(first_prefix=(2.2, 2.19, 40),
+                                      required=(2.6, 2.59, 120)),
+        'bgperf_receiver1': SinkDates()})
+    reached = unique_event(rec.events, EventKind.RECEIVER_TABLE_REACHED,
+                           'bgperf_receiver0')
+    assert reached.monotonic_s == 2.6
+    assert reached.details['dated_by'] == 'sink_log'
+    assert reached.details['poll_resolution_s'] == pytest.approx(0.01)
+    assert reached.counters == {'accepted_prefixes': 120,
+                                'required_prefixes': 100}
+    events = recorder().events + rec.events
+    session = export_metrics(events, ['bgperf_receiver0',
+                                      'bgperf_receiver1'])['sessions']
+    assert session['bgperf_receiver0']['table_reached_s'] == pytest.approx(1.6)
+    assert session['bgperf_receiver0']['table_reached_resolution_s'] == \
+        pytest.approx(0.01)
+
+
+def test_a_receivers_table_is_never_dated_before_its_first_prefix():
+    rec = export_recorder()
+    rec.observe(3.0, {'bgperf_receiver0': 150, 'bgperf_receiver1': None},
+                sink={'bgperf_receiver0': SinkDates(
+                    first_prefix=(2.2, 2.3, 40), required=(2.6, 2.59, 120))})
+    first = unique_event(rec.events, EventKind.RECEIVER_FIRST_PREFIX,
+                         'bgperf_receiver0')
+    reached = unique_event(rec.events, EventKind.RECEIVER_TABLE_REACHED,
+                           'bgperf_receiver0')
+    assert first.monotonic_s == 3.0
+    assert reached.monotonic_s == 3.0
+    assert 'before receiver_first_prefix' in \
+        reached.details['sink_dates_refused']
+
+
+def test_a_gobgp_fan_out_is_dated_exactly_as_before():
+    rec = export_recorder()
+    rec.observe(3.0, {'bgperf_receiver0': 150, 'bgperf_receiver1': 150})
+    for event in rec.events:
+        assert event.monotonic_s == 3.0
+        assert 'dated_by' not in event.details
+
+
+class SinkFakeReceiver:
+    '''A sink receiver whose round answers with a count and its dates.'''
+
+    def __init__(self, name, at_s):
+        self.name = name
+        self.at_s = at_s
+
+    def read_export(self, sampled_at):
+        at_ns = int(self.at_s * 1e9)
+        return 150, {'clock_offset_ns': 0,
+                     'first_prefix_at': (at_ns, at_ns - 10_000_000, 150),
+                     'required_at': (at_ns, at_ns - 10_000_000, 150),
+                     'changed_at': (at_ns, at_ns - 10_000_000, 150)}
+
+
+def test_the_export_poll_hands_a_sink_receivers_dates_to_the_recorder():
+    import threading
+    import bgperf2
+    started = time.monotonic()
+    rec = ExportEventRecorder(started, ['bgperf_receiver0'], 100,
+                              sample_interval_s=0.01)
+    state, failures = {}, {}
+    stop = threading.Event()
+    thread = bgperf2.controller_export_stats(
+        [SinkFakeReceiver('bgperf_receiver0', started)], rec, state,
+        failures, stop, 0.01)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not rec.events:
+        time.sleep(0.01)
+    stop.set()
+    thread.join(timeout=5)
+    reached = unique_event(rec.events, EventKind.RECEIVER_TABLE_REACHED,
+                           'bgperf_receiver0')
+    assert 'observation_error' not in state
+    assert reached.details['dated_by'] == 'sink_log', reached.details
+    assert reached.monotonic_s == pytest.approx(started)
+
+
+def test_a_sink_resolution_is_not_printed_as_an_instant():
+    import bgperf2
+    assert bgperf2.duration_text(0.0043) == '4.3ms'
+    assert bgperf2.duration_text(1.0) == '1.0s'
+    assert bgperf2.duration_text(-0.02) == '-20.0ms'
+    # Never `100.0ms` beside a `0.1s`: what `.1f` would round up, it prints.
+    assert bgperf2.duration_text(0.0999) == '0.1s'
+    assert bgperf2.export_interval_phrase(0.003, 0.0043) == \
+        'within the 4.3ms resolution'
+
+
+def test_a_dating_failure_does_not_cost_the_count():
+    import threading
+    import bgperf2
+
+    class BadSection:
+        name = 'bgperf_receiver0'
+
+        def read_export(self, sampled_at):
+            # A section the conversion cannot read.
+            return 150, {'clock_offset_ns': 'garbage'}
+
+    started = time.monotonic()
+    rec = ExportEventRecorder(started, ['bgperf_receiver0'], 100,
+                              sample_interval_s=0.01)
+    state, failures = {}, {}
+    stop = threading.Event()
+    thread = bgperf2.controller_export_stats(
+        [BadSection()], rec, state, failures, stop, 0.01)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not rec.events:
+        time.sleep(0.01)
+    stop.set()
+    thread.join(timeout=5)
+    assert failures == {}
+    assert rec.accepted == {'bgperf_receiver0': 150}
+    reached = unique_event(rec.events, EventKind.RECEIVER_TABLE_REACHED,
+                           'bgperf_receiver0')
+    assert reached.details['dated_by'] == 'poll'
+    assert 'could not be read' in reached.details['sink_dates_refused']

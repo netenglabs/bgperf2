@@ -4974,3 +4974,82 @@ all three events `dated_by: sink_log`, `convergence_s` 0.978 s at 5.1 ms, `first
 were again `sink_log`, with `convergence_s` 1.045 s at 7.5 ms and an offset of 2.4 µs. The GoBGP run's monitor events
 carried exactly `poll_resolution_s` and `sample_interval_s`, as before. These are smoke checks of
 the dating, one pass each, and not a timing result.
+
+### Progress on 2026-10-01: the receivers are dated by their own sinks (7b, third change set)
+
+Under `--monitor sink` a receiver's `receiver_first_prefix` and `receiver_table_reached` are now
+dated to its own log lines, on the rules that date the monitor's events. Those rules moved out of
+`MonitorEventRecorder` into one function, `measurements.sink_dated()`, so the two recorders cannot
+drift apart. A GoBGP fan-out is dated by the round exactly as before, and its `observe()` call
+is the one it always was.
+
+**The round decides that, the log decides when.** Every receiver is read through
+`read_export(sampled_at)`. For a GoBGP `Receiver` that returns `(accepted_prefixes(), None)`. A
+`SinkReceiver` returns the monitor's own `read_sample()`, which is the count as of the round's
+stamp together with the log's `sink` section. The stamp is taken once,
+before the round's first read, so every receiver in a round is read as of one instant, as the
+monitor's sample is. The controller turns the section into `SinkDates` and hands the round's map
+to `ExportEventRecorder.observe(sink=...)`. A receiver's table is never dated before its own
+first prefix, for the reason the monitor's check-point is not.
+
+**A receiver keeps the run's check-point.** The second change set's review had a `SinkReceiver`
+return no check-point, on the reading that the monitor's threshold is not the receiver's. It is,
+by design: `ExportEventRecorder.required_prefixes` is `export_required`, which is
+`check-points[0]`, the yardstick `export-timing.md` gives for "served". The override is gone, and
+the inherited `Instrument.check_point()` is the one threshold the line and the round both judge.
+
+**What this closes.** The second change set left `monitor_delta_s` spanning a sink-dated monitor
+event and a poll-dated receiver event, leaning positive by up to a round. Both ends are now
+sink-dated, so `monitor_delta_s` and `export_spread_s` are one instrument's measurement again,
+at the sinks' resolution. The generator side of `post_injection_tail_s` stays poll-dated,
+because a generator is not a sink, and `tester-offering.md`'s note on that lean stands.
+
+**Printed lines.** A smoke run printed "served within the 0.0s poll resolution of each other",
+which is the sub-resolution wording carrying a resolution of 4 ms. `duration_text()` prints in
+milliseconds anything that `.1f` would print as 0.0s. The export lines, through
+`export_interval_phrase()`, say "resolution", not "poll resolution". Churn keeps its own phrase,
+because churn is measured by the poll alone. Two test asserts pinned the old wording.
+
+**What review changed.** `/code-review` raised eight findings, and seven were acted on:
+
+- **A dating failure discarded a count.** The section was converted inside the read's `try`, so a
+  section the conversion could not read would have recorded a successful read as a failed one.
+  Dating is now guarded on its own and falls back to the round, with the reason given.
+- **Duplication.** The first draft left `MonitorEventRecorder._dated()`'s old body unreachable
+  after its new `return`, a second copy of the dating rules that would have drifted. It is gone.
+  `SinkReceiver.read_export()` had re-implemented the monitor's `read_sample()`, so a later change
+  to how a sink sample is annotated would have missed the receivers; it now calls it.
+- **One read path.** The loop chose a read path with `hasattr(receiver, 'read_export')`. Every
+  receiver now has `read_export()`, so the loop has a single path.
+- **Text.** The main fan-out clause still went through churn's poll phrase, and
+  `controller_export_stats()`'s and `SinkReceiver`'s docstrings still described round-dating.
+  `duration_text()` switched units at a threshold `.1f` rounds across, so it could print
+  `100.0ms` beside `0.1s`.
+
+Declined: refusing a receiver line dated before a previous round that read zero. The sink stamps
+an UPDATE on arrival and writes it a moment later, so a round can read just before the write. The
+round's zero was then the stale reading and the line's date is when the session had the route.
+Refusing the line would date the event later than the instrument recorded it.
+
+**The last 7b item, and why it stops here.** "`summary.py`'s quantum and the findings'
+resolution checks follow it." The findings read whatever resolution each interval carries, and
+none of their checks floors at the poll, so they followed with no change. A sink run's tail and
+export checks already compare against millisecond resolutions. `summary.py`'s quantum is
+`METRIC_RESOLUTION['elapsed (s)']`, and `elapsed (s)` is still whole seconds counted off the
+poll at convergence, which this phase has deliberately not touched. Shrinking that quantum for it
+would publish `separated` on a rounding boundary, the defect the floor exists to prevent. The
+variance rule can only sharpen if it decides on a sink-resolved number, for example
+`convergence_s` or a new appended column. That changes what a batch is ranked by and what the
+published CSV carries, so it is an operator decision, not a change set. It is recorded on
+`bgperf2-8gg.10.2` and left there.
+
+**Verification.** 12 new unit tests, among them two driving the real export poll over sink
+receivers; the full suite passed (2253). Docker, BIRD 2.19, `-n2 -p20000 --receivers 2 --monitor
+sink`, in `/data/bgperf-work/7b-cs3`. Every monitor and receiver event was
+`dated_by: sink_log`. `receiver_table_reached` resolutions were 4.3 ms and 1.3 ms.
+`export_spread_s` was 41 µs against 4.3 ms, and `monitor_delta_s` 48 µs against 8.2 ms, where a
+GoBGP fan-out bounds both at a whole round. After review, the cell was run once with each
+instrument. The sink run's receiver events were sink-dated at 4.4 and 7.1 ms, and it printed
+"served within the 7.1ms resolution of each other". The GoBGP run's receiver events were
+round-dated at 1.0 s with no `dated_by`, as before. Smoke checks of the dating, not timing
+results.

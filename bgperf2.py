@@ -79,7 +79,8 @@ from measurements import (EVENT_ARTIFACT_SCHEMA, ChurnEventRecorder,
                           MonitorEventRecorder, PolicyReloadEventRecorder,
                           TesterEventRecorder, event_artifact,
                           export_poll_can_stop, monitor_metrics, natural_key,
-                          sink_event_dates, tester_fleet_metrics,
+                          SinkDates, sink_event_dates,
+                          tester_fleet_metrics,
                           tester_metrics)
 from settings import dckr
 from summary import describe_batch_summary, summarize_batch
@@ -2389,6 +2390,13 @@ def controller_export_stats(receivers, recorder, state, read_failures, stop,
     served simultaneously can be off by at most one gap and can never be
     published as a *resolved* spread -- verified on a 6-receiver 1M-prefix run,
     which reported a 3.849s spread against a 3.849s resolution and said so.
+
+    That paragraph describes a GoBGP fan-out. A sink receiver's events are
+    dated by its own log lines instead (measurement plan 7b): the round only
+    decides *that* an event happened, `read_export()` reads each log as of the
+    round's stamp, and the event carries its line's date and bound. The
+    round's timestamp and gap then bound only an event whose line could not
+    be used, which says so in `sink_dates_refused`.
     '''
     def ended():
         return stop.is_set() or (delivery_stop is not None
@@ -2403,10 +2411,14 @@ def controller_export_stats(receivers, recorder, state, read_failures, stop,
         # `monitor_delta_s`, whose sign is the finding.
         sampled_at = time.monotonic()
         accepted = {}
+        dates = {}
         errors = {}
         for receiver in receivers:
             try:
-                accepted[receiver.name] = receiver.accepted_prefixes()
+                # A sink receiver answers with its log's `sink` section too,
+                # read as of this round's stamp; a GoBGP one with None (7b).
+                accepted[receiver.name], section = receiver.read_export(
+                    sampled_at)
             except Exception as e:                      # noqa: BLE001
                 # A read that could not be made is missing evidence, not a
                 # receiver holding nothing, and not a reason to end a run that
@@ -2415,8 +2427,23 @@ def controller_export_stats(receivers, recorder, state, read_failures, stop,
                 # the instrument simply never resolved.
                 accepted[receiver.name] = None
                 errors[receiver.name] = repr(e)
+                continue
+            if section is None:
+                continue
+            try:
+                dates[receiver.name] = sink_event_dates(
+                    section, SINK_CLOCK_OFFSET_LIMIT_NS)
+            except Exception as e:                      # noqa: BLE001
+                # Guarded apart from the read: a count that was read stands
+                # whatever happens to its dating, which falls back to the
+                # round's -- losing the finer date must never cost the
+                # observation.
+                dates[receiver.name] = SinkDates(
+                    refused='the sink section could not be read: {0!r}'.format(
+                        e))
         note_export_read_failures(errors, read_failures)
-        observe_export_sample(sampled_at, accepted, recorder, state)
+        observe_export_sample(sampled_at, accepted, recorder, state,
+                              sink=dates or None)
         return sampled_at, accepted
 
     def poll():
@@ -2537,7 +2564,7 @@ def drain_stale_samples(q):
         dropped += 1
 
 
-def observe_export_sample(monotonic_s, accepted, recorder, state):
+def observe_export_sample(monotonic_s, accepted, recorder, state, sink=None):
     '''Record one polled round of receiver counts.
 
     A recorder that rejects a round -- one that went backwards, or one whose
@@ -2549,7 +2576,12 @@ def observe_export_sample(monotonic_s, accepted, recorder, state):
     if recorder is None or 'observation_error' in state:
         return False
     try:
-        recorder.observe(monotonic_s, accepted)
+        # Passed only when there is one, so a GoBGP fan-out's call is the one
+        # it always was.
+        if sink is None:
+            recorder.observe(monotonic_s, accepted)
+        else:
+            recorder.observe(monotonic_s, accepted, sink=sink)
     except (ValueError, TypeError) as e:
         state['observation_error'] = str(e)
         return False
@@ -4852,18 +4884,18 @@ def describe_export_metrics(export, status='converged'):
             # Served inside one look of each other. That is what a target
             # exporting to them in parallel looks like at this cadence; it is
             # not evidence that it did.
-            spread_text = ('; the sessions were served within the {0:.1f}s '
-                           'poll resolution of each other'.format(
-                               spread_resolution))
+            spread_text = ('; the sessions were served within the {0} '
+                           'resolution of each other'.format(
+                               duration_text(spread_resolution)))
         else:
-            spread_text = ('; {0:.1f}s between the first and last of '
-                           'them'.format(spread))
+            spread_text = ('; {0} between the first and last of '
+                           'them'.format(duration_text(spread)))
         lines.append(
             'export fan-out: {0} of {1} receiver(s) reached {2} prefix(es), '
             'the last {3}{4}'.format(
                 complete, total, required,
-                churn_interval_phrase(reached,
-                                      export.get('table_reached_resolution_s')),
+                export_interval_phrase(
+                    reached, export.get('table_reached_resolution_s')),
                 spread_text))
 
     delta = export.get('monitor_delta_s')
@@ -4880,18 +4912,20 @@ def describe_export_metrics(export, status='converged'):
         # one this cadence cannot resolve in either direction.
         lines.append(
             'export fan-out: the last receiver and the monitor reached the '
-            'table within the {0:.1f}s poll resolution of each other'.format(
-                resolution))
+            'table within the {0} resolution of each other'.format(
+                duration_text(resolution)))
     elif delta < 0:
         # Ordinary rather than a fault: the monitor is one export session among
         # several and nothing orders them.
         lines.append(
-            'export fan-out: the last receiver had the table {0:.1f}s before '
-            'the monitor reached the required count'.format(-delta))
+            'export fan-out: the last receiver had the table {0} before '
+            'the monitor reached the required count'.format(
+                duration_text(-delta)))
     else:
         lines.append(
-            'export fan-out: the last receiver had the table {0:.1f}s after '
-            'the monitor reached the required count'.format(delta))
+            'export fan-out: the last receiver had the table {0} after '
+            'the monitor reached the required count'.format(
+                duration_text(delta)))
 
     error = export.get('observation_error')
     if error:
@@ -4905,6 +4939,35 @@ def describe_export_metrics(export, status='converged'):
         # only truncates it.
         lines.append('export fan-out: {0}'.format(truncated))
     return lines
+
+
+def duration_text(seconds):
+    """A duration as a printed line carries it.
+
+    Tenths of a second were enough while every export interval came from a
+    1 s poll. A sink dates its own lines to the millisecond (measurement plan
+    7b), and `0.0s` beside a 4 ms resolution reads as an instant; anything
+    `.1f` would print as 0.0s is printed in milliseconds instead.
+    """
+    # Switched on what `.1f` would print, so a value just under the line
+    # cannot print as `100.0ms` beside a `0.1s`.
+    if abs(seconds) < 0.05:
+        return '{0:.1f}ms'.format(seconds * 1000)
+    return '{0:.1f}s'.format(seconds)
+
+
+def export_interval_phrase(seconds, resolution):
+    """`churn_interval_phrase()` for an export interval, which a sink can date.
+
+    Churn is measured by the poll alone, so its phrase names a poll; an export
+    interval under `--monitor sink` is bounded by a sink's log line, so this
+    one names only a resolution, printed through `duration_text()`.
+    """
+    if seconds is None:
+        return '(unmeasured)'
+    if resolution is not None and seconds <= resolution:
+        return 'within the {0} resolution'.format(duration_text(resolution))
+    return 'in {0}'.format(duration_text(seconds))
 
 
 def churn_interval_phrase(seconds, resolution):

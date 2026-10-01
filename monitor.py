@@ -338,6 +338,17 @@ class Receiver(Monitor):
             'never polled as one. Read the monitor. What the target exported '
             'to this session is read with accepted_prefixes().')
 
+    def read_export(self, sampled_at):
+        """One export round's read: the count, and nothing to date it by.
+
+        The interface the export poll reads every receiver through, so it has
+        one read path. A GoBGP receiver has no log of its own, so its events
+        are dated by the round; `SinkReceiver.read_export()` returns its log's
+        `sink` section in the second place instead. Raises where
+        `accepted_prefixes()` does.
+        """
+        return self.accepted_prefixes(), None
+
     def accepted_prefixes(self):
         """How many prefixes the target has exported to this session so far.
 
@@ -514,7 +525,7 @@ class SinkReceiver(SinkMonitor):
     `Receiver`'s contract, on the sink: a session the target exports its
     table to, which announces nothing and is never polled into the stats
     queue -- `stats()` is refused for the reason `Receiver.stats()` is. It is
-    read with `accepted_prefixes()`, which reads its log on the host, so a
+    read with `read_export()`, which reads its log on the host, so a
     round of the export poll no longer costs a `docker exec` per receiver.
 
     Every receiver was a full GoBGP holding its own copy of the table, which
@@ -534,16 +545,30 @@ class SinkReceiver(SinkMonitor):
     def stats(self, queue, interval=1):
         return Receiver.stats(self, queue, interval)
 
-    def check_point(self):
-        # A receiver is not judged by the monitor's check-point. `run()` is
-        # inherited and would otherwise hand the monitor's threshold to this
-        # receiver's log, which dates nothing anyone reads against it.
-        return None
+    # `check_point()` is inherited on purpose. A receiver has been served when
+    # it holds the run's check-point -- `ExportEventRecorder`'s
+    # `required_prefixes` is that same `check-points[0]` -- so the line its log
+    # dates `receiver_table_reached` to is judged by the threshold the export
+    # poll judges the round by.
+
+    def read_export(self, sampled_at):
+        """One round's read: the count, and the `sink` section dating it.
+
+        The monitor's own `read_sample()`, so a receiver's log is read and
+        annotated on exactly the monitor's rules: as of the round's stamp,
+        with the reader's clock offset. Raises on a log that cannot be read
+        as a count, for the reason `Receiver.read_export()` gives.
+        """
+        sample = self.read_sample(sampled_at)
+        return sample['afi_safis'][0]['state']['accepted'], sample['sink']
 
     def accepted_prefixes(self):
         """How many prefixes the target has exported to this session so far.
 
-        Raises where the log cannot be read as a count -- not written, stale,
+        Not what the export poll calls -- that is `read_export()`, which reads
+        as of the round's stamp and carries the dates; this reads as of now,
+        for a caller that wants only the count. Raises where the log cannot
+        be read as a count -- not written, stale,
         malformed -- and the export poll records that round as unread, for
         the reason `Receiver.accepted_prefixes()` gives: a session we failed
         to ask and a session given no routes are different measurements.

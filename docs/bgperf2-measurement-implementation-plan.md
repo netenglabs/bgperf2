@@ -601,8 +601,13 @@ beside them: the convergence windows are durations, counted in samples at the
 cadence asked for, identical at 1 s. The second dated the monitor's three events
 to the sink's own log lines, each with the line's own bound as its resolution
 (5 ms against the poll's 1 s on a smoke run), falling back to the poll, and
-saying why, whenever a line cannot be trusted. Dating the receivers the same way
-is 7b's next change set; 7c runs on the campaign host. Why a sink rather than a patched GoBGP, and the GoBGP source reading that
+saying why, whenever a line cannot be trusted. The third dated the receivers
+the same way, so `monitor_delta_s` and `export_spread_s` are one instrument's
+measurement at millisecond resolution. The findings followed with no change.
+What 7b leaves open is `summary.py`'s quantum. It belongs to `elapsed (s)`, which
+is still whole seconds off the poll, so the variance rule sharpens only if it
+decides on a sink-resolved number instead. That is an operator decision, recorded
+on `bgperf2-8gg.10.2`. 7c runs on the campaign host. Why a sink rather than a patched GoBGP, and the GoBGP source reading that
 started it, are in the
 [decision log](bgperf2-measurement-decision-log.md#phase-7-replace-the-monitor-with-a-purpose-built-sink).
 

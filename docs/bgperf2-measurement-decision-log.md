@@ -4106,6 +4106,74 @@ breaks comparability with every row already taken:
    It does change what "watch" should look for first: the sign of the stall is
    `monitor_lag_s` leaving its resolution bound, not `min idle%`.
 
+### Finding on 2026-10-01: FRR exports less of the MRT table because one injected peer tags every route NO_EXPORT (`bgperf2-cw6`)
+
+The 2026-09-11 probe established that FRR holds the whole union (1,080,985 prefixes,
+10,497,949 paths) and exports ~961k of it identically to every peer, the monitor
+included, with no export policy configured. The mechanism is in the RIB, not in FRR or
+in bgperf2's config.
+
+**What the RIB carries.** `mrt/rib.20260808.0000` was parsed directly (a minimal
+TABLE_DUMP_V2 reader; bgpdump2's own `-m` printer aborts with a stack-smash near
+204.155.111.0/24 for every peer, a printer bug that does not touch `--blaster`). The
+injectors replay the first ten peer indexes holding at least 1,050,000 prefixes,
+which are indexes 1, 2, 3, 5, 7, 8, 10, 11, 12 and 13, each capped by `-T` at
+1,050,000. Their union is 1,081,195 prefixes, which matches what the targets hold
+(FRR 1,080,985, RustyBGP 1,081,178). **Peer index 10, AS 37100, which is injector 6,
+carries the well-known NO_EXPORT community (65535:65281) on all 1,050,000 of its
+routes.** Only six other routes in the union carry it. The blaster re-encodes each path
+from a fixed list of known attributes, and COMMUNITY is on it
+(`bgpdump_filter_bgp_pa_copy_nh()`, `src/bgpdump_data.c:905` in the image's clone). So
+the community reaches the target. The
+monitor and every tester are eBGP neighbours of the target. So whenever a daemon
+selects AS 37100's path as best, RFC 1997 forbids advertising that prefix to any of
+them. That is why the withheld count is identical across peers of different ASes,
+which ruled out split horizon in the original probe.
+
+**Why the daemons differ, quantitatively.** For 379,470 prefixes, AS 37100's path
+ties with at least one other path on AS-path length and origin. Which path wins those
+ties decides the count:
+
+- **A deterministic tie-break on the lower router ID** makes the NO_EXPORT path best
+  for 24,219 prefixes. That leaves 1,080,985 − 24,219 = 1,056,766 exportable. BIRD
+  3.3.2 and OpenBGPD 9.2 both export **1,056,779**, and do so on every run. The
+  13-prefix residual is within what the simulation ignores (MED, and the 210 prefixes
+  between the parsed union and the held count). So their agreement is one shared
+  tie-break, not chance.
+- **FRR prefers the oldest of otherwise-equal eBGP paths** unless
+  `bgp bestpath compare-routerid` is set, and bgperf2's `bgpd.conf` does not set it.
+  The winner of each tie therefore depends on arrival order across ten injectors, so
+  the NO_EXPORT share is timing-dependent. It lands at ~120k, inside the simulated
+  range of 24,219 (always the lower router ID) to 115,373 (always the higher), plus the
+  ties order can move. The recorded rows show the variance this predicts: across the
+  15 FRR MRT rows of Blocks 5–7, `exported_final` runs from 956,893 to 961,057, and one
+  version's three passes (10.7: 956,893 / 960,724 / 958,513) spread as widely as the
+  five versions do.
+- **RustyBGP exports the whole union** (1,081,178), so it evidently does not honour
+  NO_EXPORT on eBGP export. That is inferred from the count. Its source was not read.
+
+The arrival-order explanation of FRR's exact count is consistent with every
+observation but has not been demonstrated by a run. The decisive run would repeat one
+FRR MRT cell with `bgp bestpath compare-routerid`, which predicts ~1,056,766
+deterministically. That run is not done here, because Phase 1 of the comparison plan
+takes no new runs.
+
+**What it means for the rows.**
+
+- **No row is wrong, and FRR is entitled to all of it.** Honouring NO_EXPORT is
+  RFC-mandated, and the oldest-path tie-break is FRR's documented default.
+- **`required` (0.99 × `-p` = 1,039,500) was never a sound check-point for this RIB, for
+  any daemon.** BIRD and OpenBGPD clear it by only 17,279 prefixes, and only because
+  their tie-break happens to send few prefixes AS 37100's way. 4fb524e already replaced
+  its use as a correctness test. The five `inconclusive` FRR cells need no new run to
+  re-derive: all 15 FRR MRT rows carry a resolved `target_table.delivery` with
+  `exported_final == monitor_final` and no `unresolved_reason`.
+- **Cross-daemon MRT timing compares different export work.** FRR exports ~9% fewer
+  prefixes than BIRD and OpenBGPD, and a run-varying number of them. Within-daemon
+  comparisons are unaffected beyond that ~0.4% run-to-run wobble in FRR's export
+  volume. How to remove the confound from the comparison's own MRT runs is an operator
+  decision, recorded as Phase 2.6 of `docs/2026-daemon-comparison-plan.md`.
+
 ## Phase 7: Replace the monitor with a purpose-built sink
 
 ### Decision on 2026-09-29: fix the instrument now, and redo the testing under it

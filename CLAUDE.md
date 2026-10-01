@@ -231,6 +231,8 @@ claims.
 - Every dimension a batch iterates must reach `bench_output_prefix()`, or two cells overwrite each
   other's artifacts.
 - No call that asks the world may run before the guards that read only the command line.
+- `--pin` names every role the run has, on disjoint cores, or is refused; it is refused under
+  `-r/--repeat` in both directions.
 
 **`docs/invariants/batch-passes.md`** — `bgperf2.py`'s `expand_batch_cells()`/`batch_report_rows()`/
 `create_batch_graphs()`, `summary.py`, `graphs.py`, `scripts/timing_variance_review.py`,

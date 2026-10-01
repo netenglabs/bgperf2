@@ -236,6 +236,13 @@ def bench_output_prefix(args):
                      or DEFAULT_POLICY_RELOAD_BLOCKS)
     if reload_blocks != DEFAULT_POLICY_RELOAD_BLOCKS:
         parts.append('pr{0}'.format(reload_blocks))
+    # And the core layout: a pinned run and an unpinned run of one cell are
+    # the same workload everywhere else in this stem -- the comparison Phase 3
+    # of the daemon comparison exists to make -- so without it the second
+    # would replace the first's artifacts.
+    pin = getattr(args, 'pin', None)
+    if pin:
+        parts.append(pin_stem(pin))
     return '_'.join(parts)
 
 
@@ -543,6 +550,175 @@ def resolve_receivers(receivers):
             '--receivers must be a whole number of 0 or more, got '
             '{0!r}'.format(receivers))
     return receivers
+
+
+# The roles `--pin` gives cores to, in the order the canonical form writes
+# them. `receivers` is a role only on a run that has receivers.
+PIN_ROLES = ('target', 'monitor', 'testers', 'receivers')
+
+
+def host_cpus():
+    '''The CPU ids Docker will accept in a cpuset: the host's online CPUs.
+
+    Read from sysfs rather than `os.sched_getaffinity()`, which is this
+    process's own mask and says nothing about what a container may be given.
+    '''
+    try:
+        with open('/sys/devices/system/cpu/online') as f:
+            return parse_cpu_list(f.read().strip())
+    except (OSError, ValueError):
+        return frozenset(range(os.cpu_count() or 1))
+
+
+def parse_cpu_list(text):
+    '''`0-3,8` -> frozenset({0, 1, 2, 3, 8}), the kernel's cpulist format.'''
+    cpus = set()
+    for part in text.split(','):
+        part = part.strip()
+        lo, sep, hi = part.partition('-')
+        if not lo.isdigit() or (sep and not hi.isdigit()):
+            raise ValueError('{0!r} is not a CPU number or range'.format(part))
+        lo, hi = int(lo), int(hi) if sep else int(lo)
+        if hi < lo:
+            raise ValueError('{0!r} is a descending range'.format(part))
+        cpus.update(range(lo, hi + 1))
+    return frozenset(cpus)
+
+
+def format_cpu_list(cpus):
+    '''The shortest cpulist for a set: {0, 1, 2, 3, 8} -> `0-3,8`.'''
+    runs = []
+    for cpu in sorted(cpus):
+        if runs and cpu == runs[-1][1] + 1:
+            runs[-1][1] = cpu
+        else:
+            runs.append([cpu, cpu])
+    return ','.join(str(lo) if lo == hi else '{0}-{1}'.format(lo, hi)
+                    for lo, hi in runs)
+
+
+def resolve_pin(spec, receivers, cpus):
+    '''The validated per-role cpuset, as its canonical spec, or None.
+
+    `spec` is `role=cpulist,...` -- `target=0-7,monitor=8-9,testers=10-15`.
+    Commas separate both roles and CPUs, so a token without `=` extends the
+    role before it: `target=0,2,monitor=4` gives the target CPUs 0 and 2.
+
+    Every role the run has must be named. A pinned run is one in which no role
+    can reach another's cores, and an unnamed role would float over every core
+    -- the pinned ones included -- so a run that pinned the target and left the
+    generators unpinned would be published as isolated when it was not. The
+    sets must be disjoint for the same reason, and inside `cpus` because Docker
+    refuses a cpuset naming a CPU the host does not have, but only once the
+    previous run's containers are gone.
+
+    The canonical form fixes the role order and writes each set as its
+    shortest cpulist, so two spellings of one layout are one cell, one stem and
+    one manifest entry.
+    '''
+    sets = parse_pin(spec)
+    if sets is None:
+        return None
+    wanted = [r for r in PIN_ROLES if r != 'receivers' or receivers]
+    missing = [r for r in wanted if r not in sets]
+    if missing:
+        raise ValueError(
+            '--pin leaves {0} unpinned, and an unpinned role runs on every '
+            'core, the pinned ones included. Name every role the run has: '
+            '{1}'.format(', '.join(missing), ', '.join(wanted)))
+    if 'receivers' in sets and not receivers:
+        raise ValueError('--pin names receivers, but the run has none')
+    roles = [r for r in PIN_ROLES if r in sets]
+    for i, a in enumerate(roles):
+        for b in roles[i + 1:]:
+            shared = sets[a] & sets[b]
+            if shared:
+                raise ValueError('--pin gives {0} and {1} the same CPUs '
+                                 '({2}); the sets must be disjoint'.format(
+                                     a, b, format_cpu_list(shared)))
+    absent = set().union(*sets.values()) - set(cpus)
+    if absent:
+        raise ValueError('--pin names CPUs this host does not have ({0}); it '
+                         'has {1}'.format(format_cpu_list(absent),
+                                          format_cpu_list(cpus)))
+    return format_pin(sets)
+
+
+def format_pin(sets):
+    '''{role: cpus} as the canonical spec: fixed role order, shortest lists.'''
+    return ','.join('{0}={1}'.format(r, format_cpu_list(sets[r]))
+                    for r in PIN_ROLES if r in sets)
+
+
+def parse_pin(spec):
+    '''A `--pin` spec as {role: frozenset of CPUs}, or None when unset.
+
+    Syntax only -- which roles a run needs, overlap and the host's CPUs are
+    `resolve_pin()`'s.
+    '''
+    if spec is None or spec == '':
+        return None
+    if not isinstance(spec, str):
+        raise ValueError('--pin must be role=cpus[,role=cpus...], got '
+                         '{0!r}'.format(spec))
+    texts = {}
+    role = None
+    for token in spec.split(','):
+        token = token.strip()
+        name, sep, value = token.partition('=')
+        if sep:
+            role = name.strip()
+            if role not in PIN_ROLES:
+                raise ValueError('--pin: unknown role {0!r}; the roles are '
+                                 '{1}'.format(role, ', '.join(PIN_ROLES)))
+            if role in texts:
+                raise ValueError('--pin: {0} is named twice'.format(role))
+            texts[role] = [value]
+        elif role is None:
+            raise ValueError('--pin must start with role=cpus, got '
+                             '{0!r}'.format(spec))
+        else:
+            texts[role].append(token)
+    sets = {}
+    for role, parts in texts.items():
+        try:
+            sets[role] = parse_cpu_list(','.join(parts))
+        except ValueError as e:
+            raise ValueError('--pin: {0}: {1}'.format(role, e))
+    return sets
+
+
+def pin_cpusets(canonical):
+    '''A canonical `--pin` spec as {role: cpuset string}; {} when unpinned.'''
+    sets = {}
+    role = None
+    for token in canonical.split(',') if canonical else ():
+        name, sep, cpus = token.partition('=')
+        if sep:
+            role = name
+            sets[role] = cpus
+        else:
+            sets[role] += ',' + token
+    return sets
+
+
+def pinned_tester_containers(names, cpuset_of):
+    '''The tester containers among `names` that carry a cpuset.'''
+    prefixes = tuple(cls.CONTAINER_NAME_PREFIX for cls in TESTER_CLASSES.values())
+    return sorted((name for name in names
+                   if name.startswith(prefixes) and cpuset_of(name)),
+                  key=natural_key)
+
+
+def pin_stem(canonical):
+    '''The artifact-name part for a pinned run: `pin.target0-7.monitor8-9...`.
+
+    Commas become `+` so the stem stays one shell word; underscores are the
+    stem's own separator and are not used.
+    '''
+    return 'pin.' + '.'.join(
+        '{0}{1}'.format(role, cpus.replace(',', '+'))
+        for role, cpus in pin_cpusets(canonical).items())
 
 
 def surplus_receiver_names(container_names, wanted):
@@ -2491,6 +2667,13 @@ def bench(args):
         # refusals beside it.
         sys.exit('--receivers has nothing to add under -f: a scenario file '
                  'states the sessions the target has itself')
+    if getattr(args, 'pin', None) and args.repeat:
+        # `--repeat` builds no tester objects: it reuses the tester containers
+        # it finds, and a container's cpuset is fixed when it is created. The
+        # generators would run on whatever cores the previous run gave them
+        # while the stem and the manifest said otherwise.
+        sys.exit('--pin cannot be honoured under -r/--repeat: the reused '
+                 'tester containers keep the cores they were created with')
     churn_flags = churn_flags_set(getattr(args, 'churn_prefixes', None),
                                   getattr(args, 'churn_bursts', None))
     if args.file and churn_flags:
@@ -2609,6 +2792,14 @@ def bench(args):
         #
         # Only a -f scenario can declare the target remote, and a remote target
         # has no local image to resolve, so that case waits for the parse.
+        #
+        # The pin is resolved here, after every guard that reads only the
+        # command line, because its last check reads the host's CPU list.
+        try:
+            args.pin = resolve_pin(getattr(args, 'pin', None), args.receivers,
+                                   host_cpus())
+        except ValueError as e:
+            sys.exit(str(e))
         target_image_name = target_image(args.target,
                                          getattr(args, 'version', None),
                                          args.image)
@@ -2629,9 +2820,32 @@ def bench(args):
             # (bgperf2-urp): `resolve_receivers()` guards every path that
             # builds a scenario; this guards the one path handed one.
             scenario_receivers(early)
+            if getattr(args, 'pin', None):
+                # A remote target is not a container bgperf2 starts, so there
+                # is nothing to give its cores to, and the scenario says how
+                # many receivers the run has.
+                if early.get('target', {}).get('remote'):
+                    raise ValueError('--pin cannot be honoured for a remote '
+                                     'target: bgperf2 does not start it')
+                args.pin = resolve_pin(args.pin,
+                                       len(early.get('receivers') or []),
+                                       host_cpus())
         except ValueError as e:
             sys.exit(str(e))
         del early
+    if args.repeat:
+        # The other half of the `--pin` refusal under `--repeat`: an unpinned
+        # run reusing generators a pinned run created would inherit their
+        # cpuset, and be published as unpinned. A Docker call, so after every
+        # guard that reads only the command line; before the teardown, so the
+        # refusal costs nothing.
+        pinned = pinned_tester_containers(
+            get_ctn_names(),
+            lambda name: dckr.inspect_container(name)['HostConfig'].get('CpusetCpus'))
+        if pinned:
+            sys.exit('-r/--repeat would reuse tester containers a pinned run '
+                     'created ({0}), and they keep its cores. Run once without '
+                     '-r to rebuild them'.format(', '.join(pinned)))
     remove_target_containers()
 
     if not args.repeat:
@@ -2720,9 +2934,14 @@ def bench(args):
         print('type next to increase the value')
         print('$ echo 16384 | sudo tee /proc/sys/net/ipv4/neigh/default/gc_thresh3')
 
+    # Every role this run has was checked to be named, disjoint and on this
+    # host before anything was torn down; {} on an unpinned run.
+    pin = pin_cpusets(getattr(args, 'pin', None))
+
     print('run monitor')
     m = Monitor(config_dir+'/monitor', conf['monitor'])
     m.monitor_for = args.target
+    m.cpuset = pin.get('monitor')
     m.run(conf, dckr_net_name)
 
     # Started with the monitor and established before any generator launches:
@@ -2748,6 +2967,7 @@ def bench(args):
     receiver_containers = []
     for idx, receiver in enumerate(receivers_wanted):
         r = Receiver(idx, '{0}/receiver{1}'.format(config_dir, idx), receiver)
+        r.cpuset = pin.get('receivers')
         print('run receiver', r.name)
         r.run(conf, dckr_net_name)
         receiver_containers.append(r)
@@ -2787,6 +3007,7 @@ def bench(args):
 
 
             t = tester_class(name, config_dir+'/'+name, tester)
+            t.cpuset = pin.get('testers')
             if not mrt_injector:
                 print('run tester', name, 'type', tester_type)
             else:
@@ -2918,6 +3139,7 @@ def bench(args):
         print('run', run_name(args))
         target = target_class('{0}/{1}'.format(config_dir, args.target), conf['target'],
                               image=target_image_name)
+        target.cpuset = pin.get('target')
 
         target.run(conf, dckr_net_name)
 
@@ -3549,6 +3771,10 @@ def write_provenance(args, provenance, prefix):
                            or DEFAULT_PATH_DIVERSITY),
         'receivers': (None if getattr(args, 'file', None) else
                       getattr(args, 'receivers', None) or DEFAULT_RECEIVERS),
+        # The cores each role was confined to, or None for every core. Known
+        # under `-f` too, unlike the workload keys around it: bgperf2 starts
+        # the containers whatever wrote the scenario.
+        'pin': pin_cpusets(getattr(args, 'pin', None)) or None,
         # What the run withdrew and put back after it converged, and how many
         # times. `None` under `-f` for the reason the two above are: the
         # scenario file states what each peer announces, and churn is refused
@@ -3760,6 +3986,8 @@ def write_event_artifact(args, events, prefix, status, testers=None,
                            or DEFAULT_PATH_DIVERSITY),
         'receivers': (None if getattr(args, 'file', None) else
                       getattr(args, 'receivers', None) or DEFAULT_RECEIVERS),
+        # Both blocks, for the reason `receivers` is in both.
+        'pin': pin_cpusets(getattr(args, 'pin', None)) or None,
         # Both `run` blocks carry it, for the reason recorded for
         # `path_diversity` and `repetition`: this document is what
         # `findings.py` reads and what a summary groups by, and the only other
@@ -5115,7 +5343,7 @@ BATCH_TEST_KEYS = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
 # `repetitions` misspelt runs one pass of a matrix someone asked three of.
 BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope',
                             'path_diversity', 'receivers', 'churn_prefixes',
-                            'churn_bursts', 'policy_reload_blocks')
+                            'churn_bursts', 'policy_reload_blocks', 'pin')
 
 
 # Keys that mean something on a *test* and nothing on a target. There is no
@@ -5132,7 +5360,7 @@ BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope',
 BATCH_TEST_ONLY_KEYS = ('prefix_scope', 'repetitions', 'order', 'seed',
                         'neighbors', 'prefixes', 'filter_test',
                         'path_diversity', 'receivers', 'churn_prefixes',
-                        'churn_bursts', 'policy_reload_blocks')
+                        'churn_bursts', 'policy_reload_blocks', 'pin')
 
 # Target keys whose absence means something other than `None`. `batch()`
 # otherwise gives every unset field `None`, and `gen_conf()` routes anything
@@ -5532,6 +5760,74 @@ def check_batch_test(test):
                              for f in churn_flags),
                 ', '.join(repeated),
                 'has' if len(repeated) == 1 else 'have'))
+    check_batch_pin(test, repeated)
+
+
+def check_batch_pin(test, repeated):
+    '''`--pin`'s guards for a batch test, against every target it names.
+
+    Each target is checked rather than the first: whether `receivers` must be
+    named depends on the target -- a `file:` target's scenario states its own
+    -- and a remote scenario target has no container to pin. Refused at its
+    cell instead, the `SystemExit` would end the matrix there.
+    '''
+    pin = test.get('pin')
+    if pin in (None, ''):
+        return
+    if repeated:
+        sys.exit("test '{0}': pin cannot be honoured with repeat, which {1} "
+                 '{2} set: the reused tester containers keep the cores they '
+                 'were created with'.format(
+                     test['name'], ', '.join(repeated),
+                     'has' if len(repeated) == 1 else 'have'))
+    cpus = host_cpus()
+    for target in test['targets']:
+        receivers = test.get('receivers') or DEFAULT_RECEIVERS
+        try:
+            if target.get('file') and os.path.isfile(target['file']):
+                with open(target['file']) as f:
+                    scenario = render_scenario(f.read())
+                if (scenario.get('target') or {}).get('remote'):
+                    raise ValueError('--pin cannot be honoured for a remote '
+                                     'target: bgperf2 does not start it')
+                receivers = len(scenario.get('receivers') or [])
+            resolve_pin(pin, receivers, cpus)
+        except ValueError as e:
+            sys.exit("test '{0}': target {1!r}: {2}".format(
+                test['name'], target.get('label') or target['name'], e))
+
+
+def check_batch_pin_and_repeat(tests):
+    """`--pin` against `repeat` across a whole batch, before its first cell.
+
+    `check_batch_pin()` sees one test at a time, so a pinned test followed by
+    a test with a `repeat` target passed it -- and the second test's first
+    cell then met `bench()`'s refusal to reuse pinned generators, ending the
+    matrix partway through. Refused in either order: `order: shuffle` and
+    `--resume` both decide what runs first. A batch with `repeat` targets and
+    no pin is checked once against the host, for generators an earlier pinned
+    run left behind; the same Docker call `bench()` makes, made early.
+    """
+    pinned = [t['name'] for t in tests if t.get('pin')]
+    repeating = [t['name'] for t in tests
+                 if any(target.get('repeat') for target in t['targets'])]
+    if pinned and repeating:
+        sys.exit('batch: {0} {1} pin and {2} {3} a repeat target. A repeat '
+                 'reuses whatever tester containers the run before it left, '
+                 'and a pinned test leaves pinned ones. Split them into '
+                 'separate batches'.format(
+                     ', '.join(pinned), 'sets' if len(pinned) == 1 else 'set',
+                     ', '.join(repeating),
+                     'has' if len(repeating) == 1 else 'have'))
+    if repeating:
+        left = pinned_tester_containers(
+            get_ctn_names(),
+            lambda name: dckr.inspect_container(name)['HostConfig'].get('CpusetCpus'))
+        if left:
+            sys.exit('batch: {0} would reuse tester containers a pinned run '
+                     'created ({1}), and they keep its cores. Run one bench '
+                     'without -r to rebuild them'.format(
+                         ', '.join(repeating), ', '.join(left)))
 
 
 def target_run_name(target):
@@ -5616,6 +5912,11 @@ def expand_batch_cells(test, targets):
     # measured against the old one.
     reload_blocks = (test.get('policy_reload_blocks')
                      or DEFAULT_POLICY_RELOAD_BLOCKS)
+    # And the core layout, canonicalised so two spellings of one layout are
+    # one cell: a pinned run and an unpinned run are different cells, and an
+    # edited layout is a different run rather than more of the same one.
+    pin = test.get('pin')
+    pin = format_pin(parse_pin(pin)) if pin else None
     cells = []
     for repetition in range(1, repetitions + 1):
         ordinal = 0
@@ -5641,6 +5942,7 @@ def expand_batch_cells(test, targets):
                             'churn_prefixes': churn_prefixes,
                             'churn_bursts': churn_bursts,
                             'policy_reload_blocks': reload_blocks,
+                            'pin': pin,
                             'target': t,
                         })
                         ordinal += 1
@@ -5925,6 +6227,7 @@ def batch(args):
     # images every pass, and reporting a missing image once per repetition
     # buries the list this exists to print.
     check_batch_images([t for _, targets, _, _, _ in expanded for t in targets])
+    check_batch_pin_and_repeat([test for test, _, _, _, _ in expanded])
 
     for test, _targets, cells, order, seed in expanded:
         repetitions = batch_repetitions(test)
@@ -6044,6 +6347,7 @@ def batch(args):
             a.churn_bursts = cell.get('churn_bursts') or DEFAULT_CHURN_BURSTS
             a.policy_reload_blocks = (cell.get('policy_reload_blocks')
                                       or DEFAULT_POLICY_RELOAD_BLOCKS)
+            a.pin = cell.get('pin')
             a.filter_test = cell['filter'] if cell['filter'] != 'None' else None
             # None for a single-pass test, so its rows, graphs and event
             # artifacts keep the names they have always had; set for every pass
@@ -6159,6 +6463,9 @@ def batch_cell_id(test_name, cell):
                      or DEFAULT_POLICY_RELOAD_BLOCKS)
     if reload_blocks != DEFAULT_POLICY_RELOAD_BLOCKS:
         identity['policy_reload_blocks'] = reload_blocks
+    # Omitted when unpinned, on the rule above, so every existing id resumes.
+    if cell.get('pin'):
+        identity['pin'] = cell['pin']
     return json.dumps(identity, sort_keys=True, separators=(',', ':'), default=str)
 
 
@@ -6188,6 +6495,8 @@ def batch_cell_description(cell, repetitions=1):
     if reload_blocks != DEFAULT_POLICY_RELOAD_BLOCKS:
         described = '{0}, policy reload={1} block(s)'.format(
             described, reload_blocks)
+    if cell.get('pin'):
+        described = '{0}, pin={1}'.format(described, cell['pin'])
     if repetitions > 1:
         described = '{0}, repetition {1}/{2}'.format(
             described, cell['repetition'], repetitions)
@@ -6885,6 +7194,19 @@ def create_args_parser(main=True):
                                    'Only a target with a reload mechanism can '
                                    'do this, and not with an MRT generator, a '
                                    'policy filter or a churn workload')
+    # On `bench` only, for the reason `--policy-reload-blocks` is: a cpuset is
+    # a property of the containers, not of the scenario, so `config` would
+    # print a file that reads as though it encoded the layout.
+    parser_bench.add_argument('--pin', metavar='ROLE=CPUS[,ROLE=CPUS...]',
+                              help='confine each role to its own cores, e.g. '
+                                   'target=0-7,monitor=8-9,testers=10-15 '
+                                   '(add receivers=... when --receivers is '
+                                   'set). Every role the run has must be '
+                                   'named and the sets must not overlap, or '
+                                   'an unnamed role would run on the pinned '
+                                   'cores. Default: unpinned, every role on '
+                                   'every core. Not with -r/--repeat or a '
+                                   'remote target')
     parser_bench.add_argument('-f', '--file', metavar='CONFIG_FILE')
     parser_bench.add_argument('-o', '--output', metavar='STAT_FILE')
     parser_bench.add_argument('--results-dir', default=DEFAULT_RESULTS_DIR,

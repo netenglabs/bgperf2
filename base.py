@@ -464,6 +464,10 @@ class Container(object):
         self.command = None
         self.environment = None
         self.volumes = [self.guest_dir]
+        # The cores this container may run on (`--pin`), as a Docker cpuset
+        # string, or None for every core. Applied in run() rather than in
+        # get_host_config(), which three classes override.
+        self.cpuset = None
         if not os.path.exists(host_dir):
             os.makedirs(host_dir)
             os.chmod(host_dir, 0o777)
@@ -623,11 +627,22 @@ class Container(object):
             dckr.remove_container(self.name, force=True)
 
         host_config = self.get_host_config()
+        cpuset = getattr(self, 'cpuset', None)
+        if cpuset:
+            host_config['CpusetCpus'] = cpuset
 
         ctn = dckr.create_container(image=self.image, command=self.command, environment=self.environment,
                                     detach=True, name=self.name,
                                     stdin_open=True, volumes=self.volumes, host_config=host_config)
         self.ctn_id = ctn['Id']
+        if cpuset:
+            # Read back rather than trusted: the stem and the manifest say the
+            # run was pinned, and a cpuset the daemon dropped would publish an
+            # unpinned run under that name.
+            applied = dckr.inspect_container(self.ctn_id)['HostConfig'].get('CpusetCpus')
+            if applied != cpuset:
+                raise RuntimeError('{0}: asked Docker for cpuset {1!r} and it '
+                                   'applied {2!r}'.format(self.name, cpuset, applied))
 
         ipv4_addresses = self.get_ipv4_addresses()
 

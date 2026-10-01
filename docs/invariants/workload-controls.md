@@ -372,6 +372,49 @@ argparse's bare `unrecognized arguments`.
 - `gen_conf()` no longer writes `single-table` into the scenario; the stats row keeps its `flags`
   column (always empty) for the stats contract.
 
+## `--pin ROLE=CPUS,...` — confine each role to its own cores
+
+`--pin target=0-7,monitor=8-9,testers=10-15` (batch: `pin:`, a *test* key) gives every container of
+a role one Docker cpuset (`Container.cpuset`, applied in `Container.run()`). Without it target,
+generators, monitor and receivers share every core, and a co-located role's CPU lands in the
+target's timing. Comparison plan §4 item 2 and §5's bias check are why it exists.
+
+- **Every role the run has must be named, and the sets must be disjoint.** An unnamed role runs on
+  every core, the pinned ones included, so a run pinning only the target would be published as
+  isolated when it was not. `receivers` is required exactly when the run has receivers, and refused
+  when it has none -- from `--receivers` on a generated run, from the scenario's own list under `-f`.
+- **A CPU the host does not have is refused before the teardown**, read from
+  `/sys/devices/system/cpu/online` (`host_cpus()`), not from this process's affinity. Docker would
+  refuse it too, but only once the previous run's containers were gone. It is the one guard that
+  reads the host, so `bench()` resolves the pin after every command-line guard.
+- **The cpuset is read back after the container is created.** A daemon that dropped it would
+  publish an unpinned run under a pinned name, so a mismatch raises.
+- **Refused under `-r/--repeat`, in both directions.** `--repeat` builds no tester objects and a
+  container's cpuset is fixed at creation, so `--pin -r` would run the generators on whatever cores
+  they already had. The reverse is the quieter one: an unpinned `-r` after a pinned run reuses
+  pinned generators. `pinned_tester_containers()` refuses that before the teardown, which makes it a
+  Docker call after the pure guards. A batch target with `repeat` refuses a pinned test outright, and
+  `check_batch_pin_and_repeat()` refuses a *batch* mixing a pinned test with a repeat target in
+  either order (shuffle and `--resume` decide which runs first). It also checks the host once for
+  pinned generators left behind. Found in review: per-test checks passed it, and the matrix
+  ended at the second test's first cell.
+- **Refused for a remote target** (`-f` only): bgperf2 does not start it, so there is nothing to
+  confine.
+- **Three entry points, not four**, for the reason `--policy-reload-blocks` has three: a cpuset is a
+  property of the containers, not of the scenario, so `config` does not take the flag.
+- **Canonical form.** Role order is fixed and each set is written as its shortest cpulist, so two
+  spellings of one layout give one cell id, one stem and one manifest entry. Commas separate both
+  roles and CPUs; a token with no `=` extends the role before it.
+- **Recorded, unlike the workload keys, under `-f` too.** Both `run` blocks carry `pin` as
+  `{role: cpus}`, or `null` when unpinned: bgperf2 starts the containers whatever wrote the
+  scenario. The stem gets `pin.target0-7.monitor8-9.testers10-15` (commas become `+`), and the cell
+  id and description carry the canonical spec, only when it is set, so every existing id resumes.
+  It is not a CSV column, for the reason `--path-diversity` is not.
+- **What it does not pin:** the controller itself (bgperf2, `mpstat`, the `docker exec` polls) and
+  the kernel's network softirqs still run anywhere. Disjoint sets are only disjoint physical cores
+  where a vCPU is a core, not an SMT sibling; check `lscpu`'s `Thread(s) per core` on the host
+  before relying on it (plan §4 item 2).
+
 ## `--threads N` — worker threads on the target
 
 `--threads N` sets worker threads on the target (`conf['target']['threads']`). Only BIRD reads it

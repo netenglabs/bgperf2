@@ -92,7 +92,7 @@ def _embed(tar_bytes):
 
 
 class Sink(Container):
-    '''The sink's image. Nothing runs it as a monitor yet; see Phase 7a.'''
+    '''The sink's image. `monitor.SinkMonitor` is the class that runs it.'''
 
     CONTAINER_NAME = None
     GUEST_DIR = '/root/config'

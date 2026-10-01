@@ -4482,3 +4482,49 @@ EOF`). The clock offset was 1.1 µs. No benchmark was run.
 **Still open in 7a.** A `Monitor` class over the reader, with `wait_established` from the S lines
 and `MONITOR_CLASSES` probing it; the `--monitor gobgp|sink` dimension at all four entry points,
 the cell id and the stem; receivers as sinks; and checks 1 to 5 on every open-source target.
+
+### Progress on 2026-10-01: a monitor class over the reader (7a, third change set)
+
+`monitor.SinkMonitor` runs the sink as the monitor role: it writes the sink's `start.sh` from the
+same scenario keys the GoBGP monitor's `gobgpd.conf` is written from, waits for the session from the
+log's S lines, and puts `SinkLogReader`'s sample on the run's queue through the same poll loop at
+the same cadence. `MONITOR_CLASSES['sink']` is that class, so `verify` probes the image as what runs
+it. Nothing selects it yet -- that is the `--monitor` dimension, the next change set -- so no
+published number can have moved.
+
+**The role became a mixin, because the obvious subclass reads the wrong version.** The first shape
+considered was `SinkMonitor(Sink, Monitor)`, which would have inherited the loop, the counters and
+the container name in one line. Its MRO is `SinkMonitor → Sink → Monitor → GoBGP → Container`, so
+`Sink.exec_version_cmd()`'s `super()` reaches `GoBGP.exec_version_cmd()` and parses the sink's
+banner as gobgpd's: every run would have recorded the instrument as `UNKNOWN`. That is the
+rustybgp bug exactly, and `verify` exists because it passed every unit test. What the role owns --
+`CONTAINER_NAME`, the poll loop, the failure counters -- moved into `monitor.Instrument`, first in
+each monitor's MRO, and GoBGP's read moved out of the loop into `Monitor.read_sample()`. The loop's
+behaviour is unchanged and every existing monitor test passes against it untouched. A test asserts
+`GoBGP` is not in `SinkMonitor`'s MRO.
+
+**The establishment wait ends where GoBGP's retries.** GoBGP's wait treats a bad payload as "not
+established yet" and retries forever, which is right for an RPC endpoint that is not up yet. For
+the sink only one state is like that: no log line yet, and that is given `START_GRACE_S` (30 s)
+because the sink writes its format line before anything else. A malformed log, an unknown format
+or a sink that stopped writing will not become a session by waiting, so each raises
+`SessionUnavailable` with the sink's stderr -- otherwise the run hangs in "Waiting N seconds for
+monitor", which is how OpenBGPD's entrypoint collision presented. An idle session with fresh
+heartbeats is waited on, as GoBGP's was.
+
+**Two run-time details.** The previous log is removed before the sink starts, because the sink
+appends and under `-r/--repeat` the directory survives: the old run's lines would have read as an
+earlier process of this one, and the gap between runs as the instrument stalling
+(`max_line_gap_ns`). And the sink image has no `ip`; `Container.run()`'s `ip addr` exec answers
+with the error text rather than raising, and the default it falls back to matters only for a
+second address, which a monitor never has. Checked against the real image, not assumed.
+
+**Verification.** 15 new unit tests; the full suite passed. `verify -t sink -t gobgp`: the sink
+probed *as monitor* reports `0.1.0 (src c47b36384df1; gobgp/v4 v4.9.0; go1.25.14)`, clean. Then one
+real `SinkMonitor` on a scratch network, peered with a GoBGP 4.9.0 speaker (driven through
+`Monitor` with the roles swapped): `run()` started it, `wait_established()` returned after 1 s,
+the speaker announced 2000 /24s, and the loop's samples reached `accepted` 2000, `established`,
+`checked`, with 0 failed reads and one sink process. No benchmark was run.
+
+**Still open in 7a.** The `--monitor gobgp|sink` dimension at the entry points, the cell id and the
+stem; receivers as sinks; and checks 1 to 5 on every open-source target.

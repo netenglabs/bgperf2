@@ -57,7 +57,7 @@ from eos import Eos, EosTarget
 from tester import ExaBGPTester, BIRDTester
 from mrt_tester import ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
-from monitor import Monitor, Receiver
+from monitor import Monitor, Receiver, SinkMonitor
 from sink import Sink
 import reclaim
 from convergence import ConvergenceTracker
@@ -101,11 +101,8 @@ BUILDABLE_IMAGES = {
     'flock': Flock,
     'frr_c': FRRoutingCompiled,
     'bgpdump2': Bgpdump2,
-    # The purpose-built monitor (measurement plan Phase 7). Nothing runs it as
-    # the monitor until 7a's `--monitor` dimension lands, and until then there
-    # is no class for `verify` to probe it through but the base. That is a
-    # gap, not the design: the sink's Monitor class must join MONITOR_CLASSES
-    # when it exists, for the reason TESTER_CLASSES does.
+    # The purpose-built monitor (measurement plan Phase 7), probed by `verify`
+    # through MONITOR_CLASSES as the class that runs it.
     'sink': Sink,
 }
 
@@ -134,8 +131,14 @@ TESTER_CLASSES = {
 # generator it became the bottleneck itself. Its image is still built and must
 # still be probed, and through the class that really runs it, for the same
 # reason TESTER_CLASSES exists.
+#
+# The sink is the purpose-built replacement (measurement plan Phase 7). It is
+# probed as `SinkMonitor`, not `Sink`, for the same reason: that class mixes
+# the monitor role into the daemon, and an MRO is exactly where rustybgp's
+# version parser went wrong.
 MONITOR_CLASSES = {
     'gobgp': Monitor,
+    'sink': SinkMonitor,
 }
 
 TARGET_CLASSES = {

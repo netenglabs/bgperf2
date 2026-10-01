@@ -583,9 +583,10 @@ landed on 2026-10-01: the sink exists (`sink/`, `sink.py`), builds as
 GoBGP monitor exactly on one hand-driven session. The second change set, the
 same day, added the host-side log reader (`sink.SinkLogReader`), which turns the
 log into the GoBGP-shaped sample and refuses a log it cannot read as a count.
-Nothing runs the sink as the monitor yet: the `--monitor` dimension, a `Monitor`
-class over the reader, receivers as sinks and the five Docker checks are 7a's
-remaining work. Why a sink rather than a patched GoBGP, and the GoBGP source reading that
+The third added `monitor.SinkMonitor`, the monitor class over that reader, which
+`verify` probes and which held a real session to 2000 prefixes. Nothing selects
+it yet: the `--monitor` dimension, receivers as sinks and the five Docker checks
+are 7a's remaining work. Why a sink rather than a patched GoBGP, and the GoBGP source reading that
 started it, are in the
 [decision log](bgperf2-measurement-decision-log.md#phase-7-replace-the-monitor-with-a-purpose-built-sink).
 

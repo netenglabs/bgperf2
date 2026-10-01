@@ -4174,6 +4174,55 @@ takes no new runs.
   volume. How to remove the confound from the comparison's own MRT runs is an operator
   decision, recorded as Phase 2.6 of `docs/2026-daemon-comparison-plan.md`.
 
+### Finding on 2026-10-01: RustyBGP's MRT memory regression is one commit, `bd40d626` (`bgperf2-nit`)
+
+RustyBGP master (`9eeeebbd50`) peaked at 11.39–11.54 GB on the MRT workload across Blocks 5–7,
+against 2.33–2.37 GB for the 2026-02 build (`0cc685c`). On synthetic the two are close (12.3–12.6
+vs 13.0–16.9 GB), so the regression is specific to MRT.
+
+**Method.** The comparison plan's 1.3 asked for a bisect by build. Each step was a RustyBGP image
+built at one commit with `update rustybgp --version <sha>`, then one Block 5-shaped run:
+`-t rustybgp -g bgpdump2 -n 10 -p 1050000` on `mrt/rib.20260808.0000`, reading `max mem`. **The
+host was not the campaign class**: 8 vCPU / 30 GiB, AMD EPYC 9R45. So every step is compared only
+with controls re-run on the same host, and those controls reproduce Block 5: `0cc685c` 2.47 GB,
+master 11.81 GB. A step counted only if bench did not mark the run FAILED and the monitor received
+the whole table. Two commits mid-way through the Add-Path rework (`478a749`, `6d4fd7e`) reached
+only ~325k prefixes, and one (`66eb53c`) did not compile. All three were skipped. An earlier
+version of the loop read memory alone and briefly took one of them as "good". It was caught and
+discarded before anything was concluded.
+
+**Monthly points**, for the shape of the series:
+
+| build | date | peak memory |
+|---|---|---|
+| `0cc685c` | 02-12 | 2.47 GB |
+| `25920c6` | 03-06 | 2.40 GB |
+| `61227cc` | 03-31 | 11.46 GB |
+| `a24a66d` | 05-31 | 25.08 GB |
+| `a967bf1` | 06-30 | 11.82 GB |
+| `9eeeebb` | 08-21 | 11.81 GB |
+
+**The commit.** `bd40d626` (2026-03-07), "refactor(table): remove global max_send, track all paths
+like Juniper". Its parent `672da04` measured 3.10 GB and then 3.12 GB. `bd40d626` measured 14.61 GB
+and then 14.96 GB. Before it, `RoutingTable::insert`/`remove`/`drop` snapshotted and diffed only the
+top N unfiltered paths of a destination, where N was the largest send-max any peer had asked for.
+That is 1 when no peer negotiates Add-Path TX, as here. After it, they snapshot and diff every
+unfiltered path (`unfiltered_all()`, `table/src/lib.rs`) and emit a `Change` for each affected rank.
+Each peer discards ranks above its own send-max only at egress.
+
+**Mechanism: inferred, not profiled.** On this workload a prefix holds up to ten paths. So the table
+now builds and fans out up to ten times the changes per update, and the peers' queues hold them
+until egress drops all but rank 1. Synthetic corroborates this independently: with one path per
+prefix, "all paths" is "top 1", and synthetic shows no regression. The May peak and the June
+recovery fit the same reading: June includes "wrap ToPeerEvent::NlriChange in Arc to reduce channel
+memory" (`8c7870c`) and "limit path clones to effective_max in initial dump" (`ff6b035`). Neither
+was bisected.
+
+**What it means.** This is a real RustyBGP version regression, and the comparison can publish it
+with its cause. It is a design change (the RIB tracks every path for Add-Path correctness), not a
+bug in bgperf2. It costs only on workloads with path diversity. Reporting it upstream is outward
+action and is left to the operator.
+
 ## Phase 7: Replace the monitor with a purpose-built sink
 
 ### Decision on 2026-09-29: fix the instrument now, and redo the testing under it

@@ -192,7 +192,7 @@ func hexOf(b []byte) string {
 func TestSessionCountsAndEndOfRIB(t *testing.T) {
 	buf := &syncBuffer{}
 	p, done := establish(t, buf)
-	waitFor(t, buf, " established inbound 10.10.0.2 1000 hold=90 four_byte=true extended=false")
+	waitFor(t, buf, " established inbound 1 10.10.0.2 1000 hold=90 four_byte=true extended=false")
 
 	p.send(bgp.NewBGPUpdateMessage(nil, attrs(t, 1000), nlris(t, "10.1.0.0/24", "10.2.0.0/24")))
 	p.send(bgp.NewBGPUpdateMessage(nlris(t, "10.1.0.0/24"), nil, nil))
@@ -203,9 +203,9 @@ func TestSessionCountsAndEndOfRIB(t *testing.T) {
 
 	got := kinds(buf.String())
 	want := []string{
-		"S connected inbound pipe",
-		"S open_sent inbound",
-		"S established inbound 10.10.0.2 1000 hold=90 four_byte=true extended=false",
+		"S connected inbound 1 pipe",
+		"S open_sent inbound 1",
+		"S established inbound 1 10.10.0.2 1000 hold=90 four_byte=true extended=false",
 		"C 0 0 0",
 		// Two UPDATEs before the End-of-RIB: they may or may not coalesce,
 		// so only the last state before it is asserted below.
@@ -221,7 +221,7 @@ func TestSessionCountsAndEndOfRIB(t *testing.T) {
 		"C 1 3 1",
 		"E 1 3",
 		"C 0 0 0",
-		"S down inbound received notification 6/2",
+		"S down inbound 1 received notification 6/2",
 	}
 	for i, w := range wantTail {
 		if tail[i] != w {
@@ -251,7 +251,7 @@ func TestMalformedUpdateResetsTheSession(t *testing.T) {
 		t.Fatalf("the refused UPDATE was not logged:\n%s", log)
 	}
 	got := kinds(log)
-	if got[len(got)-2] != "C 0 0 0" || !strings.HasPrefix(got[len(got)-1], "S down inbound sent notification 3/3") {
+	if got[len(got)-2] != "C 0 0 0" || !strings.HasPrefix(got[len(got)-1], "S down inbound 1 sent notification 3/3") {
 		t.Fatalf("session did not end as a reset:\n%s", log)
 	}
 	// The count held before the reset is in the log, not overwritten.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -104,6 +105,17 @@ func TestEndOfRIBDoesNotRedateThePendingCount(t *testing.T) {
 	l.EndOfRIB(countState{at: 105, accepted: 1000, updates: 51, eor: 1})
 	got := lines(&b)
 	if len(got) != 3 || got[0] != "C 100 1000 50 0" || got[1] != "C 105 1000 51 1" || got[2] != "E 105 1000 51" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFieldLineEndsStayOnOneLine(t *testing.T) {
+	var b bytes.Buffer
+	c := &fakeClock{ns: 42}
+	l := newEventLog(&b, c.now)
+	l.Line('S', "down", "inbound", errors.New("first\nsecond\r\nthird"))
+	got := lines(&b)
+	if len(got) != 1 || got[0] != "S 42 down inbound first second  third" {
 		t.Fatalf("got %q", got)
 	}
 }

@@ -4401,3 +4401,84 @@ cadence; receivers as sinks; and checks 1 to 5 on every open-source target. This
 GoBGP speaker sending 3000 prefixes, not a target sending 1.05M. Nothing here shows the sink keeps
 up at full table, holds 500 sessions' worth of churn, or reads what BIRD, FRR, RustyBGP or OpenBGPD
 send the same way GoBGP did.
+
+### Progress on 2026-10-01: the controller can read the sink's log (7a, second change set)
+
+This change set adds the reader the first one left open: `sink.SinkLog` folds the log's complete
+lines into a count, and `sink.SinkLogReader` reads the file from the host incrementally. Neither
+is called by a run yet, so no published number can have moved. Wiring it in is the next change
+set: a `Monitor` class over the reader, and the `--monitor` dimension that selects it.
+
+**The sample is the one the GoBGP poll produced.** `sample()` returns
+`afi_safis[0].state.accepted` and `state.session_state`, the shape `Monitor.stats()` put on the
+queue. The rest of the log travels under a `sink` key: the count's own date, updates, End-of-RIB,
+process restarts and the largest gap between lines. That keeps 7a's rule of changing one thing at
+a time. The consumers read exactly what they read today, and 7b has the sink's own timestamps
+available when it starts dating events to them. One difference is deliberate: `accepted` is always
+present. GoBGP omitted it until the session had accepted something, and every consumer already
+reads a missing field as zero.
+
+**What it refuses, and why each refusal is not a zero.** A sample raises `SinkLogError` in four
+cases:
+
+- the sink has written nothing yet;
+- its newest line is older than three heartbeats by the host's clock, so the sink has stopped and
+  its last count describes nothing now;
+- the log names a format other than 1;
+- any line is malformed.
+
+The caller (next change set) records a raised sample as a failed read of the instrument, the
+status a `gobgp neighbor -j` that did not answer already has. A malformed line refuses every later
+sample, not just its own, because a skipped count line leaves the count unknown from that point
+on. That is strict on purpose. The alternative publishes a count the reader parsed by guesswork.
+
+**Two consistency checks fall out of the format for free.** An H line restates the current count,
+and an E line restates the count it arrived on. `log.go` guarantees both, because a heartbeat is
+written only when nothing is pending and an End-of-RIB flushes its count first. The reader checks
+each against the last C line it read. While writing the tests, this caught a case nothing else
+can. A log rewritten in place, on the same inode and longer than the saved offset, is resumed
+mid-file, and the reader never sees its new count line. The first replaced-log test hit exactly
+that case without meaning to: `unlink` then `create` got the freed inode back on this filesystem.
+`BlasterLogReader` names this as the one thing stat() cannot see. Here the next heartbeat
+disagrees and the sample is refused rather than carrying the old count. The test now renames over
+the old file to get a distinct inode, and a second test covers the in-place case on purpose.
+
+**The session is tracked by connection, not by direction.** The first draft ended the session on
+any `down` from the held session's direction. `/code-review` found the case that breaks it. The
+sink refuses a second connection while one is established, whatever its direction. A target that
+retries inbound before its old session's hold timer expires logs `S down inbound ...` for the
+loser, and the draft would then report the held session as idle. Every `S` line now carries a
+per-sink connection id after the direction (`S <ns> established inbound 1 ...`). The reader ends
+the session only on a `down` or `dropped` for that id, and refuses a session line without one.
+Format 1 was extended rather than bumped, because nothing had read it yet. Session state is what
+the next change set's establishment wait reads. The count does not depend on it, because the sink
+writes its zero at once when the session drops.
+
+**A V line starts from nothing.** The sink opens its log for append, so a restarted sink writes
+after the old process's last line. Its count is reset to zero, because a new process holds no
+routes. The gap between the two processes is kept in `max_line_gap_ns` as time the instrument was
+not running. That gap is also how a stall that recovered between two polls stays visible: neither
+poll's staleness check would have seen it.
+
+**Two sink-side changes.** One is the connection id above. The other: `emit()` wrote error text
+with `%v`, and an error can contain a line end. The reader takes every line as a record, so the
+second half of such an error would have been a malformed line, and under the rule above it would
+refuse the rest of the run. Line ends in a field now become spaces, and a Go test covers it. The
+source hash moved, so the image was rebuilt (`prepare -f -t sink`, `src c47b36384df1`), with the Go
+tests passing inside the build and `verify` ok.
+
+**Verification.** The Go tests passed under `-race` in `golang:1.25-bookworm`. The Python suite
+passed (2129, including 27 new reader tests): partial last line, bounded reads that resume,
+replaced and rewritten logs, heartbeat gaps, a log that stops growing, each malformed shape, and a
+restart. One real sink was then run with no reachable peer and its log read from the host. The
+reader parsed V, B and H lines and reported `accepted` 0 and `idle`. The newest line was 78 ms old.
+The clock offset from the B line was **1.0 µs**, which is the controller-side form of 7a check 5
+on this host, matching the 1.8 µs the first change set measured from inside. After `docker stop`,
+the next sample raised `no line for 4.241s ... the sink has stopped`. After the connection-id fix,
+two sinks were peered with each other on a scratch network. The reader reported `established` on
+`inbound 1` from the real `S` lines, then `idle` after the peer was stopped (`S ... down inbound 1
+EOF`). The clock offset was 1.1 µs. No benchmark was run.
+
+**Still open in 7a.** A `Monitor` class over the reader, with `wait_established` from the S lines
+and `MONITOR_CLASSES` probing it; the `--monitor gobgp|sink` dimension at all four entry points,
+the cell id and the stem; receivers as sinks; and checks 1 to 5 on every open-source target.

@@ -11,8 +11,11 @@ package main
 //
 //   V <ns> <format> <version...>            first line: format and build
 //   B <ns> <unix_ns>                        the two clocks read together
-//   S <ns> <state> <detail...>              session: connected, open_sent,
-//                                            established, down
+//   S <ns> <state> <direction> <conn> <detail...>
+//                                           session: connected, open_sent,
+//                                           established, down, dropped; <conn>
+//                                           names the connection, since two
+//                                           can share a direction
 //   C <ns> <accepted> <updates> <eor>       the count changed
 //   H <ns> <accepted> <updates> <eor>       heartbeat: still true at <ns>
 //   E <ns> <accepted> <updates>             IPv4 unicast End-of-RIB received
@@ -45,6 +48,8 @@ import (
 )
 
 const logFormat = 1
+
+var lineEnds = strings.NewReplacer("\n", " ", "\r", " ")
 
 // monoBase pairs one direct CLOCK_MONOTONIC read with Go's own clock, read
 // together at start. monotonicNS() then advances from it with time.Since(),
@@ -93,7 +98,11 @@ func (l *eventLog) emit(kind byte, at int64, fields ...any) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%c %d", kind, at)
 	for _, f := range fields {
-		fmt.Fprintf(&b, " %v", f)
+		// A field is free text when it is an error, and an error may carry a
+		// line end. The reader takes every line as a record, so one inside a
+		// field would split this record in two and the second half would be
+		// read as a malformed line of its own.
+		fmt.Fprintf(&b, " %s", lineEnds.Replace(fmt.Sprint(f)))
 	}
 	b.WriteByte('\n')
 	if _, err := io.WriteString(l.w, b.String()); err != nil && l.err == nil {

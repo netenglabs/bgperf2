@@ -26,6 +26,7 @@ import (
 	"net/netip"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/osrg/gobgp/v4/pkg/packet/bgp"
@@ -76,6 +77,10 @@ type conn struct {
 	r        *bufio.Reader
 	wmu      sync.Mutex
 	outbound bool // the sink initiated it
+	// id names this connection on every S line. Direction alone does not:
+	// a second inbound connection that loses to the held one is logged as
+	// `down inbound` too, and a reader must not end the session on it.
+	id       uint64
 	remoteID netip.Addr
 	closed   bool // set under sink.mu when collision resolution drops it
 	// body is reused for every message: one allocation per connection rather
@@ -226,6 +231,7 @@ type sink struct {
 	mu      sync.Mutex
 	pending []*conn // in OpenConfirm
 	active  *conn   // Established
+	connIDs atomic.Uint64
 }
 
 func idValue(a netip.Addr) uint32 {
@@ -311,7 +317,7 @@ func (s *sink) drop(c *conn, reason string) {
 	c.send(bgp.NewBGPNotificationMessage(bgp.BGP_ERROR_CEASE,
 		bgp.BGP_ERROR_SUB_CONNECTION_COLLISION_RESOLUTION, nil))
 	c.nc.Close()
-	s.log.Line('S', "dropped", direction(c), reason)
+	s.log.Line('S', "dropped", direction(c), c.id, reason)
 }
 
 func direction(c *conn) string {
@@ -324,10 +330,10 @@ func direction(c *conn) string {
 // serve runs one connection to the end. It returns when the connection
 // closes, for whatever reason, having logged why.
 func (s *sink) serve(nc net.Conn, outbound bool) {
-	c := &conn{nc: nc, r: bufio.NewReaderSize(nc, 1<<20), outbound: outbound}
+	c := &conn{nc: nc, r: bufio.NewReaderSize(nc, 1<<20), outbound: outbound, id: s.connIDs.Add(1)}
 	defer nc.Close()
 	defer s.forget(c)
-	s.log.Line('S', "connected", direction(c), nc.RemoteAddr().String())
+	s.log.Line('S', "connected", direction(c), c.id, nc.RemoteAddr().String())
 
 	err := s.run(c)
 	var se *sessionError
@@ -337,14 +343,14 @@ func (s *sink) serve(nc net.Conn, outbound bool) {
 	if s.wasDropped(c) {
 		return // already logged by drop()
 	}
-	s.log.Line('S', "down", direction(c), err)
+	s.log.Line('S', "down", direction(c), c.id, err)
 }
 
 func (s *sink) run(c *conn) error {
 	if err := c.send(s.openMessage()); err != nil {
 		return err
 	}
-	s.log.Line('S', "open_sent", direction(c))
+	s.log.Line('S', "open_sent", direction(c), c.id)
 	m, err := c.read(openWait, bgp.BGP_MAX_MESSAGE_LENGTH, nil)
 	if err != nil {
 		return err
@@ -383,7 +389,7 @@ func (s *sink) run(c *conn) error {
 		return notifyErr(bgp.BGP_ERROR_CEASE, bgp.BGP_ERROR_SUB_CONNECTION_COLLISION_RESOLUTION, nil,
 			"connection collision: another connection is established")
 	}
-	s.log.Line('S', "established", direction(c), neg.remoteID, neg.remoteAS,
+	s.log.Line('S', "established", direction(c), c.id, neg.remoteID, neg.remoteAS,
 		fmt.Sprintf("hold=%d four_byte=%t extended=%t", neg.holdTime, neg.fourByte, neg.extended))
 	return s.holdSession(c, neg)
 }

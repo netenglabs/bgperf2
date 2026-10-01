@@ -19,7 +19,9 @@ every byte of it inside the hash.
 import base64
 import hashlib
 import io
+import os
 import re
+import time
 import tarfile
 
 from base import *
@@ -168,3 +170,276 @@ FROM {runtime_image}
 COPY --from=build /bgperf-sink /usr/local/bin/bgperf-sink
 '''.format(**v)
         super(Sink, cls).build_image(force, tag, nocache=nocache)
+
+
+# The log format `sink/log.go` writes. A sink that names another is refused
+# rather than read: a reader that half-understood a new format would publish a
+# count it parsed by guesswork.
+SINK_LOG_FORMAT = 1
+
+# The sink's own `-heartbeat` default. A heartbeat follows any second in which
+# nothing else was written, so a log with no line for several of them is a
+# sink that has stopped, not one with nothing to say.
+SINK_HEARTBEAT_S = 1
+SINK_STALE_HEARTBEATS = 3
+
+
+class SinkLogError(RuntimeError):
+    '''The sink's log cannot be read as a count.
+
+    Raised for a log that is malformed, inconsistent with itself, of an unknown
+    format, or silent past its heartbeat. The caller records the poll as a
+    failed read of the instrument -- the same status a `gobgp neighbor -j` that
+    did not answer has -- and never as a sink holding nothing.
+    '''
+
+
+class SinkLog:
+    '''What a sink's log says so far, folded from its complete lines.
+
+    The count is the last C line's; H and E lines restate it and are checked
+    against it rather than trusted over it. A V line opens a new sink process,
+    and a process that starts holds nothing, so it resets everything the
+    previous one reported -- the log is opened for append, and a restarted sink
+    writes after the old one's last line.
+
+    The session is established from `S established <direction> <conn>` until
+    an `S down` or `S dropped` for that same connection. Direction is not
+    enough: a second connection that fails or loses to the held one is logged
+    `down` too, from either direction, and must not end the session the other
+    connection holds. The count does not depend on this: the sink writes its
+    zero at once when the session goes.
+    '''
+
+    def __init__(self):
+        self.malformed = []
+        self.malformed_lines = 0
+        self.lines = 0
+        self.processes = 0
+        # The largest distance between the dates of two consecutive lines. A
+        # sink that stalled and recovered between two polls is invisible to
+        # the staleness check at either poll; this is where it shows.
+        self.max_line_gap_ns = None
+        self.last_line_ns = None
+        self._reset_process()
+
+    def _reset_process(self):
+        self.version = None
+        self.boot_monotonic_ns = None
+        self.boot_realtime_ns = None
+        self.accepted = 0
+        self.updates = 0
+        self.eor = 0
+        self.count_ns = None
+        self.eor_ns = None
+        self.session = None
+        self.sessions_established = 0
+        self.refused_messages = 0
+        self.last_refused = None
+
+    def _bad(self, line, why):
+        self.malformed_lines += 1
+        # Bounded, like every sample this tool keeps of a log that may run away.
+        if len(self.malformed) < 5:
+            self.malformed.append('{0}: {1!r}'.format(why, line[:200]))
+
+    def feed(self, text):
+        for line in text.split('\n'):
+            if line:
+                self.feed_line(line)
+
+    def feed_line(self, line):
+        self.lines += 1
+        parts = line.split(' ')
+        if len(parts) < 2 or len(parts[0]) != 1:
+            return self._bad(line, 'not a sink log line')
+        kind = parts[0]
+        try:
+            ns = int(parts[1])
+        except ValueError:
+            return self._bad(line, 'timestamp is not an integer')
+        if kind != 'V' and self.processes == 0:
+            return self._bad(line, 'line before the format line')
+
+        if kind == 'V':
+            if len(parts) < 3 or parts[2] != str(SINK_LOG_FORMAT):
+                return self._bad(line, 'log format is not {0}'.format(
+                    SINK_LOG_FORMAT))
+            self.processes += 1
+            self._reset_process()
+            self.version = ' '.join(parts[3:]) or None
+            # A new process's clock is the same clock, so the gap from the old
+            # one's last line is real time the instrument was not running.
+        elif kind == 'B':
+            try:
+                self.boot_realtime_ns = int(parts[2])
+            except (IndexError, ValueError):
+                return self._bad(line, 'B line without a realtime reading')
+            self.boot_monotonic_ns = ns
+        elif kind in 'CHE':
+            want = 5 if kind != 'E' else 4
+            if len(parts) != want:
+                return self._bad(line, '{0} line has {1} fields, not {2}'.format(
+                    kind, len(parts), want))
+            try:
+                fields = [int(f) for f in parts[2:]]
+            except ValueError:
+                return self._bad(line, 'non-integer count')
+            if kind == 'C':
+                self.accepted, self.updates, self.eor = fields
+                self.count_ns = ns
+            elif kind == 'H':
+                if fields != [self.accepted, self.updates, self.eor]:
+                    return self._bad(line, 'heartbeat disagrees with the last count')
+            else:
+                if fields != [self.accepted, self.updates]:
+                    return self._bad(line, 'End-of-RIB disagrees with the last count')
+                self.eor_ns = ns
+        elif kind == 'S':
+            state = parts[2] if len(parts) > 2 else ''
+            if state in ('established', 'down', 'dropped'):
+                if len(parts) < 5:
+                    return self._bad(line, 'session line without a connection')
+                conn = parts[3] + ' ' + parts[4]
+                if state == 'established':
+                    self.session = conn
+                    self.sessions_established += 1
+                elif conn == self.session:
+                    self.session = None
+        elif kind == 'M':
+            self.refused_messages += 1
+            self.last_refused = ' '.join(parts[2:])[:200]
+        else:
+            return self._bad(line, 'unknown line kind {0!r}'.format(kind))
+
+        if self.last_line_ns is not None:
+            gap = ns - self.last_line_ns
+            if self.max_line_gap_ns is None or gap > self.max_line_gap_ns:
+                self.max_line_gap_ns = gap
+        # Lines are written in order but dated by the writer, and a count is
+        # dated to its last UPDATE rather than to its write; the latest date
+        # seen is what the next gap is measured from.
+        if self.last_line_ns is None or ns > self.last_line_ns:
+            self.last_line_ns = ns
+
+    def clock_offset_ns(self, host_realtime_ns, host_monotonic_ns):
+        '''How far the sink's monotonic clock is from the host's, in ns.
+
+        The B line reads the sink's two clocks together; the arguments are
+        the host's two, read together. CLOCK_REALTIME is one clock for every
+        namespace, so the difference of the two offsets is how far apart the
+        two monotonic clocks are -- zero, to within the reads' spacing and any
+        realtime step between them, when the container shares the host's
+        clock as the controller assumes. None before a B line has been read.
+        '''
+        if self.boot_monotonic_ns is None:
+            return None
+        return ((self.boot_realtime_ns - self.boot_monotonic_ns)
+                - (host_realtime_ns - host_monotonic_ns))
+
+    def sample(self, now_ns,
+               stale_after_ns=SINK_STALE_HEARTBEATS * SINK_HEARTBEAT_S * 10**9):
+        '''The count as a monitor sample, shaped as `gobgp neighbor -j` was.
+
+        `afi_safis[0].state.accepted` is the only field any consumer reads, and
+        it is always present: the sink has no "not yet" in which GoBGP omitted
+        it. The rest of what the log says travels under `sink`.
+
+        `now_ns` is the host's CLOCK_MONOTONIC when the sample was taken. A
+        log whose newest line is older than `stale_after_ns` by that clock is a
+        sink that has stopped writing -- it heartbeats every quiet second -- and
+        its last count is not a count of anything now.
+        '''
+        if self.malformed_lines:
+            raise SinkLogError('the sink log has {0} malformed line(s): {1}'.format(
+                self.malformed_lines, '; '.join(self.malformed)))
+        if self.processes == 0 or self.last_line_ns is None:
+            raise SinkLogError('the sink has not written its log yet')
+        silent = now_ns - self.last_line_ns
+        if silent > stale_after_ns:
+            raise SinkLogError(
+                'the sink log has had no line for {0:.3f}s, past {1:.3f}s of '
+                'heartbeats: the sink has stopped'.format(
+                    silent / 1e9, stale_after_ns / 1e9))
+        return {
+            'afi_safis': [{'state': {'accepted': self.accepted}}],
+            'state': {'session_state':
+                      'established' if self.session else 'idle'},
+            'sink': {
+                'count_ns': self.count_ns,
+                'updates': self.updates,
+                'eor': self.eor,
+                'eor_ns': self.eor_ns,
+                'processes': self.processes,
+                'sessions_established': self.sessions_established,
+                'refused_messages': self.refused_messages,
+                'max_line_gap_ns': self.max_line_gap_ns,
+            },
+        }
+
+
+class SinkLogReader:
+    '''Read a sink's log from the host, incrementally.
+
+    The sink appends to a file in its bind-mounted directory, so a read costs
+    no `docker exec`. It follows `bgpdump2.BlasterLogReader`: only what was
+    appended since the last read is consumed, a read stops at the last complete
+    line because the sink is still writing, and a log replaced underneath it
+    -- a different inode, or one shorter than the saved offset -- starts over
+    rather than carrying the old log's count onto a new one. What stat() cannot
+    see is a log rewritten in place to past the saved offset; the reader then
+    resumes mid-file, and it is the next heartbeat or End-of-RIB, restating a
+    count this reader never read, that refuses the sample.
+
+    An unreadable log raises, for the reason `BlasterLogReader.read()` gives:
+    failing to ask the instrument is not the instrument answering zero.
+    '''
+
+    READ_BLOCK = 1 << 16
+    READ_MAX = 4 << 20
+
+    def __init__(self, path):
+        self.path = path
+        self._pos = 0
+        self._log_id = None
+        self.log = SinkLog()
+
+    def read(self):
+        '''Consume whatever has been appended, and return the `SinkLog`.'''
+        st = os.stat(self.path)
+        log_id = (st.st_dev, st.st_ino)
+        if st.st_size < self._pos or (self._log_id is not None
+                                      and log_id != self._log_id):
+            self._pos = 0
+            self.log = SinkLog()
+        self._log_id = log_id
+        if st.st_size <= self._pos:
+            return self.log
+        consumed = 0
+        with open(self.path, 'rb') as f:
+            while consumed < self.READ_MAX:
+                f.seek(self._pos)
+                block = f.read(min(self.READ_BLOCK, self.READ_MAX - consumed))
+                if not block:
+                    break
+                end = block.rfind(b'\n')
+                if end < 0:
+                    if len(block) < self.READ_BLOCK:
+                        break       # trailing partial line; wait for more
+                    # A whole block with no newline is not a sink line; it is
+                    # skipped as malformed rather than re-read forever.
+                    self.log._bad(block[:200].decode('utf-8', 'replace'),
+                                  'a block with no line end')
+                    self._pos += len(block)
+                    consumed += len(block)
+                    continue
+                self.log.feed(block[:end].decode('utf-8', 'replace'))
+                self._pos += end + 1
+                consumed += end + 1
+        return self.log
+
+    def sample(self, now_ns=None, **kwargs):
+        '''Read, then return the count as a monitor sample (`SinkLog.sample`).'''
+        if now_ns is None:
+            now_ns = time.monotonic_ns()
+        return self.read().sample(now_ns, **kwargs)

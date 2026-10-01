@@ -157,26 +157,35 @@ Code changes, verified by the test suite and by `-n1 -p1` smoke runs.
    | RustyBGP | 2026-02, master | — (see Phase 1.3) |
 
    GoBGP is not in the matrix (Phase 0).
-6. **Decision (operator): the MRT workload's NO_EXPORT peer (new, from Phase 1.1).** On the
-   pinned RIB, one of the ten injected peers (AS 37100) tags every route NO_EXPORT. So each
-   daemon exports a different share of the table: BIRD and OpenBGPD 1,056,779, FRR ~959k
-   and varying by arrival order, RustyBGP the whole 1,081,178. Options:
-   - **Keep it, and say so.** Within-daemon comparisons stand. Cross-daemon MRT timing is
-     published with the export volume beside it, never as like-for-like.
-   - **Skip that peer index when choosing injectors.** The workload changes, so the
-     comparison's MRT rows no longer match the timing-validation campaign's except through
-     a bridge.
-   - **Strip NO_EXPORT at the injector.** This needs a bgpdump2 change and makes the replay
-     less faithful to the RIB.
-   - **Set `bgp bestpath compare-routerid` on FRR.** FRR would then match BIRD and
-     OpenBGPD deterministically. It is a non-default FRR config, and it does not help
-     RustyBGP.
+6. ~~**Decision (operator): the MRT workload's NO_EXPORT peer (new, from Phase 1.1).**~~
+   **Answered by the operator 2026-10-01: keep it, with obligations.** On the pinned RIB, one of
+   the ten injected peers (AS 37100) tags every route NO_EXPORT. So each daemon exports a
+   different share of the table: BIRD and OpenBGPD 1,056,779, FRR ~959k and varying by
+   arrival order, RustyBGP the whole 1,081,178. Keeping the peer is the only option that
+   leaves those differences visible in the data, and the only reversible one. Skipping the
+   peer or stripping the community would erase RustyBGP's apparent NO_EXPORT deficiency and
+   FRR's tie-break difference rather than resolve them. `compare-routerid` would change the
+   daemon under test. The obligations that make "say so" enforced rather than promised:
+   1. **Every MRT cell is published with its export volume beside its time**
+      (`bgperf2-0l7`, blocks Phase 3).
+   2. **Every behavioural difference and deficiency goes in §8's ledger**, with its evidence
+      and its effect on the numbers. The publication carries the ledger.
+   3. **RustyBGP's NO_EXPORT behaviour is confirmed from source** before it is published as a
+      deficiency (`bgperf2-9su`, blocks Phase 3).
+   4. **Triggers to revisit.** If cross-daemon MRT claims are to be published, or if the sink
+      monitor shows FRR's run-to-run volume wobble moving its timing by more than the
+      published resolution, add a "peer skipped" workload (index 14, AS 3130, 1,059,817
+      routes, no NO_EXPORT) **beside** this one, never in place of it.
+
+   The options not taken were: skip the peer, strip NO_EXPORT at the injector, set
+   `bgp bestpath compare-routerid` on FRR, and (not in the original list) peer the monitor
+   over iBGP.
 
 **Exit:** tests green; a pinned smoke run and an unpinned smoke run both complete, with distinct
 artifact names; all matrix images verify clean.
 
 Progress: item 1 answered by the operator 2026-09-29 (change the monitor; the work is measurement
-plan Phase 7). No other Phase 2 work has started.
+plan Phase 7). Item 6 answered by the operator 2026-10-01 (keep the NO_EXPORT peer, with obligations). No other Phase 2 work has started.
 
 ---
 
@@ -282,6 +291,36 @@ doubles cores as well. Its CPU is expected to be the same EPYC 9R14; confirm wit
 the first row. If the CPU differs, it is a different host class and the timing rows do not
 compare.
 
+## 8. Known differences and deficiencies between daemons
+
+The comparison publishes this ledger with its numbers. Each entry is a behaviour in which
+the daemons differ, or a capability one of them lacks, together with its evidence and what
+it does to the published figures. An entry is added when a difference is found, not when it
+is explained. "Inferred" means the evidence is a count or a reading of config, and that a
+named check would confirm it.
+
+1. **NO_EXPORT on eBGP export.** BIRD, OpenBGPD and FRR withhold NO_EXPORT routes from eBGP
+   neighbours, as RFC 1997 requires. **RustyBGP appears not to**: it exports the whole
+   1,081,178-prefix MRT union. *Inferred* from that count; `bgperf2-9su` confirms it from
+   source. Effect: on the MRT workload, RustyBGP exports ~24k more prefixes than BIRD and
+   OpenBGPD. Decision log "Finding on 2026-10-01".
+2. **Tie-break between otherwise-equal eBGP paths.** FRR prefers the oldest path by default.
+   BIRD and OpenBGPD prefer the lower router ID; that is *inferred* from a simulation that
+   predicts their export count to within 13 prefixes. Effect: on the MRT workload, FRR
+   exports ~97k fewer prefixes than BIRD and OpenBGPD, and the amount varies from run to run
+   (956,893–961,057 across 15 rows), because which path is oldest depends on arrival order.
+   Same source.
+3. **What a target can report about its own table.** BIRD reports `best_paths`,
+   `imported_paths` and `exported_to_monitor`. FRR reports the last two and withholds
+   `best_paths` deliberately (`docs/invariants/target-state.md`). OpenBGPD and RustyBGP
+   report none of the three (`Target.get_table_witness()` returns `None`). Effect: their
+   convergence is judged on the monitor alone, and their export volume is known only as the
+   monitor's count.
+4. **FRR runs with `log stdout debug`**, which bgperf2 sets so End-of-RIB can be read from
+   the log (`frr.py` `write_config()`). No other daemon is configured to log at debug level.
+   `bgpd.log` passes 1 GB on a full-table run. The CPU and I/O this costs FRR is part of
+   every FRR row and **has not been measured**.
+
 ---
 
 ## Tracking
@@ -289,4 +328,5 @@ compare.
 Epic `bgperf2-0y5`. Phases, each blocked by the one before: Phase 0 `bgperf2-0y5.1` (also blocked by
 `bgperf2-es0` and `bgperf2-0ma`), Phase 1 `bgperf2-0y5.2`, Phase 2 `bgperf2-0y5.3`, Phase 3 `bgperf2-0y5.4`,
 Phase 4 `bgperf2-0y5.5`. Phase 3 is also blocked by measurement plan Phase 7b (`bgperf2-8gg.10.2`), and
-it carries Phase 7c (`bgperf2-8gg.10.3`) out in its first block.
+it carries Phase 7c (`bgperf2-8gg.10.3`) out in its first block. Phase 3 is also blocked by
+`bgperf2-9su` and `bgperf2-0l7`, two of the obligations of Phase 2.6.

@@ -452,7 +452,11 @@ invocation. Nothing about them has been condensed and the plan documents they dr
 | `continue the 2026 daemon comparison` | `2026-daemon-comparison` | `docs/2026-daemon-comparison-plan.md`, epic `bgperf2-0y5`; `scripts/check_plan_beads.py` checks the plan and its beads agree before any work |
 
 All five have one shape: inspect durable state first, never run two things concurrently, complete
-exactly one reviewable unit, then stop and tell the user to use the same prompt again.
+exactly one reviewable unit, then stop and tell the user to use the same prompt again. The daemon
+comparison is the one exception, by the operator's choice on 2026-10-01. It may run independent
+items in parallel through subagents, each still its own commit and record, and never while
+anything shares the host with a benchmark. Its skill's "Delegation" section says which model does
+which job and what never leaves the main session.
 
 **The campaign host is a class, not a machine**, and that is cross-cutting enough to state here: 16
 vCPU / 61.44 GiB AMD EPYC 9R14 (`m7a.4xlarge`), an EC2 spot instance reclaimed without warning, of

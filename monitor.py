@@ -471,6 +471,19 @@ exec {binary} -local-as {local_as} -peer-as {peer_as} -router-id {router_id} \\
         # and the clock it is judged by are the same instant.
         return self.reader.sample(now_ns=int(sampled_at * 1e9))
 
+    def log_evidence(self):
+        '''`SinkLog.evidence()` for the whole log, read afresh.
+
+        A reader of its own rather than `self.reader`: the poll thread may
+        still be inside a read of that one when the run finishes, and two
+        threads advancing one offset would each skip what the other consumed.
+        '''
+        try:
+            log = SinkLogReader(self.reader.path).read_all()
+        except OSError as e:
+            return {'unreadable': '{0}: {1}'.format(type(e).__name__, e)}
+        return log.evidence(time.time_ns(), time.monotonic_ns())
+
 
 class SinkReceiver(SinkMonitor):
     '''An export receiver that is a sink (measurement plan 7a).

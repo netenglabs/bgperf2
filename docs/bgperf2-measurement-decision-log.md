@@ -4669,3 +4669,84 @@ passed on the pinned digest. `sink_parity_check.py` at its default 3000 prefixes
 step: 3000 → 2000 → 2000, with 3000, 1000 and 500 UPDATEs at the sink, and a clock offset of
 1.7 µs. At 500 prefixes after a `--keep` run it agreed again, with a 1.2 µs offset. No benchmark
 was run.
+
+### Progress on 2026-10-01: checks 1, 2, 4 and 5 on a synthetic cell, every target (7a, seventh change set)
+
+This change set adds three things the checks need, then runs them on every open-source target at
+10 × 50,000 (synthetic, BIRD generator), once with each instrument
+(`benchmarks/2026-monitor-checks-synth.yaml`, results in `results/2026/phase7a-checks/synth/`).
+
+**What the run now keeps about the instrument.** A sink run's `instrument.sink_log` section of
+the events artifact holds what the sink's own log says when the run ends: processes, lines,
+malformed lines, the final count, updates and End-of-RIB, sessions established and **sessions
+lost**, refused messages, the largest gap between two lines, and the clock offset from the B line.
+Before this, that evidence lived only in `sink.log`, and the next run overwrote it. A GoBGP run's
+document is unchanged. Checks 3 and 5 are read from here, not from a log that has been
+overwritten.
+
+**Two scripts read it.** `scripts/monitor_pair_review.py` pairs `<stem>` with
+`<stem>_mon-sink` and fails a pair when any of these holds:
+
+- the two runs ended differently;
+- their final counts differ;
+- their receivers' counts differ;
+- the sink lost a session, restarted, wrote a malformed line or refused a message;
+- the sink's clock was more than 1 ms from the host's.
+
+It also fails a cell that has only one of the two artifacts. `scripts/container_cpu_peak.py` reads
+each container's cgroup `cpu.stat` from the host once a second. It reports peak and mean CPU per
+container instance on `max cpu %`'s scale (100% is one core), and it costs no `docker exec`. Nothing
+in a run samples the monitor's CPU, so check 4 needs this.
+
+**Results.** Every pair passed.
+
+| target | final count, GoBGP / sink | sink sessions lost | clock offset |
+|---|---|---|---|
+| BIRD 2.19.2 | 500,000 / 500,000 | 0 | 1.9 µs |
+| BIRD 3.3.2 | 500,000 / 500,000 | 0 | 1.6 µs |
+| FRR 10.7 | 500,000 / 500,000 | 0 | 1.6 µs |
+| RustyBGP default | 500,000 / 500,000 | 0 | 1.3 µs |
+| OpenBGPD 9.3 | 500,000 / 500,000 | 0 | 1.2 µs |
+
+`monitor (s)` was 1 for all ten runs. That means the sink established with every open-source
+target, which is check 1. Against OpenBGPD and FRR it does so with the connect schedule the fourth
+change set copied from GoBGP. No sink process restarted, no line was malformed and no message was
+refused. The largest gap between two lines was 1.01–1.02 s, the heartbeat itself.
+
+**Check 4, CPU, synthetic cell.** The GoBGP monitor peaked at **254.9%** in the RustyBGP cell and
+**232.8%** in the OpenBGPD cell. The sampler started late and missed the GoBGP monitor's BIRD and
+FRR cells, which is how its first-cell defect (below) was found. The sink monitor peaked at
+**2.9–15.1%** in the BIRD, FRR and RustyBGP cells and **40.5%** in the OpenBGPD cell. These are 1 s
+averages on one pass, not a distribution. The comparison against the old 380% belongs with the
+MRT cell, which is where that 380% was measured.
+
+**What this does not show.** `convergence_s` was lower with the sink in every pair, by about 1 s on
+BIRD 2.19.2, FRR and RustyBGP. That is one pass of each, inside a 1 s poll. It is the bridge
+block's question (7c), asked over repetitions, and nothing here may be read as an answer to it.
+
+**What review changed.** `/code-review` found three defects, and all three were fixed:
+
+- `log_evidence()` used one bounded read and would have described only the first 4 MiB of a long
+  run's log. `SinkLogReader.read_all()` now reads to the last complete line.
+- The CPU sampler stopped at the first poll with none of its containers running. A batch
+  recreates every container between cells, so that first empty poll is only the gap between two
+  of them. It now stops after `--gone-after` (60 s) with nothing running.
+- `sessions_lost` was reset by a sink restart. A second review then found the rest of the
+  same defect: `sessions_established` and the refused-message count still reset per process, so
+  a session that was lost and came back after a restart read as "established 1, lost 1". All
+  three now count over the whole log, and a session still held when its process ends counts as
+  lost. The pair verdict was right either way, because `processes != 1` fails it, but the
+  published counts were not.
+
+A second change came from planning the MRT checks. The pair review had required both runs to
+converge. FRR's MRT cell never reaches its check-point with either instrument (it exports ~9% less
+of the table, `bgperf2-cw6`). The review now requires both runs to end the same way and compares
+the count they ended on. For a failed run that count comes from the last `target_table` sample,
+never from the first monitor event, and where there is none it is unknown, not guessed.
+
+**Verification.** 22 new unit tests; the full suite passed (2198). The ten runs above. The
+artifacts were written by the code before the `read_all` fix, and every sink log was far below
+4 MiB. No benchmark was run.
+
+**Still open in 7a.** Check 2 on the 10-peer 1.05M MRT cell, check 3 at 500 peers and at full
+table, and check 4 at full table.

@@ -1,0 +1,50 @@
+# Measurement plan 7a, Docker checks 1, 2 and 5 on a synthetic cell: every
+# open-source target, measured once with the GoBGP monitor and once with the
+# sink. Read with `scripts/monitor_pair_review.py <results-dir>`.
+#
+# This compares the instruments' counts and sessions, not their timing: one
+# pass of each says nothing about which is faster (that is 7c, the bridge
+# block, over repetitions). 10 x 50,000 is the core synthetic matrix's smallest
+# cell, large enough that the target sends many UPDATEs per session and small
+# enough to run on the development host.
+#
+# The two tests differ only in `monitor`, so each cell's artifacts are named
+# `<stem>` and `<stem>_mon-sink` and pair on the stem.
+tests:
+  -
+     name: 2026-monitor-checks-synth-gobgp
+     neighbors: [10]
+     prefixes: [50_000]
+     filter_test: [None]
+     targets: &targets
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2
+         tester_type: bird
+       -
+         name: frr_c
+         version: '10.7'
+         label: frr_c 10.7
+         tester_type: bird
+       -
+         name: rustybgp
+         label: rustybgp default
+         tester_type: bird
+       -
+         name: openbgp
+         version: '9.3'
+         label: openbgp 9.3
+         tester_type: bird
+  -
+     name: 2026-monitor-checks-synth-sink
+     monitor: sink
+     neighbors: [10]
+     prefixes: [50_000]
+     filter_test: [None]
+     targets: *targets

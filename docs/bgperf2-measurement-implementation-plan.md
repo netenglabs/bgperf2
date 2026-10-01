@@ -588,8 +588,12 @@ The third added `monitor.SinkMonitor`, the monitor class over that reader, which
 `--monitor gobgp|sink` (batch: `monitor:`), named in the stem, the cell id and
 both `run` blocks only for the sink, and made the sink's connect schedule
 GoBGP's, which a passive BIRD had shown to move `monitor (s)` by ~8 s. The fifth
-made the export receivers sinks under `--monitor sink` (`SinkReceiver`). The five
-Docker checks are 7a's remaining work. Why a sink rather than a patched GoBGP, and the GoBGP source reading that
+made the export receivers sinks under `--monitor sink` (`SinkReceiver`). The
+sixth kept the Go race run and the GoBGP parity check as scripts. The seventh
+records the sink's own log in each run's artifact and ran checks 1, 2, 4 and 5
+on a synthetic cell for every open-source target: all five pairs matched. Check
+2 on the MRT cell, check 3 at 500 peers and at full table, and check 4 at full
+table are 7a's remaining work. Why a sink rather than a patched GoBGP, and the GoBGP source reading that
 started it, are in the
 [decision log](bgperf2-measurement-decision-log.md#phase-7-replace-the-monitor-with-a-purpose-built-sink).
 

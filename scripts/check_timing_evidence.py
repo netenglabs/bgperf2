@@ -1627,8 +1627,10 @@ def check_calibration(artifact, expect_limiting, expect_mbit, tolerance):
 def check_instrument(artifact):
     """Did the run's own instruments read cleanly?
 
-    `bench()` publishes an `instrument` section only when a sampler failed a
-    read, and both samplers read `gobgp neighbor -j` -- whose errors come back
+    `bench()` publishes an `instrument` section when a sampler failed a read
+    -- and, under `--monitor sink`, always, with the sink's own `sink_log`,
+    which this check does not read (`scripts/monitor_pair_review.py` does).
+    Both GoBGP samplers read `gobgp neighbor -j` -- whose errors come back
     JSON-encoded and used to kill the reading thread outright. They survive one
     now, which is what keeps a run alive; it is not what makes the run
     comparable.

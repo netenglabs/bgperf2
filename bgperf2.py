@@ -3972,7 +3972,9 @@ def sampler_read_failures(target, monitor):
     with a silent gap in exactly the evidence the verdict rests on.
 
     Absent when both read cleanly, so an ordinary run keeps the document it has
-    always written.
+    always written -- except under `--monitor sink`, where the sink's own log
+    is read once more at the end (`SinkMonitor.log_evidence()`) and published
+    as `sink_log`. A GoBGP run has no such log and its document is unchanged.
     """
     section = {}
     target_failures = getattr(target, 'neighbor_sample_failures', 0) or 0
@@ -3985,6 +3987,9 @@ def sampler_read_failures(target, monitor):
         section['monitor'] = {
             'failed_reads': monitor_failures,
             'last_error': getattr(monitor, 'monitor_sample_last_error', None)}
+    log_evidence = getattr(monitor, 'log_evidence', None)
+    if log_evidence is not None:
+        section['sink_log'] = log_evidence()
     return section or None
 
 

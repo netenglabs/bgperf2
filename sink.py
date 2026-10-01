@@ -221,6 +221,17 @@ class SinkLog:
         # the staleness check at either poll; this is where it shows.
         self.max_line_gap_ns = None
         self.last_line_ns = None
+        # Held sessions that ended, by `down` or `dropped` on the connection
+        # the session was on; a lost collision is not one. Counted over the
+        # whole log, not per process: a restart must not erase the loss that
+        # came before it.
+        self.sessions_lost = 0
+        # Over the whole log for the same reason, so the three are read on
+        # one scope: established 2, lost 1 means a session came back.
+        self.sessions_established = 0
+        self.refused_messages = 0
+        self.last_refused = None
+        self.session = None
         self._reset_process()
 
     def _reset_process(self):
@@ -232,10 +243,11 @@ class SinkLog:
         self.eor = 0
         self.count_ns = None
         self.eor_ns = None
+        if self.session is not None:
+            # A process that ends holds nothing, so a session it held when
+            # the next one started was lost with it.
+            self.sessions_lost += 1
         self.session = None
-        self.sessions_established = 0
-        self.refused_messages = 0
-        self.last_refused = None
 
     def _bad(self, line, why):
         self.malformed_lines += 1
@@ -306,6 +318,7 @@ class SinkLog:
                     self.sessions_established += 1
                 elif conn == self.session:
                     self.session = None
+                    self.sessions_lost += 1
         elif kind == 'M':
             self.refused_messages += 1
             self.last_refused = ' '.join(parts[2:])[:200]
@@ -336,6 +349,34 @@ class SinkLog:
             return None
         return ((self.boot_realtime_ns - self.boot_monotonic_ns)
                 - (host_realtime_ns - host_monotonic_ns))
+
+    def evidence(self, host_realtime_ns, host_monotonic_ns):
+        '''What the log says about the instrument itself, for the artifact.
+
+        The run's samples carry the count; this carries what would make the
+        count doubtful. A session that was lost and came back, a sink process
+        that restarted (`processes` above 1), a stall between two lines, a
+        monotonic clock that is not the host's, and a malformed line are each
+        invisible in a count that ended right. 7a's checks 3 and 5 read them
+        from here, rather than from a log the next run overwrites.
+        '''
+        return {
+            'version': self.version,
+            'processes': self.processes,
+            'lines': self.lines,
+            'malformed_lines': self.malformed_lines,
+            'malformed': list(self.malformed),
+            'accepted': self.accepted,
+            'updates': self.updates,
+            'eor': self.eor,
+            'sessions_established': self.sessions_established,
+            'sessions_lost': self.sessions_lost,
+            'refused_messages': self.refused_messages,
+            'last_refused': self.last_refused,
+            'max_line_gap_ns': self.max_line_gap_ns,
+            'clock_offset_ns': self.clock_offset_ns(host_realtime_ns,
+                                                    host_monotonic_ns),
+        }
 
     def sample(self, now_ns,
                stale_after_ns=SINK_STALE_HEARTBEATS * SINK_HEARTBEAT_S * 10**9):
@@ -437,6 +478,20 @@ class SinkLogReader:
                 self._pos += end + 1
                 consumed += end + 1
         return self.log
+
+    def read_all(self):
+        '''Read to the last complete line, however many bounded reads it takes.
+
+        `read()` stops at `READ_MAX` and expects to be called again, which is
+        right for a poll. A one-shot reading of the whole log -- the evidence
+        written at the end of a run -- would otherwise describe only its first
+        4 MiB.
+        '''
+        while True:
+            before = self._pos
+            log = self.read()
+            if self._pos == before:
+                return log
 
     def sample(self, now_ns=None, **kwargs):
         '''Read, then return the count as a monitor sample (`SinkLog.sample`).'''

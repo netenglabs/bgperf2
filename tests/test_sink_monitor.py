@@ -294,3 +294,43 @@ def test_an_unreadable_receiver_raises_rather_than_reading_zero(tmp_path):
     from sink import SinkLogError
     with pytest.raises(SinkLogError, match='stopped'):
         r.accepted_prefixes()
+
+
+def test_the_log_evidence_names_what_a_right_count_hides(tmp_path):
+    mon = make(tmp_path)
+    t = now_ns()
+    write_log(mon, HEADER.format(t, SINK_LOG_FORMAT)
+              + 'S {0} established outbound 1 x\n'.format(t)
+              + 'C {0} 10 1 0\n'.format(t + 1)
+              + 'S {0} down outbound 1 hold timer expired\n'.format(t + 2)
+              + 'C {0} 0 1 0\n'.format(t + 2)
+              # a lost collision on another connection is not a lost session
+              + 'S {0} established inbound 2 x\n'.format(t + 3)
+              + 'S {0} down outbound 3 collision\n'.format(t + 3)
+              + 'C {0} 10 2 0\n'.format(t + 4))
+    # the poll thread's reader is not the one read
+    mon.reader.read()
+    ev = mon.log_evidence()
+    assert ev['accepted'] == 10
+    assert ev['sessions_established'] == 2
+    assert ev['sessions_lost'] == 1
+    assert ev['processes'] == 1 and ev['malformed_lines'] == 0
+    assert ev['clock_offset_ns'] is not None
+
+
+def test_an_unreadable_log_is_said_not_raised(tmp_path):
+    assert 'unreadable' in make(tmp_path).log_evidence()
+
+
+def test_only_a_sink_run_publishes_the_log(tmp_path):
+    import bgperf2
+
+    class Clean(object):
+        neighbor_sample_failures = 0
+        monitor_sample_failures = 0
+
+    assert bgperf2.sampler_read_failures(Clean(), Clean()) is None
+    mon = make(tmp_path)
+    write_log(mon, HEADER.format(now_ns(), SINK_LOG_FORMAT))
+    section = bgperf2.sampler_read_failures(Clean(), mon)
+    assert section['sink_log']['processes'] == 1

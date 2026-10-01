@@ -240,3 +240,39 @@ def test_a_same_inode_replacement_is_caught_by_its_own_contents(tmp_path):
 def test_an_unreadable_log_raises(tmp_path):
     with pytest.raises(OSError):
         SinkLogReader(str(tmp_path / 'missing.log')).read()
+
+
+def test_read_all_reads_past_one_bounded_read(tmp_path, monkeypatch):
+    '''Found in review: the end-of-run evidence used a single bounded read
+    and described only the log's first READ_MAX bytes.'''
+    monkeypatch.setattr(SinkLogReader, 'READ_MAX', 128)
+    monkeypatch.setattr(SinkLogReader, 'READ_BLOCK', 128)
+    path = tmp_path / 'sink.log'
+    lines = ''.join('C {0} {1} {1} 0\n'.format(2000 + i, i) for i in range(1, 40))
+    path.write_text(HEADER + lines)
+    assert SinkLogReader(str(path)).read().accepted < 39
+    assert SinkLogReader(str(path)).read_all().accepted == 39
+
+
+def test_a_restart_does_not_erase_a_lost_session():
+    log = fed(HEADER
+              + 'S 2000 established inbound 1 x\n'
+              + 'S 2001 down inbound 1 eof\n'
+              + 'V 3000 {0} restarted\n'.format(SINK_LOG_FORMAT))
+    assert log.processes == 2
+    assert log.sessions_lost == 1
+
+
+def test_session_counts_share_one_scope_across_a_restart():
+    '''Found in review: established reset on a restart while lost did not, so
+    a session that came back read as the only session, lost.'''
+    log = fed(HEADER
+              + 'S 2000 established inbound 1 x\n'
+              + 'M 2001 bad update\n'
+              + 'V 3000 {0} restarted\n'.format(SINK_LOG_FORMAT)
+              + 'S 3001 established outbound 1 x\n')
+    assert log.sessions_established == 2
+    # held when its process ended
+    assert log.sessions_lost == 1
+    assert log.refused_messages == 1
+    assert log.session is not None

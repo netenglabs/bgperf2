@@ -80,3 +80,31 @@ def test_the_go_test_script_names_no_toolchain_of_its_own():
                      if not line.lstrip().startswith('#'))
     assert 'BUILD_VARS["go_image"]' in code
     assert not re.search(r'golang:\d', code)
+
+
+def load_cpu_peak():
+    spec = importlib.util.spec_from_file_location(
+        'container_cpu_peak', REPO_ROOT / 'scripts' / 'container_cpu_peak.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_cpu_peak_is_cpu_time_over_wall_time_per_interval():
+    cpu = load_cpu_peak()
+    t = cpu.Tracker('bgperf_monitor', 'e058a8c602cf0e066df8')
+    # 2.5 cores for one second, then 0.5 for two
+    for wall, usage in ((0.0, 0), (1.0, 2_500_000), (3.0, 3_500_000)):
+        t.observe(wall, usage)
+    s = t.summary(1.0)
+    assert s['peak_cpu_pct'] == 250.0
+    assert s['mean_cpu_pct'] == 150.0
+    assert s['intervals'] == 2 and s['id'] == 'e058a8c602cf'
+
+
+def test_cpu_peak_with_one_reading_is_null_not_zero():
+    cpu = load_cpu_peak()
+    t = cpu.Tracker('x', 'abc')
+    t.observe(0.0, 100)
+    t.observe(1.0, None)
+    assert t.summary(1.0)['peak_cpu_pct'] is None

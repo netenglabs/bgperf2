@@ -5069,3 +5069,45 @@ What the sink's resolution is for, then, is not ranking. It is the intervals the
 resolution" at almost every shape and are now resolved, which is what lets a verdict be given
 rather than withheld. `bench()`'s truncation of `elapsed` before the assurance window is
 subtracted stays as it is: at a 1 s cadence it costs nothing anyone reads.
+
+### Decision on 2026-10-01: 7c, the bridge block, is dropped; the 64 GB campaign's rows are superseded
+
+**What 7c needed, and what happened when it was built.** The bridge block would have measured the
+64 GB campaign's cells under both monitors, shuffled together with a recorded seed. A batch test
+took one monitor, and a shuffle orders cells within one test, so the prerequisite recorded on the
+7c bead was `monitor:` as a list axis on a batch test. That change set was built and reviewed
+across two sessions, and it never reached a commit. Five review rounds each found real defects.
+The batch side settled: cell expansion, validation, the instrument in the run name, and keeping
+one target under two instruments out of the variance rule's rivals. What did not settle was
+`timing_variance_review.py`, the 64 GB campaign's pooled-review tool. It matches a cell across
+passes by the first holding pass's matrix ordinal, and a monitor list moves ordinals. Each fix
+there exposed another case:
+
+- two different cells taking one ordinal;
+- a refusal that masked the moved-matrix errors and printed a remedy that could not be carried
+  out;
+- GoBGP cells whose ordinals differed between a list test and a scalar one beyond the first
+  (peers, prefixes, filter) group.
+
+The real fix was re-keying that tool by identity, a rewrite of a completed campaign's tooling to
+serve the one block that would ever feed it two instruments.
+
+**The operator's decision.** Re-bench rather than bridge. The bridge's only purpose was to let the
+64 GB campaign's GoBGP-measured rows be read beside sink-measured ones. Nobody needs those numbers
+again, and the daemon comparison's Phase 3 re-benches the cells that matter anyway. So:
+
+- **7c is dropped**, and its bead is closed as such. The uncommitted change set was discarded
+  unmerged, so nothing of the monitor axis is in the tree.
+- **The 64 GB campaign's results are superseded, not deleted.** They stay on disk and archived
+  (`docs/completed/2026-64gb-timing-validation-plan.md`), and are not read against sink-measured
+  rows: the same standing `benchmarks/baseline/baseline-benchmark.csv` already has for its
+  different CPU. Every lesson that campaign taught is in this log and the invariant documents,
+  and none of it depended on the rows.
+- **7d no longer waits on 7c.** The default becomes `sink`, and GoBGP stays selectable. If a sink
+  result ever looks wrong, that one cell can be re-run under GoBGP. That asks the bridge's
+  question on demand, for the cell that raised it.
+- **What is given up** is a measured offset for how much the GoBGP monitor moved each published
+  metric. It would only matter to someone quoting the superseded numbers.
+
+The daemon comparison plan's Phase 3 is amended to match. It no longer carries the bridge, and its
+rows stand on their own rather than being comparable with the 64 GB campaign through it.

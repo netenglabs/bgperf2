@@ -28,8 +28,11 @@ gate passed on 2026-09-08, the campaign ran, and it **completed on 2026-09-15 an
 is archived**.
 
 **Phase 7 (opened 2026-09-29) replaces the monitor**, so the next campaign will run
-on a different instrument from the 64 GB one; its bridge block (7c) is what keeps
-the two readable against each other.
+on a different instrument from the 64 GB one. A bridge block (7c) was planned to
+keep the two readable against each other; **the operator dropped it on
+2026-10-01**. The 64 GB campaign's results are superseded rather than bridged:
+they are kept, and are not read against sink-measured rows. The next bench
+re-measures what is wanted.
 
 The completed `2026-baseline` results remain historical end-to-end evidence.
 Do not rewrite their CSV rows or reinterpret their `testers (s)` values as
@@ -579,10 +582,14 @@ The follow-up campaign may begin only when all are true:
 
 ### Phase 7: Replace the monitor with a purpose-built sink
 
-Status: in progress since 2026-10-01; **7a and 7b are complete** (2026-10-01), and
-7c is next, on the campaign host. The operator chose on 2026-09-29 to fix
-the instrument now and redo the campaign's testing under it, and the rows
-already taken stay readable through a bridge block (7c). 7a's first change set
+Status: in progress since 2026-10-01; **7a and 7b are complete** (2026-10-01),
+**7c was dropped** by the operator on 2026-10-01, and **7d is next**: it needs no
+other hardware. The operator chose on 2026-09-29 to fix the instrument now and
+redo the campaign's testing under it, with the rows already taken kept readable
+through a bridge block (7c). On 2026-10-01 they chose to re-bench instead of
+bridging, after the monitor-as-batch-axis change set that 7c needed kept failing
+review in the old campaign's pooled-review tool. The old rows are superseded, not
+deleted. 7a's first change set
 landed on 2026-10-01: the sink exists (`sink/`, `sink.py`), builds as
 `bgperf/sink` with its Go tests run in the build, passes `verify`, and matched a
 GoBGP monitor exactly on one hand-driven session. The second change set, the
@@ -609,8 +616,7 @@ saying why, whenever a line cannot be trusted. The third dated the receivers
 the same way, so `monitor_delta_s` and `export_spread_s` are one instrument's
 measurement at millisecond resolution. The findings followed with no change.
 The operator then settled `summary.py`'s quantum: it stays with `elapsed (s)` at
-1 s, because nothing finer than a second is wanted in a ranking. 7c runs on the
-campaign host. Why a sink rather than a patched GoBGP, and the GoBGP source reading that
+1 s, because nothing finer than a second is wanted in a ranking. Why a sink rather than a patched GoBGP, and the GoBGP source reading that
 started it, are in the
 [decision log](bgperf2-measurement-decision-log.md#phase-7-replace-the-monitor-with-a-purpose-built-sink).
 
@@ -647,11 +653,11 @@ count.
   namespace is configured. That is verified, not assumed (7a).
 - **Receivers become sinks too.** `Receiver(Monitor)` keeps its contract.
   `stats()` stays refused, and a receiver is still not a route source.
-- **The monitor is a run dimension until the bridge block is accepted:**
-  `--monitor gobgp|sink`, default `gobgp`. By `workload-controls.md`'s rules,
-  that means it reaches all four entry points, `bench_output_prefix()`, the cell
-  id, both `run` blocks and provenance. The bridge block measures both monitors
-  on the same cells, so without that the two passes would overwrite each other.
+- **The monitor is a run dimension:** `--monitor gobgp|sink`. By
+  `workload-controls.md`'s rules, that means it reaches the entry points,
+  `bench_output_prefix()`, the cell id, both `run` blocks and provenance. It stays
+  one after 7d, because GoBGP stays selectable as the reference the sink can be
+  re-checked against, one cell at a time.
 
 #### Work, in order
 
@@ -674,7 +680,12 @@ count.
   achieved resolution where `poll_resolution_s` is published today. Every
   resolution rule in the invariant documents still holds; only the number
   shrinks. `summary.py`'s quantum and the findings' resolution checks follow it.
-- **7c — the bridge block.** A representative subset of the 64 GB campaign's
+- **7c — the bridge block. Dropped on 2026-10-01 by the operator**, who chose
+  to re-bench rather than bridge: the 64 GB campaign's rows are superseded, kept
+  on disk and not read against sink rows. The daemon comparison's Phase 3 is the
+  re-bench. What follows is the plan as it stood, kept so the decision can be
+  read against it.
+  A representative subset of the 64 GB campaign's
   cells, each measured with both monitors, at least three repetitions,
   shuffled with a recorded seed. At minimum: one high-load synthetic cell per
   daemon, the 10-peer MRT cell per daemon, and the BIRD screen's peers and
@@ -686,9 +697,10 @@ count.
   **It runs inside the 2026 daemon comparison's Phase 3 first block**, beside
   that plan's pinned/unpinned bias check and on the same cells, so the host is
   taken once (`docs/2026-daemon-comparison-plan.md` §5).
-- **7d — flip the default** to `sink` once 7c is accepted. Keep the GoBGP
-  monitor as a selectable reference, because it is the only thing the bridge can
-  be re-checked against.
+- **7d — flip the default** to `sink`. It no longer waits on 7c. Keep the GoBGP
+  monitor as a selectable reference: a sink result that looks wrong can be
+  re-run on that one cell with GoBGP, which is the bridge's question asked on
+  demand rather than up front.
 
 #### Tests
 
@@ -706,9 +718,9 @@ count.
 
 #### Exit criterion
 
-The bridge block is reviewed and accepted, and it states for every published
-metric whether the instrument moved it. The default is `sink`. The next campaign
-may then be planned against it.
+The default is `sink`, GoBGP stays selectable, and the 64 GB campaign's results
+are recorded as superseded. The next campaign may then be planned against the
+sink. (The original criterion, a reviewed bridge block, went with 7c.)
 
 ## Explicit Non-Goals
 
@@ -770,7 +782,8 @@ The operator contract for that prompt is:
    workload controls.
 8. Run controlled and real calibration checks.
 9. Open the release gate for the 64 GB timing validation campaign.
-10. Replace the monitor with a sink, and bridge the old rows to the new ones (Phase 7).
+10. Replace the monitor with a sink, and re-bench under it (Phase 7; the bridge
+    to the old rows was dropped on 2026-10-01).
 
 ## Bottom Line
 

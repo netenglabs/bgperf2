@@ -1,6 +1,6 @@
 # 2026 daemon comparison plan
 
-**Status: Phases 0, 1 and 2 done; Phase 3 not started (`bgperf2-9su` and `bgperf2-0l7` are closed; it still needs measurement plan Phase 7b and a campaign-class host). Written 2026-09-29.**
+**Status: Phases 0, 1 and 2 done; Phase 3 not started (`bgperf2-9su` and `bgperf2-0l7` are closed, and measurement plan Phase 7b is done; it still needs a campaign-class host). Written 2026-09-29.**
 
 **Epic:** `bgperf2-0y5`
 
@@ -277,9 +277,11 @@ the default.
 **Host:** one `m7a.4xlarge`, the same class as the timing-validation campaign, **provisioned for
 this phase**: the development host is not that class (see the hardware paragraph above). The
 images Phase 2.4 built here carry over only if `/data`, Docker's root included, moves with them.
-Otherwise rebuild them there and re-run `verify`. The rows are
-comparable with that campaign **through Phase 7's bridge block** (a different monitor is a different
-instrument), and with nothing older (`benchmarks/baseline/baseline-benchmark.csv` was a different CPU).
+Otherwise rebuild them there and re-run `verify`. **The rows stand on their own.** They are not
+comparable with that campaign: a different monitor is a different instrument, and on 2026-10-01 the
+operator dropped the bridge block (measurement plan 7c) that would have made them so. The campaign's
+rows are superseded, not deleted, and this phase is the re-bench. Nor are they comparable with
+anything older (`benchmarks/baseline/baseline-benchmark.csv` was a different CPU).
 
 Workloads, three passes each, matrix repeated as a whole (`docs/invariants/batch-passes.md`),
 new run ID `2026-comparison`:
@@ -288,11 +290,10 @@ new run ID `2026-comparison`:
 2. MRT 10 × 1.05 M (bgpdump2), pinned;
 3. **one bias check:** a small subset of both, unpinned, so pinned and unpinned can be compared
    on identical builds and the effect of co-location is measured rather than assumed.
-4. **Phase 7's bridge block (7c, `bgperf2-8gg.10.3`), in the same block as item 3**, so the host
-   is taken once. It uses the same cells with `--monitor gobgp` added as a second axis. Monitor
-   and pinning stay separate dimensions of the cell identity, so each effect is read on its own.
-   It publishes the offset the instrument alone introduces, which is what lets these rows be read
-   against the timing-validation campaign's.
+~~4. Phase 7's bridge block (7c, `bgperf2-8gg.10.3`), in the same block as item 3.~~ **Dropped
+   2026-10-01** with 7c itself. The operator chose to re-bench rather than bridge, so this phase
+   needs no second monitor. GoBGP stays selectable for re-checking any one sink cell that looks
+   wrong (`docs/bgperf2-measurement-decision-log.md`, Phase 7).
 
 Every run is on-demand or checkpointed. A spot reclaim mid-block has already cost two blocks
 their continuity (`docs/completed/2026-64gb-timing-validation-plan.md`).
@@ -420,5 +421,5 @@ named check would confirm it.
 Epic `bgperf2-0y5`. Phases, each blocked by the one before: Phase 0 `bgperf2-0y5.1` (also blocked by
 `bgperf2-es0` and `bgperf2-0ma`), Phase 1 `bgperf2-0y5.2`, Phase 2 `bgperf2-0y5.3`, Phase 3 `bgperf2-0y5.4`,
 Phase 4 `bgperf2-0y5.5`. Phase 3 is also blocked by measurement plan Phase 7b (`bgperf2-8gg.10.2`), and
-it carries Phase 7c (`bgperf2-8gg.10.3`) out in its first block. Phase 3 is also blocked by
+it no longer carries Phase 7c, which was dropped on 2026-10-01. Phase 3 is also blocked by
 `bgperf2-9su` and `bgperf2-0l7`, two of the obligations of Phase 2.6.

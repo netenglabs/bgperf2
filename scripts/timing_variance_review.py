@@ -722,6 +722,21 @@ def order_relation(observations):
     return 'neither'
 
 
+# Findings that mean the generator may have been starved of CPU by something
+# the run's recorded identity does not name: the two `findings.py` emits as
+# CONFOUNDER for exactly that.
+GENERATOR_CONFOUNDERS = ('host_cpu_saturated', 'foreign_cpu_contention')
+GENERATOR_HEADROOM_BASIS = (
+    'The generator fleet, configured identically as recorded, completed the '
+    'same workload in reference_s on the reference cell; on a given cell its '
+    'fastest pass took ratio times as long. It bounds how much of that '
+    'cell\'s send the generator can be shown capable of; it does not name the '
+    'target. Its premise is that the generator\'s environment is what the '
+    'record says: a constraint applied to the generator from outside '
+    'bgperf2\'s record (the block 1 slow-tester case, a 4 mbit egress cap) is '
+    'invisible to it and is reported as headroom.')
+
+
 def review_series(run_root, series, unavailable, problems):
     '''One workload's passes, summarised together.'''
     passes = []
@@ -809,7 +824,7 @@ def review_series(run_root, series, unavailable, problems):
         # near-miss on two parallel lists is exactly how this went wrong once.
         states = {entry.get('repetition'): entry.get('state')
                   for entry in (summary_cell.get('passes') or [])}
-        observations, artifacts = [], []
+        observations, artifacts, generator_passes = [], [], []
         for entry in record['passes']:
             cell = entry.pop('cell')
             entry['artifact'] = None if cell is None else cell.get('artifact_name')
@@ -827,6 +842,12 @@ def review_series(run_root, series, unavailable, problems):
             # document down.
             artifacts.append(cell.get('artifact')
                              if observed and cell is not None else None)
+            generator_passes.append(generator_pass(
+                entry, artifacts[-1], None if cell is None else cell['row'],
+                metric_index))
+        # Raw per-pass material for `generator_headroom()`, which has to look
+        # across cells and so runs once after this loop.
+        record['generator_passes'] = generator_passes
         # Carried onto the record so a selection can be judged on the cells
         # it names rather than only on each cell's own group.
         decision = (summary_cell.get('metrics') or {}).get(DECISION_METRIC) or {}
@@ -890,6 +911,7 @@ def review_series(run_root, series, unavailable, problems):
                         series['name'], record['description'],
                         ' / '.join(str(value) for value in disagreed)))
 
+    headroom = generator_headroom(records)
     return {
         'schema': REVIEW_SCHEMA,
         'series': series['name'],
@@ -908,6 +930,7 @@ def review_series(run_root, series, unavailable, problems):
                    for one_pass in passes],
         'summary': document,
         'cells': records,
+        'generator_headroom': headroom,
         'order_effects': {
             'relations': relations,
             'basis': 'each cell ranked by its own passes; {0} cells over {1} '
@@ -915,6 +938,268 @@ def review_series(run_root, series, unavailable, problems):
                          len(records), len(passes)),
         },
     }
+
+
+def generator_pass(entry, artifact, row, metric_index):
+    '''What one pass says about its generator fleet, for `generator_headroom()`.
+
+    `artifact` is already None for a pass that failed or never ran -- the
+    caller decided that from `summary.py`'s state and it is not decided again
+    here -- so a pass with no artifact carries no timing and no identity, and
+    `state` says which kind of absence it was.
+    '''
+    fleet = dig(artifact or {}, ('tester_fleet',)) or {}
+    run = dig(artifact or {}, ('run',))
+    reported = fleet.get('reported_injection_s')
+    index = metric_index.get('tester version')
+    version = (row[index] if row is not None and index is not None
+               and index < len(row) else None)
+    return {
+        'repetition': entry['repetition'],
+        'state': entry['state'],
+        'has_artifact': artifact is not None,
+        # The identity of the generator's *configuration*: the whole `run`
+        # dict minus the two keys that name the pass rather than describe it,
+        # so a key a newer artifact adds (`pin`) separates cells without this
+        # file having to know it exists. A key whose value is None is dropped:
+        # an unpinned run written after `pin` existed records `pin: None` and
+        # one written before records no key, and those are one configuration.
+        # Kept, they split one cell's passes from each other whenever its
+        # repetitions ran on different commits, which Blocks 8 and 10 did.
+        'identity': None if not isinstance(run, dict) else {
+            'run': {key: value for key, value in sorted(run.items())
+                    if key not in ('name', 'repetition')
+                    and value is not None},
+            'testers': fleet.get('testers'),
+            'offered_prefixes': fleet.get('offered_prefixes'),
+            'tester_version': version},
+        'incomplete_testers': list(fleet.get('incomplete_testers') or []),
+        'reported_injection_s': (reported if isinstance(reported, (int, float))
+                                 and not isinstance(reported, bool) else None),
+        'confounders': sorted({
+            item.get('finding') for item in
+            (dig(artifact or {}, ('findings', 'findings')) or [])
+            if isinstance(item, dict)
+            and item.get('finding') in GENERATOR_CONFOUNDERS}),
+    }
+
+
+def _absent_passes(passes):
+    '''"1 failed, 2 not run": the two kinds of absence, counted apart.'''
+    counts = {}
+    for entry in passes:
+        if entry['state'] != OBSERVED:
+            counts[entry['state']] = counts.get(entry['state'], 0) + 1
+    return ', '.join('{0} {1}'.format(count, state or 'unknown')
+                     for state, count in sorted(counts.items(),
+                                                key=lambda item: str(item[0])))
+
+
+def _withheld(reason, **extra):
+    return dict({'best_s': None, 'ratio': None, 'headroom_shown': None,
+                 'headroom_withheld_reason': None,
+                 'reference_s': None, 'reference_cell': None,
+                 'reference_repetition': None, 'reference_max_s': None,
+                 'reason': reason}, **extra)
+
+
+def generator_headroom(records):
+    '''Could the generator fleet be shown capable of sending faster than it did?
+
+    `findings.py` names `tester` for a slow generator and for one blocked by a
+    target that is not draining, and cannot separate them from one artifact.
+    Across cells it can, in one direction: if the same fleet, configured
+    identically, completed the same send faster on another cell, then on the
+    slow cell it was not at its own ceiling. That is a statement about several
+    artifacts, so it lives here in the review and `findings.py` stays
+    per-artifact.
+
+    Cells are compared only inside a group of identical generator identity
+    (see `generator_pass()`); `reported_injection_s` is the only duration
+    used, because it is the generator's own timing of its send -- BIRD and
+    ExaBGP never report one, and a series of them is withheld by name rather
+    than read through a queue-side counter `findings.py` refuses to read.
+
+    Writes `record['generator_headroom']` onto each record and returns the
+    series-level section.
+    '''
+    entries = {}
+    withheld_cells = {}
+    for record in records:
+        passes = record['generator_passes']
+        observed = [entry for entry in passes if entry['state'] == OBSERVED]
+        if not observed:
+            absent = _absent_passes(passes)
+            withheld_cells[record['ordinal']] = _withheld(
+                'no observed pass ({0})'.format(absent) if absent
+                else 'no observed pass')
+            continue
+        carrying = [entry for entry in observed if entry['has_artifact']
+                    and entry['identity'] is not None]
+        if not carrying:
+            withheld_cells[record['ordinal']] = _withheld(
+                'no observed pass has an artifact, so the generator\'s '
+                'identity and timing are not recorded')
+            continue
+        identities = {json.dumps(entry['identity'], sort_keys=True)
+                      for entry in carrying}
+        if len(identities) != 1:
+            withheld_cells[record['ordinal']] = _withheld(
+                'this cell\'s passes disagree about the generator\'s '
+                'identity, so they are not one generator configuration')
+            continue
+        entries[record['ordinal']] = (identities.pop(), record, carrying)
+
+    groups = {}
+    for ordinal, (identity, record, carrying) in entries.items():
+        groups.setdefault(identity, []).append((record, carrying))
+
+    out_groups = []
+    for identity, members in sorted(groups.items(),
+                                    key=lambda item: min(
+                                        member[0]['ordinal']
+                                        for member in item[1])):
+        members.sort(key=lambda member: member[0]['ordinal'])
+        group = {'identity': json.loads(identity),
+                 'cells': [member[0]['description'] for member in members],
+                 'reference': None, 'reason': None}
+        out_groups.append(group)
+
+        if len(members) < 2:
+            group['reason'] = ('only one cell has this generator identity, '
+                               'so there is nothing to compare it against')
+            members[0][0]['generator_headroom'] = _withheld(group['reason'])
+            continue
+        timed = [(record, entry) for record, carrying in members
+                 for entry in carrying
+                 if entry['reported_injection_s'] is not None
+                 and not entry['incomplete_testers']]
+        if not timed:
+            group['reason'] = (
+                'no generator timed its own send (reported_injection_s is '
+                'null on every pass), and a queue-side offered count is not '
+                'a send time')
+            for record, _ in members:
+                record['generator_headroom'] = _withheld(group['reason'])
+            continue
+        # The reference is one observation, unrounded, and it may come from a
+        # pass that ran under contention: a generator that was fast *despite*
+        # a loaded host still demonstrated that speed, because contention can
+        # only slow a send down. Contention disqualifies a pass as a subject
+        # (it may have been starved by something the identity does not record)
+        # and never as evidence of what the fleet can do.
+        ref_record, ref_entry = min(
+            timed, key=lambda item: (item[1]['reported_injection_s'],
+                                     item[0]['ordinal'], item[1]['repetition']))
+        reference_s = ref_entry['reported_injection_s']
+        # The reference cell's own spread, so pass-to-pass noise of the
+        # reference cannot manufacture headroom. Every timed pass of that
+        # cell counts, contended or not: a slow pass of the reference is
+        # noise whatever slowed it, and including it only makes the claim
+        # harder to make.
+        reference_max_s = max(entry['reported_injection_s']
+                              for record, entry in timed
+                              if record is ref_record)
+        reference_passes = sum(1 for record, _ in timed if record is ref_record)
+        if reference_s <= 0:
+            # bgpdump2 prints its walk to six places, and a `-n1 -p1` walk is
+            # about a millisecond, so 0.0 is a reading it can give. It says
+            # the send was shorter than the generator's own resolution, and a
+            # ratio against it is a division by that resolution, not a
+            # comparison -- and uncaught it was a ZeroDivisionError that cost
+            # every series in the review, since this runs outside the
+            # summariser's catch.
+            group['reason'] = (
+                'the fastest self-timed send is {0}s, below the generator\'s '
+                'own resolution, so no ratio against it exists'.format(
+                    reference_s))
+            for record, _ in members:
+                record['generator_headroom'] = _withheld(group['reason'])
+            continue
+        # A comparison needs a second cell that can be a *subject*, which is
+        # stricter than a second cell with a timed send: a cell whose every
+        # timed pass was contended can still be the reference but never a
+        # subject, and without this the reference would be left alone in its
+        # group, compared against itself at a ratio of 1 -- a cell that says
+        # nothing printed as though it said something.
+        subjects = {id(record) for record, entry in timed
+                    if record is not ref_record and not entry['confounders']}
+        if not subjects:
+            group['reason'] = (
+                'no cell other than the reference has an uncontended, '
+                'complete, self-timed send, so there is nothing to compare '
+                'against it')
+            for record, _ in members:
+                record['generator_headroom'] = _withheld(group['reason'])
+            continue
+        group['reference'] = {
+            'reference_s': reference_s,
+            'cell': ref_record['description'],
+            'repetition': ref_entry['repetition'],
+            'reference_max_s': reference_max_s,
+            'reference_passes': reference_passes}
+        for record, carrying in members:
+            mine = [entry for entry in carrying
+                    if entry['reported_injection_s'] is not None
+                    and not entry['incomplete_testers']]
+            if not mine:
+                record['generator_headroom'] = _withheld(
+                    'every observed pass had a generator that did not '
+                    'complete' if any(entry['incomplete_testers']
+                                      for entry in carrying)
+                    else 'no generator timed its own send on this cell')
+                continue
+            eligible = [entry for entry in mine if not entry['confounders']]
+            excluded = [{'repetition': entry['repetition'],
+                         'findings': entry['confounders']}
+                        for entry in mine if entry['confounders']]
+            if not eligible:
+                record['generator_headroom'] = _withheld(
+                    'every timed pass was excluded as a subject: {0}'.format(
+                        '; '.join('pass {0} had {1}'.format(
+                            item['repetition'], ' and '.join(item['findings']))
+                            for item in excluded)),
+                    excluded_passes=excluded)
+                continue
+            # Best against best, deliberately: the fastest pass of this cell
+            # is the one least likely to have been slowed by something
+            # incidental, so a ratio that stays large through that choice is
+            # not a bad-luck pass. It under-reports relative to a mean or a
+            # median; it does not over-report.
+            best_s = min(entry['reported_injection_s'] for entry in eligible)
+            is_reference = record is ref_record
+            # Only when even this cell's *fastest* pass is slower than the
+            # reference cell's *slowest*. The reference cell itself can never
+            # satisfy that. And only when the reference cell has a spread at
+            # all: with one timed pass its slowest *is* its fastest, so any
+            # cell a hair slower would show headroom off pass-to-pass noise --
+            # the ratio is still published, the claim is withheld by name.
+            if is_reference:
+                shown, shown_reason = False, None
+            elif reference_passes < 2:
+                shown, shown_reason = None, (
+                    'the reference cell has one timed pass, so its own '
+                    'pass-to-pass spread is unmeasured')
+            else:
+                shown, shown_reason = best_s > reference_max_s, None
+            record['generator_headroom'] = {
+                'best_s': best_s,
+                'ratio': round_like_the_rule(best_s / reference_s),
+                'headroom_shown': shown,
+                'headroom_withheld_reason': shown_reason,
+                'is_reference': is_reference,
+                'reference_s': reference_s,
+                'reference_cell': ref_record['description'],
+                'reference_repetition': ref_entry['repetition'],
+                'reference_max_s': reference_max_s,
+                'passes_used': len(eligible),
+                'excluded_passes': excluded,
+                'reason': None}
+
+    for record in records:
+        if 'generator_headroom' not in record:
+            record['generator_headroom'] = withheld_cells[record['ordinal']]
+    return {'basis': GENERATOR_HEADROOM_BASIS, 'groups': out_groups}
 
 
 def expansion_prospect(cell, rivals):
@@ -1671,6 +1956,30 @@ def render_series(review):
                       'so only a moved median could: {2}'.format(
                           review['metric_resolution'], DECISION_METRIC,
                           ', '.join(undecidable))])
+
+    headroom = review.get('generator_headroom') or {}
+    if headroom.get('groups'):
+        lines.extend(['', '  generator headroom (own-timed send, best pass '
+                      'vs the fastest identical-generator cell):'])
+        for record in review['cells']:
+            value = record['generator_headroom']
+            if value['best_s'] is None:
+                lines.append('    {0}: withheld -- {1}'.format(
+                    labels[record['ordinal']], value['reason']))
+            else:
+                lines.append(
+                    '    {0}: best {1}s, {2}x reference, headroom_shown {3}; '
+                    'reference {4}s on {5} (pass {6}, its slowest {7}s)'.format(
+                        labels[record['ordinal']], _number(value['best_s']),
+                        _number(value['ratio']),
+                        value['headroom_shown']
+                        if value.get('headroom_withheld_reason') is None
+                        else 'withheld ({0})'.format(
+                            value['headroom_withheld_reason']),
+                        _number(value['reference_s']), value['reference_cell'],
+                        value['reference_repetition'],
+                        _number(value['reference_max_s'])))
+        lines.append('    {0}'.format(headroom['basis']))
 
     lines.append('')
     lines.append('  order effects: {0}'.format(', '.join(

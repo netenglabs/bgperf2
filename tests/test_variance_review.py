@@ -987,3 +987,243 @@ class TestSelectionDocumentShape:
                                   attempted=set())
         assert any('is not a reviewed series' in entry['message']
                    for entry in messages)
+
+
+def a_generator_pass(repetition, reported, state='observed', pin=None,
+                     version='bgpdump2 1', confounders=(), incomplete=(),
+                     testers=2, offered=1000000, artifact=True):
+    '''One entry of `record['generator_passes']`, built the way
+    `generator_pass()` builds it from an artifact.'''
+    run = {'peers': 2, 'prefixes_per_peer': 500000, 'tester_type': 'bgpdump2'}
+    if pin is not None:
+        run['pin'] = pin
+    return {'repetition': repetition, 'state': state, 'has_artifact': artifact,
+            'identity': {'run': run, 'testers': testers,
+                         'offered_prefixes': offered,
+                         'tester_version': version},
+            'incomplete_testers': list(incomplete),
+            'reported_injection_s': reported,
+            'confounders': list(confounders)}
+
+
+def a_headroom_record(ordinal, description, passes):
+    return {'ordinal': ordinal, 'description': description,
+            'generator_passes': passes}
+
+
+class TestGeneratorHeadroom:
+    """Could the same generator fleet be shown to send faster than it did?
+
+    A review-layer statistic over several artifacts: `findings.py` names
+    `tester` for a slow generator and for one blocked by an undraining target
+    and cannot separate them from one artifact.
+    """
+
+    def test_the_controlled_runs_and_the_one_reading_it_cannot_get_right(self):
+        """Three BIRD 3.3.2 runs at 2 x 500,000, from real artifacts:
+
+        - results/2026/2026-timing-validation/block1-generator-calibration/
+          tester-baseline: reported_injection_s 2.021, with a second pass at
+          1.984 from phase6-calibration/mrt-small-baseline (taken here as a
+          second pass of the same cell);
+        - phase6-calibration/target-starved-probe-500k: 11.907, the *target*
+          capped at 0.25 CPU;
+        - block1-generator-calibration/slow-tester: 32.390, the *generator's*
+          egress capped at 4 mbit.
+        """
+        records = [
+            a_headroom_record(0, 'baseline', [a_generator_pass(1, 2.021),
+                                              a_generator_pass(2, 1.984)]),
+            a_headroom_record(1, 'target starved', [a_generator_pass(1, 11.907)]),
+            a_headroom_record(2, 'slow tester', [a_generator_pass(1, 32.390)]),
+        ]
+        section = review.generator_headroom(records)
+        baseline, starved, slow = (record['generator_headroom']
+                                   for record in records)
+        assert baseline['reference_s'] == 1.984
+        assert baseline['reference_cell'] == 'baseline'
+        assert baseline['reference_repetition'] == 2
+        assert baseline['reference_max_s'] == 2.021
+        assert baseline['headroom_shown'] is False
+        assert starved['headroom_shown'] is True
+        assert starved['ratio'] == pytest.approx(6.0, abs=0.01)
+        assert slow['headroom_shown'] is True
+        assert slow['ratio'] == pytest.approx(16.33, abs=0.01)
+        # THE KNOWN FALSE READING, pinned so nobody claims otherwise. The
+        # slow-tester cell's generator really was throttled -- by a 4 mbit
+        # egress cap applied outside bgperf2's record -- and this statistic
+        # reports it as headroom exactly as it reports the starved *target*.
+        # The premise named in `basis` is what says why: the two cannot be
+        # separated, and `shown` means "the record gives no reason the
+        # generator could not have gone faster".
+        assert 'outside bgperf2' in section['basis']
+        assert 'invisible' in section['basis']
+        assert len(section['groups']) == 1
+
+    def test_a_contended_pass_is_no_subject_but_still_a_reference(self):
+        records = [
+            a_headroom_record(0, 'fast under load', [
+                a_generator_pass(1, 2.0, confounders=['foreign_cpu_contention']),
+                a_generator_pass(2, 2.1, confounders=['foreign_cpu_contention'])]),
+            a_headroom_record(1, 'slow', [a_generator_pass(1, 9.0)]),
+            a_headroom_record(2, 'slow but loaded', [
+                a_generator_pass(1, 9.0, confounders=['host_cpu_saturated'])]),
+        ]
+        review.generator_headroom(records)
+        fast, slow, loaded = (record['generator_headroom'] for record in records)
+        # It demonstrated that speed despite the contention.
+        assert slow['reference_s'] == 2.0
+        assert slow['headroom_shown'] is True
+        assert fast['best_s'] is None
+        assert 'foreign_cpu_contention' in fast['reason']
+        assert loaded['best_s'] is None
+        assert 'host_cpu_saturated' in loaded['reason']
+
+    def test_a_contended_pass_of_a_cell_does_not_hide_its_clean_one(self):
+        records = [
+            a_headroom_record(0, 'ref', [a_generator_pass(1, 2.0)]),
+            a_headroom_record(1, 'mixed', [
+                a_generator_pass(1, 3.0, confounders=['host_cpu_saturated']),
+                a_generator_pass(2, 8.0)]),
+        ]
+        review.generator_headroom(records)
+        mixed = records[1]['generator_headroom']
+        assert mixed['best_s'] == 8.0
+        assert mixed['passes_used'] == 1
+        assert mixed['excluded_passes'] == [
+            {'repetition': 1, 'findings': ['host_cpu_saturated']}]
+
+    @pytest.mark.parametrize('other', [{'pin': {'target': '0-1'}},
+                                       {'version': 'bgpdump2 other'}])
+    def test_a_different_identity_is_a_different_group(self, other):
+        records = [
+            a_headroom_record(0, 'a', [a_generator_pass(1, 2.0)]),
+            a_headroom_record(1, 'b', [a_generator_pass(1, 20.0, **other)]),
+        ]
+        section = review.generator_headroom(records)
+        assert len(section['groups']) == 2
+        for record in records:
+            value = record['generator_headroom']
+            assert value['best_s'] is None and value['ratio'] is None
+            assert 'only one cell' in value['reason']
+
+    def test_no_self_timed_send_is_withheld_never_zero(self):
+        records = [
+            a_headroom_record(0, 'a', [a_generator_pass(1, None)]),
+            a_headroom_record(1, 'b', [a_generator_pass(1, None)]),
+        ]
+        section = review.generator_headroom(records)
+        for record in records:
+            value = record['generator_headroom']
+            assert value['best_s'] is None and value['ratio'] is None
+            assert value['headroom_shown'] is None
+            assert 'no generator timed its own send' in value['reason']
+        assert section['groups'][0]['reference'] is None
+
+    def test_the_references_own_noise_cannot_manufacture_headroom(self):
+        """B's best pass (3.0) is faster than the reference cell's slowest
+        (4.0): the reference's pass-to-pass spread covers the gap."""
+        records = [
+            a_headroom_record(0, 'ref', [a_generator_pass(1, 2.0),
+                                         a_generator_pass(2, 4.0)]),
+            a_headroom_record(1, 'b', [a_generator_pass(1, 3.0),
+                                       a_generator_pass(2, 9.0)]),
+        ]
+        review.generator_headroom(records)
+        value = records[1]['generator_headroom']
+        assert value['ratio'] == 1.5
+        assert value['headroom_shown'] is False
+
+    def test_a_failed_pass_is_not_an_observation(self):
+        """Its (made-up) timing is ignored, and the two kinds of absence are
+        counted apart in the reason."""
+        records = [
+            a_headroom_record(0, 'ref', [a_generator_pass(1, 2.0)]),
+            a_headroom_record(1, 'b', [a_generator_pass(1, 9.0)]),
+            a_headroom_record(2, 'broken', [
+                a_generator_pass(1, 0.5, state='failed', artifact=False),
+                a_generator_pass(2, None, state='not run', artifact=False)]),
+        ]
+        review.generator_headroom(records)
+        assert records[1]['generator_headroom']['reference_s'] == 2.0
+        broken = records[2]['generator_headroom']
+        assert broken['best_s'] is None
+        assert '1 failed' in broken['reason'] and '1 not run' in broken['reason']
+
+    def test_an_incomplete_generator_contributes_nothing(self):
+        records = [
+            a_headroom_record(0, 'ref', [a_generator_pass(1, 2.0)]),
+            a_headroom_record(1, 'cut short', [
+                a_generator_pass(1, 0.1, incomplete=['tester_1'])]),
+        ]
+        review.generator_headroom(records)
+        assert records[0]['generator_headroom']['best_s'] is None, (
+            'one cell is no comparison: the incomplete one left it alone')
+        assert records[1]['generator_headroom']['best_s'] is None
+
+    def test_a_pass_is_read_off_its_artifact_by_header_name(self):
+        artifact = {'run': {'name': 'x', 'repetition': 2, 'peers': 2,
+                            'pin': None},
+                    'tester_fleet': {'reported_injection_s': 1.5, 'testers': 2,
+                                     'offered_prefixes': 10,
+                                     'incomplete_testers': []},
+                    'findings': {'findings': [
+                        {'finding': 'foreign_cpu_contention'},
+                        {'finding': 'post_injection_tail'}]}}
+        row = ['bgpdump2 2.0.14 (abc)', 'other']
+        entry = review.generator_pass(
+            {'repetition': 1, 'state': 'observed'}, artifact, row,
+            {'tester version': 0})
+        assert entry['identity']['tester_version'] == 'bgpdump2 2.0.14 (abc)'
+        assert 'name' not in entry['identity']['run']
+        assert 'repetition' not in entry['identity']['run']
+        # An unpinned run's `pin: None` is the same configuration as an older
+        # artifact with no `pin` key at all.
+        assert 'pin' not in entry['identity']['run']
+        assert entry['confounders'] == ['foreign_cpu_contention']
+        assert entry['reported_injection_s'] == 1.5
+
+    def test_a_one_pass_reference_publishes_the_ratio_and_withholds_the_claim(self):
+        # With one timed pass the reference's slowest is its fastest, so a
+        # cell a hair slower would "show headroom" off noise alone.
+        records = [
+            a_headroom_record(0, 'ref', [a_generator_pass(1, 1.984)]),
+            a_headroom_record(1, 'near', [a_generator_pass(1, 2.021)]),
+        ]
+        review.generator_headroom(records)
+        ref, near = (record['generator_headroom'] for record in records)
+        assert ref['headroom_shown'] is False
+        assert near['ratio'] == pytest.approx(1.02, abs=0.01)
+        assert near['headroom_shown'] is None
+        assert 'one timed pass' in near['headroom_withheld_reason']
+
+    def test_a_zero_reference_is_withheld_not_divided_by(self):
+        records = [
+            a_headroom_record(0, 'instant', [a_generator_pass(1, 0.0),
+                                             a_generator_pass(2, 0.0)]),
+            a_headroom_record(1, 'slow', [a_generator_pass(1, 3.0)]),
+        ]
+        section = review.generator_headroom(records)
+        assert all(record['generator_headroom']['ratio'] is None
+                   for record in records)
+        assert 'resolution' in section['groups'][0]['reason']
+
+    def test_a_reference_alone_after_contention_is_not_compared_with_itself(self):
+        records = [
+            a_headroom_record(0, 'ref', [a_generator_pass(1, 2.0),
+                                         a_generator_pass(2, 2.1)]),
+            a_headroom_record(1, 'loaded', [
+                a_generator_pass(1, 9.0, confounders=['host_cpu_saturated'])]),
+        ]
+        section = review.generator_headroom(records)
+        assert records[0]['generator_headroom']['ratio'] is None
+        assert 'nothing to compare' in section['groups'][0]['reason']
+
+    def test_passes_with_and_without_a_pin_key_are_one_configuration(self):
+        old = review.generator_pass(
+            {'repetition': 1, 'state': 'observed'},
+            {'run': {'peers': 2}, 'tester_fleet': {}}, None, {})
+        new = review.generator_pass(
+            {'repetition': 2, 'state': 'observed'},
+            {'run': {'peers': 2, 'pin': None}, 'tester_fleet': {}}, None, {})
+        assert old['identity'] == new['identity']

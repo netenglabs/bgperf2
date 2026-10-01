@@ -671,12 +671,35 @@ own ceiling through the interval is a target that was the constraint; a target
 with headroom while the generators sent slowly is not. That is the
 [CPU attribution boundary](bgperf2-measurement-implementation-plan.md#cpu-attribution-boundary),
 and until that instrumentation exists this finding may not be read as a
-statement about the generator. A second candidate, cheaper and weaker, is a
-cross-cell comparison within one series: a fleet that reached 623,727 pps on
-one cell of the Block 5-7 MRT matrix was not at its ceiling on the cell where
-it managed 345,720 pps with identical generator configuration. That is a
-review-layer statistic over several runs, not something `findings.py` can see
-from one artifact, and it is not implemented (`bgperf2-bgg`).
+statement about the generator.
+
+**A second, cheaper and weaker, is implemented: `generator_headroom` in
+`scripts/timing_variance_review.py`** (`bgperf2-ylb`). It is a cross-cell
+comparison within one series, which `findings.py` cannot make from one artifact.
+Cells are grouped by the generator's recorded identity:
+- the `run` dict minus name and repetition, so `pin` separates cells;
+- tester count, offered prefixes and `tester version`.
+
+Within a group, the reference is the fastest `reported_injection_s` of any pass,
+which is the generator's own timing. Each cell's fastest uncontended pass is
+published as a ratio to it. `headroom_shown` is set only when that pass is
+slower than the reference cell's *slowest* pass. Durations are compared, never
+rates, for the reason `tester_metrics()` derives no rate from them.
+
+It is withheld by name in each of these cases:
+- a series whose generator never timed itself (every BIRD-generator series);
+- a cell whose every timed pass was contended;
+- a reference cell with one timed pass (the ratio is still published);
+- a reference that reads 0.0;
+- a group with no second cell to compare.
+
+**Its premise is that the generator's environment is what the record says, and
+the controlled runs above show it is load-bearing.** It reports the starved
+target as 6.0× the baseline's own-timed send, which is correct. It reports the
+4 mbit-capped generator as 16.33× in exactly the same way, which is wrong,
+because the cap was applied outside the record. `tests/test_variance_review.py`
+pins both, so nobody later reads it as separating the two. What it does is
+bound: the identical fleet, on this host, was shown able to go this much faster.
 
 A run whose policy raised still writes its artifact: `write_event_artifact()`
 catches, and publishes `limiting_component: inconclusive` with the exception in

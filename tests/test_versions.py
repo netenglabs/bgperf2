@@ -121,7 +121,7 @@ class TestOpenBGP:
         '''
         assert OpenBGP.pulls_base(OpenBGP.image_tag()) is True
 
-    @pytest.mark.parametrize('version', ['8.8', '9.2'])
+    @pytest.mark.parametrize('version', ['8.8', '9.2', '9.3'])
     def test_pinned_versions_are_not_re_pulled(self, version):
         '''`FROM openbgpd/openbgpd:9.2` is immutable, so a pull cannot find
         anything new -- and it is fatal when the registry is unreachable even

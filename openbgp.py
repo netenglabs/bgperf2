@@ -20,10 +20,10 @@ class OpenBGP(Container):
     # OpenBGPD is not compiled here -- it is repackaged from the upstream
     # image, so a version is a tag on openbgpd/openbgpd rather than a git ref,
     # and the inherited passthrough resolve_ref() is already correct. Upstream
-    # tags every release (7.3 through 9.2 at the time of writing), so any of
+    # tags every release (7.3 through 9.3 at the time of writing), so any of
     # them can be asked for by name even though only these are prebuilt.
     DEFAULT_REF = 'latest'
-    VERSIONS = ('8.8', '9.2')
+    VERSIONS = ('8.8', '9.2', '9.3')
     # The base image is the daemon under test, so a cached copy of
     # openbgpd/openbgpd:latest means the unversioned tag stops tracking
     # upstream: a local copy pulled in 2025-02 kept `latest` at 8.8 well after

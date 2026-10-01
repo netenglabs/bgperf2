@@ -17,12 +17,24 @@ status disagrees with its bead's, when the epic has a child no phase names, or w
 carrying reasoning. The `bd` items link to this document's sections and hold no reasoning of their
 own.
 
-**Hardware, in one paragraph.** Phases 0–4 need **no new hardware**. They run on the current
-campaign host class (16 vCPU / 61.44 GiB AMD EPYC 9R14, `m7a.4xlarge`). New hardware is needed
-at exactly one point, the gate in §5. Only if that gate says so do we rent **three `m7a.4xlarge`
-hosts in one cluster placement group**, to separate generator, target and monitor. **More memory
-is not needed for this comparison at all.** It is needed only for the capacity-cliff work in §7,
-which is a different question from "what changed between versions".
+**Hardware, in one paragraph.** **Everything before Phase 3 runs on the development host as it
+stands.** On 2026-10-01 that is 8 vCPU / 30 GiB, AMD EPYC 9R45: smaller than the campaign class
+and a different CPU. That is the operator's choice: get as far as possible on this instance, and
+provision another only for performance testing. Work done here must never need a row that
+compares with the campaign's:
+- source and artifact reads;
+- code changes and their tests;
+- `-n1 -p1` smoke runs;
+- image builds;
+- diagnostics that compare only against controls re-run on this same host, like the 1.3
+  memory bisect.
+
+**Phase 3 is the first point that needs another EC2 instance.** It runs on a freshly provisioned
+`m7a.4xlarge` (16 vCPU / 61.44 GiB AMD EPYC 9R14), the campaign host class. **Confirm the class with
+`lscpu` before the first row.** Beyond that, new hardware is needed only if the gate in §5 says so.
+Then we rent **three `m7a.4xlarge` hosts in one cluster placement group**, to separate generator,
+target and monitor. **More memory is not needed for this comparison at all.** It is needed only for
+the capacity-cliff work in §7, which is a different question from "what changed between versions".
 
 ---
 
@@ -197,7 +209,10 @@ plan Phase 7). Item 6 answered by the operator 2026-10-01 (keep the NO_EXPORT pe
 monitor at its finer resolution, passed explicitly as `--monitor sink` if 7d has not yet flipped
 the default.
 
-**Host:** one `m7a.4xlarge`, the same class as the timing-validation campaign. The rows are
+**Host:** one `m7a.4xlarge`, the same class as the timing-validation campaign, **provisioned for
+this phase**: the development host is not that class (see the hardware paragraph above). The
+images Phase 2.4 built here carry over only if `/data`, Docker's root included, moves with them.
+Otherwise rebuild them there and re-run `verify`. The rows are
 comparable with that campaign **through Phase 7's bridge block** (a different monitor is a different
 instrument), and with nothing older (`benchmarks/baseline/baseline-benchmark.csv` was a different CPU).
 

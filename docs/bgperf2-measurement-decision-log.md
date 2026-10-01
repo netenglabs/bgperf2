@@ -4281,3 +4281,123 @@ GoBGP's exactly on the same cell. Each of those is a 7a check, not an
 assumption. The shared-monotonic-clock claim has the same status: containers
 share the host's `CLOCK_MONOTONIC` unless a time namespace is configured, and
 7a verifies it on this host rather than relying on it.
+
+### Progress on 2026-10-01: the sink exists, and on one session it counts what GoBGP counts (7a, first change set)
+
+7a is three things: the sink itself, the `--monitor` dimension that lets a run use it, and the
+five Docker checks that compare it with GoBGP on every target. This change set is the first:
+`sink/` (Go), `sink.py` (the image), registration in `BUILDABLE_IMAGES`/`PREPARE_IMAGES` and
+`BGPERF_PROCESSES`. Nothing runs it as the monitor yet, so no published number can have moved.
+
+**What the GoBGP monitor actually sent, read off the wire.** A `bgperf/gobgp` 4.9.0 configured as
+the monitor (AS 1001, one neighbour, no afi-safis) was pointed at a listener that printed the
+first message. Its OPEN advertises, in this order: route refresh, FQDN (the container's
+hostname), extended message (RFC 8654), multiprotocol IPv4 unicast, 4-octet AS, and extended next
+hop for IPv4 unicast over IPv6 (RFC 8950), with hold time 90. That matches
+`capabilitiesFromConfig()` at v4.9.0. Two of these were not in the plan's list, and both
+affect what a target may send. Extended message lets an UPDATE reach 65,535 octets. Extended
+next hop lets an IPv4 route arrive in MP_REACH with an IPv6 next hop. The sink sends the same OPEN
+byte for byte, apart from the hostname. A Go test pins it against the capture.
+
+**What `accepted` is, so the sink can count the same thing.** It is `AdjRib.Accepted()` for IPv4
+unicast. The rules read from the source, each now a Go test:
+
+- one path per prefix (no ADD-PATH is negotiated), so a re-announcement replaces;
+- withdrawing a prefix that is not held does nothing;
+- within one UPDATE the order is NLRI, MP_REACH, withdrawn, MP_UNREACH (`table.ProcessMessage`), so a
+  prefix both announced and withdrawn in one message ends withdrawn. RFC 7606 reads that the other
+  way, but agreement with the old instrument is the point;
+- a path whose AS_PATH holds the monitor's own AS, in a sequence or a set, is stored as
+  *rejected* and is not counted (`hasOwnASLoop`, allow-own-as 0). A later clean
+  re-announcement counts it again.
+
+GoBGP's selection, policy and global RIB never reached that counter, and they are the work the sink
+exists not to do.
+
+**Errors are handled the way the monitor was configured.** The monitor ran with `treat-as-withdraw`
+off, and in that mode GoBGP resets the session on *any* UPDATE that fails to parse or fails
+`ValidateUpdateMsg` (`fsmHandler.handlingError`). The sink does the same and sends the NOTIFICATION
+the parser names. The RFC 7606 behaviour would be the more forgiving choice, but a sink that kept a
+session GoBGP would have reset could hold a count GoBGP never reached.
+
+**The log, format 1.** Each line is `<kind> <CLOCK_MONOTONIC ns> <fields>`. The count lines are
+`C <ns> <accepted> <updates> <eor>`; the full list of kinds is in `sink/log.go`. Count changes are
+coalesced to at most one line per 10 ms, and a heartbeat follows a quiet second. The first draft
+had one defect, and it was caught before anything ran: an immediate write, such as the zero on a
+session drop, *replaced* a pending count instead of writing it first. That would have lost
+the table's peak just before a drop. An End-of-RIB had the same flaw: it re-dated the last count to
+its own arrival. Both now flush the pending count at its own time first, and a test covers each.
+The resolution of a C line is the coalesce interval, not the write cadence. A count first seen on a
+line became true after the previous line's time and no later than its own.
+
+**Why the source is embedded in the recipe instead of passed as a build context.** The recipe hash
+(`RECIPE_LABEL_KEY`) covers the rendered Dockerfile text. With a build context, an edit to
+`sink/*.go` would leave that text unchanged, and a stale *instrument* would read as current. That is
+the trap `prepare` has fallen into three times. The source therefore goes into the Dockerfile as an
+uncompressed ustar archive, and a test shows that editing a `.go` file moves the hash. It is
+uncompressed because gzip output depends on the zlib build, and a hash that moved with the host's
+zlib would flag images nobody touched. The base64 is split into RUN steps of at most 32 KiB, under
+Linux's 128 KiB limit on one argument. The archive's SHA-256, cut to 12 digits, is compiled into
+the binary, so a running sink names the source it was built from (`793fa1b81a76` for this one). A
+banner without that hash is refused as `VersionUnavailable`. The compiler is pinned to
+`golang:1.25-bookworm`, not the `golang:latest` the GoBGP recipe floats on.
+
+**Verification.** The Go tests pass under `-race` (Go 1.25.14) and again inside the image build,
+so an image cannot exist unless they passed against the source it holds. The Python suite passed
+(2101). `prepare -t sink` built `bgperf/sink:latest` (121 MB). `verify -t sink` reported
+`0.1.0 (src 793fa1b81a76; gobgp/v4 v4.9.0; go1.25.14)` and a clean binary. One hand-driven Docker
+session followed: a GoBGP 4.9.0 speaker peered with both the sink and a GoBGP monitor.
+
+| step | sink | GoBGP monitor |
+|---|---|---|
+| 3000 /24s announced | 3000 | 3000 |
+| 1000 of them withdrawn | 2000 | 2000 |
+| 500 held prefixes re-announced with another next hop | 2000 | 2000 |
+
+After an administrative reset, the count went to 0 at once with the reason logged (`6/4`). The
+session came back after GoBGP's own idle hold, and the full table was back 6 ms after it did. The
+sink was then restarted twice, with a router ID below the speaker's and then above it. Both came up
+inbound, so both directions have now established against a real speaker. A true simultaneous
+collision has not happened against one yet, and its resolution (RFC 4271 6.8) is covered only by a
+unit test. **The shared-clock assumption holds on this host.** The sink's first line pairs
+CLOCK_REALTIME with CLOCK_MONOTONIC, and its realtime−monotonic offset matched the host's to within
+0.25 µs. A container in its own time namespace would be off by its whole offset. That is 7a check 5
+in its simplest form, and the controller-side version belongs with the log reader.
+
+**What review changed before the commit.** `/code-review` raised ten findings, and nine were acted
+on:
+
+- **Rejection rules.** The ORIGINATOR_ID rule now applies, on iBGP only, as in `peer.handleUpdate`.
+  gen_conf() always peers the monitor over eBGP, but a `-f` scenario need not. The reviewer's
+  second rule, CLUSTER_LIST, is not on that path in v4.9.0, and the source was read to check.
+- **Pinning.** The base images were tag-pinned (`golang:1.25-bookworm`), and a tag moves while the
+  recipe text stays the same. They are now pinned by digest, so a toolchain change is a recipe
+  change.
+- **Hot path.** It read CLOCK_MONOTONIC by syscall and allocated a body buffer for every UPDATE.
+  It now reads the clock through Go's vDSO path, offset from one direct read at start, and reuses
+  one buffer per connection.
+- **Proxy.** `build_dockerfile()` added the proxy only after the *last* FROM, so the build stage,
+  the one that fetches, never saw it. Every FROM gets it now, which also fixes rustybgp's
+  multi-stage recipe. The recipe hash is unaffected, because it is computed before the splice.
+- **Smaller fixes.** Durations are validated, since `-coalesce 0` panicked and
+  `-connect-retry 0` spun. Equal router IDs between ASes fall back to the AS (RFC 6286). An
+  internal peer with our own identifier is refused. `prepare`/`images` name `sink/ (src <hash>)`
+  as the source rather than `HEAD`. The `verify` comment now calls the base-class probe a gap
+  rather than the design.
+
+Declined: replacing the embedded archive with a docker-py build context. It would make
+`dockerfile sink` readable, but it changes `build_dockerfile()`'s single build path for every
+image to save one image's printout.
+
+The rebuilt image (`src 4eda4de2857a`) passed `verify`. It matched GoBGP again on a fresh session
+(2000 announced, then 1500 after 500 withdrawals). The realtime−monotonic offsets now agree to
+1.8 µs, against 0.25 µs on the first build. The difference is the vDSO-derived clock's start
+offset, and it is far below the 10 ms coalesce resolution.
+
+**Still open in 7a.** The `--monitor gobgp|sink` dimension at all four entry points and in the cell
+id and stem; a `Monitor` class for the sink, with `MONITOR_CLASSES` probing it; the host-side log
+reader (last complete line, heartbeat gaps) that feeds the run's queue the same sample at the same
+cadence; receivers as sinks; and checks 1 to 5 on every open-source target. This session was a
+GoBGP speaker sending 3000 prefixes, not a target sending 1.05M. Nothing here shows the sink keeps
+up at full table, holds 500 sessions' worth of churn, or reads what BIRD, FRR, RustyBGP or OpenBGPD
+send the same way GoBGP did.

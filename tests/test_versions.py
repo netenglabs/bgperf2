@@ -556,6 +556,30 @@ class TestRecipeDrift:
         Dummy.build_dockerfile(dockerfile, force=False, tag='bgperf/x:latest')
         assert captured['labels'] == {base.RECIPE_LABEL_KEY: base.recipe_hash(dockerfile)}
 
+    def test_the_proxy_reaches_every_build_stage(self, monkeypatch):
+        """A multi-stage recipe fetches in its build stage, and each stage
+        starts with a clean environment: splicing the proxy after only the
+        last FROM left `go mod download` in the sink's build stage without it.
+        """
+        captured = {}
+
+        def fake_build(fileobj, **kwargs):
+            captured['dockerfile'] = fileobj.read().decode('utf-8')
+            return iter([])
+
+        monkeypatch.setattr(base.dckr, 'build', fake_build)
+        monkeypatch.setattr(base, 'img_exists', lambda tag: False)
+        monkeypatch.setenv('http_proxy', 'http://proxy.example:3128')
+
+        class Dummy(base.Container):
+            pass
+
+        Dummy.build_dockerfile('FROM golang AS build\nRUN fetch\nFROM debian\nCOPY --from=build /x /x\n',
+                               force=False, tag='bgperf/x:latest')
+        lines = captured['dockerfile'].split('\n')
+        env = 'ENV http_proxy http://proxy.example:3128'
+        assert lines[:5] == ['FROM golang AS build', env, 'RUN fetch', 'FROM debian', env]
+
     def test_labels_are_withheld_below_the_api_version_that_supports_them(self, monkeypatch):
         '''docker-py raises InvalidVersion for `labels` below API 1.23
         (~Engine 1.11) -- older than the 1.9.0 doctor()'s own version check

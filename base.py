@@ -554,16 +554,19 @@ class Container(object):
         if _RenderOnly.active:
             return
         def insert_after_from(dockerfile, line):
-            lines = dockerfile.split('\n')
-            i = -1
-            for idx, l in enumerate(lines):
-                elems = [e.strip() for e in l.split()]
-                if len(elems) > 0 and elems[0] == 'FROM':
-                    i = idx
-            if i < 0:
+            # After *every* FROM, not just the last: each stage of a
+            # multi-stage build starts with a clean environment, and it is the
+            # build stage that fetches (sink's `go mod download`, rustybgp's
+            # cargo), not the runtime stage the last FROM begins.
+            out = []
+            for l in dockerfile.split('\n'):
+                out.append(l)
+                elems = l.split()
+                if elems and elems[0] == 'FROM':
+                    out.append(line)
+            if len(out) == len(dockerfile.split('\n')):
                 raise Exception('no FROM statement')
-            lines.insert(i+1, line)
-            return '\n'.join(lines)
+            return '\n'.join(out)
 
         for env in ['http_proxy', 'https_proxy']:
             if env in os.environ:

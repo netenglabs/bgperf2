@@ -58,6 +58,7 @@ from tester import ExaBGPTester, BIRDTester
 from mrt_tester import ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
 from monitor import Monitor, Receiver
+from sink import Sink
 import reclaim
 from convergence import ConvergenceTracker
 from reclaim import StopRequested, StopSignal, watch_for_interruption
@@ -100,12 +101,18 @@ BUILDABLE_IMAGES = {
     'flock': Flock,
     'frr_c': FRRoutingCompiled,
     'bgpdump2': Bgpdump2,
+    # The purpose-built monitor (measurement plan Phase 7). Nothing runs it as
+    # the monitor until 7a's `--monitor` dimension lands, and until then there
+    # is no class for `verify` to probe it through but the base. That is a
+    # gap, not the design: the sink's Monitor class must join MONITOR_CLASSES
+    # when it exists, for the reason TESTER_CLASSES does.
+    'sink': Sink,
 }
 
 # What `prepare` builds, in order. Flock and the commercial NOSes are left out:
 # they are downloaded rather than compiled.
 PREPARE_IMAGES = ['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'rustybgp',
-                  'openbgp', 'frr_c', 'bgpdump2']
+                  'openbgp', 'frr_c', 'bgpdump2', 'sink']
 
 # Targets `bench -t` accepts. The class both selects the daemon's behaviour and
 # supplies the image naming used to resolve --version.

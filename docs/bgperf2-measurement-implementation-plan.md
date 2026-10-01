@@ -575,10 +575,14 @@ The follow-up campaign may begin only when all are true:
 
 ### Phase 7: Replace the monitor with a purpose-built sink
 
-Status: opened 2026-09-29, not started. Planned only; no code exists. The operator
-chose on 2026-09-29 to fix the instrument now and redo the campaign's testing
-under it, and the rows already taken stay readable through a bridge block
-(7c). Why a sink rather than a patched GoBGP, and the GoBGP source reading that
+Status: in progress since 2026-10-01. The operator chose on 2026-09-29 to fix
+the instrument now and redo the campaign's testing under it, and the rows
+already taken stay readable through a bridge block (7c). 7a's first change set
+landed on 2026-10-01: the sink exists (`sink/`, `sink.py`), builds as
+`bgperf/sink` with its Go tests run in the build, passes `verify`, and matched a
+GoBGP monitor exactly on one hand-driven session. Nothing runs it as the monitor
+yet: the `--monitor` dimension, the log reader and the five Docker checks are
+7a's remaining work. Why a sink rather than a patched GoBGP, and the GoBGP source reading that
 started it, are in the
 [decision log](bgperf2-measurement-decision-log.md#phase-7-replace-the-monitor-with-a-purpose-built-sink).
 

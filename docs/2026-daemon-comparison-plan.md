@@ -162,9 +162,35 @@ Code changes, verified by the test suite and by `-n1 -p1` smoke runs.
 
    On `m7a` a vCPU is a physical core, not an SMT sibling. **Confirm this with `lscpu` on the
    host before relying on it.** If it holds, disjoint sets really are disjoint.
-3. **`bgperf2-ylb`: separate a slow generator from a back-pressured one.** Generator-side
-   evidence of whether an injector was blocked on write or busy encoding. Without it, the five
-   `tester` MRT cells stay unreadable however many times they run.
+3. ~~**`bgperf2-ylb`: separate a slow generator from a back-pressured one.**~~ **Done 2026-10-01,
+   `ad993ee`:** `generator_headroom` in `scripts/timing_variance_review.py`. It is a bound, not a
+   separation: cells are grouped by the generator's recorded identity, and each cell's fastest
+   uncontended self-timed send is compared with the fastest in its group. The definition and its
+   refusals are in `docs/measurement-dictionary.md`, "What `tester_limited` does not separate".
+   - **Validated against the controls, with the result it gets wrong pinned in the tests.** The
+     starved target reads 6.0× the baseline, which is correct. The 4 mbit-capped generator reads
+     16.33×, which is wrong. The statistic cannot see a constraint applied outside bgperf2's
+     record, and it says so in its `basis`.
+   - **On the Block 5–7 MRT series** (one group: 10 × 1.05 M, bgpdump2 `2.0.14 (a019184)`), the
+     reference is 1.389 s, set by the OpenBGPD cells. The three OpenBGPD cells sit inside its own
+     spread (1.389–1.394 s). Every other cell shows headroom:
+
+     | cells | fastest self-timed send | × reference |
+     |---|---|---|
+     | RustyBGP 2026-02 | 3.03 s | 2.2 |
+     | RustyBGP master | 12.4 s | 8.9 |
+     | BIRD | 24.4–34.9 s | 17.6–25.1 |
+     | FRR | 58.6–73.0 s | 42.2–52.5 |
+
+     None of those passes was contended, and host idle never fell below 28% on the
+     five `tester` cells. RustyBGP 2026-02 reached 3.0 s at 8% idle, so host CPU does not explain
+     the gap either. **So the five `tester` MRT cells (four BIRD, RustyBGP master) were waiting on
+     the target's ingest, not on the generator's ceiling**, under the stated premise.
+     `findings.py` still says `tester` for them, by design.
+   - What would turn the bound into an attribution is still per-role CPU. Phase 3's pinned rows
+     narrow the premise, because the generator's cores are then part of its recorded identity.
+   - The rule is reproduced by
+     `scripts/timing_variance_review.py --run-root results/2026/2026-timing-validation --series mrt`.
 4. **Rebuild every image** with `prepare -f`. Every current image reports `recipe unknown`, so the
    recipe-drift check cannot vouch for any of them. Then run `verify` and require all ok.
 5. ~~**Fix the version matrix.**~~ **Done 2026-10-01, `2d7bb84`:** checked upstream by `git ls-remote`
@@ -210,7 +236,7 @@ Code changes, verified by the test suite and by `-n1 -p1` smoke runs.
 artifact names; all matrix images verify clean.
 
 Progress: item 1 answered by the operator 2026-09-29 (change the monitor; the work is measurement
-plan Phase 7). Item 6 answered by the operator 2026-10-01 (keep the NO_EXPORT peer, with obligations). Item 2 done 2026-10-01 (`1a1bdf9`), item 5 2026-10-01 (`2d7bb84`). Items 3 and 4 remain.
+plan Phase 7). Item 6 answered by the operator 2026-10-01 (keep the NO_EXPORT peer, with obligations). Item 2 done 2026-10-01 (`1a1bdf9`), item 5 2026-10-01 (`2d7bb84`), item 3 2026-10-01 (`ad993ee`). Item 4 remains.
 
 ---
 

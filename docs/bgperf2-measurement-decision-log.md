@@ -5053,3 +5053,19 @@ instrument. The sink run's receiver events were sink-dated at 4.4 and 7.1 ms, an
 "served within the 7.1ms resolution of each other". The GoBGP run's receiver events were
 round-dated at 1.0 s with no `dated_by`, as before. Smoke checks of the dating, not timing
 results.
+
+### Decision on 2026-10-01: the summary keeps `elapsed (s)` and its 1 s quantum; 7b is complete
+
+The third change set left one 7b item open: `summary.py`'s quantum. It could only follow the sink
+if the variance rule decided on a sink-resolved number instead of `elapsed (s)`. The operator
+answered the same day: a difference of a second or less means the test is uninteresting or the
+two targets are the same. Nothing finer than a second is wanted, and a difference under about
+10 s rarely matters unless it is a large share of the run. The decision metric stays
+`elapsed (s)`, and `METRIC_RESOLUTION` stays 1.0 s. The switch is not deferred to 7d; it is not
+wanted at all.
+
+What the sink's resolution is for, then, is not ranking. It is the intervals the findings read:
+`post_injection_tail_s`, `monitor_delta_s` and `export_spread_s`. Those used to be "within
+resolution" at almost every shape and are now resolved, which is what lets a verdict be given
+rather than withheld. `bench()`'s truncation of `elapsed` before the assurance window is
+subtracted stays as it is: at a 1 s cadence it costs nothing anyone reads.

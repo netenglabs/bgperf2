@@ -1,6 +1,6 @@
 # 2026 daemon comparison plan
 
-**Status: Phase 0 done; Phase 1 next. Written 2026-09-29.**
+**Status: Phases 0 and 1 done; Phase 2 next. Written 2026-09-29.**
 
 **Epic:** `bgperf2-0y5`
 
@@ -51,7 +51,7 @@ host class:
   (733 vs 624 s).
 - **BIRD 3.3.2** is slower than 2.19.2 on every workload except policy recalculation.
 - **RustyBGP master** has regressed from the 2026-02 build: 2.3× slower on synthetic, 4.9× the
-  memory on MRT.
+  memory on MRT. The memory regression bisects to one commit, `bd40d626` (Phase 1.3).
 
 Caveat that travels with it: the report names no limiting component for any synthetic cell
 (`unresolved (injection_boundary_unresolved)`).
@@ -91,7 +91,7 @@ Progress: done 2026-09-29. Item 1 merged as `fb69263` (`bgperf2-es0`); item 2 is
 
 ## 3. Phase 1 — questions answerable from existing evidence
 
-**Tracked by:** `bgperf2-0y5.2` · **Status:** in progress
+**Tracked by:** `bgperf2-0y5.2` · **Status:** done
 
 No new benchmark runs. Each item is a read of source or artifacts that already exist.
 
@@ -113,13 +113,19 @@ No new benchmark runs. Each item is a read of source or artifacts that already e
    server's exclusive lock throughout, so the monitor processes no UPDATE during it: ~30% of wall
    time at 1.05 M. No CLI read avoids it. All 27 MRT rows keep `monitor_lag_s` inside its bound.
    What remains is a decision, and it is the operator's — see Phase 2.1.
-3. **`bgperf2-nit`: RustyBGP master's 4.8× memory.** Bisect by build, not by benchmark: build two
-   or three commits between `2026-02` and master and measure only memory. This is small.
+3. ~~**`bgperf2-nit`: RustyBGP master's 4.8× memory.**~~ **Answered 2026-10-01 (`fb5f58d`,
+   decision log "Finding on 2026-10-01: RustyBGP's MRT memory regression is one commit").** It is
+   one commit, `bd40d626` (2026-03-07, "remove global max_send, track all paths like Juniper"):
+   its parent peaks at 3.10/3.12 GB and it peaks at 14.61/14.96 GB. The RIB now diffs and emits
+   changes for every path of a prefix, not just the best. That costs only where prefixes have
+   several paths, which is why synthetic shows no regression. The mechanism is inferred from the
+   diff, not profiled. The bisect ran on the 8 vCPU development host against controls re-run there
+   (2.47 vs 11.81 GB, reproducing Block 5).
 
 **Exit:** each of the three has a recorded answer, or a named reason it cannot be answered
 without new runs.
 
-Progress: item 2 done 2026-09-29; item 1 done 2026-10-01 (`e6d4f46`). Item 3 remains.
+Progress: done 2026-10-01. Item 2 done 2026-09-29 (`21ae46c`), item 1 2026-10-01 (`e6d4f46`), item 3 2026-10-01 (`fb5f58d`).
 
 ---
 

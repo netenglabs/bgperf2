@@ -50,7 +50,7 @@ precisely, because it was easy to overstate:
 | cells | verdict | what it does and does not say |
 |---|---|---|
 | 4 BIRD, `rustybgp default` | `tester` | the generators were still sending when the monitor reached the count. It does **not** say bgpdump2 was slow: a generator blocked by a target that is not draining it produces the same measurement (`docs/invariants/findings.md`). A 1.8× spread in fleet rate on identical generator config (345k/s vs 623k/s) points toward back-pressure. Nothing yet proves it. |
-| 5 `frr_c` | `inconclusive` | the monitor never reached the check-point. FRR advertises ~9% less of the table (`bgperf2-cw6`), so this is a counting question, not a timing one. |
+| 5 `frr_c` | `inconclusive` | the monitor never reached the check-point. FRR advertises ~9% less of the table, because one injected peer (AS 37100) tags every route NO_EXPORT and FRR's oldest-path tie-break selects it more often (`bgperf2-cw6`, Phase 1.1). So this is a counting question, not a timing one. |
 | 3 OpenBGPD, `rustybgp 2026-02` | `target_or_monitor` | the generators finished 14.5–103.7 s before the end, so the generator is ruled out. The remaining time cannot be split between the target and the GoBGP monitor on one host. |
 
 **Wrong in the published record:** two `2026-baseline` rows claim `-s/--single-table` affected
@@ -83,10 +83,18 @@ Progress: done 2026-09-29. Item 1 merged as `fb69263` (`bgperf2-es0`); item 2 is
 
 No new benchmark runs. Each item is a read of source or artifacts that already exist.
 
-1. **`bgperf2-cw6`: why does FRR advertise ~9% less of the MRT table?** If the answer is
-   filtering or path selection FRR is entitled to, the check-point for FRR MRT cells is
-   wrong and the five `inconclusive` cells can be re-derived from existing artifacts. If it is
-   a bgperf2 config bug, fix it; those cells must then be re-run in Phase 3.
+1. ~~**`bgperf2-cw6`: why does FRR advertise ~9% less of the MRT table?**~~ **Answered
+   2026-10-01 (`e6d4f46`, decision log "Finding on 2026-10-01").** It is filtering FRR is
+   entitled to, not a config bug. Injected peer AS 37100 (RIB index 10, injector 6) carries
+   NO_EXPORT on all 1,050,000 of its routes, and the monitor and testers are all eBGP. A
+   prefix whose best path is AS 37100's is advertised to nobody. BIRD and OpenBGPD break
+   ties on router ID, which picks that path for 24,219 prefixes and predicts their
+   1,056,779 to within 13. FRR prefers the oldest path, so its share (~120k) depends on
+   arrival order. That matches its 956,893–961,057 spread across the 15 recorded rows.
+   The check-point is unsound for this RIB for every daemon. The five `inconclusive`
+   cells can be re-derived without a run: all 15 FRR rows carry a resolved
+   `target_table.delivery` with `exported_final == monitor_final`. Cross-daemon MRT
+   timing compares unequal export work, which is Phase 2.6.
 2. ~~**`bgperf2-4pm`: what does GoBGP do to answer `gobgp neighbor -j`?**~~ **Source read
    2026-09-29 (`21ae46c`, decision log "Finding on 2026-09-29").** The accepted count is O(1).
    The O(table) walk is the received count, which bgperf2 never reads. `ListPeer` holds the
@@ -99,7 +107,7 @@ No new benchmark runs. Each item is a read of source or artifacts that already e
 **Exit:** each of the three has a recorded answer, or a named reason it cannot be answered
 without new runs.
 
-Progress: item 2 done 2026-09-29.
+Progress: item 2 done 2026-09-29; item 1 done 2026-10-01 (`e6d4f46`). Item 3 remains.
 
 ---
 
@@ -149,6 +157,20 @@ Code changes, verified by the test suite and by `-n1 -p1` smoke runs.
    | RustyBGP | 2026-02, master | — (see Phase 1.3) |
 
    GoBGP is not in the matrix (Phase 0).
+6. **Decision (operator): the MRT workload's NO_EXPORT peer (new, from Phase 1.1).** On the
+   pinned RIB, one of the ten injected peers (AS 37100) tags every route NO_EXPORT. So each
+   daemon exports a different share of the table: BIRD and OpenBGPD 1,056,779, FRR ~959k
+   and varying by arrival order, RustyBGP the whole 1,081,178. Options:
+   - **Keep it, and say so.** Within-daemon comparisons stand. Cross-daemon MRT timing is
+     published with the export volume beside it, never as like-for-like.
+   - **Skip that peer index when choosing injectors.** The workload changes, so the
+     comparison's MRT rows no longer match the timing-validation campaign's except through
+     a bridge.
+   - **Strip NO_EXPORT at the injector.** This needs a bgpdump2 change and makes the replay
+     less faithful to the RIB.
+   - **Set `bgp bestpath compare-routerid` on FRR.** FRR would then match BIRD and
+     OpenBGPD deterministically. It is a non-default FRR config, and it does not help
+     RustyBGP.
 
 **Exit:** tests green; a pinned smoke run and an unpinned smoke run both complete, with distinct
 artifact names; all matrix images verify clean.

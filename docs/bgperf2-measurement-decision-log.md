@@ -4528,3 +4528,65 @@ the speaker announced 2000 /24s, and the loop's samples reached `accepted` 2000,
 
 **Still open in 7a.** The `--monitor gobgp|sink` dimension at the entry points, the cell id and the
 stem; receivers as sinks; and checks 1 to 5 on every open-source target.
+
+### Progress on 2026-10-01: `--monitor gobgp|sink` selects the instrument (7a, fourth change set)
+
+A run can now be measured by the sink: `bench --monitor sink`, or `monitor: sink` on a batch test.
+The default stays `gobgp` until 7d, so no published number has moved.
+
+**Where it reaches, and where it does not.** It follows `--pin`'s shape: the monitor is a
+container, not part of the scenario, so `config` does not take it, and the dimension has three
+entry points rather than four. A batch value is validated against `MONITOR_TYPES` in
+`check_batch_test()`, and it is refused under a target like every other test key. The stem gets
+`mon-sink`, the cell id and description carry `monitor` for the sink only, both `run` blocks record
+it (under `-f` too, because bgperf2 starts the monitor whatever wrote the scenario), and the
+manifest's `monitor.daemon` names it where it used to say `gobgp` unconditionally. It is not a CSV
+column, because the existing `monitor version` column already names the build.
+
+**The unmarked name follows the old instrument, not the default.** A first reading of the rule
+for `pin` and `path_diversity`, "named only away from the default", would have tied the omission to
+`DEFAULT_MONITOR`. 7d flips that default. On that day the sink would take the unmarked stem and
+cell id, and every GoBGP cell measured before the flip would be renamed to an id no artifact on
+disk carries. `UNMARKED_MONITOR` is therefore its own constant, fixed at `gobgp`, and a test flips
+the default to check that the names do not move.
+
+**The image is checked before the teardown.** `MONITOR_CLASSES[...].require_image()` runs after
+every command-line guard, on both the generated and the `-f` path, and once per batch in
+`check_batch_monitor_images()`. The GoBGP monitor's image had never been checked; a missing one
+failed at `create_container`, after the previous run's containers were gone.
+
+**The Docker check found a difference in when the session comes up, and the sink now copies
+GoBGP's schedule.** The first `bench -t bird -n1 -p1 --monitor sink` converged correctly, but
+`monitor (s)` was 9 against GoBGP's 1. The sink's log showed no inbound connection and its first
+outbound one 10.3 s after it started. BIRD's config uses `neighbor range`, which never initiates, so
+the monitor's dial is the only way the session forms, and the monitor starts before the target. The
+sink dialled at once, was refused, and slept the whole 10 s connect-retry. GoBGP's `connectLoop`
+(v4.9.0, `pkg/server/fsm.go`) waits 0.75 to 1.0 of a tick before *every* attempt, and the first tick
+is `minConnectRetryInterval`, 2 s, so its first try lands at 1.5 to 2 s, after the target is up.
+Later attempts wait 0.75 to 1.0 of the configured connect-retry, and the dial timeout is
+connect-retry less a second, floored at 2 s. The sink now does exactly that (`connectDelay()`, with
+a Go test). This was not cosmetic: `monitor (s)` is a published column, and on a passive target the
+instrument would have moved it by about 8 s. The image was rebuilt (`src 9c54763a82af`), `verify`
+ok, with the Go tests passing under `-race`.
+
+**Verification.** 15 new unit tests; the full suite passed (2159). Docker, all BIRD 2.19 at the
+smallest shapes. After the fix, `-n1 -p1` alternated sink, gobgp, sink, gobgp: `monitor (s)` 1 for
+all four, received 1 for all four, and `elapsed (s)` 3, 2, 3, 2, which is inside the 1 s poll's
+resolution on a one-prefix table. A two-test batch, one test per monitor, at 2 × 1000: both received
+2000 of 1980 required. The artifacts were `bird_bird_1000_2.*` and `bird_bird_1000_2_mon-sink.*`,
+side by side. The sink cell's id carried `"monitor":"sink"` and the GoBGP cell's did not. The sink
+row's `monitor version` read `0.1.0 (src 9c54763a82af; ...)`. These are smoke checks of the
+plumbing, not 7a's comparison checks. No benchmark was run.
+
+**Still open in 7a.** Receivers as sinks, and checks 1 to 5 on every open-source target. A batch
+test takes one monitor, so the bridge block's two instruments are two tests, and a shuffle orders
+cells within a test, not across tests. Shuffling the two instruments together needs `monitor` as a
+list axis, and that is a 7c prerequisite, recorded on its bead.
+
+**What review changed.** `/code-review` found one gap. Under `--monitor sink` the receivers are
+still GoBGP, and their image was not checked. A host with the sink image but without
+`bgperf/gobgp` therefore passed the new check, tore down the previous run, and died at the first
+receiver's `create_container`. That is the cost the check exists to prevent. The receivers' class
+is now `RECEIVER_CLASSES[monitor]`, and its image is checked whenever the run has receivers. On
+the `-f` path the count comes from the scenario's own list, and in a batch a `file:` target counts
+as having receivers. Two tests cover it.

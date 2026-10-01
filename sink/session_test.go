@@ -362,3 +362,25 @@ func TestInternalPeerWithOurIdentifierIsRefused(t *testing.T) {
 		t.Fatalf("expected notification 2/3, got %v", err)
 	}
 }
+
+func TestConnectScheduleIsGoBGPs(t *testing.T) {
+	retry := 10 * time.Second
+	// The first attempt waits 1.5 to 2 s, not nothing and not a whole retry.
+	if got := connectDelay(0, retry, 0); got != 1500*time.Millisecond {
+		t.Fatalf("first attempt, r=0: %v", got)
+	}
+	if got := connectDelay(0, retry, 0.999999); got > 2*time.Second || got < 1999*time.Millisecond {
+		t.Fatalf("first attempt, r=1: %v", got)
+	}
+	// Later ones 7.5 to 10 s.
+	if got := connectDelay(1, retry, 0); got != 7500*time.Millisecond {
+		t.Fatalf("second attempt, r=0: %v", got)
+	}
+	if got := connectDelay(5, retry, 0.5); got != 8750*time.Millisecond {
+		t.Fatalf("later attempt, r=0.5: %v", got)
+	}
+	// A retry below GoBGP's minimum is floored at it.
+	if got := connectDelay(3, time.Second, 0); got != 1500*time.Millisecond {
+		t.Fatalf("short retry: %v", got)
+	}
+}

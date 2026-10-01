@@ -141,6 +141,32 @@ MONITOR_CLASSES = {
     'sink': SinkMonitor,
 }
 
+# Which of them a run measures with (`--monitor`; batch: `monitor:`, a *test*
+# key). A run dimension until measurement plan 7c's bridge block is accepted,
+# because that block measures the same cells with both instruments.
+MONITOR_TYPES = tuple(MONITOR_CLASSES)
+DEFAULT_MONITOR = 'gobgp'
+# The instrument every row before Phase 7 was measured with. A run on it is
+# named and identified exactly as before the flag existed, so every existing
+# stem and cell id resumes. Deliberately a constant of its own, not
+# DEFAULT_MONITOR: 7d flips the default, and if the omission followed it, a
+# sink cell would take the old unmarked name and every GoBGP cell measured
+# before the flip would be renamed to something no artifact on disk carries.
+UNMARKED_MONITOR = 'gobgp'
+
+# The class each monitor's export receivers run as. A receiver is a monitor
+# nothing reads (`monitor.Receiver`), so it follows the run's instrument.
+RECEIVER_CLASSES = {
+    'gobgp': Receiver,
+    # Still GoBGP until 7a makes the receivers sinks too.
+    'sink': Receiver,
+}
+
+
+def run_monitor(args):
+    '''The monitor a run measures with, from `--monitor` or its default.'''
+    return getattr(args, 'monitor', None) or DEFAULT_MONITOR
+
 TARGET_CLASSES = {
     'bird': BIRDTarget,
     'frr_c': FRRoutingCompiledTarget,
@@ -253,6 +279,12 @@ def bench_output_prefix(args):
     pin = getattr(args, 'pin', None)
     if pin:
         parts.append(pin_stem(pin))
+    # And the instrument: the bridge block (measurement plan 7c) measures one
+    # cell with each monitor, which is the same workload everywhere else in
+    # this stem, so without it the second would replace the first's artifacts.
+    monitor = run_monitor(args)
+    if monitor != UNMARKED_MONITOR:
+        parts.append('mon-{0}'.format(monitor))
     return '_'.join(parts)
 
 
@@ -2842,7 +2874,24 @@ def bench(args):
                                        host_cpus())
         except ValueError as e:
             sys.exit(str(e))
+        scenario_receiver_count = len(early.get('receivers') or [])
         del early
+    # The instrument's image, on both paths -- a `-f` run starts the monitor
+    # too -- and after every guard that reads only the command line, because
+    # this asks Docker. Before the teardown, so a sink nobody built costs a
+    # message rather than the previous run's containers; the GoBGP monitor was
+    # never checked here, and a missing one failed at `create_container`.
+    #
+    # And the receivers' image, when the run has receivers: they are their own
+    # class, and under `--monitor sink` that class was not the monitor's.
+    receiver_count = (scenario_receiver_count if args.file
+                      else getattr(args, 'receivers', None) or 0)
+    try:
+        MONITOR_CLASSES[run_monitor(args)].require_image()
+        if receiver_count:
+            RECEIVER_CLASSES[run_monitor(args)].require_image()
+    except ImageNotBuilt as e:
+        sys.exit(str(e))
     if args.repeat:
         # The other half of the `--pin` refusal under `--repeat`: an unpinned
         # run reusing generators a pinned run created would inherit their
@@ -2949,7 +2998,7 @@ def bench(args):
     pin = pin_cpusets(getattr(args, 'pin', None))
 
     print('run monitor')
-    m = Monitor(config_dir+'/monitor', conf['monitor'])
+    m = MONITOR_CLASSES[run_monitor(args)](config_dir+'/monitor', conf['monitor'])
     m.monitor_for = args.target
     m.cpuset = pin.get('monitor')
     m.run(conf, dckr_net_name)
@@ -2976,7 +3025,8 @@ def bench(args):
         dckr.remove_container(name, force=True)
     receiver_containers = []
     for idx, receiver in enumerate(receivers_wanted):
-        r = Receiver(idx, '{0}/receiver{1}'.format(config_dir, idx), receiver)
+        r = RECEIVER_CLASSES[run_monitor(args)](
+            idx, '{0}/receiver{1}'.format(config_dir, idx), receiver)
         r.cpuset = pin.get('receivers')
         print('run receiver', r.name)
         r.run(conf, dckr_net_name)
@@ -3644,7 +3694,7 @@ def collect_provenance(args, target, monitor, testers):
 
     provenance = {
         'target': describe(args.target, target),
-        'monitor': describe('gobgp', monitor),
+        'monitor': describe(run_monitor(args), monitor),
         'testers': [],
     }
     # A run can be a hundred tester containers off one image. Ask one per
@@ -3785,6 +3835,9 @@ def write_provenance(args, provenance, prefix):
         # under `-f` too, unlike the workload keys around it: bgperf2 starts
         # the containers whatever wrote the scenario.
         'pin': pin_cpusets(getattr(args, 'pin', None)) or None,
+        # The instrument every timing in this run was read from. Known under
+        # `-f` too: bgperf2 starts the monitor whatever wrote the scenario.
+        'monitor': run_monitor(args),
         # What the run withdrew and put back after it converged, and how many
         # times. `None` under `-f` for the reason the two above are: the
         # scenario file states what each peer announces, and churn is refused
@@ -3998,6 +4051,10 @@ def write_event_artifact(args, events, prefix, status, testers=None,
                       getattr(args, 'receivers', None) or DEFAULT_RECEIVERS),
         # Both blocks, for the reason `receivers` is in both.
         'pin': pin_cpusets(getattr(args, 'pin', None)) or None,
+        # Both blocks, for the same reason: `findings.py` and the bridge
+        # block's review read this document, and the stem is the only other
+        # carrier.
+        'monitor': run_monitor(args),
         # Both `run` blocks carry it, for the reason recorded for
         # `path_diversity` and `repetition`: this document is what
         # `findings.py` reads and what a summary groups by, and the only other
@@ -5353,7 +5410,8 @@ BATCH_TEST_KEYS = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
 # `repetitions` misspelt runs one pass of a matrix someone asked three of.
 BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope',
                             'path_diversity', 'receivers', 'churn_prefixes',
-                            'churn_bursts', 'policy_reload_blocks', 'pin')
+                            'churn_bursts', 'policy_reload_blocks', 'pin',
+                            'monitor')
 
 
 # Keys that mean something on a *test* and nothing on a target. There is no
@@ -5370,7 +5428,8 @@ BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope',
 BATCH_TEST_ONLY_KEYS = ('prefix_scope', 'repetitions', 'order', 'seed',
                         'neighbors', 'prefixes', 'filter_test',
                         'path_diversity', 'receivers', 'churn_prefixes',
-                        'churn_bursts', 'policy_reload_blocks', 'pin')
+                        'churn_bursts', 'policy_reload_blocks', 'pin',
+                        'monitor')
 
 # Target keys whose absence means something other than `None`. `batch()`
 # otherwise gives every unset field `None`, and `gen_conf()` routes anything
@@ -5771,6 +5830,12 @@ def check_batch_test(test):
                 ', '.join(repeated),
                 'has' if len(repeated) == 1 else 'have'))
     check_batch_pin(test, repeated)
+    monitor = test.get('monitor')
+    if monitor is not None and monitor not in MONITOR_TYPES:
+        # `batch()` bypasses argparse's `choices`, and `MONITOR_CLASSES[...]`
+        # at the cell would end the matrix there with a bare KeyError.
+        sys.exit("test '{0}': unknown monitor {1!r}; the monitors are {2}".format(
+            test['name'], monitor, ', '.join(MONITOR_TYPES)))
 
 
 def check_batch_pin(test, repeated):
@@ -5927,6 +5992,10 @@ def expand_batch_cells(test, targets):
     # edited layout is a different run rather than more of the same one.
     pin = test.get('pin')
     pin = format_pin(parse_pin(pin)) if pin else None
+    # And the instrument: a cell measured with the sink and the same cell
+    # measured with GoBGP are what the bridge block compares, so they are
+    # different cells, and an edited monitor is a different run.
+    monitor = test.get('monitor') or DEFAULT_MONITOR
     cells = []
     for repetition in range(1, repetitions + 1):
         ordinal = 0
@@ -5953,6 +6022,7 @@ def expand_batch_cells(test, targets):
                             'churn_bursts': churn_bursts,
                             'policy_reload_blocks': reload_blocks,
                             'pin': pin,
+                            'monitor': monitor,
                             'target': t,
                         })
                         ordinal += 1
@@ -6195,6 +6265,34 @@ def check_batch_images(targets):
         sys.exit('\n'.join(['this batch cannot run:'] + ['  ' + m for m in missing]))
 
 
+def check_batch_monitor_images(tests):
+    '''Fail before the first run if any test's monitor image is missing.
+
+    The batch counterpart of the check in `bench()`, for the reason
+    `check_batch_images()` exists: a missing image at the cell is the matrix
+    ending there.
+    '''
+    wanted = set()
+    for test in tests:
+        monitor = test.get('monitor') or DEFAULT_MONITOR
+        wanted.add(MONITOR_CLASSES[monitor])
+        # A `file:` target's scenario may state receivers of its own, so any
+        # such target counts as having them; asking for an image a run turns
+        # out not to need costs a build, not a matrix.
+        if (test.get('receivers') or DEFAULT_RECEIVERS) != DEFAULT_RECEIVERS \
+                or any(t.get('file') for t in test['targets']):
+            wanted.add(RECEIVER_CLASSES[monitor])
+    missing = []
+    for cls in sorted(wanted, key=lambda c: c.__name__):
+        try:
+            cls.require_image()
+        except ImageNotBuilt as e:
+            if str(e) not in missing:
+                missing.append(str(e))
+    if missing:
+        sys.exit('\n'.join(['this batch cannot run:'] + ['  ' + m for m in missing]))
+
+
 def batch(args):
     """ runs several tests together, produces all the stats together and creates graphs
     requires a yaml file to describe the batch of tests to run
@@ -6237,6 +6335,7 @@ def batch(args):
     # images every pass, and reporting a missing image once per repetition
     # buries the list this exists to print.
     check_batch_images([t for _, targets, _, _, _ in expanded for t in targets])
+    check_batch_monitor_images([test for test, _, _, _, _ in expanded])
     check_batch_pin_and_repeat([test for test, _, _, _, _ in expanded])
 
     for test, _targets, cells, order, seed in expanded:
@@ -6358,6 +6457,7 @@ def batch(args):
             a.policy_reload_blocks = (cell.get('policy_reload_blocks')
                                       or DEFAULT_POLICY_RELOAD_BLOCKS)
             a.pin = cell.get('pin')
+            a.monitor = cell.get('monitor') or DEFAULT_MONITOR
             a.filter_test = cell['filter'] if cell['filter'] != 'None' else None
             # None for a single-pass test, so its rows, graphs and event
             # artifacts keep the names they have always had; set for every pass
@@ -6476,6 +6576,12 @@ def batch_cell_id(test_name, cell):
     # Omitted when unpinned, on the rule above, so every existing id resumes.
     if cell.get('pin'):
         identity['pin'] = cell['pin']
+    # Omitted on the instrument every existing id was measured with, on the
+    # rule above, so every existing id resumes; see UNMARKED_MONITOR for why
+    # that is not "omitted at the default".
+    monitor = cell.get('monitor') or DEFAULT_MONITOR
+    if monitor != UNMARKED_MONITOR:
+        identity['monitor'] = monitor
     return json.dumps(identity, sort_keys=True, separators=(',', ':'), default=str)
 
 
@@ -6507,6 +6613,9 @@ def batch_cell_description(cell, repetitions=1):
             described, reload_blocks)
     if cell.get('pin'):
         described = '{0}, pin={1}'.format(described, cell['pin'])
+    monitor = cell.get('monitor') or DEFAULT_MONITOR
+    if monitor != UNMARKED_MONITOR:
+        described = '{0}, monitor={1}'.format(described, monitor)
     if repetitions > 1:
         described = '{0}, repetition {1}/{2}'.format(
             described, cell['repetition'], repetitions)
@@ -7217,6 +7326,16 @@ def create_args_parser(main=True):
                                    'cores. Default: unpinned, every role on '
                                    'every core. Not with -r/--repeat or a '
                                    'remote target')
+    # On `bench` only, for the reason `--pin` is: the monitor is a container,
+    # not part of the scenario, so `config` would print a file that reads as
+    # though it encoded the instrument.
+    parser_bench.add_argument('--monitor', choices=MONITOR_TYPES,
+                              default=DEFAULT_MONITOR,
+                              help='the instrument the run is measured with: '
+                                   'gobgp, polled once a second, or sink, the '
+                                   'purpose-built counter that writes its own '
+                                   'timestamped count (measurement plan Phase '
+                                   '7). Default: %(default)s')
     parser_bench.add_argument('-f', '--file', metavar='CONFIG_FILE')
     parser_bench.add_argument('-o', '--output', metavar='STAT_FILE')
     parser_bench.add_argument('--results-dir', default=DEFAULT_RESULTS_DIR,

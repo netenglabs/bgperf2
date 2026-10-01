@@ -415,6 +415,30 @@ target's timing. Comparison plan §4 item 2 and §5's bias check are why it exis
   where a vCPU is a core, not an SMT sibling; check `lscpu`'s `Thread(s) per core` on the host
   before relying on it (plan §4 item 2).
 
+## `--monitor gobgp|sink` — which instrument measures the run
+
+`--monitor` (batch: `monitor:`, a *test* key) chooses the monitor class from `MONITOR_CLASSES`.
+It is a run dimension only until measurement plan 7c's bridge block is accepted, because that
+block measures the same cells with both instruments; 7d then flips `DEFAULT_MONITOR`.
+
+- **Three entry points, not four**, for the reason `--pin` has three: the monitor is a container,
+  not part of the scenario, so `config` does not take it. A batch value is checked against
+  `MONITOR_TYPES` by `check_batch_test()`, since `batch()` bypasses argparse's `choices`.
+- **The image is checked after every command-line guard and before the teardown**, on both the
+  generated and the `-f` path (a `-f` run starts the monitor too), and once per batch by
+  `check_batch_monitor_images()`. The GoBGP monitor's image had never been checked at all. A run
+  with receivers checks `RECEIVER_CLASSES[monitor]`'s image as well: review found that under
+  `--monitor sink` the receivers were still GoBGP and their image went unchecked.
+- **Named only away from `UNMARKED_MONITOR`, which is not `DEFAULT_MONITOR`.** The stem gets
+  `mon-sink`, and the cell id and description carry `monitor` only for the sink, so every existing
+  artifact and cell id is unchanged. The omission is tied to the instrument the old rows were
+  measured on rather than to the default: tied to the default, the 7d flip would hand the
+  unmarked name to the sink and rename every GoBGP cell measured before it.
+- **Recorded under `-f` too**, in both `run` blocks and as the manifest's `monitor.daemon`,
+  because bgperf2 starts the monitor whatever wrote the scenario. Not a CSV column: the
+  `monitor version` column already names the build.
+- **The receivers stay GoBGP** under either value until 7a makes them sinks too.
+
 ## `--threads N` — worker threads on the target
 
 `--threads N` sets worker threads on the target (`conf['target']['threads']`). Only BIRD reads it

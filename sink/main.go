@@ -12,6 +12,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/netip"
 	"os"
@@ -151,18 +152,46 @@ func (s *sink) accept(ln net.Listener) {
 	}
 }
 
+// minConnectRetry is GoBGP's minConnectRetryInterval (pkg/server/fsm.go).
+const minConnectRetry = 2 * time.Second
+
+// connectDelay is how long GoBGP v4.9.0's connectLoop waits before an attempt:
+// 0.75 to 1.0 of a tick, where the first tick is minConnectRetry and every
+// later one the configured connect-retry, floored at the same minimum. r is
+// uniform in [0, 1).
+//
+// The schedule is copied rather than simplified because it decides when a
+// passive target's session comes up. BIRD's `neighbor range` never
+// initiates, so the monitor's dial is the only way in, and the monitor starts
+// before the target: an attempt at once is refused, and a sink that then
+// waited a whole connect-retry came up ~9 s after a GoBGP monitor that tried
+// again at ~2 s. `monitor (s)` is a published column.
+func connectDelay(attempt int, retry time.Duration, r float64) time.Duration {
+	tick := minConnectRetry
+	if attempt > 0 && retry > tick {
+		tick = retry
+	}
+	return time.Duration((0.75 + r*0.25) * float64(tick))
+}
+
 func (s *sink) connect() {
+	// GoBGP's dial timeout: connect-retry less a second, floored at the
+	// minimum interval.
+	timeout := s.cfg.connectRetry - time.Second
+	if timeout < minConnectRetry {
+		timeout = minConnectRetry
+	}
 	d := net.Dialer{
 		LocalAddr: &net.TCPAddr{IP: s.cfg.localAddr.AsSlice()},
-		Timeout:   s.cfg.connectRetry,
+		Timeout:   timeout,
 	}
 	target := netip.AddrPortFrom(s.cfg.peerAddr, 179).String()
-	for {
+	for attempt := 0; ; attempt++ {
+		time.Sleep(connectDelay(attempt, s.cfg.connectRetry, rand.Float64()))
 		if !s.established() {
 			if nc, err := d.Dial("tcp", target); err == nil {
 				s.serve(nc, true)
 			}
 		}
-		time.Sleep(s.cfg.connectRetry)
 	}
 }

@@ -1,6 +1,6 @@
 # 2026 daemon comparison plan
 
-**Status: Phases 0, 1 and 2 done; Phase 3 not started (needs measurement plan Phase 7b and a campaign-class host). Written 2026-09-29.**
+**Status: Phases 0, 1 and 2 done; Phase 3 not started (`bgperf2-9su` and `bgperf2-0l7` are closed; it still needs measurement plan Phase 7b and a campaign-class host). Written 2026-09-29.**
 
 **Epic:** `bgperf2-0y5`
 
@@ -238,8 +238,13 @@ Code changes, verified by the test suite and by `-n1 -p1` smoke runs.
    peer or stripping the community would erase RustyBGP's apparent NO_EXPORT deficiency and
    FRR's tie-break difference rather than resolve them. `compare-routerid` would change the
    daemon under test. The obligations that make "say so" enforced rather than promised:
-   1. **Every MRT cell is published with its export volume beside its time**
-      (`bgperf2-0l7`, blocks Phase 3).
+   1. ~~**Every MRT cell is published with its export volume beside its time**
+      (`bgperf2-0l7`, blocks Phase 3).~~ **Done 2026-10-01 (`cfcc105`).**
+      `build_timing_report.py` publishes `received`, the monitor's accepted count when the
+      run ended, as the column directly after `elapsed (s)`, for every cell, with each
+      pass's value printed beside each pass's time. Rebuilt against the Block 12 review, it
+      shows BIRD and OpenBGPD at 1,056,779, the FRR cells between 956,893 and 961,057 from
+      pass to pass, and RustyBGP 2026-02 at 1,081,178.
    2. **Every behavioural difference and deficiency goes in §8's ledger**, with its evidence
       and its effect on the numbers. The publication carries the ledger.
    3. **RustyBGP's NO_EXPORT behaviour is confirmed from source** before it is published as a
@@ -257,7 +262,7 @@ Code changes, verified by the test suite and by `-n1 -p1` smoke runs.
 artifact names; all matrix images verify clean.
 
 Progress: item 1 answered by the operator 2026-09-29 (change the monitor; the work is measurement
-plan Phase 7). Item 6 answered by the operator 2026-10-01 (keep the NO_EXPORT peer, with obligations). Item 2 done 2026-10-01 (`1a1bdf9`), item 5 2026-10-01 (`2d7bb84`), item 3 2026-10-01 (`ad993ee`), item 4 2026-10-01 (images rebuilt, `verify` all ok). **Phase 2 done 2026-10-01**: tests green, pinned and unpinned smoke runs completed under distinct stems (item 2), all matrix images verify clean.
+plan Phase 7). Item 6 answered by the operator 2026-10-01 (keep the NO_EXPORT peer, with obligations). Item 2 done 2026-10-01 (`1a1bdf9`), item 5 2026-10-01 (`2d7bb84`), item 3 2026-10-01 (`ad993ee`), item 4 2026-10-01 (images rebuilt, `verify` all ok), item 6 obligation 1 2026-10-01 (`cfcc105`, `bgperf2-0l7`). **Phase 2 done 2026-10-01**: tests green, pinned and unpinned smoke runs completed under distinct stems (item 2), all matrix images verify clean.
 
 ---
 

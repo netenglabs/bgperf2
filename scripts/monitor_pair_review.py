@@ -22,7 +22,11 @@ Exits 0 when every pair passes, 1 when one does not, and 2 when there is
 nothing to compare. A cell with only one of the two artifacts is reported
 unpaired and fails: a check that skipped half of its cells has not passed.
 Two runs that both failed pass if they failed on the same count: that is a
-property of the target, and the instruments agreed about it.
+property of the target, and the instruments agreed about it. Final counts that
+differ pass only when each monitor ended on exactly what the target says it
+exported to that run, both counts are non-zero, and they are within
+`TARGET_VARIATION_LIMIT` of each other (`target_varied()`); the pair then
+carries a note saying so.
 '''
 import argparse
 import glob
@@ -37,6 +41,13 @@ SINK_SUFFIX = '_mon-sink'
 # container in its own time namespace is off by its whole offset, which is
 # seconds or more.
 CLOCK_OFFSET_LIMIT_NS = 1_000_000
+
+# How far apart two runs' target export counts may be and still be read as the
+# target varying rather than something breaking. `convergence.DROP_FRACTION`'s
+# value, the threshold below which a count is treated as wobble everywhere
+# else; this script imports nothing from the project, so it is restated and
+# pinned by a test. FRR's measured variation on the MRT cell was 0.17%.
+TARGET_VARIATION_LIMIT = 0.01
 
 
 def pair_key(path):
@@ -100,8 +111,40 @@ def sink_problems(doc):
     return problems
 
 
-def compare(gobgp, sink):
-    '''The verdict for one pair, as (passed, list of reasons it did not).'''
+def target_export(doc):
+    '''The target's own count of what it exported to the monitor, or None.'''
+    delivery = ((doc.get('target_table') or {}).get('delivery')) or {}
+    return delivery.get('exported_final')
+
+
+def target_varied(gobgp, sink):
+    '''Whether a difference in final counts is the target's, not the instrument's.
+
+    True only when each monitor ended on exactly what the target says it
+    exported to that monitor. Then each instrument counted its own run
+    exactly, and the two runs differ because the target sent different
+    amounts. FRR does that on the MRT table, where which of two equal paths
+    wins depends on arrival order (bgperf2-cw6). A target with no export
+    count cannot show it, and its difference stays a failure.
+    '''
+    pairs = [(final_accepted(d), target_export(d)) for d in (gobgp, sink)]
+    if not all(f is not None and f == e for f, e in pairs):
+        return False
+    counts = [f for f, _ in pairs]
+    # A count of zero never attests: a session that carried nothing matches a
+    # target that exported nothing to it, and that is a broken run, not a
+    # target that varied.
+    if min(counts) <= 0:
+        return False
+    return (max(counts) - min(counts)) / max(counts) <= TARGET_VARIATION_LIMIT
+
+
+def compare(gobgp, sink, notes=None):
+    '''The verdict for one pair, as (passed, list of reasons it did not).
+
+    `notes`, if given, collects what passed only because of a rule worth
+    reading -- a target that exported different amounts to the two runs.
+    '''
     reasons = []
     # The two runs must end the same way, not necessarily converged. A target
     # that never reaches the check-point (FRR on the MRT table, which exports
@@ -111,8 +154,16 @@ def compare(gobgp, sink):
         reasons.append('status gobgp {0} vs sink {1}'.format(
             gobgp.get('status'), sink.get('status')))
     g, s = final_accepted(gobgp), final_accepted(sink)
-    if g is None or s is None or g != s:
+    if g is None or s is None:
         reasons.append('final count gobgp {0} vs sink {1}'.format(g, s))
+    elif g != s:
+        if target_varied(gobgp, sink):
+            if notes is not None:
+                notes.append('the target exported {0} to the GoBGP run and {1} '
+                             'to the sink run, and each monitor ended on '
+                             'exactly that'.format(g, s))
+        else:
+            reasons.append('final count gobgp {0} vs sink {1}'.format(g, s))
     rg, rs = receiver_counts(gobgp), receiver_counts(sink)
     if rg != rs:
         reasons.append('receivers gobgp {0} vs sink {1}'.format(rg, rs))
@@ -176,8 +227,10 @@ def main(argv=None):
                            'gobgp': describe(found.get('gobgp')),
                            'sink': describe(found.get('sink'))})
             continue
-        passed, reasons = compare(found['gobgp'], found['sink'])
+        notes = []
+        passed, reasons = compare(found['gobgp'], found['sink'], notes)
         report.append({'stem': stem, 'passed': passed, 'reasons': reasons,
+                       'notes': notes,
                        'gobgp': describe(found['gobgp']),
                        'sink': describe(found['sink'])})
 
@@ -190,6 +243,8 @@ def main(argv=None):
             print('     sink:  {0}'.format(row['sink']))
             for reason in row['reasons']:
                 print('     - {0}'.format(reason))
+            for note in row.get('notes') or []:
+                print('     note: {0}'.format(note))
         failed = sum(1 for r in report if not r['passed'])
         print('{0} pair(s), {1} failed'.format(len(report), failed))
     return 0 if all(r['passed'] for r in report) else 1

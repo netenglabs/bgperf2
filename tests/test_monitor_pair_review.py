@@ -116,3 +116,48 @@ def test_an_unpaired_cell_fails_and_a_misnamed_one_is_refused(tmp_path):
 
 def test_nothing_to_compare(tmp_path):
     assert review.main([str(tmp_path)]) == 2
+
+
+def with_export(d, exported):
+    d['target_table'] = {'delivery': {'exported_final': exported},
+                         'samples': [{'monitor_accepted': exported}]}
+    return d
+
+
+def test_a_target_that_exported_differently_is_not_the_instrument():
+    '''FRR on the MRT table, measured: 962,315 to the GoBGP run and 963,952
+    to the sink run, each monitor exactly on its run's export count.'''
+    notes = []
+    passed, reasons = review.compare(with_export(doc(count=962315), 962315),
+                                     with_export(doc('sink', count=963952), 963952),
+                                     notes)
+    assert passed, reasons
+    assert '962315' in notes[0] and '963952' in notes[0]
+
+
+def test_a_monitor_off_its_own_targets_export_still_fails():
+    passed, reasons = review.compare(with_export(doc(count=962315), 962315),
+                                     with_export(doc('sink', count=963000), 963952))
+    assert not passed and 'final count' in reasons[0]
+    # and a target with no export count cannot excuse anything
+    passed, _ = review.compare(doc(count=1), doc('sink', count=2))
+    assert not passed
+
+
+def test_a_run_that_received_nothing_is_never_the_target_varying():
+    '''Found in review: 0 == exported 0 would have excused a sink session
+    that carried nothing.'''
+    passed, reasons = review.compare(with_export(doc(count=962315), 962315),
+                                     with_export(doc('sink', count=0), 0))
+    assert not passed and 'final count' in reasons[0]
+
+
+def test_a_variation_past_the_limit_is_not_excused():
+    passed, _ = review.compare(with_export(doc(count=1000000), 1000000),
+                               with_export(doc('sink', count=980000), 980000))
+    assert not passed
+
+
+def test_the_limit_is_the_convergence_drop_fraction():
+    import convergence
+    assert review.TARGET_VARIATION_LIMIT == convergence.DROP_FRACTION

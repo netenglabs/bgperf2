@@ -1,0 +1,30 @@
+# Measurement plan 7a, Docker check 3 at high session count: the BIRD screen's
+# 500-peer cell (500 x 2,000, one table of 1M routes), once with the GoBGP
+# monitor and once with the sink. The monitor holds one session whatever the
+# peer count; what this asks is whether the sink keeps it, and counts the same,
+# when the target is busy with 500 others. Read with
+# `scripts/monitor_pair_review.py <results-dir>`.
+tests:
+  -
+     name: 2026-monitor-checks-peers-gobgp
+     neighbors: [500]
+     prefixes: [2_000]
+     filter_test: [None]
+     targets: &targets
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2
+         tester_type: bird
+  -
+     name: 2026-monitor-checks-peers-sink
+     monitor: sink
+     neighbors: [500]
+     prefixes: [2_000]
+     filter_test: [None]
+     targets: *targets

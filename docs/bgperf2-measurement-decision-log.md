@@ -4796,3 +4796,68 @@ which would fail at 0.3 s (17 × 0.3 is 5.1); that test now asserts the window i
 duration. The other: `bench()` truncates `elapsed` to whole seconds before subtracting the window.
 That predates this change, and it is part of the next 7b change set, which dates the monitor
 events to the sink's own timestamps. It is recorded here so that change set takes it.
+
+### Progress on 2026-10-01: checks 2, 3 and 4 at full table and at 500 peers; 7a's checks are done (7a, eighth change set)
+
+Two batches on the development host, each cell run once with each instrument, read with
+`scripts/monitor_pair_review.py`, with `scripts/container_cpu_peak.py` sampling the monitor:
+`benchmarks/2026-monitor-checks-mrt.yaml` (the core matrix's 10 × 1,050,000 MRT cell, bgpdump2, every
+open-source target) and `benchmarks/2026-monitor-checks-peers.yaml` (the BIRD screen's 500 × 2,000).
+Results in `results/2026/phase7a-checks/{mrt,peers}/`. This host is not the campaign class, and
+none of this is a timing result.
+
+**Check 2, full table: the instrument counted exactly on every target.**
+
+| target | GoBGP run | sink run |
+|---|---|---|
+| BIRD 2.19.2 | 1,056,779 | 1,056,779 |
+| BIRD 3.3.2 | 1,056,779 | 1,056,779 |
+| FRR 10.7 | 962,315 (FRR's own export: 962,315) | 963,952 (FRR's own export: 963,952) |
+| RustyBGP default | 1,081,180 | 1,081,180 |
+| OpenBGPD 9.3 | 1,056,779 | 1,056,779 |
+
+FRR is the one pair whose counts differ, and the difference is FRR's own. In each run the monitor
+ended on exactly the count FRR reports exporting to it (`target_table.delivery`,
+`exported_final == monitor_final`), so each instrument counted its own run exactly, and FRR exported
+1,637 more routes in the second run. That is the arrival-order tie-break `bgperf2-cw6` describes.
+The pair review first failed this pair. Its rule now passes a count difference only when each
+monitor ended on its own run's target export count, and it prints that note. A target with no export
+count cannot excuse a difference. The plan's list included GoBGP as a target. It has not been one
+since 2026-09-29.
+
+**Check 3: no session dropped at full table or at 500 peers.** Every sink run's own log shows one
+session established and none lost, one process, no refused message and no malformed line. The
+largest gap between two lines was the heartbeat (1.01–1.02 s). The 500-peer cells converged at
+1,000,000 with both instruments, on BIRD 2.19.2 and 3.3.2. OpenBGPD sent the sink no End-of-RIB on
+the MRT cell; every other target sent one. That costs nothing today, because nothing reads End-of-RIB
+to decide a run. 7b should know it before it dates anything to one.
+
+**Check 4: the sink's peak CPU beside the GoBGP monitor's.** 1 s averages from the cgroup, one pass
+each. On the MRT cell, the GoBGP monitor's peak was **193.8–331.0%** (mean 52.9–127.6%) across the
+five targets, and the sink's was **4.9–41.3%** (mean 0.9–3.3%). At 500 peers it was 148.1–154.3%
+against 1.3–2.3%. The old 380% was a 16 vCPU host's figure. This host has 8, so the ranges are
+comparable as orders of magnitude, not as figures.
+
+**Check 5** was answered by every sink run in this change set and the last one. The offset between
+the sink's monotonic clock and the host's, from its B line, was 1.2–2.4 µs, against a 10 ms
+coalesce resolution.
+
+**Two sampler changes.** `container_cpu_peak.py` gained `--until-pid`, because `bench` leaves its
+last cell's containers running. A sampler waiting for them to go never stops, and keeps adding idle
+intervals to the last instance's mean. The MRT batch's sampler had to be stopped by hand.
+
+**What 7a leaves open.** Nothing in its work list. The sink is behind `--monitor`, in
+`BGPERF_PROCESSES`, `verify` and provenance, and checks 1 to 5 have each been run against GoBGP on
+every open-source target. One more pass of each cell was not run: none of these checks is a
+statistic, and the repetitions are 7c's job. One test failed once, unnamed, while the MRT batch
+loaded this host, and passed in five reruns. That is `bgperf2-qn2`, a P3 bead.
+
+**What review changed.** `/code-review` found the first version of that rule too loose. A sink run
+that received nothing ends on 0, and `delivery_metrics()` still publishes `exported_final: 0` beside
+its refusal, so "each monitor ended on its target's export" held, and a dead session would have
+passed as the target varying. A count of zero never attests, here as in the convergence and
+delivery rules. The excuse now requires both counts to be non-zero and within 1% of each other.
+That is `DROP_FRACTION`, the threshold below which a count is treated as wobble elsewhere. A test
+pins the two together, because this script imports nothing from the project. All three result
+sets still pass, 12 pairs of 12. The receivers' comparison has no such excuse, and a target that
+varied would fail it. That errs toward failing, and none of these cells had receivers.

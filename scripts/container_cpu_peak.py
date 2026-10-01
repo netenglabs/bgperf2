@@ -77,11 +77,25 @@ class Tracker:
                 'intervals': self.intervals, 'interval_s': interval}
 
 
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('names', nargs='+')
     parser.add_argument('--interval', type=float, default=1.0)
     parser.add_argument('--duration', type=float, default=None)
+    parser.add_argument('--until-pid', type=int, default=None,
+                        help='stop when this process (a bench or batch) '
+                             'exits; bench leaves its last containers '
+                             'running, so they never go on their own')
     parser.add_argument('--gone-after', type=float, default=60.0,
                         help='without --duration, stop once none of the '
                              'named containers has run for this long (a '
@@ -114,6 +128,8 @@ def main(argv=None):
                 and tick - last_seen >= args.gone_after):
             break
         if args.duration is not None and tick - started >= args.duration:
+            break
+        if args.until_pid is not None and not pid_alive(args.until_pid):
             break
         time.sleep(max(0.0, args.interval - (time.monotonic() - tick)))
     for tracker in trackers.values():

@@ -575,7 +575,8 @@ The follow-up campaign may begin only when all are true:
 
 ### Phase 7: Replace the monitor with a purpose-built sink
 
-Status: in progress since 2026-10-01. The operator chose on 2026-09-29 to fix
+Status: in progress since 2026-10-01; **7a is complete** (2026-10-01) and 7b has
+started. The operator chose on 2026-09-29 to fix
 the instrument now and redo the campaign's testing under it, and the rows
 already taken stay readable through a bridge block (7c). 7a's first change set
 landed on 2026-10-01: the sink exists (`sink/`, `sink.py`), builds as
@@ -591,11 +592,14 @@ GoBGP's, which a passive BIRD had shown to move `monitor (s)` by ~8 s. The fifth
 made the export receivers sinks under `--monitor sink` (`SinkReceiver`). The
 sixth kept the Go race run and the GoBGP parity check as scripts. The seventh
 records the sink's own log in each run's artifact and ran checks 1, 2, 4 and 5
-on a synthetic cell for every open-source target: all five pairs matched. Check
-2 on the MRT cell, check 3 at 500 peers and at full table, and check 4 at full
-table are 7a's remaining work. 7b's first change set landed beside it: the
-convergence windows are durations, counted in samples at the cadence asked for,
-identical at 1 s. Why a sink rather than a patched GoBGP, and the GoBGP source reading that
+on a synthetic cell for every open-source target: all five pairs matched. The
+eighth ran the full-table MRT cell and the 500-peer cell with both instruments:
+every count matched (FRR's two runs differ by its own export, which each monitor
+matched exactly), no sink session dropped, and the sink peaked at 5-41% CPU
+against GoBGP's 194-331%. 7a's checks are done. 7b's first change set landed
+beside them: the convergence windows are durations, counted in samples at the
+cadence asked for, identical at 1 s. Dating the monitor events to the sink's own
+timestamps is 7b's next change set; 7c runs on the campaign host. Why a sink rather than a patched GoBGP, and the GoBGP source reading that
 started it, are in the
 [decision log](bgperf2-measurement-decision-log.md#phase-7-replace-the-monitor-with-a-purpose-built-sink).
 

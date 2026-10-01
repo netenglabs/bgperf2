@@ -1,6 +1,6 @@
 # 2026 daemon comparison plan
 
-**Status: Phases 0 and 1 done; Phase 2 in progress. Written 2026-09-29.**
+**Status: Phases 0, 1 and 2 done; Phase 3 not started (needs measurement plan Phase 7b and a campaign-class host). Written 2026-09-29.**
 
 **Epic:** `bgperf2-0y5`
 
@@ -131,7 +131,7 @@ Progress: done 2026-10-01. Item 2 done 2026-09-29 (`21ae46c`), item 1 2026-10-01
 
 ## 4. Phase 2 — instrument changes on the current host
 
-**Tracked by:** `bgperf2-0y5.3` · **Status:** in progress
+**Tracked by:** `bgperf2-0y5.3` · **Status:** done
 
 Code changes, verified by the test suite and by `-n1 -p1` smoke runs.
 
@@ -191,8 +191,29 @@ Code changes, verified by the test suite and by `-n1 -p1` smoke runs.
      narrow the premise, because the generator's cores are then part of its recorded identity.
    - The rule is reproduced by
      `scripts/timing_variance_review.py --run-root results/2026/2026-timing-validation --series mrt`.
-4. **Rebuild every image** with `prepare -f`. Every current image reports `recipe unknown`, so the
-   recipe-drift check cannot vouch for any of them. Then run `verify` and require all ok.
+4. ~~**Rebuild every image** with `prepare -f`.~~ **Done 2026-10-01:** before this, every current
+   image reported `recipe unknown`, so the recipe-drift check could not vouch for any of them.
+   `prepare -f -t <name>` was run for each of the eight `PREPARE_IMAGES`, which built 18 tags. Log:
+   `/data/bgperf-work/logs/phase2.4-prepare-20261001T034909.log`. Afterwards `images` shows every
+   matrix tag `built` with its recipe known, and `verify` reports **31 image(s) checked, all ok**.
+   The 2084 tests pass. Read these before relying on the images:
+   - **`-f` without `-n` reuses Docker's layer cache.** That is sound for the label: the cache
+     is keyed on the instruction text, so a cached layer is what this recipe builds. But it
+     means the `master`/`latest` tags keep the clone they were first built from:
+     BIRD `2.19.0+branch.master.292a46adc54d`, RustyBGP `v0.2.0-9eeeebbd50`, GoBGP 4.9.0.
+     They are not today's heads. The pinned versions are unaffected.
+   - **The exabgp pair really did change.** Their `apt dist-upgrade` and unpinned
+     `pip3 install exabgp` layers re-ran, so those two images hold whatever was current today.
+     This is the open unpinned-exabgp issue `CLAUDE.md` describes. Provenance still records
+     `UNKNOWN` for both.
+   - `verify` cannot probe `frr_c`'s version without a running daemon (`--` in its output). Its
+     instrumentation check is clean on all five tags.
+   - `openbgp:latest` is 9.3, the same as the pinned 9.3 tag.
+   - `prepare` builds with `rm=False` (`base.py` `build_dockerfile()`), so every build leaves
+     its intermediate containers behind: 40 from this rebuild, now removed. Tracked as
+     `bgperf2-os1`.
+   - Phase 3 runs on another host, so these images carry over only if `/data` (Docker's root
+     is `/data/docker`) moves with them (§5).
 5. ~~**Fix the version matrix.**~~ **Done 2026-10-01, `2d7bb84`:** checked upstream by `git ls-remote`
    and the Docker Hub API. The only newer release is **OpenBGPD 9.3** (pushed 2026-09-30), now in
    `OpenBGP.VERSIONS`. FRR's newest is `frr-10.7.1`, a patch inside the `stable/10.7` we already
@@ -236,7 +257,7 @@ Code changes, verified by the test suite and by `-n1 -p1` smoke runs.
 artifact names; all matrix images verify clean.
 
 Progress: item 1 answered by the operator 2026-09-29 (change the monitor; the work is measurement
-plan Phase 7). Item 6 answered by the operator 2026-10-01 (keep the NO_EXPORT peer, with obligations). Item 2 done 2026-10-01 (`1a1bdf9`), item 5 2026-10-01 (`2d7bb84`), item 3 2026-10-01 (`ad993ee`). Item 4 remains.
+plan Phase 7). Item 6 answered by the operator 2026-10-01 (keep the NO_EXPORT peer, with obligations). Item 2 done 2026-10-01 (`1a1bdf9`), item 5 2026-10-01 (`2d7bb84`), item 3 2026-10-01 (`ad993ee`), item 4 2026-10-01 (images rebuilt, `verify` all ok). **Phase 2 done 2026-10-01**: tests green, pinned and unpinned smoke runs completed under distinct stems (item 2), all matrix images verify clean.
 
 ---
 

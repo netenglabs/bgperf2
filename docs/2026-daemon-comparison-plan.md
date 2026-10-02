@@ -413,7 +413,7 @@ Read these with three things in mind:
 
 ## 6. Phase 4 — attribute on one larger host
 
-**Tracked by:** `bgperf2-0y5.5` · **Status:** not started
+**Tracked by:** `bgperf2-0y5.5` · **Status:** in progress
 
 **Decided by the operator on 2026-10-02**, after §5's gate landed on its second row: answer the
 gate on **one `m7a.8xlarge`**, not by separating the roles across three hosts. The three-host design
@@ -437,7 +437,7 @@ what item 2 checks.
 
 Items, in order:
 
-1. **Per-role, time-aligned CPU (code, on the current host).** Sample every container's CPU at
+1. ~~**Per-role, time-aligned CPU (code, on the current host).** Sample every container's CPU at
    each poll from its cgroup, as a delta between two samples (the rule `contention.py` follows for
    `/proc`), on the controller's clock. Publish it per role in `events.json`. Each role's
    containers are summed, and each role's cpuset is stated beside it. This item **publishes the
@@ -445,7 +445,9 @@ Items, in order:
    taken on item 3's data, under `findings.md`'s rule against fitting an attribution to the runs in
    front of it. It is what `findings.md`, `docs/measurement-dictionary.md` and `bgperf2-bgg` name
    as the missing measurement. **Exit:** tests green; a pinned and an unpinned `-n1 -p1` smoke run
-   each publish a series for every role.
+   each publish a series for every role.~~ Done 2026-10-02, `f6d5329`: `role_cpu.py`, published as
+   `events.json`'s `role_cpu` section (`docs/measurement-dictionary.md`). Its rules are in
+   `docs/invariants/host-and-environment.md`.
 2. **Calibrate the larger host against Phase 3.** Run §5's bias-check cells (BIRD 2.19.2, FRR 10.7,
    OpenBGPD 9.3 and RustyBGP master synthetic; BIRD 2.19.2, OpenBGPD 9.3 and RustyBGP master MRT)
    with Phase 3's pinning exactly, `target=0-7,monitor=8-9,testers=10-15`, three passes. Cores
@@ -479,7 +481,11 @@ this phase.
 
 **Exit:** items 1–3 done, and every row of the table above that applies is recorded.
 
-Progress: —
+Progress: started 2026-10-02. Item 1 is `f6d5329`. On this host (m7a.4xlarge, EPYC 9R14), 2278
+tests passed. Two `bird -n1 -p1` smoke runs then published seven intervals for each of target,
+monitor and testers. The pinned run (`target=0-3,monitor=4-5,testers=6-7`) showed effective
+cpusets equal to the requested ones. The unpinned run showed `0-15` and `pinned: false`. Items 2 and
+3 wait for the operator's `m7a.8xlarge`.
 
 ---
 

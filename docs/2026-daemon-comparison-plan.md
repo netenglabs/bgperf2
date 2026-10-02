@@ -547,6 +547,22 @@ keeps item 2's workload, RIB and labels, and only its pin changes. That makes 15
 guards accept every pin. Results go to `results/2026/2026-comparison/cores/`. The run waits for the
 operator's go-ahead, because it takes the whole host.
 
+**"RustyBGP master" is not upstream master** (found 2026-10-02, while item 3 ran). Every Phase 3 and
+Phase 4 row labelled `rustybgp default` or "RustyBGP master" ran `bgperf/rustybgp:latest`. Its
+provenance reads `rustybgpd v0.2.0-9eeeebbd50`, a commit from 2026-08-21. Phase 2.4 recorded why:
+`prepare -f` reused the cached `git clone && git checkout master` layer. Upstream master on
+2026-10-02 is `783d6df` (2026-09-24), 8 commits later. By their titles, none of the 8 touches
+performance: a build fix, docs, an e2e gRPC bump, socket TTL for internal peers, RR-client loop checks,
+listen-socket errors, and next hops in `ListPath`. This has not been measured. Upstream made 723 commits
+in 2026 and about none in 2025, and the `2026-02` build (`0cc685c`) is 696 commits before
+`9eeeebbd50`. Three follow-ups:
+- the rows are published under a label that names the commit, not "master" (`bgperf2-c5d`);
+- §8 entry 1 cites a source read at `783d6df`, not at the built commit (`bgperf2-kpf`);
+- today's head can be built uncached as its own tag, and benched only if the operator wants it
+  (`bgperf2-97u`).
+
+None of them changes item 3, which runs the same image as item 2 and Phase 3.
+
 ---
 
 ## 7. Not part of this plan: more memory

@@ -339,6 +339,8 @@ The batch's own variance rule lists three pairs it cannot separate at n=3: FRR 1
 
 The controller spends about 2 min of single-threaded CPU per cell rendering and parsing the scenario before the measured interval starts. That is about 96 min of main-thread CPU across this batch, and 6% of one core during measurement. Tracked as `bgperf2-dyr`; it is outside this plan.
 
+Item 2 config: `benchmarks/2026-comparison-mrt.yaml`, item 1's config with only the workload changed (10 bgpdump2 peers on `mrt/rib.20260808.0000`, `prefixes: 1_050_000`) and seed 202632. Launched 2026-10-02 after the operator confirmed it; results go to `results/2026/2026-comparison/mrt/`.
+
 ---
 
 ## 6. Phase 4 (conditional) — separate the roles across hosts

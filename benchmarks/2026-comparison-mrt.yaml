@@ -1,0 +1,96 @@
+# 2026 daemon comparison, Phase 3 item 2: full-internet MRT, 10 peers through
+# bgpdump2, pinned, three passes (docs/2026-daemon-comparison-plan.md §5, run
+# ID 2026-comparison).
+#
+# Written fresh, as §5 requires, beside item 1's
+# `benchmarks/2026-comparison-synth.yaml`. The rows are measured by the sink
+# and stand on their own: not read against the timing-validation MRT blocks
+# (GoBGP monitor, unpinned) or against benchmarks/baseline/ (a different CPU).
+#
+# WORKLOAD. 10 full-internet peers replaying the pinned Route Views RIB
+# `mrt/rib.20260808.0000` through ten bgpdump2 injectors, no policy. Call it
+# "10 full-internet peers using bgpdump2", not "10 x 1.05M": `prefixes:
+# 1_050_000` caps each injector and sets the check-point (1,039,500) from the
+# whole table, because the ten views overlap and the target holds their union
+# (~1.08M). Do not add `prefix_scope: total`; it is refused for an MRT
+# generator at every entry point.
+#
+# NO_EXPORT. One injected peer (AS 37100) tags every route NO_EXPORT, kept by
+# operator decision (plan §4 item 6). So the daemons export different shares:
+# BIRD and OpenBGPD 1,056,779, FRR ~957k-961k by arrival order, RustyBGP the
+# whole 1,081,178. The FRR rows are expected to finish below `required`; that
+# is plan §3 item 1 and §8 entry 1, not a fault in the run. Each cell's
+# `received` is published beside its time (`bgperf2-0l7`).
+#
+# MATRIX. Item 1's fourteen: FRR 8.5/9.1/10.0/10.7/master, BIRD 2.19.2/3.3.2
+# (default threads and 4 threads)/master, OpenBGPD 8.8/9.2/9.3, RustyBGP
+# 2026-02/master. No `openbgp default` cell: `openbgp:latest` is 9.3.
+#
+# PIN. target=0-7, monitor=8-9, testers=10-15, item 1's layout, so the two
+# workloads differ in workload only. Ten injectors share six cores here.
+#
+# PASSES. `repetitions: 3` in one config, so the whole matrix repeats.
+#
+# ORDER. `order: shuffle`, seed by item 1's rule: year, phase, item, 2026-3-2.
+tests:
+  -
+     name: 2026-comparison-mrt
+     monitor: sink
+     pin: target=0-7,monitor=8-9,testers=10-15
+     repetitions: 3
+     neighbors: [10]
+     prefixes: [1_050_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 202632
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (4 threads)
+         threads: 4
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: bird
+         label: bird default
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: frr_c
+         versions: [8.5, 9.1, 10.0, 10.7]
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: frr_c
+         label: frr default
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: openbgp
+         versions: [8.8, 9.2, 9.3]
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: rustybgp
+         version: 2026-02
+         label: rustybgp 2026-02
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: rustybgp
+         label: rustybgp default
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000

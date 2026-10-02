@@ -288,7 +288,7 @@ Workloads, three passes each, matrix repeated as a whole (`docs/invariants/batch
 new run ID `2026-comparison`:
 
 1. ~~synthetic 50 × 100k, pinned;~~ **Done 2026-10-02** (`03d824d`, `benchmarks/2026-comparison-synth.yaml`). 42 rows in `results/2026/2026-comparison/synth/`; see Progress.
-2. ~~MRT 10 × 1.05 M (bgpdump2), pinned;~~ **Ran 2026-10-02** (`ebb1ff9`, `benchmarks/2026-comparison-mrt.yaml`). 42 rows in `results/2026/2026-comparison/mrt/`; RustyBGP 2026-02's three failed (`bgperf2-f22`); see Progress.
+2. ~~MRT 10 × 1.05 M (bgpdump2), pinned;~~ **Ran 2026-10-02** (`ebb1ff9`, `benchmarks/2026-comparison-mrt.yaml`). 42 rows in `results/2026/2026-comparison/mrt/`; RustyBGP 2026-02's three failed on a sink defect, since fixed (`bgperf2-f22`); that cell is re-run before item 3. See Progress.
 3. **one bias check:** a small subset of both, unpinned, so pinned and unpinned can be compared
    on identical builds and the effect of co-location is measured rather than assumed.
 ~~4. Phase 7's bridge block (7c, `bgperf2-8gg.10.3`), in the same block as item 3.~~ **Dropped
@@ -368,7 +368,13 @@ Read these with four things in mind:
 
 The batch's variance rule cannot separate four pairs at n=3: FRR 8.5 from 10.7, 9.1 from 8.5, master from 8.5, and FRR 10.0 from OpenBGPD 9.2 and 9.3. It recommends `repetitions: 5` for each.
 
-**Before item 3, the operator decides how RustyBGP 2026-02's MRT cell is measured.** The plan records two routes. One is to re-check that cell with `monitor: gobgp`, which this phase keeps selectable for exactly this case. Its rows would then be on a different instrument from every other cell. The other is to resolve `bgperf2-f22` first and re-run the cell on the sink. Item 3's subset should also include RustyBGP master, as item 1 recorded.
+**RustyBGP 2026-02's MRT cell, decided by the operator on 2026-10-02: fix the sink first.** The
+cause was two-sided. The build sends a malformed AS_PATH (§8 entry 5). gobgpd runs with RFC 7606
+treat-as-withdraw on by default, which the sink had assumed off, so the sink reset a session GoBGP
+had kept. The sink now handles errors as gobgpd does (`9efd294`, `bgperf2-f22`, decision log "Correction on
+2026-10-02"). An unpinned verification run converged at 1,081,178, gobgpd's count. **Next: re-run
+that one cell, pinned, three passes,** before item 3. Its rows replace the three failed ones.
+Item 3's subset should also include RustyBGP master, as item 1 recorded.
 
 ---
 
@@ -473,11 +479,14 @@ named check would confirm it.
    the log (`frr.py` `write_config()`). No other daemon is configured to log at debug level.
    `bgpd.log` passes 1 GB on a full-table run. The CPU and I/O this costs FRR is part of
    every FRR row and **has not been measured**.
-5. **RustyBGP 2026-02 and the sink monitor cannot hold an MRT session.** The sink resets it
-   with NOTIFICATION 3/11 ("unknown AS_PATH seg type") in every pass. RustyBGP master, and
-   every other daemon, are unaffected, and gobgpd 4.9.0 kept the same build's session on
-   2026-09-11. Not yet attributed to either side. Effect: that cell has no MRT row on the sink.
-   Phase 3 item 2; `bgperf2-f22`.
+5. **RustyBGP 2026-02 emits a malformed AS_PATH** when it prepends its AS to a path whose
+   first segment already holds 255 ASes. It writes the new one-AS segment, then drops the old
+   segment's first four octets, so the next header is garbage (seen as segment type 0x0c in a
+   capture, 2026-10-02). RustyBGP master encodes the same path correctly. RFC 7606 makes such an
+   UPDATE a withdrawal. GoBGP treated it as one, and since `bgperf2-f22` so does the sink. Effect:
+   on the MRT workload, 2 prefixes that 2026-02 should export are withdrawn at the monitor, so
+   it delivers 1,081,178 where master delivers 1,081,180. The rows count the work, but those
+   two prefixes are missing from 2026-02's table. Decision log, "Correction on 2026-10-02".
 6. **FRR delivers its last few MRT prefixes (4 to ~225) about 25 s after the rest**, in 12 of 15 rows
    of Phase 3 item 2. Effect: FRR's MRT `elapsed (s)` is bimodal (67–70 or 94–97 s) and its
    median measures the tail. Not explained; `bgperf2-5du`.

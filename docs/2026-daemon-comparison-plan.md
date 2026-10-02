@@ -798,6 +798,47 @@ both from the same cause: RustyBGP ships no `Cargo.lock`. First, a fresh `prepar
 retagged `latest` carries the master recipe's hash (`c1978d2e5088`), so `doctor` may report the
 `2026-08` tag `stale` even though its binary is the benched one.
 
+Item 4's survey ran 2026-10-02. It used RIBs from 2026-08-08 00:00 UTC, the same time as the
+baseline, and every file existed at that time. The parser is a streaming TABLE_DUMP_V2 reader that
+counts IPv4 unicast prefixes per peer index, and entries carrying 65535:65281 (NO_EXPORT). It is
+kept with its downloads and per-file JSON in `/data/bgperf-work/scratch/rib-survey/` (`ribscan.py`).
+
+Two checks of the method. On `rib.20260808.0000` it reproduces `bgpdump2 -c` for all 28 peers,
+including the 17 full-table indexes. On route-views3 an independent `bgpdump2 -c` gives the same 20
+full-table indexes, and the same 965,355 for index 12.
+
+The survey also corrects a reading of the baseline: peer 10 tags **every** prefix it sends with
+NO_EXPORT (1,058,167 of 1,058,167). The ~24k in §8 entry 1 is what NO_EXPORT removes from the
+1,081,178-prefix union, which is consistent with this, not a count of tagged routes.
+
+"Full" means ≥ 1.05 M IPv4 prefixes. A count of index entries is not a count of ASes: some ASes
+peer more than once.
+
+| collector | peers in index / with IPv4 | full-table peers (distinct ASes) | largest IPv4 table | NO_EXPORT among full-table peers |
+|---|---|---|---|---|
+| route-views2 (baseline) | 28 / 21 | 17 | 1,079,184 | idx 10 tags every prefix; idx 12, 26 and 27 tag 1–6 |
+| RIS rrc00 | 108 / 63 | **38** (35) | 1,104,164 | none |
+| route-views.linx | 122 / 52 | **28** (26) | 1,083,755 | 1–9 prefixes on 10 peers |
+| RIS rrc01 | 151 / 81 | **31** (30) | 1,094,292 | none |
+| RIS rrc03 | 156 / 87 | **25** | 1,104,467 | none. Idx 122 (640k, not full) tags every prefix |
+| route-views3 | 43 / 24 | **20** (16) | 1,078,976 | 2–9 prefixes on 6 peers |
+| route-views4 | 42 / 21 | 17 | 1,098,971 | idx 23 tags every prefix; 3–8 on 5 more |
+| route-views.sydney | 61 / 28 | 10 | 1,088,490 | 4–8 prefixes on 2 peers |
+| route-views.amsix | 43 / 16 | 7 | 1,081,484 | 4 prefixes on 1 peer |
+| route-views.wide | 11 / 5 | 3 | 1,066,670 | none |
+| route-views6 | 26 / 0 | 0 | — | IPv6 only |
+
+**Item 4 waits on an operator decision: the axis past 17 peers.** The options §9 records:
+- **A new RIB.** rrc00 is the largest: 38 full-table peers from 35 ASes, and none of them tags its
+  table NO_EXPORT. On that RIB, FRR's check-point would be sound, unlike on route-views2, where
+  index 10 is in every step. Its table differs from route-views2's (largest peer 1,104,164 against
+  1,079,184), so the curve would be measured again from 10 peers on that RIB. Item 3's 10/14/17 rows
+  would not extend it. Whether `get_index_valid()` and the MRT generators select rrc00's sparse
+  full-table indexes correctly is not checked.
+- **Wrap-around** on route-views2. Past 17, generators replay peers already in use: more sessions
+  carrying identical paths, not a wider table.
+- **Stop at 17.**
+
 ---
 
 ## Tracking

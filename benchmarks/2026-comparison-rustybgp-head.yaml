@@ -1,0 +1,89 @@
+# 2026 daemon comparison, Phase 5 item 2: RustyBGP head (2026-09, 783d6dfd00)
+# against 2026-08 (9eeeebbd50), five passes each, on the m7a.8xlarge
+# (docs/2026-daemon-comparison-plan.md §9, run ID 2026-comparison,
+# bgperf2-97u).
+#
+# WHY. Every comparison row labelled "rustybgp default" ran 9eeeebbd50, not
+# upstream head, and those rows are bimodal in time with hold-timer expiries
+# that follow it (§8 entry 7). The question is whether head keeps both.
+#
+# BUILDS. 2026-09 is built --no-cache from 783d6dfd00. 2026-08 is
+# bgperf/rustybgp:latest retagged, by the operator's choice on 2026-10-02:
+# RustyBGP ships no Cargo.lock, so a fresh build of 9eeeebbd50 is the same
+# source but not necessarily the binary Phases 3 and 4 benched. 2026-09 was
+# built 2026-10-02, so its dependencies resolve 40 days later than 2026-08's:
+# a difference between the two is the source and its dependency graph
+# together, not the source alone.
+#
+# ARRANGEMENTS. Synthetic 50 x 100k pinned with Phase 3's
+# target=0-7,monitor=8-9,testers=10-15, and unpinned; MRT 10 x 1.05 M pinned.
+# Unpinned on this host is 32 cores, so those rows compare only with each
+# other. Each arrangement is its own test, so none shares a CSV, progress or
+# summary file. Results go to results/2026/2026-comparison/rustybgp-head/.
+#
+# ORDER. `order: shuffle`, seed by Phase 3's rule: year, phase, item, 2026-5-2.
+tests:
+  -
+     name: 2026-comparison-rustybgp-head-synth
+     monitor: sink
+     pin: target=0-7,monitor=8-9,testers=10-15
+     repetitions: 5
+     neighbors: [50]
+     prefixes: [100_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 202652
+     targets:
+       -
+         name: rustybgp
+         version: 2026-08
+         label: rustybgp 2026-08
+         tester_type: bird
+       -
+         name: rustybgp
+         version: 2026-09
+         label: rustybgp 2026-09
+         tester_type: bird
+  -
+     name: 2026-comparison-rustybgp-head-synth-unpinned
+     monitor: sink
+     repetitions: 5
+     neighbors: [50]
+     prefixes: [100_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 202652
+     targets:
+       -
+         name: rustybgp
+         version: 2026-08
+         label: rustybgp 2026-08
+         tester_type: bird
+       -
+         name: rustybgp
+         version: 2026-09
+         label: rustybgp 2026-09
+         tester_type: bird
+  -
+     name: 2026-comparison-rustybgp-head-mrt
+     monitor: sink
+     pin: target=0-7,monitor=8-9,testers=10-15
+     repetitions: 5
+     neighbors: [10]
+     prefixes: [1_050_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 202652
+     targets:
+       -
+         name: rustybgp
+         version: 2026-08
+         label: rustybgp 2026-08
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: rustybgp
+         version: 2026-09
+         label: rustybgp 2026-09
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000

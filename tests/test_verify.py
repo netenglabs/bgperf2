@@ -27,6 +27,7 @@ class TestVersionMatches:
         # builds under a date label but reports the commit.
         ('rustybgpd v0.2.0-0cc685c882', '2026-02', '0cc685c'),
         ('rustybgpd v0.2.0-9eeeebbd50', '2026-08', '9eeeebbd50'),
+        ('rustybgpd v0.2.0-783d6dfd00', '2026-09', '783d6dfd00'),
     ])
     def test_a_matching_build_is_accepted(self, reported, version, ref):
         assert bgperf2.version_matches(reported, version, ref) is True

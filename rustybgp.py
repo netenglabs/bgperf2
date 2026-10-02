@@ -22,7 +22,7 @@ class RustyBGP(Container):
     # `home` needs 1.88, and on 1.97 tokio-stream fails to compile. It is
     # deliberately not listed: a recipe that cannot build is worse than none.
     DEFAULT_REF = 'master'
-    VERSIONS = ('2026-02', '2026-08')
+    VERSIONS = ('2026-02', '2026-08', '2026-09')
     VERSION_REFS = {
         # The project was dormant from 2023-07 until 2026-01, then rewritten
         # hard (103/39/67/466 commits in Mar/Apr/May/Jun 2026). 2026-02 is the
@@ -36,6 +36,11 @@ class RustyBGP(Container):
         # Building it again resolves dependencies fresh (no Cargo.lock), so a
         # new build is the same source, not necessarily the same binary.
         '2026-08': '9eeeebbd50',
+        # Upstream master on 2026-10-02, committed 2026-09-29: eight commits
+        # past 2026-08, none touching the gRPC API, so the default recipe's
+        # v4.7 CLI still speaks it. Benched against 2026-08 in the comparison
+        # plan's Phase 5 item 2.
+        '2026-09': '783d6dfd00',
     }
 
     BUILD_VARS = {

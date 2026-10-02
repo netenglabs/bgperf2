@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"io"
 	"net"
 	"net/netip"
@@ -230,19 +231,97 @@ func TestSessionCountsAndEndOfRIB(t *testing.T) {
 	}
 }
 
-func TestMalformedUpdateResetsTheSession(t *testing.T) {
-	// GoBGP with treat-as-withdraw off -- the monitor's config -- resets the
-	// session on an UPDATE that fails validation. An announcement with no
-	// ORIGIN is one.
+// rawUpdate frames an UPDATE body by hand, for the malformed ones the
+// library will not serialise.
+func rawUpdate(body []byte) []byte {
+	b := bytes.Repeat([]byte{0xff}, 16)
+	b = binary.BigEndian.AppendUint16(b, uint16(bgp.BGP_HEADER_LENGTH+len(body)))
+	return append(append(b, bgp.BGP_MSG_UPDATE), body...)
+}
+
+// sendKeepsSession sends a valid announcement and an End-of-RIB after a
+// malformed message, and waits for the End-of-RIB's line, which is written at
+// once where a count would be coalesced: the proof that the session was kept.
+// It returns the E line's fields, accepted and updates.
+func sendKeepsSession(t *testing.T, p *peer, buf *syncBuffer) string {
+	t.Helper()
+	p.send(bgp.NewBGPUpdateMessage(nil, attrs(t, 1000), nlris(t, "10.3.0.0/24")))
+	p.send(bgp.NewEndOfRib(bgp.RF_IPv4_UC))
+	waitFor(t, buf, "\nE ")
+	if strings.Contains(buf.String(), " down ") {
+		t.Fatalf("the session was reset:\n%s", buf.String())
+	}
+	for _, k := range kinds(buf.String()) {
+		if strings.HasPrefix(k, "E ") {
+			return k
+		}
+	}
+	return ""
+}
+
+func TestMissingOriginIsTreatAsWithdraw(t *testing.T) {
+	// GoBGP runs a neighbour with RFC 7606's revised handling unless its
+	// config says otherwise, and the monitor's did not. An announcement with
+	// no ORIGIN is then a withdrawal of what it carries, and the session stays.
 	buf := &syncBuffer{}
 	p, done := establish(t, buf)
 	waitFor(t, buf, " established ")
 	p.send(bgp.NewBGPUpdateMessage(nil, attrs(t, 1000), nlris(t, "10.1.0.0/24")))
-	p.send(bgp.NewBGPUpdateMessage(nil, attrs(t, 1000)[1:], nlris(t, "10.2.0.0/24")))
+	p.send(bgp.NewBGPUpdateMessage(nil, attrs(t, 1000)[1:], nlris(t, "10.1.0.0/24", "10.2.0.0/24")))
+	// 10.1.0.0/24 was held and the malformed UPDATE withdraws it, so the
+	// End-of-RIB finds 10.3.0.0/24 alone; kept, it would find two.
+	if e := sendKeepsSession(t, p, buf); e != "E 1 4" {
+		t.Fatalf("End-of-RIB %q, want \"E 1 4\":\n%s", e, buf.String())
+	}
+	p.nc.Close()
+	<-done
+	if !strings.Contains(buf.String(), " treat-as-withdraw 3/3: ") {
+		t.Fatalf("the UPDATE was not logged as treated:\n%s", buf.String())
+	}
+}
+
+func TestMalformedASPathIsTreatAsWithdraw(t *testing.T) {
+	// bgperf2-f22: RustyBGP 2026-02 prepends its AS to a full 255-AS segment
+	// by writing a new segment and dropping the old one's first four octets,
+	// so the next header reads as segment type 0x0c. These are the first
+	// octets of that AS_PATH off the wire. gobgpd treated the UPDATE as a
+	// withdrawal and kept the session; the first sink reset it.
+	buf := &syncBuffer{}
+	p, done := establish(t, buf)
+	waitFor(t, buf, " established ")
+	asPath := []byte{0x02, 0x01, 0x00, 0x00, 0x03, 0xe8, 0x0c, 0xb9, 0x00, 0x00, 0x8b, 0x73}
+	body := []byte{0, 0} // no withdrawn routes
+	attrsRaw := []byte{0x40, 0x01, 0x01, 0x00} // ORIGIN IGP
+	attrsRaw = append(attrsRaw, 0x50, 0x02, 0x00, byte(len(asPath)))
+	attrsRaw = append(attrsRaw, asPath...)
+	attrsRaw = append(attrsRaw, 0x40, 0x03, 0x04, 10, 0, 0, 1) // NEXT_HOP
+	body = binary.BigEndian.AppendUint16(body, uint16(len(attrsRaw)))
+	body = append(body, attrsRaw...)
+	body = append(body, 24, 10, 5, 0) // 10.5.0.0/24
+	p.sendRaw(rawUpdate(body))
+	if e := sendKeepsSession(t, p, buf); e != "E 1 3" {
+		t.Fatalf("End-of-RIB %q, want \"E 1 3\":\n%s", e, buf.String())
+	}
+	p.nc.Close()
+	<-done
+	if !strings.Contains(buf.String(), " treat-as-withdraw 3/11: ") {
+		t.Fatalf("the UPDATE was not logged as treated:\n%s", buf.String())
+	}
+}
+
+func TestUnrecoverableUpdateResetsTheSession(t *testing.T) {
+	// An error whose handling is a reset still ends the session, with the
+	// NOTIFICATION the parser names: here a withdrawn-routes length past the
+	// end of the message.
+	buf := &syncBuffer{}
+	p, done := establish(t, buf)
+	waitFor(t, buf, " established ")
+	p.send(bgp.NewBGPUpdateMessage(nil, attrs(t, 1000), nlris(t, "10.1.0.0/24")))
+	p.sendRaw(rawUpdate([]byte{0x00, 0xff, 0x00, 0x00}))
 	m := p.recv()
 	n, ok := m.Body.(*bgp.BGPNotification)
-	if !ok || n.ErrorCode != bgp.BGP_ERROR_UPDATE_MESSAGE_ERROR || n.ErrorSubcode != bgp.BGP_ERROR_SUB_MISSING_WELL_KNOWN_ATTRIBUTE {
-		t.Fatalf("expected notification 3/3, got %+v", m.Body)
+	if !ok || n.ErrorCode != bgp.BGP_ERROR_UPDATE_MESSAGE_ERROR || n.ErrorSubcode != bgp.BGP_ERROR_SUB_MALFORMED_ATTRIBUTE_LIST {
+		t.Fatalf("expected notification 3/1, got %+v", m.Body)
 	}
 	p.nc.Close()
 	<-done
@@ -251,7 +330,7 @@ func TestMalformedUpdateResetsTheSession(t *testing.T) {
 		t.Fatalf("the refused UPDATE was not logged:\n%s", log)
 	}
 	got := kinds(log)
-	if got[len(got)-2] != "C 0 0 0" || !strings.HasPrefix(got[len(got)-1], "S down inbound 1 sent notification 3/3") {
+	if got[len(got)-2] != "C 0 0 0" || !strings.HasPrefix(got[len(got)-1], "S down inbound 1 sent notification 3/1") {
 		t.Fatalf("session did not end as a reset:\n%s", log)
 	}
 	// The count held before the reset is in the log, not overwritten.

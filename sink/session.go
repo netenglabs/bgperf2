@@ -10,10 +10,17 @@ package main
 // have their own goroutine, so a saturated reader cannot let the peer's hold
 // timer expire. ROUTE-REFRESH is accepted and ignored. It never sends an UPDATE.
 //
-// An UPDATE that fails to parse or validate resets the session, with the
-// NOTIFICATION the parser names. That is GoBGP's behaviour with
-// `treat-as-withdraw` off, which is how the monitor was configured. The rule
-// matters for agreement: a sink that kept a session GoBGP would have reset
+// An UPDATE that fails to parse or validate is handled as GoBGP handled it
+// for the monitor: with RFC 7606's revised error handling, which gobgpd turns
+// on for every neighbour whose config does not set `treat-as-withdraw`
+// (`pkg/config/oc/default.go`), and the GoBGP monitor's never did. The error
+// names its own handling. Treat-as-withdraw withdraws every prefix the UPDATE
+// carries and keeps the session, attribute-discard applies it without the
+// attribute, and anything else resets the session with the NOTIFICATION the
+// parser names. Either way the message is logged on an M line. The rule
+// matters for agreement both ways: a sink that reset a session GoBGP kept
+// would lose a table GoBGP held, which is what the first sink did to
+// RustyBGP 2026-02 (`bgperf2-f22`), and one that kept a session GoBGP reset
 // would hold a count GoBGP never reached.
 
 import (
@@ -72,6 +79,49 @@ func fromMessageError(err error, what string) *sessionError {
 	return &sessionError{reason: fmt.Sprintf("%s: %v", what, err)}
 }
 
+// revisedHandling reports whether GoBGP keeps a session through a message
+// that decoded with err, and the error to act on if so. Only an UPDATE comes
+// back with a message beside its error. The error then carries the handling
+// its attribute calls for, and fsmHandler.handlingError takes it as given:
+// treat-as-withdraw and attribute-discard keep the session, and so does none,
+// after which GoBGP validates the UPDATE as if it had decoded cleanly.
+func revisedHandling(m *bgp.BGPMessage, err error) (*bgp.MessageError, bool) {
+	var me *bgp.MessageError
+	if m == nil || m.Header.Type != bgp.BGP_MSG_UPDATE || !errors.As(err, &me) {
+		return nil, false
+	}
+	switch me.ErrorHandling {
+	case bgp.ERROR_HANDLING_NONE, bgp.ERROR_HANDLING_ATTRIBUTE_DISCARD, bgp.ERROR_HANDLING_TREAT_AS_WITHDRAW:
+		return me, true
+	}
+	return nil, false
+}
+
+// validationHandling is what GoBGP does with an UPDATE ValidateUpdateMsg
+// refused: the handling the error names, except that a family it cannot
+// disable resets the session (fsmHandler.handlingError).
+func validationHandling(err error) bgp.ErrorHandling {
+	var me *bgp.MessageError
+	if !errors.As(err, &me) || me.ErrorHandling == bgp.ERROR_HANDLING_AFISAFI_DISABLE {
+		return bgp.ERROR_HANDLING_SESSION_RESET
+	}
+	return me.ErrorHandling
+}
+
+// keptLine is the M line for an UPDATE the session was kept through.
+func keptLine(handling bgp.ErrorHandling, err error) string {
+	name := "attribute-discard"
+	if handling == bgp.ERROR_HANDLING_TREAT_AS_WITHDRAW {
+		name = "treat-as-withdraw"
+	}
+	var me *bgp.MessageError
+	if errors.As(err, &me) {
+		return fmt.Sprintf("%s %d/%d: %v", name, me.TypeCode, me.SubTypeCode, err)
+	}
+	// The first word is what sink.py counts a kept UPDATE by; keep it bare.
+	return fmt.Sprintf("%s %v", name, err)
+}
+
 type conn struct {
 	nc       net.Conn
 	r        *bufio.Reader
@@ -104,7 +154,11 @@ func (c *conn) send(m *bgp.BGPMessage, opts ...*bgp.MarshallingOption) error {
 
 // read returns one message. maxLen is the length cap for UPDATE,
 // NOTIFICATION and ROUTE-REFRESH; OPEN and KEEPALIVE keep 4096 (RFC 8654).
-func (c *conn) read(deadline time.Duration, maxLen int, opts *bgp.MarshallingOption) (*bgp.BGPMessage, error) {
+//
+// An UPDATE that decoded with an error GoBGP keeps the session through comes
+// back with that error beside it (see revisedHandling); every other error
+// ends the session.
+func (c *conn) read(deadline time.Duration, maxLen int, opts *bgp.MarshallingOption) (*bgp.BGPMessage, *bgp.MessageError, error) {
 	if deadline > 0 {
 		c.nc.SetReadDeadline(time.Now().Add(deadline))
 	} else {
@@ -112,11 +166,11 @@ func (c *conn) read(deadline time.Duration, maxLen int, opts *bgp.MarshallingOpt
 	}
 	var hb [bgp.BGP_HEADER_LENGTH]byte
 	if _, err := io.ReadFull(c.r, hb[:]); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	h := &bgp.BGPHeader{}
 	if err := h.DecodeFromBytes(hb[:]); err != nil {
-		return nil, fromMessageError(err, "malformed header")
+		return nil, nil, fromMessageError(err, "malformed header")
 	}
 	limit := bgp.BGP_MAX_MESSAGE_LENGTH
 	switch h.Type {
@@ -124,18 +178,21 @@ func (c *conn) read(deadline time.Duration, maxLen int, opts *bgp.MarshallingOpt
 		limit = maxLen
 	}
 	if int(h.Len) > limit {
-		return nil, notifyErr(bgp.BGP_ERROR_MESSAGE_HEADER_ERROR, bgp.BGP_ERROR_SUB_BAD_MESSAGE_LENGTH,
+		return nil, nil, notifyErr(bgp.BGP_ERROR_MESSAGE_HEADER_ERROR, bgp.BGP_ERROR_SUB_BAD_MESSAGE_LENGTH,
 			binary.BigEndian.AppendUint16(nil, h.Len), "message length %d over %d", h.Len, limit)
 	}
 	body := c.body[:int(h.Len)-bgp.BGP_HEADER_LENGTH]
 	if _, err := io.ReadFull(c.r, body); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	m, err := bgp.ParseBGPBody(h, body, opts)
 	if err != nil {
-		return nil, fromMessageError(err, fmt.Sprintf("malformed message type %d", h.Type))
+		if revised, ok := revisedHandling(m, err); ok {
+			return m, revised, nil
+		}
+		return nil, nil, fromMessageError(err, fmt.Sprintf("malformed message type %d", h.Type))
 	}
-	return m, nil
+	return m, nil, nil
 }
 
 func (n negotiated) hold() time.Duration { return time.Duration(n.holdTime) * time.Second }
@@ -351,7 +408,7 @@ func (s *sink) run(c *conn) error {
 		return err
 	}
 	s.log.Line('S', "open_sent", direction(c), c.id)
-	m, err := c.read(openWait, bgp.BGP_MAX_MESSAGE_LENGTH, nil)
+	m, _, err := c.read(openWait, bgp.BGP_MAX_MESSAGE_LENGTH, nil)
 	if err != nil {
 		return err
 	}
@@ -374,7 +431,7 @@ func (s *sink) run(c *conn) error {
 	if wait == 0 {
 		wait = openWait
 	}
-	m, err = c.read(wait, bgp.BGP_MAX_MESSAGE_LENGTH, nil)
+	m, _, err = c.read(wait, bgp.BGP_MAX_MESSAGE_LENGTH, nil)
 	if err != nil {
 		return err
 	}
@@ -444,7 +501,7 @@ func (s *sink) holdSession(c *conn, neg negotiated) error {
 	rfs := map[bgp.Family]bgp.BGPAddPathMode{bgp.RF_IPv4_UC: bgp.BGP_ADD_PATH_NONE}
 	isEBGP := s.cfg.localAS != s.cfg.peerAS
 	for {
-		m, err := c.read(hold, maxLen, opts)
+		m, decodeErr, err := c.read(hold, maxLen, opts)
 		if err != nil {
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
@@ -457,12 +514,27 @@ func (s *sink) holdSession(c *conn, neg negotiated) error {
 		}
 		switch b := m.Body.(type) {
 		case *bgp.BGPUpdate:
-			if ok, verr := bgp.ValidateUpdateMsg(b, rfs, isEBGP, false, false); !ok {
-				se := fromMessageError(verr, "invalid UPDATE")
+			// GoBGP validates only an UPDATE that decoded with no handling
+			// to apply, and acts on whichever of the two errors it has.
+			handling, cause := bgp.ERROR_HANDLING_NONE, error(nil)
+			if decodeErr != nil {
+				handling, cause = decodeErr.ErrorHandling, decodeErr
+			}
+			if handling == bgp.ERROR_HANDLING_NONE {
+				if ok, verr := bgp.ValidateUpdateMsg(b, rfs, isEBGP, false, false); !ok {
+					handling, cause = validationHandling(verr), verr
+				}
+			}
+			switch handling {
+			case bgp.ERROR_HANDLING_NONE:
+			case bgp.ERROR_HANDLING_TREAT_AS_WITHDRAW, bgp.ERROR_HANDLING_ATTRIBUTE_DISCARD:
+				s.log.Line('M', keptLine(handling, cause))
+			default:
+				se := fromMessageError(cause, "invalid UPDATE")
 				s.log.Line('M', se)
 				return se
 			}
-			r := t.apply(b)
+			r := t.apply(b, handling == bgp.ERROR_HANDLING_TREAT_AS_WITHDRAW)
 			st.updates++
 			st.accepted = t.accepted
 			st.at = monotonicNS()

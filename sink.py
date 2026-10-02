@@ -242,6 +242,12 @@ class SinkLog:
         self.sessions_established = 0
         self.refused_messages = 0
         self.last_refused = None
+        # UPDATEs the session was kept through under GoBGP's revised error
+        # handling, which an M line names by its first word (`keptLine()` in
+        # `sink/session.go`). Not refusals: GoBGP did the same, so they are
+        # counted apart rather than reported as a fault in the instrument.
+        self.kept_messages = 0
+        self.last_kept = None
         self.session = None
         self._reset_process()
 
@@ -343,8 +349,13 @@ class SinkLog:
                     self.session = None
                     self.sessions_lost += 1
         elif kind == 'M':
-            self.refused_messages += 1
-            self.last_refused = ' '.join(parts[2:])[:200]
+            detail = ' '.join(parts[2:])[:200]
+            if parts[2:3] in (['treat-as-withdraw'], ['attribute-discard']):
+                self.kept_messages += 1
+                self.last_kept = detail
+            else:
+                self.refused_messages += 1
+                self.last_refused = detail
         else:
             return self._bad(line, 'unknown line kind {0!r}'.format(kind))
 
@@ -429,6 +440,8 @@ class SinkLog:
             'sessions_lost': self.sessions_lost,
             'refused_messages': self.refused_messages,
             'last_refused': self.last_refused,
+            'kept_messages': self.kept_messages,
+            'last_kept': self.last_kept,
             'max_line_gap_ns': self.max_line_gap_ns,
             'clock_offset_ns': self.clock_offset_ns(host_realtime_ns,
                                                     host_monotonic_ns),
@@ -470,6 +483,7 @@ class SinkLog:
                 'processes': self.processes,
                 'sessions_established': self.sessions_established,
                 'refused_messages': self.refused_messages,
+                'kept_messages': self.kept_messages,
                 'max_line_gap_ns': self.max_line_gap_ns,
                 'first_prefix_at': self.first_prefix_at,
                 'required_at': self.required_at,

@@ -143,7 +143,10 @@ func (t *table) originatedHere(attrs []bgp.PathAttributeInterface) bool {
 }
 
 // apply folds one validated UPDATE into the table.
-func (t *table) apply(u *bgp.BGPUpdate) applied {
+// asWithdraw applies the UPDATE as GoBGP's treat-as-withdraw does
+// (table.ProcessMessage): every prefix it announces is withdrawn instead, in
+// the same order, and its attributes are not read.
+func (t *table) apply(u *bgp.BGPUpdate, asWithdraw bool) applied {
 	var r applied
 	if eor, family := u.IsEndOfRib(); eor {
 		r.eor = family == bgp.RF_IPv4_UC
@@ -159,19 +162,27 @@ func (t *table) apply(u *bgp.BGPUpdate) applied {
 			unreach = a
 		}
 	}
-	rejected := ownASLoop(t.localAS, u.PathAttributes) || t.originatedHere(u.PathAttributes)
+	rejected := !asWithdraw &&
+		(ownASLoop(t.localAS, u.PathAttributes) || t.originatedHere(u.PathAttributes))
+	reached := func(p netip.Prefix) {
+		if asWithdraw {
+			t.withdraw(p)
+			r.withdrawn++
+			return
+		}
+		t.announce(p, rejected)
+		r.announced++
+	}
 
 	for _, n := range u.NLRI {
 		if p, ok := prefixOf(n.NLRI); ok {
-			t.announce(p, rejected)
-			r.announced++
+			reached(p)
 		}
 	}
 	if reach != nil && bgp.NewFamily(reach.AFI, reach.SAFI) == bgp.RF_IPv4_UC {
 		for _, n := range reach.Value {
 			if p, ok := prefixOf(n.NLRI); ok {
-				t.announce(p, rejected)
-				r.announced++
+				reached(p)
 			}
 		}
 	}

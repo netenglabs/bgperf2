@@ -19,7 +19,12 @@ package main
 //   C <ns> <accepted> <updates> <eor>       the count changed
 //   H <ns> <accepted> <updates> <eor>       heartbeat: still true at <ns>
 //   E <ns> <accepted> <updates>             IPv4 unicast End-of-RIB received
-//   M <ns> <detail...>                      a message the sink refused
+//   M <ns> <detail...>                      a message the sink refused: one
+//                                           that reset the session (an S down
+//                                           follows), or an UPDATE the session
+//                                           was kept through, whose detail
+//                                           starts treat-as-withdraw or
+//                                           attribute-discard
 //
 // A C line is dated to the last UPDATE folded into the state it reports, not
 // to when it was written. Changes are coalesced to at most one C line per

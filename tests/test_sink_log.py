@@ -143,6 +143,18 @@ def test_refused_messages_are_counted_not_fatal():
     assert log.last_refused == 'malformed attribute'
 
 
+def test_kept_updates_are_not_refusals():
+    # bgperf2-f22: GoBGP kept the session through these, so a sink that did
+    # the same has refused nothing.
+    log = fed(HEADER + 'M 2000 treat-as-withdraw 3/11: unknown AS_PATH seg type\n'
+              'M 2010 attribute-discard 3/5: bad AGGREGATOR\nC 2100 1 1 0\n')
+    sample = log.sample(now_ns=2100)
+    assert sample['sink']['refused_messages'] == 0
+    assert sample['sink']['kept_messages'] == 2
+    assert log.last_kept == 'attribute-discard 3/5: bad AGGREGATOR'
+    assert log.last_refused is None
+
+
 def test_clock_offset_is_the_difference_of_the_two_offsets():
     log = fed(HEADER)
     sink_offset = 1759300000000000000 - 1001

@@ -4314,7 +4314,9 @@ unicast. The rules read from the source, each now a Go test:
 GoBGP's selection, policy and global RIB never reached that counter, and they are the work the sink
 exists not to do.
 
-**Errors are handled the way the monitor was configured.** The monitor ran with `treat-as-withdraw`
+**Errors are handled the way the monitor was configured.** *(The premise of this paragraph was
+wrong: the monitor ran with `treat-as-withdraw` **on**, gobgpd's default. Corrected 2026-10-02,
+below, under `bgperf2-f22`.)* The monitor ran with `treat-as-withdraw`
 off, and in that mode GoBGP resets the session on *any* UPDATE that fails to parse or fails
 `ValidateUpdateMsg` (`fsmHandler.handlingError`). The sink does the same and sends the NOTIFICATION
 the parser names. The RFC 7606 behaviour would be the more forgiving choice, but a sink that kept a
@@ -5214,3 +5216,57 @@ artifacts named `..._mon-sink`. `monitor_first_prefix` and `monitor_last_change`
 giving its reason ("the sink log has no line for it"), because a one-prefix table's check-point
 of `int(1 * 0.99)` is reached at zero, before the sink logged anything. Clock offset 2.2 µs, no
 session lost. That is a smoke check of the default, not a timing result.
+
+### Correction on 2026-10-02: GoBGP kept sessions through malformed UPDATEs, and now the sink does too (`bgperf2-f22`)
+
+**What happened.** In the daemon comparison's Phase 3 MRT block, all three RustyBGP 2026-02 passes
+failed: the sink sent NOTIFICATION 3/11 ("unknown AS_PATH seg type"), the session reset, and the
+count fell to 0. The same build had delivered 1,081,178 prefixes to the GoBGP 4.9.0 monitor on
+2026-09-11, and the sink parses with the same `gobgp/v4 v4.9.0` library.
+
+**The UPDATE is malformed.** A capture of the target→monitor stream on a re-run caught it.
+RustyBGP 2026-02 prepends its AS to a path whose first segment is full (255 ASes: 3257 35699
+205624×253, then a second segment of 205624×2). It writes a new segment holding AS 1000, then the
+old segment without its first four octets (`02 ff 00 00`), so the next header reads as type 0x0c,
+count 0xb9: the low half of AS 3257. The NOTIFICATION was correct. RustyBGP master encodes the
+same path correctly. The defect is listed in the comparison plan's §8.
+
+**GoBGP never reset for it.** gobgpd turns RFC 7606's revised error handling on for every
+neighbour whose config does not set `treat-as-withdraw` (`pkg/config/oc/default.go`), and
+`gobgp.py` never sets it. A malformed AS_PATH's handling is treat-as-withdraw
+(`getErrorHandlingFromPathAttribute`), so gobgpd withdrew the UPDATE's prefixes and kept the
+session. That is why it counted 1,081,178 where master, encoding correctly, delivers 1,081,180.
+The Phase 7 entry above stated the opposite premise, and nothing tested it: no 7a check had a
+malformed UPDATE in it.
+
+**The fix** (`sink/session.go`) mirrors `fsmHandler.handlingError` with revised handling on.
+- An UPDATE that decodes with an error comes back with the error's own handling.
+  Treat-as-withdraw and attribute-discard keep the session. So does no handling, after which the
+  UPDATE is validated as if it had decoded cleanly. Anything else resets.
+- `ValidateUpdateMsg` runs only when decoding left no handling. Its error's handling is applied
+  the same way, with AFI/SAFI-disable as a reset.
+- A treated UPDATE withdraws everything it announces, NLRI and MP_REACH, in
+  `table.ProcessMessage`'s order, and its attributes are not read.
+- A kept UPDATE is logged on an M line whose detail starts `treat-as-withdraw` or
+  `attribute-discard`. `sink.py` counts these as `kept_messages`, apart from `refused_messages`,
+  so a run in which the sink did exactly what GoBGP did is not reported as an instrument fault.
+
+`TestMissingOriginIsTreatAsWithdraw` replaces `TestMalformedUpdateResetsTheSession`, which had
+asserted the wrong behaviour. Under gobgpd's real settings a missing ORIGIN is a treat-as-withdraw
+too. `TestMalformedASPathIsTreatAsWithdraw` uses the captured AS_PATH's first octets, and
+`TestUnrecoverableUpdateResetsTheSession` keeps a reset case. The log format is unchanged: an M line
+was already "a message the sink refused", and its detail now says which kind.
+
+**Verified** on the comparison host after `prepare -f -t sink`. One unpinned RustyBGP 2026-02 MRT
+run kept its session, logged two `treat-as-withdraw 3/11` lines, and converged at 1,081,178:
+gobgpd's count, to the prefix.
+
+**What it changes.** In Phase 3 items 1 and 2, only the three RustyBGP 2026-02 MRT rows logged an M
+line, so no other row's count is affected. Those three rows stand as recorded, failed under the
+first sink. The cell still has to be re-run under this one.
+
+**Not acted on from review.** Each kept UPDATE writes its own M line, which flushes a pending count
+ahead of the coalesce interval. A target that malformed every UPDATE would write a line pair per
+message. gobgpd logs one warning per treated message too, and a target doing that is itself the
+finding. The real case logged two.
+

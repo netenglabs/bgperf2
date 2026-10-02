@@ -1,0 +1,35 @@
+# 2026 daemon comparison, Phase 3 item 2, re-run of one cell: RustyBGP 2026-02
+# on the full-internet MRT workload, pinned, three passes
+# (docs/2026-daemon-comparison-plan.md §5, run ID 2026-comparison).
+#
+# WHY. All three of this cell's rows in `benchmarks/2026-comparison-mrt.yaml`
+# failed: the sink reset the monitor session on the build's malformed AS_PATH,
+# where gobgpd applies RFC 7606 treat-as-withdraw. The sink now does the same
+# (`9efd294`, `bgperf2-f22`). The operator decided on 2026-10-02 to fix the sink
+# and re-run this cell before item 3. Its rows replace the three failed ones in
+# the plan's item 2 table. The failed rows stay on disk under
+# `results/2026/2026-comparison/mrt/` as the record of the failure.
+#
+# SHAPE. Item 2's config with the matrix narrowed to this one target and
+# nothing else changed: same workload, RIB, monitor and pinning. It has its own
+# test name so that it cannot rewrite item 2's CSV, progress or summary, which a
+# one-cell batch under `2026-comparison-mrt` would do.
+#
+# ORDER. One cell per pass, so there is nothing to shuffle: `order: matrix`.
+tests:
+  -
+     name: 2026-comparison-mrt-rustybgp-rerun
+     monitor: sink
+     pin: target=0-7,monitor=8-9,testers=10-15
+     repetitions: 3
+     neighbors: [10]
+     prefixes: [1_050_000]
+     filter_test: [None]
+     order: matrix
+     targets:
+       -
+         name: rustybgp
+         version: 2026-02
+         label: rustybgp 2026-02
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000

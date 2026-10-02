@@ -288,7 +288,7 @@ Workloads, three passes each, matrix repeated as a whole (`docs/invariants/batch
 new run ID `2026-comparison`:
 
 1. ~~synthetic 50 × 100k, pinned;~~ **Done 2026-10-02** (`03d824d`, `benchmarks/2026-comparison-synth.yaml`). 42 rows in `results/2026/2026-comparison/synth/`; see Progress.
-2. ~~MRT 10 × 1.05 M (bgpdump2), pinned;~~ **Ran 2026-10-02** (`ebb1ff9`, `benchmarks/2026-comparison-mrt.yaml`). 42 rows in `results/2026/2026-comparison/mrt/`; RustyBGP 2026-02's three failed on a sink defect, since fixed (`bgperf2-f22`); that cell is re-run before item 3. See Progress.
+2. ~~MRT 10 × 1.05 M (bgpdump2), pinned;~~ **Ran 2026-10-02** (`ebb1ff9`, `benchmarks/2026-comparison-mrt.yaml`). 42 rows in `results/2026/2026-comparison/mrt/`; RustyBGP 2026-02's three failed on a sink defect, since fixed (`bgperf2-f22`), and that cell was re-run pinned on 2026-10-02 (`2a0d396`, `benchmarks/2026-comparison-mrt-rustybgp-rerun.yaml`), three rows in `results/2026/2026-comparison/mrt-rustybgp-rerun/` replacing them. See Progress.
 3. **one bias check:** a small subset of both, unpinned, so pinned and unpinned can be compared
    on identical builds and the effect of co-location is measured rather than assumed.
 ~~4. Phase 7's bridge block (7c, `bgperf2-8gg.10.3`), in the same block as item 3.~~ **Dropped
@@ -357,11 +357,11 @@ Item 2, 2026-10-02 06:11–07:12 UTC: 14 cells × 3 passes, same pinning and hos
 | OpenBGPD 8.8 | 121, 122, 121 | 121 | 1,056,779 | `target_or_monitor` ×3 |
 | OpenBGPD 9.2 | 77, 77, 76 | 77 | 1,056,779 | `target_or_monitor` ×3 |
 | OpenBGPD 9.3 | 75, 75, 76 | 75 | 1,056,779 | `target_or_monitor` ×3 |
-| RustyBGP 2026-02 | failed ×3 | — | 0 | `inconclusive` ×3 |
+| RustyBGP 2026-02 (re-run) | 13, 12, 12 | 12 | 1,081,178 | `target_or_monitor` ×2, `tester` ×1 |
 | RustyBGP master | 25, 23, 23 | 23 | 1,081,180 | `tester` ×3 |
 
 Read these with four things in mind:
-- **RustyBGP 2026-02 has no MRT measurement.** In all three passes the sink refused one of its UPDATEs with `sent notification 3/11: malformed message type 2: unknown AS_PATH seg type` (`instrument.sink_log.last_refused`). That reset the monitor session, and the count fell to 0 by 7–18 s. The same build delivered 1,081,178 to the GoBGP 4.9.0 monitor in the timing-validation MRT blocks (2026-09-11), and the sink is built on the same `gobgp/v4 v4.9.0` packet library. Phase 7a's sink checks ran RustyBGP master, not 2026-02, on MRT, so this pairing was never run before. Whether the build emits a malformed AS_PATH that gobgpd tolerated, or the sink decodes differently from gobgpd, is not determined: `bgperf2-f22`, ledger §8 entry 5. Because the cell has no observation, the variance rule withholds a verdict for every cell grouped with it.
+- **RustyBGP 2026-02's row is from the re-run below**, not from this batch. In all three of this batch's passes the sink refused one of its UPDATEs with `sent notification 3/11: malformed message type 2: unknown AS_PATH seg type` (`instrument.sink_log.last_refused`). That reset the monitor session, and the count fell to 0 by 7–18 s. The same build delivered 1,081,178 to the GoBGP 4.9.0 monitor in the timing-validation MRT blocks (2026-09-11), and the sink is built on the same `gobgp/v4 v4.9.0` packet library. Phase 7a's sink checks ran RustyBGP master, not 2026-02, on MRT, so this pairing was never run before. Whether the build emits a malformed AS_PATH that gobgpd tolerated, or the sink decodes differently from gobgpd, is not determined: `bgperf2-f22`, ledger §8 entry 5. Because the cell had no observation, this batch's variance rule withheld a verdict for every cell grouped with it; the re-run is a separate test, so its rows are not pooled into that rule.
 - **FRR's check-point is unsound on this RIB, as Phase 1.1 found.** Its monitor count sits 65–74k under the 1,039,500 required in every row, so every row is `inconclusive` (`missing_timing_evidence`). Every row has a resolved `target_table.delivery` with `exported_final == monitor_final`. Its range here, 965,351–974,642, sits above the 956,893–961,057 the GoBGP-monitor rows recorded, which is consistent with an arrival-order cause but is not checked.
 - **FRR's `elapsed (s)` is a tail.** Every FRR row reaches 99.9% of its final count by 59–74 s. In 12 of 15 rows a last 4 to ~225 prefixes then reach the monitor at 92–95 s, after a ~25 s quiet gap. The three rows without it are the 67–70 s values. A median of 97 therefore measures that tail, not the table. Not explained: `bgperf2-5du`, ledger §8 entry 6.
 - **OpenBGPD resolves to `target_or_monitor` in all nine rows** (`post_injection_tail`). This is the evidence the hardware gate reads. The gate is read after item 3, so no row of its table is chosen here. Every row's `max foreign cpu %` stayed under the 100% contention threshold, and the lowest `min free mem` was 45.7 GB (RustyBGP master, peak 11.5 GB).
@@ -372,9 +372,15 @@ The batch's variance rule cannot separate four pairs at n=3: FRR 8.5 from 10.7, 
 cause was two-sided. The build sends a malformed AS_PATH (§8 entry 5). gobgpd runs with RFC 7606
 treat-as-withdraw on by default, which the sink had assumed off, so the sink reset a session GoBGP
 had kept. The sink now handles errors as gobgpd does (`9efd294`, `bgperf2-f22`, decision log "Correction on
-2026-10-02"). An unpinned verification run converged at 1,081,178, gobgpd's count. **Next: re-run
-that one cell, pinned, three passes,** before item 3. Its rows replace the three failed ones.
-Item 3's subset should also include RustyBGP master, as item 1 recorded.
+2026-10-02"). An unpinned verification run converged at 1,081,178, gobgpd's count.
+
+Re-run, 2026-10-02 08:05–08:07 UTC, after the operator confirmed it: that one cell, item 2's config narrowed to it (`benchmarks/2026-comparison-mrt-rustybgp-rerun.yaml`, `2a0d396`), same pinning, three passes, `order: matrix` since one cell has nothing to shuffle. It has its own test name so it could not rewrite item 2's CSV, progress or summary. The failed rows stay on disk. Log: `/data/bgperf-work/logs/2026-comparison-mrt-rustybgp-rerun-20261002T080545.*`. From `2026-comparison-mrt-rustybgp-rerun.summary.json` and each row's `events.json`:
+- All three passes converged at 1,081,178, gobgpd's count, against 1,039,500 required. `elapsed (s)` was 13, 12, 12 (median 12), and `refused_messages` was 0 in each.
+- The sink did meet the malformed AS_PATH and kept the session. Pass 3's `sink.log`, the only one still on disk because the bench directory is reused, holds 4 `treat-as-withdraw 3/11: unknown AS_PATH seg type` lines.
+- The limiting component was `target_or_monitor` in passes 1 and 3 (`post_injection_tail` 3.2 s and 1.4 s) and `tester` in pass 2 (0.8 s), against 1.0 s poll resolution. The cell sits on the boundary between the two, so it gives the gate no clean attribution either way.
+- `max foreign cpu %` peaked at 5 and `min free mem` at 54.8 GB.
+
+This build's median of 12 s is under half RustyBGP master's 23 s on the same workload, while master delivers 1,081,180, two more prefixes. That is recorded, not explained. **Next: item 3.** Its subset should include RustyBGP master, as item 1 recorded.
 
 ---
 

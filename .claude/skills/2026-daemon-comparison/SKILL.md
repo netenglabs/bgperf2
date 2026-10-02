@@ -34,10 +34,11 @@ Rules this contract adds to `CLAUDE.md`'s:
 
 - **A decision marked "(operator)" in the plan is never guessed**, and never delegated. Lay out
   the options the plan records and stop.
-- **Phase 3 runs benchmarks that take the whole host for hours.** Confirm with the user before
-  starting one, and never run two at once.
-- **Phase 4 needs hardware nobody here can provision.** At the Phase 3 gate, report which row of
-  the gate table the evidence landed in, and stop. Do not start Phase 4 work speculatively.
+- **Phases 3 and 4 run benchmarks that take the whole host for hours.** Confirm with the user
+  before starting one, and never run two at once.
+- **Phase 4's items 2 and 3 need an `m7a.8xlarge` that only the operator provisions** (plan §6,
+  decided 2026-10-02). Item 1 is code and runs on whatever host this is. Before item 2, confirm the
+  host with `lscpu` against §6; on any other host, say so and stop.
 - **Beads never carry reasoning.** A finding goes into the plan (or the decision log), and the
   bead gets at most a pointer. The checker flags a description long enough to be prose.
 - `/code-review` before every code commit, as `CLAUDE.md` requires.

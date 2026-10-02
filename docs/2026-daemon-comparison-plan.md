@@ -1,6 +1,6 @@
 # 2026 daemon comparison plan
 
-**Status: Phases 0–3 done; Phase 3's hardware gate landed on its second row (Phase 4, new hardware), which waits on the operator. Written 2026-09-29.**
+**Status: Phases 0–3 done. Phase 3's hardware gate landed on its second row; on 2026-10-02 the operator chose to answer it on one `m7a.8xlarge` (§6), and Phase 4 has not started. Written 2026-09-29.**
 
 **Epic:** `bgperf2-0y5`
 
@@ -32,8 +32,8 @@ compares with the campaign's:
 **Phase 3 is the first point that needs another EC2 instance.** It runs on a freshly provisioned
 `m7a.4xlarge` (16 vCPU / 61.44 GiB AMD EPYC 9R14), the campaign host class. **Confirm the class with
 `lscpu` before the first row.** Beyond that, new hardware is needed only if the gate in §5 says so.
-Then we rent **three `m7a.4xlarge` hosts in one cluster placement group**, to separate generator,
-target and monitor. **More memory is not needed for this comparison at all.** It is needed only for
+It did, and on 2026-10-02 the operator chose **one `m7a.8xlarge`**, the same CPU with twice the cores,
+over the three separate hosts this plan first proposed (§6). **More memory is not needed for this comparison at all.** It is needed only for
 the capacity-cliff work in §7, which is a different question from "what changed between versions".
 
 ---
@@ -405,52 +405,79 @@ Read these with three things in mind:
 - **RustyBGP master on synthetic is the one disagreement, and it follows the hold-timer expiries.** Unpinned pass 1 had `Hold timer expired` on 3 of 50 generator sessions (`rustybgp_default_#1_bird_100000_50_mon-sink.tester-health.json`). That pass reached 4.9 M at 142 s and the full table at 153 s. Passes 2 and 3 had none and reached the full table at 92 and 87 s. All three pinned passes had them (1, 4 and 1 sessions) and reached the full table at 145–167 s. So item 1's question is answered in part: the expiry happens unpinned too, so pinning does not cause it on its own, though it happened in 3 of 3 pinned passes against 1 of 3 unpinned. Whether the expiries slow the run or a slow run causes the expiries is not determined. Unpinned, the target used up to 1,239% CPU against the 8-core cap's 817%. The bias run's own variance rule cannot separate this cell from BIRD 2.19.2 (CV 32.9%) and recommends `repetitions: 5`.
 - One RustyBGP neighbour-sample read failed once, with a gobgp CLI `Unavailable` error (stderr log). That is one missed sample, not a missing row.
 
-**The hardware gate lands on its second row: co-location is biasing the result; go to Phase 4 on new hardware.** It is met on both of that row's grounds. MRT OpenBGPD still resolves to `target_or_monitor`, in all 12 rows across both pinnings. RustyBGP master's synthetic cell disagrees between pinnings by far more than resolution (median 154 against 93 s), though that disagreement follows hold-timer expiries rather than a steady shift. The first row is not met, since its condition is that no cell resolves to `target_or_monitor`. The third row, export fan-out, was not measured in this phase: no Phase 3 config ran receivers. Phase 4 needs three `m7a.4xlarge` hosts in one cluster placement group (§6), which only the operator can provision.
+**The hardware gate lands on its second row: co-location is biasing the result; go to Phase 4 on new hardware.** It is met on both of that row's grounds. MRT OpenBGPD still resolves to `target_or_monitor`, in all 12 rows across both pinnings. RustyBGP master's synthetic cell disagrees between pinnings by far more than resolution (median 154 against 93 s), though that disagreement follows hold-timer expiries rather than a steady shift. The first row is not met, since its condition is that no cell resolves to `target_or_monitor`. The third row, export fan-out, was not measured in this phase: no Phase 3 config ran receivers. The operator chose on 2026-10-02 to answer it on one `m7a.8xlarge` rather than across three hosts (§6).
 
 **Phase 3 done 2026-10-02**: items 1–3 ran, item 4 was dropped, and the gate is read above.
 
 ---
 
-## 6. Phase 4 (conditional) — separate the roles across hosts
+## 6. Phase 4 — attribute on one larger host
 
 **Tracked by:** `bgperf2-0y5.5` · **Status:** not started
 
-**Only if the gate in §5 says so.**
+**Decided by the operator on 2026-10-02**, after §5's gate landed on its second row: answer the
+gate on **one `m7a.8xlarge`**, not by separating the roles across three hosts. The three-host design
+this section carried until then is in git history (`ebf8ba0`) and is dropped. The reasons:
 
-### What hardware, exactly
+- **Neither ground of the gate needs the roles on different machines.** What it needs is each
+  role's CPU, which bgperf2 does not measure (`docs/invariants/findings.md`), and room to change
+  one role's cores while the others stay fixed. OpenBGPD's MRT wait begins after the generators
+  have finished, so that question is the target against the monitor alone. RustyBGP master's
+  pinned/unpinned gap is a question about the target's own cores.
+- **It avoids multi-host orchestration entirely.** That would need a Docker endpoint per role,
+  peering routed between hosts, sampling on every host, and a settled answer on clocks.
+- **It is the same CPU as Phase 3** (EPYC 9R14, a vCPU per physical core), so Phase 3's rows stay
+  the baseline. A newer CPU (`m8a`, `c8a`) would have meant re-running Phase 3 on it first.
 
-| host | role | instance | why this one |
-|---|---|---|---|
-| A | target | `m7a.4xlarge` (16 vCPU / 64 GiB) | **The same class as every existing row**, so the only thing that changes is separation. A different target host class would make every row incomparable and leave nothing to measure the bias against. |
-| B | generators (bgpdump2, BIRD tester) | `m7a.4xlarge` | Headroom: the generator fleet alone, with nothing else competing for CPU. If Phase 2.3 shows injectors are CPU-bound even so, step up to `m7a.8xlarge` for **this host only** — the generator's host class is not part of the result. |
-| C | monitor, export receivers | `m7a.4xlarge` | The monitor holds a full table and peaked at 380% CPU. Ten receivers each hold a copy of the table. Its own box removes it from the target's CPU. |
+**Host:** one on-demand `m7a.8xlarge` (32 vCPU / 128 GiB). **Confirm with `lscpu` before the first
+row:** model EPYC 9R14, 32 CPUs, `Thread(s) per core: 1`. The bench directory must be durable,
+not in RAM and not on the root filesystem (`docs/invariants/host-and-environment.md`). Same-CPU is not
+same-machine: memory bandwidth and cache per instance size may differ from the 4xlarge, which is
+what item 2 checks.
 
-- **Placement:** all three in **one availability zone, one cluster placement group**, so
-  propagation between hosts is consistent and small next to the 1 s poll.
-- **Purchase:** **on-demand for the duration of a block**, not spot. Losing one of three hosts
-  loses the run, and three spot hosts are three times as likely to be reclaimed.
-- **Storage:** each host needs a durable, non-root, non-RAM bench directory
-  (`docs/invariants/host-and-environment.md`). On the target host, the pinned RIB must be on
-  that volume.
-- **Check prices and availability when scheduling**, not from this document.
+Items, in order:
 
-### What has to be built first
+1. **Per-role, time-aligned CPU (code, on the current host).** Sample every container's CPU at
+   each poll from its cgroup, as a delta between two samples (the rule `contention.py` follows for
+   `/proc`), on the controller's clock. Publish it per role in `events.json`. Each role's
+   containers are summed, and each role's cpuset is stated beside it. This item **publishes the
+   series and changes no verdict.** A `findings.py` rule that reads it is a separate decision,
+   taken on item 3's data, under `findings.md`'s rule against fitting an attribution to the runs in
+   front of it. It is what `findings.md`, `docs/measurement-dictionary.md` and `bgperf2-bgg` name
+   as the missing measurement. **Exit:** tests green; a pinned and an unpinned `-n1 -p1` smoke run
+   each publish a series for every role.
+2. **Calibrate the larger host against Phase 3.** Run §5's bias-check cells (BIRD 2.19.2, FRR 10.7,
+   OpenBGPD 9.3 and RustyBGP master synthetic; BIRD 2.19.2, OpenBGPD 9.3 and RustyBGP master MRT)
+   with Phase 3's pinning exactly, `target=0-7,monitor=8-9,testers=10-15`, three passes. Cores
+   16–31 are left to the controller and the kernel, which `--pin` does not confine
+   (`docs/invariants/workload-controls.md`), so a difference here is the host size, that headroom,
+   or both. **Agreement with Phase 3 within pass spread** makes Phase 3's rows the baseline for
+   item 3. Disagreement stops the phase for an operator decision.
+3. **Change one role's cores at a time**, each against item 2, three passes each:
 
-It is not a configuration change. bgperf2 today starts every container on one local Docker bridge
-and only knows "remote target" through a hand-written scenario, **with no CPU or memory stats**.
-Phase 4 needs:
+   | variant | pin | cells | question |
+   |---|---|---|---|
+   | a. monitor ×4 | `target=0-7,monitor=8-15,testers=16-21` | OpenBGPD 9.3 MRT, BIRD 2.19.2 MRT | Does OpenBGPD's ~70 s wait move with the monitor's cores? |
+   | b. testers ×2.7 | `target=0-7,monitor=8-9,testers=16-31` | RustyBGP master synthetic and MRT | Does RustyBGP's time, or its hold-timer expiries, move with the generators' cores? |
+   | c. target 12 cores | `target=0-11,monitor=12-13,testers=14-19` | RustyBGP master synthetic | Does it move with the target's own cores, as unpinned (up to 1,239%) suggests? |
 
-1. a Docker endpoint per role, with the controller on one host (probably B or C);
-2. routed peering between hosts in place of the local bridge;
-3. target CPU and memory sampled from host A, and `contention.py`'s `/proc` sampler on **every**
-   host, since each host can now be busy independently;
-4. a decision on clocks. Timings are stamped by the controller, so they stay on one monotonic
-   clock *if* every sample is still driven from the controller. That must be confirmed, not
-   assumed. Otherwise use the Amazon Time Sync Service on all three hosts, and publish the
-   measured offset.
+   The configs are written when the item starts, stating `monitor: sink`, each with its own test
+   name.
 
-**Exit:** the §5 bias-check subset re-run across three hosts. The difference against Phase 3 is
-published as the single-host bias.
+**Reading it:**
+
+| what item 3 shows | conclusion |
+|---|---|
+| OpenBGPD's wait is unchanged under (a), and item 1 shows the monitor well under its cores during it | The wait is the target's. It is published as such, and the `findings.py` rule is proposed with this as its evidence. |
+| OpenBGPD's wait shortens under (a) | The monitor was limiting. The sink is fixed before any OpenBGPD MRT time is published. |
+| RustyBGP moves under (b) or (c) | The result depends on the arrangement. It is published with its pinning stated, and the cores it needs are recorded. |
+| nothing moves anywhere | Single-host co-location is not biasing these cells. Publish from §5's rows. |
+
+The difference between each variant and item 2 is published per cell, as the single-host
+co-location cost. Export fan-out (the §5 gate's third row) was never measured and is not part of
+this phase.
+
+**Exit:** items 1–3 done, and every row of the table above that applies is recorded.
 
 Progress: —
 

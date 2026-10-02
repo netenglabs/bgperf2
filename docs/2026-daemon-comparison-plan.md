@@ -448,13 +448,17 @@ Items, in order:
    each publish a series for every role.~~ Done 2026-10-02, `f6d5329`: `role_cpu.py`, published as
    `events.json`'s `role_cpu` section (`docs/measurement-dictionary.md`). Its rules are in
    `docs/invariants/host-and-environment.md`.
-2. **Calibrate the larger host against Phase 3.** Run §5's bias-check cells (BIRD 2.19.2, FRR 10.7,
+2. ~~**Calibrate the larger host against Phase 3.** Run §5's bias-check cells (BIRD 2.19.2, FRR 10.7,
    OpenBGPD 9.3 and RustyBGP master synthetic; BIRD 2.19.2, OpenBGPD 9.3 and RustyBGP master MRT)
    with Phase 3's pinning exactly, `target=0-7,monitor=8-9,testers=10-15`, three passes. Cores
    16–31 are left to the controller and the kernel, which `--pin` does not confine
    (`docs/invariants/workload-controls.md`), so a difference here is the host size, that headroom,
    or both. **Agreement with Phase 3 within pass spread** makes Phase 3's rows the baseline for
-   item 3. Disagreement stops the phase for an operator decision.
+   item 3. Disagreement stops the phase for an operator decision.~~ Done 2026-10-02 (`0e15115`,
+   `benchmarks/2026-comparison-calib.yaml`, 21 rows in `results/2026/2026-comparison/calib/`).
+   Five of seven cells agreed within pass spread. OpenBGPD 9.3 MRT ran 2 s slower, and RustyBGP
+   master synthetic had more hold-timer expiries. The operator chose (A): Phase 3's rows stay the
+   baseline, with the offset stated. See Progress.
 3. **Change one role's cores at a time**, each against item 2, three passes each:
 
    | variant | pin | cells | question |
@@ -530,6 +534,11 @@ item 2 stays open until the operator decides. **Pending operator decision**, wit
 (B) make item 2's rows the baseline for everything Phase 4 publishes;
 (C) run more passes of the two cells first. Item 3's variants are read against item 2 under any of
 the three.
+
+**Operator decision 2026-10-02: (A).** Phase 3's pinned rows stay the published baseline. OpenBGPD
+9.3 MRT carries this host's +2 s (post-injection tail +1.7 s, about 2.5%) as a stated offset.
+RustyBGP master's hold-timer counts on both hosts are published as measured. Item 3 is read against
+item 2's rows.
 
 ---
 

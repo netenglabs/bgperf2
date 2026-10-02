@@ -287,7 +287,7 @@ anything older (`benchmarks/baseline/baseline-benchmark.csv` was a different CPU
 Workloads, three passes each, matrix repeated as a whole (`docs/invariants/batch-passes.md`),
 new run ID `2026-comparison`:
 
-1. synthetic 50 × 100k, pinned;
+1. ~~synthetic 50 × 100k, pinned;~~ **Done 2026-10-02** (`03d824d`, `benchmarks/2026-comparison-synth.yaml`). 42 rows in `results/2026/2026-comparison/synth/`; see Progress.
 2. MRT 10 × 1.05 M (bgpdump2), pinned;
 3. **one bias check:** a small subset of both, unpinned, so pinned and unpinned can be compared
    on identical builds and the effect of co-location is measured rather than assumed.
@@ -310,6 +310,34 @@ After Phase 3, look at the MRT and fan-out cells and decide with this table:
 | export fan-out still shows host CPU saturation with the monitor and receivers pinned apart from the target | **Phase 4** — the receivers need their own host. |
 
 Progress: started 2026-10-02 on an on-demand `m7a.4xlarge` (16 vCPU, AMD EPYC 9R14, one thread per core, confirmed with `lscpu` and the instance metadata). Docker's root `/data/docker` carried the Phase 2.4 images over, and `verify` reported 32 images checked, all ok. Item 1 config: `benchmarks/2026-comparison-synth.yaml`. Its matrix has no `openbgp default` cell, because `openbgp:latest` is 9.3.
+
+Item 1, 2026-10-02 01:34–05:52 UTC: 14 cells × 3 passes, pinned `target=0-7,monitor=8-9,testers=10-15`, sink monitor, shuffle seed 202631. Log: `/data/bgperf-work/logs/2026-comparison-synth-20261002T013416.*`. All 42 rows received 5,000,000 against a required 4,950,000, and none failed. Per-cell `elapsed (s)`, the three passes and their median, from `2026-comparison-synth.summary.json`:
+
+| cell | passes | median |
+|---|---|---|
+| BIRD 2.19.2 | 78, 76, 78 | 78 |
+| BIRD 3.3.2 (default threads) | 99, 98, 99 | 99 |
+| BIRD 3.3.2 (4 threads) | 78, 78, 77 | 78 |
+| BIRD master | 78, 78, 77 | 78 |
+| FRR 8.5 | 72, 72, 72 | 72 |
+| FRR 9.1 | 72, 72, 72 | 72 |
+| FRR 10.0 | 71, 71, 72 | 71 |
+| FRR 10.7 | 45, 51, 46 | 46 |
+| FRR master | 46, 47, 47 | 47 |
+| OpenBGPD 8.8 | 610, 617, 605 | 610 |
+| OpenBGPD 9.2 | 695, 690, 708 | 695 |
+| OpenBGPD 9.3 | 714, 701, 701 | 701 |
+| RustyBGP 2026-02 | 73, 76, 76 | 76 |
+| RustyBGP master | 154, 168, 146 | 154 |
+
+Read these with three things in mind:
+- **Every row's limiting component is `unresolved`.** The cause is the same as in timing-validation Blocks 2–4: BIRD 2.19's offered count is queue-side, so at most 62,368 of the 5,000,000 offered prefixes crossed the measured interval in any row, far short of the half that attribution needs. This workload cannot attribute. The gate reads the MRT cells.
+- **RustyBGP master sent `Hold timer expired` to its generator sessions** (`<RMT> bgp1: Error: Hold timer expired` in the BIRD tester logs, recorded in each run's `tester-health.json`). It happened on 1, 4 and 1 of the 50 sessions in passes 1–3, and every pass still converged with the full table. RustyBGP 2026-02 shows none. Neither build did it in timing-validation Blocks 2–4, which were unpinned at 16 cores and ran on GoBGP. Pinning and the monitor both changed between those runs, so the cause is not attributed. **Item 3's subset should include RustyBGP master** so the pinned/unpinned pair can separate the two.
+- OpenBGPD 8.8's lowest `min free mem` was 17.8 GB (29% of the host), clear of the 20% floor.
+
+The batch's own variance rule lists three pairs it cannot separate at n=3: FRR 10.7 against master, OpenBGPD 9.2 against 9.3, and RustyBGP 2026-02 against BIRD 2.19.2. For each it recommends `repetitions: 5`.
+
+The controller spends about 2 min of single-threaded CPU per cell rendering and parsing the scenario before the measured interval starts. That is about 96 min of main-thread CPU across this batch, and 6% of one core during measurement. Tracked as `bgperf2-dyr`; it is outside this plan.
 
 ---
 

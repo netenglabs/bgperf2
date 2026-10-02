@@ -297,6 +297,10 @@ class TestSecondRoundFixes:
         monkeypatch.setattr(bgperf2, 'remove_old_containers', lambda: order.append('teardown'))
         monkeypatch.setattr(bgperf2, 'target_image',
                             lambda *a, **k: order.append('resolve') or 'img')
+        # `repeat=True` asks Docker for leftover pinned testers; without this
+        # the test read the host's real containers, and failed whenever a
+        # pinned run had left its testers behind.
+        monkeypatch.setattr(bgperf2, 'get_ctn_names', lambda: [])
 
         # The workload fields are valid: resolution now sits *after* the
         # guards that read only the command line, so that a mistyped -p or

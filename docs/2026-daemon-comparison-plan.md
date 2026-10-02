@@ -1,6 +1,6 @@
 # 2026 daemon comparison plan
 
-**Status: Phases 0–4 done. Phase 3's hardware gate landed on its second row; on 2026-10-02 the operator chose to answer it on one `m7a.8xlarge` (§6), and Phase 4 did so and is done (2026-10-02): OpenBGPD's MRT wait is the target's, and no one role's cores move any cell beyond pass spread. Written 2026-09-29.**
+**Status: Phases 0–4 done. Phase 3's hardware gate landed on its second row; on 2026-10-02 the operator chose to answer it on one `m7a.8xlarge` (§6), and Phase 4 did so and is done (2026-10-02): OpenBGPD's MRT wait is the target's, and no one role's cores move any cell beyond pass spread. Phase 5 (§9) keeps measuring on the same host. Written 2026-09-29.**
 
 **Epic:** `bgperf2-0y5`
 
@@ -726,10 +726,69 @@ named check would confirm it.
    (§6 item 3). Measured at `9eeeebbd50`, not current head (`bgperf2-97u`).
 ---
 
+## 9. Phase 5 — keep measuring on the m7a.8xlarge
+
+**Tracked by:** `bgperf2-0y5.6` · **Status:** not started
+
+**Decided by the operator on 2026-10-02**, after Phase 4: keep measuring, and turn the results into
+as many articles as are useful afterwards. What Phases 0–4 hold already supports one article: how
+each daemon changed between releases, on the 50 × 100k synthetic and 10 × 1.05 M MRT workloads.
+Where and what to publish is decided later (§6 Progress, "Operator decisions"). This phase widens
+the evidence. It does not publish.
+
+**Host:** the same on-demand `m7a.8xlarge` (EPYC 9R14, 32 CPUs, one thread per core, 123 GiB),
+confirmed with `lscpu` before each benchmark item. Its rows form their own series. Phase 4 item 2
+ties its 10-peer cells to Phase 3 within pass spread in 5 of 7 cells. Scale cells have no Phase 3
+counterpart, so every step of a curve is measured here, the 10-peer step included.
+
+**The RIB's limit.** `mrt/rib.20260808.0000` (route-views2) has 28 peers, but only 17 carry the full
+table (≥ 1.05 M prefixes): indexes 1, 2, 3, 5, 7, 8, 10, 11, 12, 13, 14, 18, 20, 21, 23, 26 and 27,
+from `bgpdump2 -c`, 2026-10-02. Past 17, `get_index_valid()` wraps, and the generators replay peers
+already in use. `mrt/rib.20210801.0000` has 32 peers at ≥ 800k but a 2021-sized table (largest
+894,970), so its rows cannot sit beside the 2026 MRT rows. The operator chose to run to 17 distinct
+peers on the 2026 RIB, survey other collectors, and decide the axis past 17 on what the survey
+finds.
+
+Items, in order:
+
+1. **RustyBGP labels and the NO_EXPORT re-check (code, any host).** Label `9eeeebbd50` as `2026-08`
+   in `RustyBGP.VERSION_REFS` (`bgperf2-c5d`). Re-read §8 entry 1's export path at `9eeeebbd50`
+   (`bgperf2-kpf`). **Exit:** tests green; `dockerfile rustybgp --version 2026-08` renders that
+   commit; §8 entry 1 cites the built commit.
+2. **RustyBGP head against 2026-08 (`bgperf2-97u`).** Build current upstream head without cache, as
+   its own dated tag, and `verify` it. Then run head and 2026-08, five passes each:
+   - synthetic 50 × 100k, pinned with Phase 3's `target=0-7,monitor=8-9,testers=10-15` and unpinned;
+   - MRT 10 × 1.05 M, pinned.
+
+   Unpinned on this host means 32 cores, so those rows compare only with each other. **Reading:**
+   per build and arrangement, `elapsed (s)` beside the hold-timer-expired session count (§8
+   entry 7). Does head keep the bimodal time and the expiries, and do the expiries still follow the
+   time? About 1.5 h. Confirm with the operator before the run.
+3. **Full-table peer curve, 10 → 17 distinct peers, all 14 builds.** MRT, steps of 10, 14 and 17
+   peers, three passes each, one pin across the whole curve, chosen and stated in the config when the
+   item starts. The testers need more cores than Phase 3's six at 17 generators. Stop a cell at the
+   20% free-memory guardrail (`docs/2026-memory-capacity-options.md`). The NO_EXPORT peer (index
+   10) is in every step, so FRR's check-point stays unsound and its rows are read through
+   `target_table.delivery`, as in Phase 3. 14 builds × 3 steps × 3 passes is 126 rows, about 9 h at
+   Phase 4 item 2's rate. It may run as one batch per step, each confirmed with the operator.
+4. **Survey 2026 RIBs for more full-table peers (read-only).** For each candidate collector (RIPE RIS
+   `rrc00` and the other Route Views collectors), take a RIB from the same day as
+   `rib.20260808.0000` and record: peer count, full-table peer count, table size, and peers whose
+   routes carry NO_EXPORT. It downloads and reads files, so it never runs while a benchmark does.
+   **Exit:** a table of collectors, and an operator decision on the axis past 17: a new RIB,
+   wrap-around, or stop at 17.
+
+**Exit:** items 1–4 done. Each build's curve is recorded with `elapsed (s)`, `received` and peak
+memory per step, and the operator has decided the axis past 17.
+
+Progress: not started.
+
+---
+
 ## Tracking
 
 Epic `bgperf2-0y5`. Phases, each blocked by the one before: Phase 0 `bgperf2-0y5.1` (also blocked by
 `bgperf2-es0` and `bgperf2-0ma`), Phase 1 `bgperf2-0y5.2`, Phase 2 `bgperf2-0y5.3`, Phase 3 `bgperf2-0y5.4`,
-Phase 4 `bgperf2-0y5.5`. Phase 3 is also blocked by measurement plan Phase 7b (`bgperf2-8gg.10.2`), and
+Phase 4 `bgperf2-0y5.5`, Phase 5 `bgperf2-0y5.6`. Phase 3 is also blocked by measurement plan Phase 7b (`bgperf2-8gg.10.2`), and
 it no longer carries Phase 7c, which was dropped on 2026-10-01. Phase 3 is also blocked by
 `bgperf2-9su` and `bgperf2-0l7`, two of the obligations of Phase 2.6.

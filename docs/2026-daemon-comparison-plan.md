@@ -496,6 +496,41 @@ Item 2 config: `benchmarks/2026-comparison-calib.yaml`. It is the bias check's c
 against the pinned rows of the same cells in `synth/` and `mrt/`. Results go to
 `results/2026/2026-comparison/calib/`.
 
+Item 2 ran 2026-10-02, 16:24–17:56 UTC, after the operator confirmed it. All 21 rows converged with
+the same `received` as Phase 3 (5,000,000 synthetic; MRT BIRD and OpenBGPD 1,056,779, RustyBGP
+1,081,180). The sink logged no refused and no kept messages in any row, so the sink build change does
+not apply. Every row's verdict matches its Phase 3 pinned row: synthetic `unresolved`
+(`injection_boundary_unresolved`), MRT BIRD and RustyBGP `tester` (`tester_limited`), MRT OpenBGPD
+`target_or_monitor` (`post_injection_tail`). `max foreign cpu %` peaked at 29 (RustyBGP synthetic pass
+3) and `min free mem` stayed at or above 97.8 GB. `elapsed (s)` per pass, Phase 3 → this host:
+
+| cell | Phase 3 pinned | m7a.8xlarge | within pass spread? |
+|---|---|---|---|
+| BIRD 2.19.2 synthetic | 78, 76, 78 | 79, 75, 76 | yes |
+| FRR 10.7 synthetic | 45, 51, 46 | 43, 45, 45 | yes |
+| OpenBGPD 9.3 synthetic | 714, 701, 701 | 700, 698, 697 | yes (medians 3 s apart, Phase 3 spread 13 s) |
+| RustyBGP master synthetic | 154, 168, 146 | 164, 161, 147 | yes |
+| BIRD 2.19.2 MRT | 29, 32, 29 | 31, 39, 29 | yes |
+| OpenBGPD 9.3 MRT | 75, 75, 76 | 77, 77, 77 | **no**: +2 s, every pass |
+| RustyBGP master MRT | 25, 23, 23 | 24, 24, 24 | yes |
+
+Two differences go past pass spread:
+
+- **OpenBGPD 9.3 MRT is about 2 s slower here.** The difference is in the post-injection tail, which
+  went from 66.8, 67.8 and 68.0 s to 68.8, 69.6 and 69.3 s (1 s resolution). Injection stayed at 3 s.
+  That is about 2.5%, tight in both runs, and it is the cell variant (a) studies.
+- **RustyBGP master's generators saw more hold-timer expiries.** BIRD tester logs
+  (`tester-health.json`) record `Hold timer expired` on 10, 5 and 5 sessions, against 1, 4 and 1 in
+  Phase 3. Elapsed time is unchanged. Pass 3 also logged one failed target-state sample
+  (`GoBGPNeighborReadError`, connection closed), and that run still converged.
+
+Neither is attributed here. By §6's rule, disagreement stops the phase for an operator decision, so
+item 2 stays open until the operator decides. **Pending operator decision**, with the options:
+(A) accept Phase 3's rows as the baseline, with the OpenBGPD MRT offset stated beside them;
+(B) make item 2's rows the baseline for everything Phase 4 publishes;
+(C) run more passes of the two cells first. Item 3's variants are read against item 2 under any of
+the three.
+
 ---
 
 ## 7. Not part of this plan: more memory

@@ -1,6 +1,6 @@
 # 2026 daemon comparison plan
 
-**Status: Phases 0, 1 and 2 done; Phase 3 in progress (started 2026-10-02 on an on-demand `m7a.4xlarge`, EPYC 9R14). Written 2026-09-29.**
+**Status: Phases 0–3 done; Phase 3's hardware gate landed on its second row (Phase 4, new hardware), which waits on the operator. Written 2026-09-29.**
 
 **Epic:** `bgperf2-0y5`
 
@@ -268,7 +268,7 @@ plan Phase 7). Item 6 answered by the operator 2026-10-01 (keep the NO_EXPORT pe
 
 ## 5. Phase 3 — re-run on the current host class, then the hardware gate
 
-**Tracked by:** `bgperf2-0y5.4` · **Status:** in progress
+**Tracked by:** `bgperf2-0y5.4` · **Status:** done
 
 **Requires measurement plan Phase 7 through 7b** (`bgperf2-8gg.10.2`). Phase 3 runs on the sink
 monitor at its finer resolution. The sink has been the default since 7d (2026-10-02). Write this
@@ -289,8 +289,10 @@ new run ID `2026-comparison`:
 
 1. ~~synthetic 50 × 100k, pinned;~~ **Done 2026-10-02** (`03d824d`, `benchmarks/2026-comparison-synth.yaml`). 42 rows in `results/2026/2026-comparison/synth/`; see Progress.
 2. ~~MRT 10 × 1.05 M (bgpdump2), pinned;~~ **Ran 2026-10-02** (`ebb1ff9`, `benchmarks/2026-comparison-mrt.yaml`). 42 rows in `results/2026/2026-comparison/mrt/`; RustyBGP 2026-02's three failed on a sink defect, since fixed (`bgperf2-f22`), and that cell was re-run pinned on 2026-10-02 (`2a0d396`, `benchmarks/2026-comparison-mrt-rustybgp-rerun.yaml`), three rows in `results/2026/2026-comparison/mrt-rustybgp-rerun/` replacing them. See Progress.
-3. **one bias check:** a small subset of both, unpinned, so pinned and unpinned can be compared
-   on identical builds and the effect of co-location is measured rather than assumed.
+3. ~~**one bias check:** a small subset of both, unpinned, so pinned and unpinned can be compared
+   on identical builds and the effect of co-location is measured rather than assumed.~~ **Ran
+   2026-10-02** (`e987c22`, `benchmarks/2026-comparison-bias.yaml`). 21 rows in
+   `results/2026/2026-comparison/bias/`, all converged; see Progress.
 ~~4. Phase 7's bridge block (7c, `bgperf2-8gg.10.3`), in the same block as item 3.~~ **Dropped
    2026-10-01** with 7c itself. The operator chose to re-bench rather than bridge, so this phase
    needs no second monitor. GoBGP stays selectable for re-checking any one sink cell that looks
@@ -383,6 +385,29 @@ Re-run, 2026-10-02 08:05–08:07 UTC, after the operator confirmed it: that one 
 This build's median of 12 s is under half RustyBGP master's 23 s on the same workload, while master delivers 1,081,180, two more prefixes. That is recorded, not explained. **Next: item 3.** Its subset should include RustyBGP master, as item 1 recorded.
 
 Item 3 config: `benchmarks/2026-comparison-bias.yaml` (`e987c22`). It is items 1 and 2's configs with `pin` removed and the matrix narrowed, three passes, seed 202633. Synthetic: BIRD 2.19.2, FRR 10.7, OpenBGPD 9.3, RustyBGP master. MRT: the same cells without FRR 10.7, because FRR's MRT rows are all `inconclusive` and their `elapsed (s)` falls near 68 s or 97 s by the unexplained tail (`bgperf2-5du`), which three unpinned passes could mistake for co-location. The sink build changed between items 1–2 and this run (`9efd294`). That change only alters behaviour after a decode or validation error, and all 24 pinned rows of these cells recorded `refused_messages: 0`, so on their input the two builds behave the same. The config header has the full reasoning. Results go to `results/2026/2026-comparison/bias/`.
+
+Item 3, 2026-10-02 08:16–09:46 UTC: 7 cells × 3 passes, unpinned, same host, sink monitor, shuffle seed 202633. Log: `/data/bgperf-work/logs/2026-comparison-bias-20261002T081613.*`. It was launched in an earlier session and recorded in a later one; nothing else ran on the host in between. All 21 rows converged (synthetic 5,000,000, MRT at the same final counts as item 2), `refused_messages` was 0 in every row, `max foreign cpu %` peaked at 13, and `min free mem` stayed at or above 36.5 GB. Unpinned `elapsed (s)` beside the pinned rows of the same cells (items 1 and 2), from each run's `*.summary.json` and CSV:
+
+| workload | cell | pinned | unpinned | medians |
+|---|---|---|---|---|
+| synthetic | BIRD 2.19.2 | 78, 76, 78 | 76, 76, 74 | 78 / 76 |
+| synthetic | FRR 10.7 | 45, 51, 46 | 45, 46, 45 | 46 / 45 |
+| synthetic | OpenBGPD 9.3 | 714, 701, 701 | 698, 704, 719 | 701 / 704 |
+| synthetic | RustyBGP master | 154, 168, 146 | 154, 93, 88 | 154 / 93 |
+| MRT | BIRD 2.19.2 | 29, 32, 29 | 29, 31, 29 | 29 / 29 |
+| MRT | OpenBGPD 9.3 | 75, 75, 76 | 76, 76, 76 | 75 / 76 |
+| MRT | RustyBGP master | 25, 23, 23 | 23, 25, 24 | 23 / 24 |
+
+Limiting components: every synthetic row is `unresolved`, as in item 1. MRT BIRD 2.19.2 and RustyBGP master are `tester` ×3, as pinned. **MRT OpenBGPD 9.3 is `target_or_monitor` ×3 unpinned, as it was ×3 pinned**, with `post_injection_tail` 69.6–69.8 s unpinned against 66.8–68.0 s pinned (1.0 s resolution).
+
+Read these with three things in mind:
+- **Six of the seven cells agree.** Their medians differ by 0–3 s, and in each one the pinned and unpinned pass ranges overlap. The 2–3 s gaps (BIRD and OpenBGPD on synthetic) exceed the 1.0 s resolution only by as much as the passes vary among themselves, so they are not counted as disagreement. Where pinning capped a target's CPU, the time did not move: RustyBGP master on MRT peaked at 799–802% pinned (8 cores) and 866–869% unpinned, at the same `elapsed (s)`.
+- **RustyBGP master on synthetic is the one disagreement, and it follows the hold-timer expiries.** Unpinned pass 1 had `Hold timer expired` on 3 of 50 generator sessions (`rustybgp_default_#1_bird_100000_50_mon-sink.tester-health.json`). That pass reached 4.9 M at 142 s and the full table at 153 s. Passes 2 and 3 had none and reached the full table at 92 and 87 s. All three pinned passes had them (1, 4 and 1 sessions) and reached the full table at 145–167 s. So item 1's question is answered in part: the expiry happens unpinned too, so pinning does not cause it on its own, though it happened in 3 of 3 pinned passes against 1 of 3 unpinned. Whether the expiries slow the run or a slow run causes the expiries is not determined. Unpinned, the target used up to 1,239% CPU against the 8-core cap's 817%. The bias run's own variance rule cannot separate this cell from BIRD 2.19.2 (CV 32.9%) and recommends `repetitions: 5`.
+- One RustyBGP neighbour-sample read failed once, with a gobgp CLI `Unavailable` error (stderr log). That is one missed sample, not a missing row.
+
+**The hardware gate lands on its second row: co-location is biasing the result; go to Phase 4 on new hardware.** It is met on both of that row's grounds. MRT OpenBGPD still resolves to `target_or_monitor`, in all 12 rows across both pinnings. RustyBGP master's synthetic cell disagrees between pinnings by far more than resolution (median 154 against 93 s), though that disagreement follows hold-timer expiries rather than a steady shift. The first row is not met, since its condition is that no cell resolves to `target_or_monitor`. The third row, export fan-out, was not measured in this phase: no Phase 3 config ran receivers. Phase 4 needs three `m7a.4xlarge` hosts in one cluster placement group (§6), which only the operator can provision.
+
+**Phase 3 done 2026-10-02**: items 1–3 ran, item 4 was dropped, and the gate is read above.
 
 ---
 

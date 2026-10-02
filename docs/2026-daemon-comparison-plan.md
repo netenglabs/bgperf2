@@ -1,6 +1,6 @@
 # 2026 daemon comparison plan
 
-**Status: Phases 0–3 done. Phase 3's hardware gate landed on its second row; on 2026-10-02 the operator chose to answer it on one `m7a.8xlarge` (§6), and Phase 4 has not started. Written 2026-09-29.**
+**Status: Phases 0–4 done. Phase 3's hardware gate landed on its second row; on 2026-10-02 the operator chose to answer it on one `m7a.8xlarge` (§6), and Phase 4 did so and is done (2026-10-02): OpenBGPD's MRT wait is the target's, and no one role's cores move any cell beyond pass spread. Written 2026-09-29.**
 
 **Epic:** `bgperf2-0y5`
 
@@ -413,7 +413,7 @@ Read these with three things in mind:
 
 ## 6. Phase 4 — attribute on one larger host
 
-**Tracked by:** `bgperf2-0y5.5` · **Status:** in progress
+**Tracked by:** `bgperf2-0y5.5` · **Status:** done
 
 **Decided by the operator on 2026-10-02**, after §5's gate landed on its second row: answer the
 gate on **one `m7a.8xlarge`**, not by separating the roles across three hosts. The three-host design
@@ -459,7 +459,7 @@ Items, in order:
    Five of seven cells agreed within pass spread. OpenBGPD 9.3 MRT ran 2 s slower, and RustyBGP
    master synthetic had more hold-timer expiries. The operator chose (A): Phase 3's rows stay the
    baseline, with the offset stated. See Progress.
-3. **Change one role's cores at a time**, each against item 2, three passes each:
+3. ~~**Change one role's cores at a time**, each against item 2, three passes each:
 
    | variant | pin | cells | question |
    |---|---|---|---|
@@ -468,7 +468,9 @@ Items, in order:
    | c. target 12 cores | `target=0-11,monitor=12-13,testers=14-19` | RustyBGP master synthetic | Does it move with the target's own cores, as unpinned (up to 1,239%) suggests? |
 
    The configs are written when the item starts, stating `monitor: sink`, each with its own test
-   name.
+   name.~~ Done 2026-10-02 (`471c6ec`, `benchmarks/2026-comparison-cores.yaml`, 15 rows in
+   `results/2026/2026-comparison/cores/`). Nothing moved beyond pass spread at n=3. OpenBGPD's MRT
+   wait is the target's. Rows 1 and 4 of the table below apply. See Progress.
 
 **Reading it:**
 
@@ -485,7 +487,7 @@ this phase.
 
 **Exit:** items 1–3 done, and every row of the table above that applies is recorded.
 
-Progress: started 2026-10-02. Item 1 is `f6d5329`. On this host (m7a.4xlarge, EPYC 9R14), 2278
+Progress: started 2026-10-02, done 2026-10-02. Item 1 is `f6d5329`. On this host (m7a.4xlarge, EPYC 9R14), 2278
 tests passed. Two `bird -n1 -p1` smoke runs then published seven intervals for each of target,
 monitor and testers. The pinned run (`target=0-3,monitor=4-5,testers=6-7`) showed effective
 cpusets equal to the requested ones. The unpinned run showed `0-15` and `pinned: false`. Items 2 and
@@ -562,6 +564,64 @@ in 2026 and about none in 2025, and the `2026-02` build (`0cc685c`) is 696 commi
   (`bgperf2-97u`).
 
 None of them changes item 3, which runs the same image as item 2 and Phase 3.
+
+Item 3 ran 2026-10-02, 20:28–21:07 UTC, after the operator confirmed it. Log:
+`/data/bgperf-work/logs/2026-comparison-cores-20261002T202834.*`. All 15 rows converged with item 2's
+`received` (5,000,000 synthetic; MRT BIRD and OpenBGPD 1,056,779, RustyBGP 1,081,180). No row
+failed. `refused_messages` and `kept_messages` were 0 throughout, no `role_cpu` interval went unread,
+and `max foreign cpu %` peaked at 10. Every verdict matches item 2's row for the same cell. Two
+target-state samples failed with `GoBGPNeighborReadError`, one each in variant (c) passes 2 and 3,
+and both runs converged. `elapsed (s)` per pass, item 2 → variant:
+
+| variant | cell | item 2 | variant | medians |
+|---|---|---|---|---|
+| a. monitor 2→8 cores | OpenBGPD 9.3 MRT | 77, 77, 77 | 75, 77, 76 | 77 / 76 |
+| a. | BIRD 2.19.2 MRT | 31, 39, 29 | 28, 32, 34 | 31 / 32 |
+| b. testers 6→16 cores | RustyBGP master synthetic | 164, 161, 147 | 148, 156, 163 | 161 / 156 |
+| b. | RustyBGP master MRT | 24, 24, 24 | 24, 24, 23 | 24 / 24 |
+| c. target 8→12 cores | RustyBGP master synthetic | 164, 161, 147 | 144, 152, 150 | 161 / 150 |
+
+Per-role CPU is item 1's `role_cpu` series. Here a percentage is of one core. The OpenBGPD tail
+window is `[convergence_s − post_injection_tail_s, convergence_s]`. It starts at the fleet's
+`complete_s` and ends at the check-point, in the same clock as the findings: both are monotonic
+from `bench_clock_started`. That was reproduced independently in pass 1, 72.742 − 5.930 = 66.81 s.
+
+- **OpenBGPD 9.3's MRT wait is the target's.** The post-injection tail was 66.8, 69.3 and 68.0 s
+  under (a), against 68.8, 69.6 and 69.3 s in item 2. The ranges overlap, so it did not shorten. It
+  sits back on Phase 3's values (66.8–68.0 s), so item 2's +2 s offset is mostly absent here; that is
+  stated, not explained.
+  - During the tail the monitor averaged 12–13% in every row of both runs, with 2 cores or 8. It
+    peaked at 43–56%, and no 1 s interval passed 90%. The sink reads each session on one goroutine
+    (`sink/session.go:459`), so a monitor pegged on one core would show about 100% in some interval.
+    None did.
+  - The target averaged 136–139%, never fell below 100% in any interval of the tail, and peaked at
+    198–199% of its 800% cap. So the wait is inside OpenBGPD. It is not a shortage of its cores. It
+    fits one serialised component inside bgpd, but per-process CPU was not measured.
+- **No role's cores move RustyBGP master beyond pass spread.**
+  - **(b) MRT:** the time is unchanged. The generators' 600% in item 2 and 890–907% here is a burst
+    in the first 3 s. After that they sit at 1–70% while the fleet is still offering, so the
+    `tester` verdict is back-pressure from the target, not generator CPU (`docs/invariants/findings.md`).
+    The target peaked at 780–797% of 8 cores in both runs. Pass 1 reached the check-point at 11.1 s,
+    against 18.2–18.8 s in every other MRT pass of this cell. `elapsed (s)` does not show it (24). It
+    is recorded, not explained.
+  - **(b) synthetic:** the time is unchanged. Hold-timer-expired sessions were 2, 9 and 9, against
+    10, 5 and 5.
+  - **(c):** a possible ~6% reduction (median 150 against 161 s) that three passes cannot separate
+    from noise. The target hit its 1,200% cap. Hold-timer sessions were 3, 4 and 5.
+- **RustyBGP's pinned/unpinned gap is still unexplained.** Phase 3's unpinned passes 2 and 3 had no
+  hold-timer expiry and finished in 93 and 88 s. All nine pinned passes on this host (item 2, (b) and
+  (c)) had 2–10 expiries and took 144–164 s. The expiries follow the time, not any one role's cores.
+  Twelve pinned target cores are still not the unpinned headroom, which peaked at 1,239%.
+
+**Reading, by §6's table.** Row 1 applies: OpenBGPD's wait is unchanged under (a), and the monitor
+stays far under its cores during it. The wait is published as the target's. A `findings.py` rule that
+reads `role_cpu` to attribute a `post_injection_tail` is proposed with this as its evidence, and
+adopting it is a separate operator decision. Row 4 applies in the form n=3 supports: nothing moves
+beyond pass spread, so Phase 3's rows are published, with item 2's offset stated. Rows 2 and 3 do not
+apply. The reading was checked adversarially before it was recorded. The check narrowed (a) to
+"within spread" and (c) to "cannot separate", and showed the generators' burst.
+
+**Phase 4 done 2026-10-02**: items 1–3 done, and rows 1 and 4 are recorded.
 
 ---
 

@@ -22,13 +22,20 @@ class RustyBGP(Container):
     # `home` needs 1.88, and on 1.97 tokio-stream fails to compile. It is
     # deliberately not listed: a recipe that cannot build is worse than none.
     DEFAULT_REF = 'master'
-    VERSIONS = ('2026-02',)
+    VERSIONS = ('2026-02', '2026-08')
     VERSION_REFS = {
         # The project was dormant from 2023-07 until 2026-01, then rewritten
         # hard (103/39/67/466 commits in Mar/Apr/May/Jun 2026). 2026-02 is the
         # last commit before that wave, so it is the "old but current-ish"
         # comparison point.
         '2026-02': '0cc685c',
+        # What every comparison row labelled "rustybgp default" or "RustyBGP
+        # master" actually ran: bgperf/rustybgp:latest reports
+        # v0.2.0-9eeeebbd50, because `prepare -f` reused a cached master
+        # checkout from 2026-08-21. Written at the length the daemon prints.
+        # Building it again resolves dependencies fresh (no Cargo.lock), so a
+        # new build is the same source, not necessarily the same binary.
+        '2026-08': '9eeeebbd50',
     }
 
     BUILD_VARS = {

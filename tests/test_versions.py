@@ -55,6 +55,7 @@ class TestResolveRef:
 
     @pytest.mark.parametrize('version,ref', [
         ('2026-02', '0cc685c'),   # date labels map onto the commit they name
+        ('2026-08', '9eeeebbd50'),
         ('master', 'master'),     # raw refs still pass through
         ('16cc827', '16cc827'),
     ])
@@ -80,6 +81,14 @@ class TestResolveRef:
         assert (RustyBGP.build_vars(spelling)['gobgp_version']
                 == RustyBGP.build_vars('2026-02')['gobgp_version'])
 
+    @pytest.mark.parametrize('spelling', ['2026-08', '9eeeebbd50'])
+    def test_rustybgp_2026_08_keeps_the_default_recipe(self, spelling):
+        '''9eeeebbd50 was built by the default recipe (master on 2026-08-21),
+        which serves the v4.7 API the default CLI speaks.
+        '''
+        assert (RustyBGP.build_vars(spelling)['gobgp_version']
+                == RustyBGP.BUILD_VARS['gobgp_version'])
+
     @pytest.mark.parametrize('spelling', ['master', '0', '16cc827', ''])
     def test_rustybgp_other_refs_keep_the_default_recipe(self, spelling):
         '''A too-short or unrelated ref must not claim the pinned commit.'''
@@ -91,7 +100,7 @@ class TestResolveRef:
         startup with "GLIBC_2.xx not found" -- a bench that will not come up
         rather than a build error.
         '''
-        for v in (None, '2026-02'):
+        for v in (None, '2026-02', '2026-08'):
             build = RustyBGP.build_vars(v)
             assert build['base_image'].endswith('-bookworm')
             assert build['runtime_image'] == 'debian:bookworm'

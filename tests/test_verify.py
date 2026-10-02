@@ -26,6 +26,7 @@ class TestVersionMatches:
         # ...and where it does not, the resolved ref does. RustyBGP files
         # builds under a date label but reports the commit.
         ('rustybgpd v0.2.0-0cc685c882', '2026-02', '0cc685c'),
+        ('rustybgpd v0.2.0-9eeeebbd50', '2026-08', '9eeeebbd50'),
     ])
     def test_a_matching_build_is_accepted(self, reported, version, ref):
         assert bgperf2.version_matches(reported, version, ref) is True

@@ -623,6 +623,29 @@ apply. The reading was checked adversarially before it was recorded. The check n
 
 **Phase 4 done 2026-10-02**: items 1–3 done, and rows 1 and 4 are recorded.
 
+**Operator decisions 2026-10-02, after Phase 4:**
+
+1. **The `findings.py` rule: adopt it only once it is tested on runs it was not fitted to.** The six
+   OpenBGPD rows are the evidence that proposed it. They are not enough to adopt it, by
+   `docs/invariants/findings.md`. Until then, OpenBGPD 9.3's MRT wait is published as the target's,
+   by hand, with item 3's evidence beside it, and the verdict field keeps saying `target_or_monitor`.
+   The test runs are not yet designed. They need another daemon with a post-injection tail, and a
+   monitor throttled on purpose, so that the rule is shown to name `monitor` when it should.
+2. **RustyBGP master's synthetic time is published as bimodal.** It is about 90 s in a pass where no
+   generator session times out, and 144–168 s in a pass where some do. The timeouts are published as
+   a behaviour difference (§8 entry 7). This concerns master only: 2026-02 ran 73–76 s pinned with
+   no expiries. Two consequences:
+   - "Master" is a moving tree. A published master result has to be re-run against current upstream
+     head, to check it still holds. `bgperf2-97u` (build head, uncached, as its own tag) is
+     therefore required work, no longer optional.
+   - The operator has reported RustyBGP performance problems upstream before, and they were fixed.
+     The bimodal result and its timeouts are a candidate report once head confirms them.
+3. **What to publish, and where, is open.** The operator is not sure the comparison has been tested
+   widely enough to show how the daemons differ. Earlier work separated them with workloads that
+   needed more memory and more bgpdump2 generators, to simulate more peers. That is the
+   capacity-cliff work §7 puts outside this plan. Content and venue are deferred. No phase is added
+   until the operator decides whether the comparison needs that wider coverage first.
+
 ---
 
 ## 7. Not part of this plan: more memory
@@ -693,6 +716,14 @@ named check would confirm it.
    of Phase 3 item 2. Effect: FRR's MRT `elapsed (s)` is bimodal (67–70 or 94–97 s) and its
    median measures the tail. Not explained; `bgperf2-5du`.
 
+7. **RustyBGP master lets some generator sessions' hold timers expire on the synthetic workload**
+   (`Hold timer expired` in the BIRD tester logs, `tester-health.json`). It happened on 1–10 of 50
+   sessions in every pinned pass on both hosts: Phase 3 items 1 and 2, and Phase 4 items 2 and 3. It
+   also happened in 1 of 3 unpinned passes. Every affected pass took 144–168 s, and the two unpinned
+   passes without it took 88 and 93 s. Every run still converged with the full table. RustyBGP
+   2026-02, BIRD, FRR and OpenBGPD show none. Effect: master's synthetic time is bimodal. Whether the
+   expiries slow the run, or a slow run causes them, is not determined, and no one role's cores move it
+   (§6 item 3). Measured at `9eeeebbd50`, not current head (`bgperf2-97u`).
 ---
 
 ## Tracking

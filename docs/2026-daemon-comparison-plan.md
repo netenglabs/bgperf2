@@ -674,8 +674,12 @@ named check would confirm it.
 1. **NO_EXPORT on eBGP export.** BIRD, OpenBGPD and FRR withhold NO_EXPORT routes from eBGP
    neighbours, as RFC 1997 requires. **RustyBGP does not, and does not honour NO_ADVERTISE
    either.** This is confirmed from source on 2026-10-01 (`bgperf2-9su`), at master
-   `783d6df` and at `0cc685c` (the 2026-02 build). On master, the export decision
-   (`process_nlri_change`, `daemon/src/event/export.rs:609`) checks only:
+   `783d6df` and at `0cc685c` (the 2026-02 build). It was re-read on 2026-10-02 at
+   `9eeeebbd50`, the build every "RustyBGP master" row ran (`2026-08`, `bgperf2-kpf`): there the
+   export decision is `process_nlri_change`, `daemon/src/event/export.rs:608`. It makes the same
+   checks, and its only community handling adds LLGR_STALE. Between `9eeeebbd50` and `783d6df`,
+   `export.rs` changes only by passing a next hop into `AdjOutSink::reach`. On master, the export
+   decision (`process_nlri_change`, `daemon/src/event/export.rs:609`) checks only:
    - echo back to the sending peer;
    - iBGP split horizon;
    - route-server isolation;
@@ -728,7 +732,7 @@ named check would confirm it.
 
 ## 9. Phase 5 — keep measuring on the m7a.8xlarge
 
-**Tracked by:** `bgperf2-0y5.6` · **Status:** not started
+**Tracked by:** `bgperf2-0y5.6` · **Status:** in progress
 
 **Decided by the operator on 2026-10-02**, after Phase 4: keep measuring, and turn the results into
 as many articles as are useful afterwards. What Phases 0–4 hold already supports one article: how
@@ -751,10 +755,10 @@ finds.
 
 Items, in order:
 
-1. **RustyBGP labels and the NO_EXPORT re-check (code, any host).** Label `9eeeebbd50` as `2026-08`
+1. ~~**RustyBGP labels and the NO_EXPORT re-check (code, any host).** Label `9eeeebbd50` as `2026-08`
    in `RustyBGP.VERSION_REFS` (`bgperf2-c5d`). Re-read §8 entry 1's export path at `9eeeebbd50`
    (`bgperf2-kpf`). **Exit:** tests green; `dockerfile rustybgp --version 2026-08` renders that
-   commit; §8 entry 1 cites the built commit.
+   commit; §8 entry 1 cites the built commit.~~ Done 2026-10-02, `e5e39a7`. See Progress.
 2. **RustyBGP head against 2026-08 (`bgperf2-97u`).** Build current upstream head without cache, as
    its own dated tag, and `verify` it. Then run head and 2026-08, five passes each:
    - synthetic 50 × 100k, pinned with Phase 3's `target=0-7,monitor=8-9,testers=10-15` and unpinned;
@@ -781,7 +785,18 @@ Items, in order:
 **Exit:** items 1–4 done. Each build's curve is recorded with `elapsed (s)`, `received` and peak
 memory per step, and the operator has decided the axis past 17.
 
-Progress: not started.
+Progress: started 2026-10-02 on the `m7a.8xlarge` (`lscpu`: AMD EPYC 9R14, 32 CPUs, one thread per
+core).
+
+Item 1 is `e5e39a7`. `2026-08` resolves to `9eeeebbd50`, is in `RustyBGP.VERSIONS`, and keeps the
+default recipe (gobgp CLI 4.7.0). `dockerfile rustybgp --version 2026-08` renders
+`git checkout 9eeeebbd50`, and 2282 tests pass. Its rows are published as `2026-08`, never "master".
+§8 entry 1 holds at the built commit; the read is in the entry. Two things item 2 has to settle,
+both from the same cause: RustyBGP ships no `Cargo.lock`. First, a fresh `prepare -t rustybgp
+--versions 2026-08` builds the same source but not necessarily the same binary as the benched
+`bgperf/rustybgp:latest`. To bench that binary, retag `latest` as `2026-08` instead. Second, a
+retagged `latest` carries the master recipe's hash (`c1978d2e5088`), so `doctor` may report the
+`2026-08` tag `stale` even though its binary is the benched one.
 
 ---
 

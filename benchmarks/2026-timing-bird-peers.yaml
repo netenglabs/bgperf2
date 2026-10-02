@@ -68,6 +68,7 @@
 tests:
   -
      name: 2026-timing-bird-peers
+     monitor: gobgp   # what this ran under; the default is the sink since measurement plan 7d
      neighbors: [50, 250, 500]
      prefixes: [2_000]
      filter_test: [None]

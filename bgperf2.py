@@ -144,15 +144,17 @@ MONITOR_CLASSES = {
 }
 
 # Which of them a run measures with (`--monitor`; batch: `monitor:`, a *test*
-# key). A run dimension until measurement plan 7c's bridge block is accepted,
-# because that block measures the same cells with both instruments.
+# key). The sink is the default since measurement plan 7d. GoBGP stays
+# selectable as the reference a sink result can be re-checked against, one cell
+# at a time -- the bridge block that would have compared the two up front (7c)
+# was dropped by the operator in favour of re-benching.
 MONITOR_TYPES = tuple(MONITOR_CLASSES)
-DEFAULT_MONITOR = 'gobgp'
+DEFAULT_MONITOR = 'sink'
 # The instrument every row before Phase 7 was measured with. A run on it is
 # named and identified exactly as before the flag existed, so every existing
 # stem and cell id resumes. Deliberately a constant of its own, not
-# DEFAULT_MONITOR: 7d flips the default, and if the omission followed it, a
-# sink cell would take the old unmarked name and every GoBGP cell measured
+# DEFAULT_MONITOR: the default is now the sink, and if the omission followed it,
+# a sink cell would take the old unmarked name and every GoBGP cell measured
 # before the flip would be renamed to something no artifact on disk carries.
 UNMARKED_MONITOR = 'gobgp'
 
@@ -167,6 +169,29 @@ RECEIVER_CLASSES = {
 def run_monitor(args):
     '''The monitor a run measures with, from `--monitor` or its default.'''
     return getattr(args, 'monitor', None) or DEFAULT_MONITOR
+
+
+def batch_test_monitor(test):
+    '''The monitor a batch test measures with: its `monitor:`, or the default.
+
+    The one reading of a test, for `expand_batch_cells()` and
+    `check_batch_monitor_images()` both, so the image checked is the image
+    run. (A cell or a parsed cell id is read with `cell_monitor()`, which is a
+    different question: there an absent key is the unmarked instrument.)
+    '''
+    return test.get('monitor') or DEFAULT_MONITOR
+
+
+def cell_monitor(cell):
+    '''The monitor a batch cell, or a parsed cell id, was measured with.
+
+    A cell id omits `monitor` on UNMARKED_MONITOR, so an absent key is that
+    instrument and never DEFAULT_MONITOR. Now that the default is the sink,
+    reading it as the default would describe every GoBGP cell measured before
+    7d -- in `timing_variance_review.py`, which reads parsed ids -- as a sink
+    cell.
+    '''
+    return cell.get('monitor') or UNMARKED_MONITOR
 
 TARGET_CLASSES = {
     'bird': BIRDTarget,
@@ -280,9 +305,11 @@ def bench_output_prefix(args):
     pin = getattr(args, 'pin', None)
     if pin:
         parts.append(pin_stem(pin))
-    # And the instrument: the bridge block (measurement plan 7c) measures one
-    # cell with each monitor, which is the same workload everywhere else in
-    # this stem, so without it the second would replace the first's artifacts.
+    # And the instrument: one cell measured with each monitor -- a sink result
+    # re-checked under GoBGP -- is the same workload everywhere else in this
+    # stem, so without it the second would replace the first's artifacts.
+    # Marked away from UNMARKED_MONITOR, so the default (the sink) is the
+    # marked one and every GoBGP artifact keeps its pre-Phase-7 name.
     monitor = run_monitor(args)
     if monitor != UNMARKED_MONITOR:
         parts.append('mon-{0}'.format(monitor))
@@ -862,7 +889,7 @@ def scenario_receivers(conf):
     return receivers
 
 
-def describe_export_fanout_cost(receivers, monitor=DEFAULT_MONITOR):
+def describe_export_fanout_cost(receivers, monitor):
     """What the fan-out costs the host, said out loud before the run.
 
     Under the GoBGP monitor each receiver is a full GoBGP holding its own copy
@@ -4113,9 +4140,9 @@ def write_event_artifact(args, events, prefix, status, testers=None,
                       getattr(args, 'receivers', None) or DEFAULT_RECEIVERS),
         # Both blocks, for the reason `receivers` is in both.
         'pin': pin_cpusets(getattr(args, 'pin', None)) or None,
-        # Both blocks, for the same reason: `findings.py` and the bridge
-        # block's review read this document, and the stem is the only other
-        # carrier.
+        # Both blocks, for the same reason: `findings.py` and
+        # `monitor_pair_review.py` read this document, and the stem is the
+        # only other carrier.
         'monitor': run_monitor(args),
         # Both `run` blocks carry it, for the reason recorded for
         # `path_diversity` and `repetition`: this document is what
@@ -6086,9 +6113,9 @@ def expand_batch_cells(test, targets):
     pin = test.get('pin')
     pin = format_pin(parse_pin(pin)) if pin else None
     # And the instrument: a cell measured with the sink and the same cell
-    # measured with GoBGP are what the bridge block compares, so they are
-    # different cells, and an edited monitor is a different run.
-    monitor = test.get('monitor') or DEFAULT_MONITOR
+    # re-checked under GoBGP are different cells, and an edited monitor is a
+    # different run.
+    monitor = batch_test_monitor(test)
     cells = []
     for repetition in range(1, repetitions + 1):
         ordinal = 0
@@ -6367,7 +6394,7 @@ def check_batch_monitor_images(tests):
     '''
     wanted = set()
     for test in tests:
-        monitor = test.get('monitor') or DEFAULT_MONITOR
+        monitor = batch_test_monitor(test)
         wanted.add(MONITOR_CLASSES[monitor])
         # A `file:` target's scenario may state receivers of its own, so any
         # such target counts as having them; asking for an image a run turns
@@ -6424,6 +6451,11 @@ def batch(args):
         check_batch_run_names(test, targets)
         order, seed = batch_order(test)
         expanded.append((test, targets, expand_batch_cells(test, targets), order, seed))
+    # Reads only local files, so before anything that asks Docker: its remedy
+    # can make an image check moot.
+    if getattr(args, 'resume', False):
+        check_resume_across_monitor_flip(
+            [test for test, _, _, _, _ in expanded], args.results_dir)
     # One entry per target, not per cell: a repeated matrix asks about the same
     # images every pass, and reporting a missing image once per repetition
     # buries the list this exists to print.
@@ -6550,7 +6582,11 @@ def batch(args):
             a.policy_reload_blocks = (cell.get('policy_reload_blocks')
                                       or DEFAULT_POLICY_RELOAD_BLOCKS)
             a.pin = cell.get('pin')
-            a.monitor = cell.get('monitor') or DEFAULT_MONITOR
+            # Read directly: `expand_batch_cells()` always sets it, from the
+            # same reading of the test that `check_batch_monitor_images()`
+            # checked the image for. A fallback here would be a second reading
+            # of an absent key that could disagree with that check.
+            a.monitor = cell['monitor']
             a.filter_test = cell['filter'] if cell['filter'] != 'None' else None
             # None for a single-pass test, so its rows, graphs and event
             # artifacts keep the names they have always had; set for every pass
@@ -6672,7 +6708,7 @@ def batch_cell_id(test_name, cell):
     # Omitted on the instrument every existing id was measured with, on the
     # rule above, so every existing id resumes; see UNMARKED_MONITOR for why
     # that is not "omitted at the default".
-    monitor = cell.get('monitor') or DEFAULT_MONITOR
+    monitor = cell_monitor(cell)
     if monitor != UNMARKED_MONITOR:
         identity['monitor'] = monitor
     return json.dumps(identity, sort_keys=True, separators=(',', ':'), default=str)
@@ -6706,7 +6742,7 @@ def batch_cell_description(cell, repetitions=1):
             described, reload_blocks)
     if cell.get('pin'):
         described = '{0}, pin={1}'.format(described, cell['pin'])
-    monitor = cell.get('monitor') or DEFAULT_MONITOR
+    monitor = cell_monitor(cell)
     if monitor != UNMARKED_MONITOR:
         described = '{0}, monitor={1}'.format(described, monitor)
     if repetitions > 1:
@@ -6719,6 +6755,43 @@ def batch_cell_description(cell, repetitions=1):
 # so a file written by an older build still resumes rather than costing the
 # operator every completed cell.
 BATCH_PROGRESS_SCHEMA_VERSION = 1
+
+
+def check_resume_across_monitor_flip(tests, results_dir):
+    """Refuse to `--resume` a test into rows another instrument measured.
+
+    A cell id names its instrument, so rows measured under one monitor match
+    nothing once the test runs under another: every cell re-runs, and each
+    checkpoint carries the old rows forward beside the new ones in one
+    progress file, which `timing_variance_review.py` would read as one pass.
+    It happens two ways -- a test with no `monitor:` that ran GoBGP before
+    measurement plan 7d made the sink the default, and a `monitor:` edited
+    between runs -- and both are refused here, before any container, with both
+    ways out named.
+    """
+    for test in tests:
+        wanted = batch_test_monitor(test)
+        path = results_path(results_dir, f"{test['name']}.progress.json")
+        try:
+            completed = load_batch_progress_document(path)['cells']
+        except (OSError, ValueError):
+            # `batch()` reports an unreadable file itself, at the same read.
+            continue
+        measured = {}
+        for cell_id in completed:
+            try:
+                monitor = cell_monitor(json.loads(cell_id))
+            except (ValueError, AttributeError):
+                continue
+            if monitor != wanted:
+                measured[monitor] = measured.get(monitor, 0) + 1
+        if measured:
+            other = ', '.join('{0} cell(s) under {1}'.format(n, m)
+                              for m, n in sorted(measured.items()))
+            sys.exit("test '{0}': {1} holds {2}, and this test runs under {3}. "
+                     'Set `monitor:` to what those rows ran under to resume '
+                     'them, or rerun without --resume to measure the test '
+                     'again under {3}'.format(test['name'], path, other, wanted))
 
 
 def load_batch_progress_document(path):

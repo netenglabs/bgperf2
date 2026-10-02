@@ -2,6 +2,7 @@
 tests:
   -
      name: 2026-smoke
+     monitor: gobgp   # what this ran under; the default is the sink since measurement plan 7d
      neighbors: [10]
      prefixes: [100]
      filter_test: [None]

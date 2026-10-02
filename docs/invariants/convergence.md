@@ -30,8 +30,10 @@ turns each into a sample count at the cadence the monitor is **asked** for, roun
 poll every count is the one this document names: 20, 5, 600, 10, 5 and 600, and the `*_SAMPLES`
 names remain as exactly that. It counts samples rather than measuring elapsed time on purpose. The
 GoBGP poll overruns its cadence under load, and a window of real seconds would converge such a run
-in fewer samples than before, changing the old instrument's decisions inside the bridge block that
-measures the difference between the two. Anything else that turns a window into time has to go
+in fewer samples than before, changing the old instrument's decisions. GoBGP stays selectable as
+the reference a surprising sink result is re-checked against, so its decisions must be the ones it
+always made. (This first said the bridge block needed it; 7c was dropped on 2026-10-01, and the
+reference re-check is what is left of that need.) Anything else that turns a window into time has to go
 through the cadence too. `bench()`'s subtraction of the assurance window from `elapsed (s)` did
 not, and it would have subtracted 200 s from a 0.1 s-cadence run.
 

@@ -18,6 +18,7 @@
 tests:
   -
      name: 2026-timing-smoke-mrt
+     monitor: gobgp   # what this ran under; the default is the sink since measurement plan 7d
      neighbors: [2]
      prefixes: [10_000]
      filter_test: [None]

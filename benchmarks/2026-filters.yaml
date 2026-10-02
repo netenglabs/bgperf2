@@ -4,6 +4,7 @@
 tests:
   -
      name: 2026-filters-mrt
+     monitor: gobgp   # what this ran under; the default is the sink since measurement plan 7d
      neighbors: [10]
      prefixes: [1_050_000]
      filter_test: [None, transit, ixp]
@@ -48,6 +49,7 @@ tests:
          mrt_file: mrt/rib.20260808.0000
   -
      name: 2026-filters-synth
+     monitor: gobgp   # what this ran under; the default is the sink since measurement plan 7d
      neighbors: [50]
      prefixes: [100_000]
      filter_test: [None, transit, ixp]

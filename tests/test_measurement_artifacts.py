@@ -27,6 +27,7 @@ def test_failed_finalization_persists_events_before_later_collection(
         tmp_path, monkeypatch):
     '''A failed fake run leaves evidence even if later collection also fails.'''
     args = Namespace(
+        monitor='gobgp',
         target='frr_c',
         label=None,
         neighbor_num=10,
@@ -99,7 +100,7 @@ def test_a_sample_from_an_unpolled_producer_is_ignored():
 
 
 def test_tester_evidence_reaches_the_artifact(tmp_path, monkeypatch):
-    args = Namespace(target='bird', label=None, neighbor_num=1,
+    args = Namespace(monitor='gobgp', target='bird', label=None, neighbor_num=1,
                      prefix_num=100, tester_type='bird',
                      results_dir=str(tmp_path))
     monitor = MonitorEventRecorder(100.0, producer='bgperf_monitor')
@@ -142,7 +143,7 @@ def test_tester_evidence_reaches_the_artifact(tmp_path, monkeypatch):
 
 
 def test_a_failed_observation_is_named_in_the_artifact(tmp_path, monkeypatch):
-    args = Namespace(target='bird', label=None, neighbor_num=1,
+    args = Namespace(monitor='gobgp', target='bird', label=None, neighbor_num=1,
                      prefix_num=100, tester_type='bird',
                      results_dir=str(tmp_path))
     monitor = MonitorEventRecorder(100.0, producer='bgperf_monitor')
@@ -170,7 +171,7 @@ def test_a_failed_observation_is_named_in_the_artifact(tmp_path, monkeypatch):
 
 def test_a_run_with_no_polled_generator_reports_no_tester_section(tmp_path,
                                                                   monkeypatch):
-    args = Namespace(target='bird', label=None, neighbor_num=1,
+    args = Namespace(monitor='gobgp', target='bird', label=None, neighbor_num=1,
                      prefix_num=100, tester_type='exabgp',
                      results_dir=str(tmp_path))
     monitor = MonitorEventRecorder(100.0, producer='bgperf_monitor')
@@ -324,7 +325,7 @@ class TestBenchOutputPrefix:
 
     def args(self, **overrides):
         args = Namespace(
-            target='bird', label=None, version=None, repetition=None,
+            monitor='gobgp', target='bird', label=None, version=None, repetition=None,
             tester_type='bgpdump2', prefix_num=1050000, neighbor_num=10,
             filter_test=None)
         for k, v in overrides.items():

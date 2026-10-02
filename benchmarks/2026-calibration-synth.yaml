@@ -26,6 +26,7 @@
 tests:
   -
      name: 2026-calibration-synth
+     monitor: gobgp   # what this ran under; the default is the sink since measurement plan 7d
      neighbors: [10]
      prefixes: [100_000]
      filter_test: [None]

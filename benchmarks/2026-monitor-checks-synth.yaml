@@ -3,8 +3,8 @@
 # sink. Read with `scripts/monitor_pair_review.py <results-dir>`.
 #
 # This compares the instruments' counts and sessions, not their timing: one
-# pass of each says nothing about which is faster (that is 7c, the bridge
-# block, over repetitions). 10 x 50,000 is the core synthetic matrix's smallest
+# pass of each says nothing about which is faster (a question for repetitions;
+# the bridge block, 7c, that was to ask it was dropped on 2026-10-01). 10 x 50,000 is the core synthetic matrix's smallest
 # cell, large enough that the target sends many UPDATEs per session and small
 # enough to run on the development host.
 #
@@ -13,6 +13,7 @@
 tests:
   -
      name: 2026-monitor-checks-synth-gobgp
+     monitor: gobgp
      neighbors: [10]
      prefixes: [50_000]
      filter_test: [None]

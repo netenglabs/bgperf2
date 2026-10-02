@@ -271,8 +271,9 @@ plan Phase 7). Item 6 answered by the operator 2026-10-01 (keep the NO_EXPORT pe
 **Tracked by:** `bgperf2-0y5.4` · **Status:** not started
 
 **Requires measurement plan Phase 7 through 7b** (`bgperf2-8gg.10.2`). Phase 3 runs on the sink
-monitor at its finer resolution, passed explicitly as `--monitor sink` if 7d has not yet flipped
-the default.
+monitor at its finer resolution. The sink has been the default since 7d (2026-10-02). Write this
+phase's configs fresh, stating `monitor: sink`; do not copy one of the 2026 configs, which all
+state `monitor: gobgp` because that is what they ran under.
 
 **Host:** one `m7a.4xlarge`, the same class as the timing-validation campaign, **provisioned for
 this phase**: the development host is not that class (see the hardware paragraph above). The

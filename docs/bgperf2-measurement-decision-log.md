@@ -5111,3 +5111,106 @@ again, and the daemon comparison's Phase 3 re-benches the cells that matter anyw
 
 The daemon comparison plan's Phase 3 is amended to match. It no longer carries the bridge, and its
 rows stand on their own rather than being comparable with the 64 GB campaign through it.
+
+### Progress on 2026-10-02: the sink is the default monitor (7d); Phase 7 is complete
+
+`DEFAULT_MONITOR` is `sink`. `UNMARKED_MONITOR` stays `gobgp`, as 7a set it up for this day, so
+every GoBGP stem and cell id is byte-identical to the ones on disk. A default run is now the
+marked one: `bench -t bird -n1 -p1` writes `bird_bird_1_1_mon-sink.*`. GoBGP stays selectable as
+the reference a surprising sink result can be re-checked against.
+
+**What else had to move with the default:**
+
+- **Every 2026 config states its monitor.** Thirty-three configs under `benchmarks/` ran under
+  GoBGP and said nothing, because GoBGP was the default. After the flip, re-reading one
+  describes its cells as sink cells. `check_repetition_configs.py` showed this first, naming the
+  archived timing-validation blocks' cells `monitor=sink`. Thirty of them gained
+  `monitor: gobgp`, each checked by parsing to differ from its old self by that key alone.
+  Review then found the other three: the GoBGP half of each 7a monitor-pair config had silently
+  become a second sink run, so each pair compared the sink with itself and both halves wrote one
+  stem. `test_static.py` now fails on any 2026 config test that does not state a monitor. The
+  older example configs (`bench.yaml`, `frr.yaml`, …) are for future use and take the new
+  default. Resumed against old results, their cell ids differ, so they re-run rather than reuse
+  GoBGP rows.
+- **An absent monitor in a cell id is GoBGP** (`cell_monitor()`), in the id, the description and
+  the monitor `batch()` runs a cell under. `batch_cell_description()` had read it as the
+  default since 7a, which was harmless while the default was GoBGP. After the flip,
+  `timing_variance_review.py`, which reads parsed ids back from progress files, would have
+  described every pre-flip cell as a sink cell. The abandoned monitor-axis change set's second
+  review round found this, and it is fixed here because this is the change that triggers it.
+- **`describe_export_fanout_cost()` takes the monitor as a required argument.** A default bound
+  at import time would describe sink receivers to any caller that left it out.
+- **Tests that are about another dimension now state `monitor='gobgp'`.** Twenty-nine tests
+  failed on the flip. The stem and id tests of churn, fan-out, diversity, reload, pin and the
+  artifact writers built run arguments with no monitor and asserted GoBGP-era stems; they test
+  their own dimension, and the GoBGP stem is still exactly what it was. The seed-order and
+  single-pass id-shape pins are true of a GoBGP test, and say so. The monitor-dimension tests
+  assert the new default. Two new tests cover the flip itself: an old id still reads as GoBGP,
+  and a config with no `monitor:` key cannot resume into GoBGP rows.
+- **Comments and documents** no longer justify anything by the bridge. `convergence.py` keeps
+  counting samples rather than seconds, for a narrower reason: GoBGP is the reference a sink
+  result is re-checked against, so its decisions must be the ones it always made. `CLAUDE.md`'s
+  description of the monitor role now describes the sink.
+
+**Review.** Round 1 found one real defect, the three monitor-pair configs above, and five
+smaller findings. Every finding but one was acted on. That one, declined, was pinning the older
+example configs to GoBGP: they describe no completed work, and the new default is right for
+them. Round 2 found four more, which stopped the session before the commit:
+
+- the flip was dated 2026-10-01 in `CLAUDE.md` and `workload-controls.md`; it landed on
+  2026-10-02;
+- the daemon comparison plan still told Phase 3 to pass `--monitor sink` "if 7d has not yet
+  flipped the default". It now says to write Phase 3's configs fresh, stating `monitor: sink`,
+  rather than copy a 2026 config that states `gobgp`;
+- the README still called GoBGP the monitor;
+- `batch()` read an absent monitor as GoBGP through `cell_monitor()`, while expansion and the
+  image check read it as the default. It now reads `cell['monitor']`, which expansion always
+  sets, so there is one reading.
+
+Round 2 also noted two things, recorded here and not acted on. First, the campaign runners
+byte-compare a config with the original recorded for its run ID, so a config that gained
+`monitor: gobgp` cannot be resumed under a recorded run ID. Every such campaign is finished, so
+that only matters if one is reopened. Second, the `2026-*` guard checks that a monitor is stated,
+not which one.
+
+Round 3 found three more real defects, and the session stopped again before the commit. All three
+are fixed:
+
+- **`2026-peer-scaling.yaml` never ran.** It was deliberately never registered with the campaign
+  driver, so `monitor: gobgp   # what this ran under` was false there. It is a future workload and
+  states `monitor: sink`. The review also claimed the 2026-baseline suites never ran, because
+  their results are not on this host's disk. That part was wrong: `results/` is git-ignored, and
+  `architecture-and-benchmark-roadmap.md` records the smoke, core synthetic, core MRT and filter
+  suites as completed (146 primary rows), so their pin stands.
+- **Resuming across the flip mixed instruments.** A test with no `monitor:` and GoBGP rows in its
+  progress file re-ran every cell under the sink, and carried the GoBGP rows forward beside the
+  sink rows. `check_resume_across_monitor_flip()` now refuses that before the first cell, and
+  names both ways out: add `monitor: gobgp`, or rerun without `--resume`.
+- **`check_repetition_configs.py` read archived rendered configs as sink.** The copies it reads
+  under `--config-dir` were snapshotted with no `monitor:` key. It only ever checks the
+  timing-validation blocks, all of which ran under GoBGP, so an absent key means GoBGP there.
+
+Also from round 3: `batch_test_monitor()` is now the one reading of a test's monitor, for both
+expansion and the image check. `CLAUDE.md` says a default `bench` needs the `bgperf/sink` image.
+Declined: routing `monitor_pair_review.py`'s `'gobgp'` through `UNMARKED_MONITOR`. That script is
+deliberately standalone, and its literal reads artifacts from before `run.monitor` existed, all
+of which are GoBGP. It is a historical fact, not a default that could move.
+
+Round 4 found the resume guard was narrower than its own docstring. It caught a test with no
+`monitor:`, but not a `monitor:` edited between runs, which mixes the two instruments' rows the
+same way. It now refuses any stored row whose instrument is not the one the test runs, which also
+removed a condition that could never be false. The guard runs before anything asks Docker, since
+its remedy (state the instrument the rows ran under) can make a missing-image refusal moot. And
+`workload-controls.md` had said such a resume re-runs the cells, contradicting the code, which
+refuses it. Two comments in the monitor-pair configs still cited 7c. Declined again, for the
+reasons given above: making `check_repetition_configs.py` read an absent key as the default, and
+pinning the older example configs.
+
+**Verification.** The full suite passed (2261). Docker, on this host (16 vCPU EPYC 9R14): a plain
+`bench -t bird -n1 -p1` with no `--monitor`, in `/data/bgperf-work/7d-smoke`. It converged with
+`run.monitor: sink`, the manifest naming `bgperf/sink:latest` at `src 9c54763a82af`, and
+artifacts named `..._mon-sink`. `monitor_first_prefix` and `monitor_last_change` were
+`dated_by: sink_log` at 0.62 s resolution. `monitor_required_reached` fell back to the poll,
+giving its reason ("the sink log has no line for it"), because a one-prefix table's check-point
+of `int(1 * 0.99)` is reached at zero, before the sink logged anything. Clock offset 2.2 µs, no
+session lost. That is a smoke check of the default, not a timing result.

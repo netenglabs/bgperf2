@@ -88,7 +88,9 @@ pip install -r pip-requirements.txt
 ```
 
 Requires Docker (user must be in the `docker` group), and `sysstat` for `mpstat` — `bench` shells out
-to `mpstat` and `free`, and will crash without them.
+to `mpstat` and `free`, and will crash without them. A default `bench` also needs the `bgperf/sink`
+image, since the sink became the default monitor (measurement plan 7d, 2026-10-02). A host whose
+images were built before that refuses the run until `./bgperf2.py prepare -t sink` builds it.
 
 ```bash
 venv/bin/pip install -r test-requirements.txt
@@ -120,13 +122,20 @@ The venv is tied to a specific interpreter — a distro Python upgrade orphans i
 Every `bench` run creates containers on a dedicated Docker bridge network (`<bench-name>-br`):
 
 - **target** — the daemon under test. One per run.
-- **monitor** — always a GoBGP instance peered with the target. It is the *measurement instrument*:
-  `bench` polls `gobgp neighbor -j` once a second and reads `afi_safis[0].state.accepted` to see how
-  many routes the target has re-advertised. This is what "recved" means in the output.
+- **monitor** — the *measurement instrument*, peered with the target, counting how many prefixes
+  the target has re-advertised to it. This is what "recved" means in the output. **Since
+  2026-10-02 (measurement plan 7d) it is the sink by default** (`sink/`, `bgperf/sink`): a
+  purpose-built counter that writes its own timestamped count to a log in its bind-mounted
+  directory, which the controller reads on the host. `--monitor gobgp` (batch: `monitor: gobgp`)
+  selects the old instrument, a GoBGP that `bench` polls with `gobgp neighbor -j` once a second.
+  It is kept as the reference a surprising sink result can be re-checked against. Every 2026
+  config under `benchmarks/` that ran before the flip states `monitor: gobgp`, because that is
+  what it ran. Those rows are superseded, not bridged (measurement plan Phase 7).
 - **testers** — one or more route generators peered with the target. BIRD (default) or ExaBGP for
   synthetic prefixes; bgpdump2 or ExaBGP-mrtparse for MRT file playback. GoBGP is **only** the
-  monitor (and the export receivers) — it was removed as a target and as an MRT generator on
-  2026-09-29 as too slow, and `GoBGPTarget` survives solely as `RustyBGPTarget`'s config writer.
+  selectable monitor (and its export receivers) — it was removed as a target and as an MRT
+  generator on 2026-09-29 as too slow, and `GoBGPTarget` survives solely as `RustyBGPTarget`'s
+  config writer.
 
 Routes flow tester → target → monitor. Timing is measured at the monitor, so it captures full
 propagation, not just reception.

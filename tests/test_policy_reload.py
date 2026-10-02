@@ -82,7 +82,7 @@ def peers(**overrides):
 
 
 def stem_args(**overrides):
-    args = Namespace(target='bird', label=None, version=None,
+    args = Namespace(monitor='gobgp', target='bird', label=None, version=None,
                      tester_type='bird', prefix_num=100, neighbor_num=10,
                      filter_test=None, path_diversity=1, receivers=0,
                      churn_prefixes=0, churn_bursts=1,

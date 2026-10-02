@@ -213,7 +213,9 @@ class TestProgressSchema:
         would silently re-run hours of finished work.
         '''
         import json
-        test = a_test(neighbors=[1])
+        # GoBGP, the instrument every such file was measured with; a sink cell
+        # names its monitor (`test_monitor_dimension.py`).
+        test = a_test(neighbors=[1], monitor='gobgp')
         cell = bgperf2.expand_batch_cells(test, test['targets'])[0]
         assert json.loads(bgperf2.batch_cell_id('reps', cell)) == {
             'test': 'reps', 'ordinal': 0, 'neighbors': 1, 'prefixes': 10,

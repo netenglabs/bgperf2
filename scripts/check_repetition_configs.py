@@ -48,7 +48,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import yaml  # noqa: E402
 
-from bgperf2 import (BatchLoader, batch_cell_description,  # noqa: E402
+from bgperf2 import (UNMARKED_MONITOR, BatchLoader,  # noqa: E402
+                     batch_cell_description,
                      batch_order, check_batch_run_names, check_batch_test,
                      expand_batch_cells, expand_target_versions)
 
@@ -171,7 +172,16 @@ def read_config(path):
 def cells_of(test):
     '''The cells one config will run, described exactly as the selection
     names them -- `batch_cell_description()` is what produced the strings in
-    the selection document, so the two cannot drift apart.'''
+    the selection document, so the two cannot drift apart.
+
+    An absent `monitor:` is GoBGP here, not the default. This only ever checks
+    the timing-validation campaign's blocks, every one of which ran under
+    GoBGP before the sink became the default (measurement plan 7d), and the
+    rendered copies under `--config-dir` were snapshotted without the key.
+    Read as the default, every archived cell was described as `monitor=sink`
+    and no longer matched its own selection.'''
+    test = dict(test)
+    test.setdefault('monitor', UNMARKED_MONITOR)
     check_batch_test(test)
     targets = expand_target_versions(test['targets'])
     check_batch_run_names(test, targets)

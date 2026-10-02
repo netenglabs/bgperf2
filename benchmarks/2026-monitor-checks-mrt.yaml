@@ -4,13 +4,14 @@
 # `scripts/monitor_pair_review.py <results-dir>`, and sample the monitor's CPU
 # with `scripts/container_cpu_peak.py bgperf_monitor` for check 4.
 #
-# Counts and sessions, not timing (that is 7c). FRR is expected to fail this
+# Counts and sessions, not timing (7c was to ask that, and was dropped). FRR is expected to fail this
 # cell with either instrument -- it exports ~9% less of the table and never
 # reaches the check-point (bgperf2-cw6) -- and the review then asks whether the
 # two instruments failed it on the same count.
 tests:
   -
      name: 2026-monitor-checks-mrt-gobgp
+     monitor: gobgp
      neighbors: [10]
      prefixes: [1_050_000]
      filter_test: [None]

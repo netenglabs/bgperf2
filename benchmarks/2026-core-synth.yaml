@@ -2,6 +2,7 @@
 tests:
   -
      name: 2026-core-synth
+     monitor: gobgp   # what this ran under; the default is the sink since measurement plan 7d
      neighbors: [10, 50]
      prefixes: [50_000, 100_000]
      filter_test: [None]

@@ -418,8 +418,10 @@ target's timing. Comparison plan §4 item 2 and §5's bias check are why it exis
 ## `--monitor gobgp|sink` — which instrument measures the run
 
 `--monitor` (batch: `monitor:`, a *test* key) chooses the monitor class from `MONITOR_CLASSES`.
-It is a run dimension only until measurement plan 7c's bridge block is accepted, because that
-block measures the same cells with both instruments; 7d then flips `DEFAULT_MONITOR`.
+**`DEFAULT_MONITOR` is `sink` since measurement plan 7d (2026-10-02).** GoBGP stays selectable
+as the reference a sink result can be re-checked against, one cell at a time, so the monitor
+stays a run dimension. The bridge block (7c) that would have compared the two up front was
+dropped by the operator in favour of re-benching.
 
 - **Three entry points, not four**, for the reason `--pin` has three: the monitor is a container,
   not part of the scenario, so `config` does not take it. A batch value is checked against
@@ -432,13 +434,31 @@ block measures the same cells with both instruments; 7d then flips `DEFAULT_MONI
 - **Named only away from `UNMARKED_MONITOR`, which is not `DEFAULT_MONITOR`.** The stem gets
   `mon-sink`, and the cell id and description carry `monitor` only for the sink, so every existing
   artifact and cell id is unchanged. The omission is tied to the instrument the old rows were
-  measured on rather than to the default: tied to the default, the 7d flip would hand the
-  unmarked name to the sink and rename every GoBGP cell measured before it.
+  measured on rather than to the default: tied to the default, the 7d flip would have handed the
+  unmarked name to the sink and renamed every GoBGP cell measured before it. So since the flip a
+  default run is the marked one: `bench -t bird -n1 -p1` writes `bird_bird_1_1_mon-sink.*`.
+- **A config that ran before the flip says so.** Every 2026 config under `benchmarks/` states its
+  monitor, and those that ran under GoBGP say `monitor: gobgp` (`test_static.py` enforces it).
+  Without the key, re-reading one after the flip describes its cells as sink cells:
+  `check_repetition_configs.py` reported exactly that for the archived timing-validation blocks,
+  and review found the GoBGP half of all three monitor-pair configs had become a second sink run.
+  With it, their cell ids are byte-identical to the ones recorded, because GoBGP is the unmarked
+  instrument.
+- **`--resume` refuses rows another instrument measured** (`check_resume_across_monitor_flip()`),
+  before anything asks Docker. A cell id names its instrument, so such rows match nothing: every
+  cell would re-run, and each checkpoint would carry the old rows forward beside the new ones in
+  one progress file. It catches both ways in: a config with no `monitor:` key that ran GoBGP
+  before the flip, and a `monitor:` edited between runs. The message names both ways out: state
+  the instrument the rows ran under, or rerun without `--resume`.
+- **An absent monitor in a cell id is `UNMARKED_MONITOR`** (`cell_monitor()`), never the
+  default, and `batch()` runs a cell under the same reading. An id omits the key on GoBGP, and
+  `timing_variance_review.py` reads ids back from progress files; read as the default, every
+  GoBGP cell measured before the flip would be described as a sink cell.
 - **Recorded under `-f` too**, in both `run` blocks and as the manifest's `monitor.daemon`,
   because bgperf2 starts the monitor whatever wrote the scenario. Not a CSV column: the
   `monitor version` column already names the build.
 - **The receivers follow the monitor** (`RECEIVER_CLASSES`): GoBGP under `gobgp`, sinks under
-  `sink`, so one dimension names every instrument in the run and the bridge block compares
+  `sink`, so one dimension names every instrument in the run, and a GoBGP re-check compares
   whole instruments rather than a sink monitor beside GoBGP receivers.
 
 ## `--threads N` — worker threads on the target

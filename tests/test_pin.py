@@ -82,7 +82,7 @@ class TestResolvePin:
 
 class TestArtifactNames:
     def args(self, **kw):
-        a = Namespace(target='bird', label=None, version=None,
+        a = Namespace(monitor='gobgp', target='bird', label=None, version=None,
                       tester_type='bird', prefix_num=100, neighbor_num=10,
                       filter_test=None)
         for k, v in kw.items():

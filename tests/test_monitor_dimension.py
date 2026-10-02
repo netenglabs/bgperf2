@@ -1,10 +1,11 @@
 """`--monitor gobgp|sink`: the instrument as a run dimension (measurement plan
 7a, docs/invariants/workload-controls.md).
 
-The bridge block (7c) measures the same cells with both monitors, so the
+The sink is the default since 7d, and GoBGP stays selectable to re-check a sink
+cell against. One cell measured with each is the same workload, so the
 instrument has to reach everything a dimension reaches -- the entry points, the
-cell id, the artifact stem and both `run` blocks -- or the two passes overwrite
-or resume into each other.
+cell id, the artifact stem and both `run` blocks -- or the two overwrite or
+resume into each other.
 """
 from argparse import Namespace
 
@@ -24,21 +25,16 @@ class TestNames:
         return a
 
     def test_gobgp_keeps_the_name_every_existing_artifact_has(self):
-        stem = bgperf2.bench_output_prefix(self.args())
-        assert bgperf2.bench_output_prefix(self.args(monitor='gobgp')) == stem
-        assert bgperf2.bench_output_prefix(self.args(monitor=None)) == stem
+        assert bgperf2.bench_output_prefix(self.args(monitor='gobgp')) == \
+            'bird_bird_100_10'
 
-    def test_the_sink_is_a_different_stem(self):
-        stem = bgperf2.bench_output_prefix(self.args(monitor='sink'))
-        assert stem == bgperf2.bench_output_prefix(self.args()) + '_mon-sink'
-
-    def test_the_unmarked_name_does_not_follow_the_default(self, monkeypatch):
-        '''7d flips the default. The omission must stay with the instrument
-        the old rows were measured on, or every one of them is renamed.'''
-        monkeypatch.setattr(bgperf2, 'DEFAULT_MONITOR', 'sink')
-        assert bgperf2.bench_output_prefix(self.args()).endswith('_mon-sink')
-        assert not bgperf2.bench_output_prefix(
-            self.args(monitor='gobgp')).endswith('_mon-gobgp')
+    def test_the_default_is_the_sink_and_is_marked(self):
+        '''7d. The omission stays with the instrument the old rows were
+        measured on, not with the default, or every one of them is renamed.'''
+        assert bgperf2.DEFAULT_MONITOR == 'sink'
+        assert bgperf2.UNMARKED_MONITOR == 'gobgp'
+        for args in (self.args(), self.args(monitor=None), self.args(monitor='sink')):
+            assert bgperf2.bench_output_prefix(args) == 'bird_bird_100_10_mon-sink'
 
     def test_every_monitor_class_is_selectable(self):
         assert set(bgperf2.MONITOR_TYPES) == set(bgperf2.MONITOR_CLASSES)
@@ -48,8 +44,8 @@ class TestNames:
 class TestCli:
     def test_bench_takes_it_and_config_does_not(self):
         parser = bgperf2.create_args_parser()
-        assert parser.parse_args(['bench']).monitor == 'gobgp'
-        assert parser.parse_args(['bench', '--monitor', 'sink']).monitor == 'sink'
+        assert parser.parse_args(['bench']).monitor == 'sink'
+        assert parser.parse_args(['bench', '--monitor', 'gobgp']).monitor == 'gobgp'
         with pytest.raises(SystemExit):
             parser.parse_args(['bench', '--monitor', 'bird'])
         with pytest.raises(SystemExit):
@@ -129,15 +125,15 @@ class TestBatch:
             bgperf2.check_batch_test(test)
 
     def test_cells_carry_it(self):
-        test = self.test(monitor='sink')
-        assert [c['monitor'] for c in
-                bgperf2.expand_batch_cells(test, test['targets'])] == ['sink']
-        test = self.test()
+        test = self.test(monitor='gobgp')
         assert [c['monitor'] for c in
                 bgperf2.expand_batch_cells(test, test['targets'])] == ['gobgp']
+        test = self.test()
+        assert [c['monitor'] for c in
+                bgperf2.expand_batch_cells(test, test['targets'])] == ['sink']
 
     def test_the_id_and_description_name_only_the_sink(self):
-        test = self.test()
+        test = self.test(monitor='gobgp')
         cell = bgperf2.expand_batch_cells(test, test['targets'])[0]
         old_cell = {k: v for k, v in cell.items() if k != 'monitor'}
         # An id written before the flag existed resumes.
@@ -147,13 +143,35 @@ class TestBatch:
         assert bgperf2.batch_cell_id('t', sink) != bgperf2.batch_cell_id('t', cell)
         assert 'monitor=sink' in bgperf2.batch_cell_description(sink)
 
+    def test_an_old_id_is_still_gobgp_after_the_flip(self):
+        '''A cell id omits `monitor` on GoBGP. Read as the default, every
+        GoBGP cell measured before 7d -- which `timing_variance_review.py`
+        reads back from progress files -- would be described as a sink cell.'''
+        import json
+        test = self.test(monitor='gobgp')
+        old = json.loads(bgperf2.batch_cell_id(
+            't', bgperf2.expand_batch_cells(test, test['targets'])[0]))
+        assert 'monitor' not in old
+        assert bgperf2.cell_monitor(old) == 'gobgp'
+        assert 'monitor' not in bgperf2.batch_cell_description(old)
+
+    def test_a_config_with_no_monitor_does_not_resume_into_gobgp_rows(self):
+        '''A batch with no `monitor:` key ran GoBGP before 7d and runs the
+        sink after it. Its old rows must not be reused under the new
+        instrument, so the ids must differ.'''
+        before = self.test(monitor='gobgp')
+        after = self.test()
+        assert bgperf2.batch_cell_id('t', bgperf2.expand_batch_cells(
+            before, before['targets'])[0]) != bgperf2.batch_cell_id(
+            't', bgperf2.expand_batch_cells(after, after['targets'])[0])
+
     def test_a_missing_monitor_image_ends_the_batch_before_it_starts(self, monkeypatch):
         monkeypatch.setattr(base, 'img_exists', lambda tag, images=None:
                             not tag.startswith('bgperf/sink'))
-        bgperf2.check_batch_monitor_images([self.test()])
+        bgperf2.check_batch_monitor_images([self.test(monitor='gobgp')])
         with pytest.raises(SystemExit, match='bgperf/sink'):
             bgperf2.check_batch_monitor_images(
-                [self.test(), self.test(monitor='sink')])
+                [self.test(monitor='gobgp'), self.test()])
 
     def test_a_missing_receiver_image_ends_the_batch_before_it_starts(self, monkeypatch):
         class OtherReceiver(base.Container):
@@ -187,6 +205,9 @@ class TestRecorded:
         assert doc['monitor']['daemon'] == 'sink'
         assert doc['monitor']['image'].startswith('bgperf/sink')
         doc = bgperf2.collect_provenance(Namespace(target='bird'), Target(), Ctn(), [])
+        assert doc['monitor']['daemon'] == 'sink'
+        doc = bgperf2.collect_provenance(
+            Namespace(target='bird', monitor='gobgp'), Target(), Ctn(), [])
         assert doc['monitor']['daemon'] == 'gobgp'
 
 
@@ -205,3 +226,67 @@ def test_both_run_blocks_record_it_under_f_too(tmp_path, scenario):
         assert json.load(f)['run']['monitor'] == 'sink'
     with open(tmp_path / 'run.events.json') as f:
         assert json.load(f)['run']['monitor'] == 'sink'
+
+
+class TestResumeAcrossTheFlip:
+    '''Rows one instrument measured must not be resumed under another. Found
+    in review twice: a test with no `monitor:` (GoBGP before 7d, the sink
+    after), and then an explicit `monitor:` edited between runs. Each re-ran
+    every cell and carried the old rows forward beside the new ones.'''
+
+    def write(self, tmp_path, test, monitor):
+        cells = bgperf2.expand_batch_cells(dict(test, monitor=monitor),
+                                           test['targets'])
+        bgperf2.write_batch_progress(
+            str(tmp_path / 't.progress.json'),
+            {bgperf2.batch_cell_id('t', c): ['row'] for c in cells},
+            order='matrix', seed=None, previous_seeds=[])
+
+    def a_test(self, **kw):
+        test = {'name': 't', 'neighbors': [10], 'prefixes': [100],
+                'filter_test': [None], 'targets': [{'name': 'bird'}]}
+        test.update(kw)
+        return test
+
+    def test_gobgp_rows_under_a_test_naming_no_monitor_are_refused(self, tmp_path):
+        test = self.a_test()
+        self.write(tmp_path, test, 'gobgp')
+        with pytest.raises(SystemExit, match='1 cell\\(s\\) under gobgp, and this '
+                           'test runs under sink'):
+            bgperf2.check_resume_across_monitor_flip([test], str(tmp_path))
+
+    def test_an_edited_monitor_is_refused_too(self, tmp_path):
+        test = self.a_test()
+        self.write(tmp_path, test, 'gobgp')
+        with pytest.raises(SystemExit, match='under gobgp'):
+            bgperf2.check_resume_across_monitor_flip(
+                [self.a_test(monitor='sink')], str(tmp_path))
+        self.write(tmp_path, test, 'sink')
+        with pytest.raises(SystemExit, match='under sink, and this test runs under gobgp'):
+            bgperf2.check_resume_across_monitor_flip(
+                [self.a_test(monitor='gobgp')], str(tmp_path))
+
+    def test_rows_of_the_instrument_the_test_runs_resume(self, tmp_path):
+        test = self.a_test()
+        self.write(tmp_path, test, 'gobgp')
+        bgperf2.check_resume_across_monitor_flip(
+            [self.a_test(monitor='gobgp')], str(tmp_path))
+        self.write(tmp_path, test, 'sink')
+        bgperf2.check_resume_across_monitor_flip([test], str(tmp_path))
+        bgperf2.check_resume_across_monitor_flip([test], str(tmp_path / 'none'))
+
+
+def test_the_repetition_check_reads_an_archived_config_as_gobgp():
+    '''It only ever checks the timing-validation blocks, all GoBGP, and the
+    rendered copies it reads were snapshotted with no `monitor:` key.'''
+    import sys
+    sys.path.insert(0, str(bgperf2.REPO_ROOT / 'scripts'))
+    try:
+        import check_repetition_configs as check
+    finally:
+        sys.path.pop(0)
+    test = {'name': 't', 'neighbors': [10], 'prefixes': [100],
+            'filter_test': [None], 'targets': [{'name': 'bird'}]}
+    assert not any('monitor' in d for d in check.cells_of(test))
+    assert 'monitor' not in test
+    assert all('monitor=sink' in d for d in check.cells_of(dict(test, monitor='sink')))

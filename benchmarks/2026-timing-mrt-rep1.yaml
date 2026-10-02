@@ -158,6 +158,7 @@
 tests:
   -
      name: 2026-timing-mrt-rep1
+     monitor: gobgp   # what this ran under; the default is the sink since measurement plan 7d
      neighbors: [10]
      prefixes: [1_050_000]
      filter_test: [None]

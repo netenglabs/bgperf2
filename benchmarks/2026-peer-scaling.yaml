@@ -36,6 +36,7 @@ tests:
      name: 2026-peer-scaling
      prefix_scope: total
      repetitions: 3
+     monitor: sink   # never run (not registered with the campaign driver), so it takes the sink, the default since measurement plan 7d
      neighbors: [10, 25, 50]
      prefixes: [1_000_000]
      filter_test: [None]

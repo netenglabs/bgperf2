@@ -15,8 +15,9 @@ for each pair reports:
 - each receiver's final count, where the run had receivers.
 
 It computes no timing comparison. `convergence_s` is printed beside each pair
-for reading, but which monitor is faster is the bridge block's question (7c),
-asked over repetitions, and one pass of each cannot answer it.
+for reading, but which monitor is faster is a question for repetitions, and one
+pass of each cannot answer it. (It was to be the bridge block's, 7c, which was
+dropped on 2026-10-01 in favour of re-benching under the sink.)
 
 Exits 0 when every pair passes, 1 when one does not, and 2 when there is
 nothing to compare. A cell with only one of the two artifacts is reported

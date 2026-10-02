@@ -1005,7 +1005,7 @@ class FakeComponent:
 def test_finish_bench_publishes_the_export_section(tmp_path, monkeypatch):
     '''The fan-out reaches the artifact by the same path the churn and reload
     sections do, on a run that failed as well as one that converged.'''
-    args = Namespace(target='bird', label=None, neighbor_num=2,
+    args = Namespace(monitor='gobgp', target='bird', label=None, neighbor_num=2,
                      prefix_num=100, tester_type='bird', single_table=False,
                      filter_test=None, receivers=2, results_dir=str(tmp_path))
     output_stats = {

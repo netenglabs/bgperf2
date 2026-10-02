@@ -111,8 +111,11 @@ class TestOrderBatchCells:
         recording a seed is that the sequence can be rebuilt later, so it must
         not be a property of this interpreter's PRNG. Changing the keying
         scheme has to be a deliberate edit to this expectation.
+
+        On GoBGP, whose cell ids have not changed since this was pinned; a
+        sink cell's id names its monitor, so it sorts elsewhere under one seed.
         '''
-        assert sequence(seed=7) == [
+        assert sequence(seed=7, monitor='gobgp') == [
             (None, 5), (None, 0), (None, 2), (None, 1), (None, 4), (None, 3)]
 
     def test_a_pass_is_permuted_within_itself_and_never_across(self):

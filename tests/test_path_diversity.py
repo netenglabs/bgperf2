@@ -247,7 +247,7 @@ class TestTheScenarioItProduces:
 
 class TestNamingAndProvenance:
     def args(self, **overrides):
-        args = Namespace(target='bird', label=None, version=None,
+        args = Namespace(monitor='gobgp', target='bird', label=None, version=None,
                          tester_type='bird', prefix_num=1_000,
                          neighbor_num=10, filter_test=None, file=None,
                          path_diversity=1)

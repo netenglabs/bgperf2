@@ -582,9 +582,11 @@ The follow-up campaign may begin only when all are true:
 
 ### Phase 7: Replace the monitor with a purpose-built sink
 
-Status: in progress since 2026-10-01; **7a and 7b are complete** (2026-10-01),
-**7c was dropped** by the operator on 2026-10-01, and **7d is next**: it needs no
-other hardware. The operator chose on 2026-09-29 to fix the instrument now and
+Status: **complete on 2026-10-02.** 7a and 7b were completed on 2026-10-01,
+**7c was dropped** by the operator on 2026-10-01, and **7d landed on 2026-10-02**:
+the sink is the default monitor, GoBGP stays selectable, and every 2026 config
+states the instrument it means. The next campaign may be planned against the
+sink. The operator chose on 2026-09-29 to fix the instrument now and
 redo the campaign's testing under it, with the rows already taken kept readable
 through a bridge block (7c). On 2026-10-01 they chose to re-bench instead of
 bridging, after the monitor-as-batch-axis change set that 7c needed kept failing

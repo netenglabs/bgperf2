@@ -274,10 +274,16 @@ bird,bird,2.17.1+branch.master.fe0c22277c21,100,100,9900,10000,18,5,1,4,31.32,23
 As you might notice, the interesting statistics are shown twice, once in an easy to read format and the second
 in a CSV format to easily copy and paste to do analysis later.
 
+That sample predates the sink. **Since 2026-10-02 the default monitor is the sink** (`bgperf/sink`,
+built by `prepare`): a purpose-built counter that timestamps its own count, so `monitor version`
+reads like `0.1.0 (src 9c54763a82af; ...)`, and a run's artifacts are named `..._mon-sink.*`.
+`--monitor gobgp` selects the old GoBGP monitor, kept as a reference to re-check a sink result
+against; its artifacts keep their old names.
+
 To change a target implementation, use `-t` option.
 Currently, `bgperf2` supports [BIRD](http://bird.network.cz/) and [FRRouting](https://frrouting.org/)
 and OpenBGPD. GoBGP is not a target: it is too slow to be worth benchmarking, and serves only as
-the monitor. There is very intial support for[RustyBGP](https://github.com/osrg/rustybgp), partly
+the selectable reference monitor. There is very intial support for[RustyBGP](https://github.com/osrg/rustybgp), partly
 because RustyBGP doesn't support all policy that Bgperf2 tries to use for policy testing. If you just want to
 do routes and neighbors then RustyBGP works.
 
@@ -713,9 +719,12 @@ And some graphs. These are some of the important ones
 If you try to change the config, it's a little tricky to debug what's going on since there are so many containers. What bgperf is doing is creating configs and startup scripts in 2 and then it copies those to the containers before launching them. It creates three containers: bgperf_exabgp_tester_tester, bgperf_\<target\>_target, and bgperf2_monitor. If things aren't working, it's probably because the config for the target is not correct. bgperf2 puts all the log output in /var/tmp/bgperf2/*.log, but what it doesn't do is capture the output of the startup script.
 
 If it doesn't seem to be working, try with 1 peer and 1 route (-n1 -p1) and make sure
-that it connecting. If it's just stuck at waiting to connect to the neighbor, then probably the config is wrong and neighbors are not being established between the monitor (gobgp) and the NOS being tested
+that it connecting. If it's just stuck at waiting to connect to the neighbor, then probably the config is wrong and neighbors are not being established between the monitor and the NOS being tested
 
-You'll have to break into gobgp and the test config.
+The sink monitor writes every session event (the `S` lines) to `sink.log`, beside its
+`sink.stderr`, in its bind-mounted directory (`<--dir>/<bench-name>/monitor/`), which is the
+first thing to read. Under `--monitor gobgp`
+you'll have to break into gobgp and the test config.
 
 if you want to see what is happening when the test containers starts, after the test is over (or you've killed it), run 
 ```$ docker exec bgperf_bird_target /root/config/start.sh```

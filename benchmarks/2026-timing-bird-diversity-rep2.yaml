@@ -32,6 +32,7 @@
 tests:
   -
      name: 2026-timing-bird-diversity-rep2
+     monitor: gobgp   # what this ran under; the default is the sink since measurement plan 7d
      neighbors: [50]
      prefixes: [100_000]
      filter_test: [None]

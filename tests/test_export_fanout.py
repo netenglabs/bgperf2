@@ -323,12 +323,14 @@ class TestWhatTheFanOutCostsTheHost:
     confounder and withhold `limiting_component` entirely.
     """
 
-    def test_nothing_is_said_when_there_is_no_fan_out(self):
-        assert bgperf2.describe_export_fanout_cost(0) is None
-        assert bgperf2.describe_export_fanout_cost(None) is None
+    @pytest.mark.parametrize('monitor', bgperf2.MONITOR_TYPES)
+    def test_nothing_is_said_when_there_is_no_fan_out(self, monitor):
+        assert bgperf2.describe_export_fanout_cost(0, monitor) is None
+        assert bgperf2.describe_export_fanout_cost(None, monitor) is None
 
-    def test_it_names_the_column_and_the_confounder(self):
-        said = bgperf2.describe_export_fanout_cost(4)
+    @pytest.mark.parametrize('monitor', bgperf2.MONITOR_TYPES)
+    def test_it_names_the_column_and_the_confounder(self, monitor):
+        said = bgperf2.describe_export_fanout_cost(4, monitor)
         assert 'min free mem' in said
         assert 'low_free_memory' in said
 
@@ -345,8 +347,9 @@ class TestWhatTheFanOutCostsTheHost:
         holds per route depends on the paths, and an invented number would be
         quoted back as though it had been measured.
         """
-        said = bgperf2.describe_export_fanout_cost(4)
-        assert 'GB' not in said and 'MB' not in said
+        for monitor in bgperf2.MONITOR_TYPES:
+            said = bgperf2.describe_export_fanout_cost(4, monitor)
+            assert 'GB' not in said and 'MB' not in said
 
 
 class TestAScenarioFilesOwnReceivers:
@@ -385,7 +388,7 @@ class TestAScenarioFilesOwnReceivers:
 
 class TestNamingAndProvenance:
     def args(self, **overrides):
-        args = Namespace(target='bird', label=None, version=None,
+        args = Namespace(monitor='gobgp', target='bird', label=None, version=None,
                          tester_type='bird', prefix_num=1_000,
                          neighbor_num=10, filter_test=None, file=None,
                          path_diversity=1, receivers=0)

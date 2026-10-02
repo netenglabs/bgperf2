@@ -71,6 +71,26 @@ def test_benchmark_configs_reference_supported_targets():
                     f"{config.name}: target '{target['name']}' is not in {sorted(supported)}"
 
 
+def test_every_2026_config_states_its_monitor():
+    '''The default monitor changed under these configs (measurement plan 7d,
+    gobgp -> sink). One that leaves the key out means a different instrument
+    before and after the flip, and re-read after it describes GoBGP rows as
+    sink rows: review found the GoBGP half of all three monitor-pair configs
+    silently turned into a second sink run. So every test in a 2026 config
+    states which instrument it means.
+    '''
+    yaml = pytest.importorskip('yaml')
+    import bgperf2
+
+    missing = []
+    for config in sorted((REPO_ROOT / 'benchmarks').glob('2026-*.yaml')):
+        data = yaml.load(config.read_text(), Loader=bgperf2.BatchLoader)
+        for test in data.get('tests') or []:
+            if test.get('monitor') not in bgperf2.MONITOR_TYPES:
+                missing.append('{0}: {1}'.format(config.name, test.get('name')))
+    assert not missing, 'tests that do not state their monitor: {0}'.format(missing)
+
+
 def test_benchmark_config_versions_are_resolvable():
     '''A version in a batch config has to name an image that `prepare`/`update`
     could actually produce -- expansion happens before any run, so a bad one

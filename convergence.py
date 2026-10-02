@@ -26,9 +26,9 @@
 # times shorter. Counting samples rather than measuring elapsed time is
 # deliberate: the GoBGP poll overruns its cadence under load, and a window of
 # real seconds would converge such a run in fewer samples than it does today,
-# changing the old instrument's decisions inside the bridge block that exists
-# to measure the difference between the two. At the 1 s cadence every count
-# is exactly what it was.
+# changing the old instrument's decisions -- and GoBGP stays selectable as the
+# reference a sink result is re-checked against, so they must be the ones it
+# always made. At the 1 s cadence every count is exactly what it was.
 
 import math
 

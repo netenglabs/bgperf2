@@ -382,6 +382,8 @@ Re-run, 2026-10-02 08:05–08:07 UTC, after the operator confirmed it: that one 
 
 This build's median of 12 s is under half RustyBGP master's 23 s on the same workload, while master delivers 1,081,180, two more prefixes. That is recorded, not explained. **Next: item 3.** Its subset should include RustyBGP master, as item 1 recorded.
 
+Item 3 config: `benchmarks/2026-comparison-bias.yaml` (`e987c22`). It is items 1 and 2's configs with `pin` removed and the matrix narrowed, three passes, seed 202633. Synthetic: BIRD 2.19.2, FRR 10.7, OpenBGPD 9.3, RustyBGP master. MRT: the same cells without FRR 10.7, because FRR's MRT rows are all `inconclusive` and their `elapsed (s)` falls near 68 s or 97 s by the unexplained tail (`bgperf2-5du`), which three unpinned passes could mistake for co-location. The sink build changed between items 1–2 and this run (`9efd294`). That change only alters behaviour after a decode or validation error, and all 24 pinned rows of these cells recorded `refused_messages: 0`, so on their input the two builds behave the same. The config header has the full reasoning. Results go to `results/2026/2026-comparison/bias/`.
+
 ---
 
 ## 6. Phase 4 (conditional) — separate the roles across hosts

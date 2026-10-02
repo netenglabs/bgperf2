@@ -583,6 +583,29 @@ it to three decimal places. The target lost no routes and the monitor was not
 miscounting; what changed was which of the prefixes it held the target chose to
 export, as the last injectors delivered and best paths moved.
 
+## Event artifact: the `role_cpu` section
+
+Each role's CPU through the run, read from every container's cgroup v2
+`cpu.stat` on the controller's monotonic clock (`role_cpu.py`, comparison plan
+§6 item 1). It is evidence only, and no finding reads it.
+
+| field | meaning |
+|---|---|
+| `clock`, `origin` | `monotonic`, measured from `bench_clock_started`. That is the same clock as `events`, so an interval can be laid beside any event. |
+| `source` | `cgroup v2 cpu.stat usage_usec`. Each interval is the delta between two reads, never a cumulative value. |
+| `sample_interval_s` | The cadence asked for. The cadence achieved is each interval's own `start_s`/`end_s`. |
+| `unit` | `percent of one core`, so 800 is eight cores busy. |
+| `roles.<role>` | `target`, `monitor`, `testers`, `receivers`. A role this run did not have is absent. A role it had but could not read carries only `unmeasured_reason`: a remote target, a generator set reused by `-r/--repeat`, or a container whose cgroup was not found. |
+| `.containers[]` | Each member's `name`, `cpuset_requested` (what `--pin` asked for, `null` unpinned), `cpuset_effective` (what the kernel reported when the run started), and `first_error` (its first failed read). |
+| `.pinned`, `.cpuset_effective`, `.cores` | Whether every member was pinned, plus the role's one effective cpuset and its core count. The last two are `null` when members disagree. |
+| `.intervals[]` | `start_s`, `end_s` and `cpu_percent`, the sum over the role's members. `cpu_percent` is `null`, with `unread` naming the missing members, when any member was not read at both ends. A role sum missing one generator would read as less work, so it is not published. It is also `null` with an `unread_reason` when a counter went backwards. |
+| `.peak_cpu_percent`, `.intervals_read`, `.intervals_unread` | Over the read intervals only. |
+| `.cpu_seconds` | Total CPU from first read to last. `null` unless every member was read on every poll. |
+| `poll_incomplete` | Present only when the final pass had not returned within `ROLE_CPU_TEARDOWN_WAIT_S`. |
+
+The series runs from the bench clock until `finish_bench()`, so it covers churn and policy
+reload. It is not routed through the run's queue, for the reason the receiver poll is not.
+
 ## Both documents: the `bgperf2` section
 
 `<prefix>.events.json` and `<prefix>.versions.json` each carry a `bgperf2`
@@ -652,7 +675,7 @@ interval supports).
 | `tester_incomplete` | missing_evidence | A generator never reported completion, so the workload was never fully offered and no interval bounded by it can be read. |
 | `missing_timing_evidence` | missing_evidence | No generator in the run could be asked what it offered (ExaBGP and GoBGP playback), or the monitor never reached the required count, which is also every failed run. |
 | `backpressure_observed` | confounder | A generator reported cumulative blocked writes or send stalls. Which end of a blocked write was at fault is not in these numbers, so it withholds an attribution rather than supplying one. BIRD 3's `TX pending` queue depths are deliberately **not** read as backpressure: a session with something queued at the instant it is polled is what a working session looks like, and treating it as backpressure would withhold every BIRD 3 verdict there is. |
-| `host_cpu_saturated` | confounder | Host idle fell to `HOST_IDLE_PERCENT` (5%) or below. `min idle%` is host-wide and includes bgperf2's own load, so it says the machine had nothing spare and not whose work that was — see the CPU attribution boundary in the implementation plan. Per-role, time-aligned CPU would be needed to say more, and no such measurement exists. |
+| `host_cpu_saturated` | confounder | Host idle fell to `HOST_IDLE_PERCENT` (5%) or below. `min idle%` is host-wide and includes bgperf2's own load, so it says the machine had nothing spare and not whose work that was — see the CPU attribution boundary in the implementation plan. Per-role, time-aligned CPU would be needed to say more. It is published in the `role_cpu` section below, and this finding does not read it yet. |
 | `foreign_cpu_contention` | confounder | `max foreign cpu %` reached `contention.CONTENTION_PERCENT` (one core). A run sharing the machine is not comparable with one that did not, and a version ranking read off it would be an artifact of the neighbour. Its `evidence.processes` names the heaviest competing commands from the sample that set that maximum — aggregated by command name with a `process_count`, since the canonical competitor is a parallel build of thousands of short-lived processes rather than one large one. They are recorded during the run and never re-derived here: a competitor that has since exited is exactly the case this fires on. An artifact written before that was recorded carries no `processes` key at all, which is deliberately not an empty list. |
 | `low_free_memory` | confounder | Free memory fell below `LOW_FREE_MEMORY_FRACTION` (5%) of the host's total, so the intervals include page pressure. A fraction rather than a constant because the column is also moved by bgperf2's own logging when the bench directory is tmpfs. |
 
@@ -697,8 +720,9 @@ they would, do not:
 own ceiling through the interval is a target that was the constraint; a target
 with headroom while the generators sent slowly is not. That is the
 [CPU attribution boundary](bgperf2-measurement-implementation-plan.md#cpu-attribution-boundary),
-and until that instrumentation exists this finding may not be read as a
-statement about the generator.
+and until a rule reads that series this finding may not be read as a
+statement about the generator. The series is published as the
+[`role_cpu` section](#event-artifact-the-role_cpu-section); no rule reads it yet.
 
 **A second, cheaper and weaker, is implemented: `generator_headroom` in
 `scripts/timing_variance_review.py`** (`bgperf2-ylb`). It is a cross-cell

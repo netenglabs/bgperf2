@@ -126,7 +126,8 @@ intervals under `convergence` with nothing saying which one the row describes.
   `--path-diversity`. The stop event is per run and never cleared, unlike
   `controller_stop`, so a round still in flight at the end of a batch cell
   cannot find that event clear again at the start of the next one.
-- **This is the one sampler that does not go through the run's queue**, and the
+- **This sampler does not go through the run's queue** (nor does the per-role
+  cgroup poll in `role_cpu.py`, for the same reason), and the
   reason is that nothing would reliably take its messages out again: `bench()`'s
   monitor loop stops the instant convergence is declared, and `run_churn_bursts()`
   and `run_policy_reload()` read that queue afterwards and skip anything that is

@@ -299,7 +299,7 @@ claims.
 - A receiver is not a route source and not a second monitor; `Receiver.stats()` is refused.
 - One serialised round for the whole fan-out, never a thread per receiver, and **every** round waits
   at least as long as it took.
-- This is the one sampler that does not go through the run's queue.
+- This sampler, and the per-role cgroup poll, do not go through the run's queue.
 - Export timing and a post-convergence workload are not measured in the same run; a run asking for
   both keeps the fan-out and withholds the timing by name.
 - What still cannot be separated is table selection, and that is said out loud rather than folded
@@ -317,8 +317,8 @@ component, and `bgperf2.py`'s `write_event_artifact()`, which catches for it.
   component: a throttled generator and one blocked writing to an undrained target are the same
   measurement, and three controlled runs of one shape all return it.
 
-**`docs/invariants/host-and-environment.md`** — `contention.py`, the controller threads, and the
-`-d` warnings.
+**`docs/invariants/host-and-environment.md`** — `contention.py`, `role_cpu.py`, the controller
+threads, and the `-d` warnings.
 
 - **Measure CPU as a delta between two `/proc` samples, never `ps -eo pcpu`**, which fails in both
   directions.
@@ -330,6 +330,7 @@ component, and `bgperf2.py`'s `write_event_artifact()`, which catches for it.
 - The names travel with the number, and only ever together.
 - The controller threads are governed by the `controller_stop` Event and must actually stop — they
   once did not, and bgperf was manufacturing the contention it reports.
+- Per-role CPU is a cgroup delta, summed only when every member was read, and changes no verdict.
 - The bench directory must not be in RAM, and must not be on the root filesystem.
 
 **`docs/invariants/provenance-and-verify.md`** — `Container.version_string()`,

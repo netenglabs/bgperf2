@@ -2477,7 +2477,7 @@ def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
                    churn=None, policy_reload=None, export=None,
                    target_table=None, target_table_unmeasured_reason=None,
                    target_table_witness_rule=None,
-                   convergence_rule=None, instrument=None):
+                   convergence_rule=None, instrument=None, role_cpu=None):
     '''Build the stable JSON-compatible event artifact document.
 
     `testers` maps a generator's producer name to whatever evidence it holds
@@ -2568,6 +2568,12 @@ def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
     # published timing is derived from.
     if instrument:
         artifact['instrument'] = dict(instrument)
+    # Each role's CPU on this document's clock (`role_cpu.py`). Evidence only:
+    # nothing in `findings.py` reads it, and a rule that does is a separate
+    # decision (docs/invariants/findings.md). Absent when the caller supplied
+    # none, so a document built without the sampler is unchanged.
+    if role_cpu:
+        artifact['role_cpu'] = dict(role_cpu)
     return artifact
 
 

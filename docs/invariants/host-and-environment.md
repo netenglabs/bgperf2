@@ -2,7 +2,7 @@
 
 Whether the machine was yours, and where the run is allowed to write.
 
-**Read this before editing:** `contention.py`, `bgperf2.py` (`warn_if_machine_is_busy()`, `controller_foreign_cpu()`, `warn_if_log_dir_is_in_ram()`, `warn_if_log_dir_is_short_on_space()`, the controller threads)
+**Read this before editing:** `contention.py`, `role_cpu.py`, `bgperf2.py` (`warn_if_machine_is_busy()`, `controller_foreign_cpu()`, `controller_role_cpu()`, `role_cpu_members()`, `warn_if_log_dir_is_in_ram()`, `warn_if_log_dir_is_short_on_space()`, the controller threads)
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 
@@ -96,6 +96,42 @@ start of each run is required or every cell after the first gets a sampler that 
 and a contention column stuck at 0, and the samplers wait on the event instead of `time.sleep()` so
 they stop at once rather than lingering a poll interval. `tests/test_controller_threads.py` covers
 both directions.
+
+## Per-role CPU — `role_cpu.py`
+
+`min idle%` says whether the machine had anything spare. `max foreign cpu %` says whether anything
+outside the benchmark used it. Neither says which of the benchmark's own roles did the work, and
+that is the measurement `findings.md` keeps naming as missing. Comparison plan §6 item 1 added it.
+Every container the run started is read from its cgroup v2 `cpu.stat` once a second, on the
+controller's monotonic clock. Each role's members are summed and published as `events.json`'s
+`role_cpu` section. The rules are the ones above, applied to cgroups:
+
+- **A delta between two reads, never one reading.** `usage_usec` is cumulative since the container
+  started, which is the lifetime-average trap `ps -eo pcpu` falls into.
+- **Stamped before the read, and the interval published is the one achieved.** Each interval
+  carries its own `start_s`/`end_s`, so a slow pass shows up as a long interval rather than as a
+  high rate.
+- **A role is summed only when every member was read at both ends.** A generator whose container
+  exited makes the role's sum smaller, not unknown. Published as a number, that reads as less
+  work. That interval is `null` and names the missing member. A role whose cgroup could not be
+  resolved at all is `unmeasured_reason`, not an empty role.
+- **The cgroup is found through `/proc/<pid>/cgroup`, never built from the container id.** The
+  path differs between Docker's `systemd` and `cgroupfs` drivers. A v1 host has no unified path
+  and is refused by name, because its `cpuacct.usage` is a different file in different units and
+  has not been checked here.
+- **Resolved before the bench clock starts.** It takes a `docker inspect` per container, and fifty
+  of them inside the clock would publish the controller's cost as the run's.
+- **Not through the run's queue**, for the receiver poll's reason (`export-timing.md`). The
+  monitor loop stops reading the queue at convergence, and churn and the reload skip anything but
+  monitor samples. A queued series would end exactly where the post-convergence workload begins.
+  The poll thread is the recorder's only writer. It takes one last pass when `controller_stop` is
+  set, and `finish_bench()` joins it **after** `bench_stop`.
+- **It changes no verdict.** `findings.py` does not read it. A rule that does is a separate
+  decision, taken on data gathered for that purpose (`findings.md`), and `tests/test_role_cpu.py`
+  fails if `findings.py` starts naming the section.
+
+The controller itself, and the kernel's softirq work for the bridge, belong to no role. Under
+`--pin` they run on the cores the pin leaves free, and this section does not measure them.
 
 ## The bench directory must not be in RAM
 

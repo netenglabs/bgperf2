@@ -46,7 +46,8 @@ Seven rules hold the thing up:
   reports `unresolved`, naming host saturation as what decided it. `min idle%`
   is host-wide and includes bgperf2's own load, so it says the machine had
   nothing spare and not whose work that was — per-role, time-aligned CPU is
-  what would say more, and it does not exist.
+  what would say more. It is published since comparison Phase 4 item 1, as
+  `events.json`'s `role_cpu` section, and **no rule here reads it yet**.
 - **Backpressure names no component, and only the counts of *being blocked*
   qualify.** BIRD 3 reports `TX pending` bytes at every poll and a session with
   something queued is what a working session looks like, so reading queue depth
@@ -62,7 +63,9 @@ Seven rules hold the thing up:
   61,291 pps. Blocked-write counters do not separate them either, because an
   egress cap blocks writes exactly as an undrained peer does, which is why
   `backpressure_observed` withholds rather than attributes. Per-role,
-  time-aligned CPU would; it does not exist. Do not add a rule that names the
+  time-aligned CPU would. It is now published (`role_cpu`), and a rule
+  that reads it is a separate decision, taken on the comparison plan's Phase 4
+  item 3 data rather than on the runs in front of it. Do not add a rule that names the
   target here from two runs -- that is how all three convergence rules were
   broken. `docs/measurement-dictionary.md` carries the evidence and
   `bgperf2-bgg` the tracking.

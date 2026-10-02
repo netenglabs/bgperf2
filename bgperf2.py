@@ -61,6 +61,8 @@ from monitor import Monitor, Receiver, SinkMonitor, SinkReceiver
 from sink import SINK_CLOCK_OFFSET_LIMIT_NS, Sink
 import reclaim
 from convergence import ConvergenceTracker
+from role_cpu import (ROLE_CPU_INTERVAL_S, RoleCpuRecorder, cgroup_dir_for_pid,
+                      read_effective_cpuset, read_members)
 from reclaim import StopRequested, StopSignal, watch_for_interruption
 from policy import (DEFAULT_POLICY_RELOAD_BLOCKS,
                     PolicyReloadConfigurationError, PolicyReloadTracker,
@@ -2114,6 +2116,93 @@ def controller_foreign_cpu(queue, interval=5):
     t.start()
 
 
+def role_cpu_members(target, monitor, testers, receivers, repeat=False):
+    """Each role's containers with their cgroup, and the roles that have none.
+
+    Resolved once, before the bench clock starts: a `docker inspect` per
+    container is tens of milliseconds, and fifty of them inside the clock
+    would be the controller's cost published as the run's. A container whose
+    cgroup cannot be found is left out of its role and the role is unmeasured
+    by name, never summed without it.
+    """
+    roles = {'target': [target] if target is not None else [],
+             'monitor': [monitor],
+             'testers': list(testers),
+             'receivers': list(receivers)}
+    members, unmeasured = {}, {}
+    if target is None:
+        unmeasured['target'] = 'the target is remote; it has no container here'
+    if repeat and not testers:
+        # --repeat reuses the generators the previous run started, and this
+        # run holds no handle on them. Named, so an empty role is not read as
+        # generators that did no work.
+        unmeasured['testers'] = ('-r/--repeat reuses the previous run\'s '
+                                 'generator containers, which this run did not '
+                                 'start')
+    for role, containers in roles.items():
+        resolved, failures = [], []
+        for c in containers:
+            try:
+                pid = dckr.inspect_container(c.ctn_id)['State']['Pid']
+                cgroup_dir = cgroup_dir_for_pid(pid)
+            except Exception as exc:
+                failures.append('{0}: {1}'.format(c.name, exc))
+                continue
+            resolved.append({'name': c.name, 'cgroup_dir': cgroup_dir,
+                             'cpuset_requested': getattr(c, 'cpuset', None),
+                             'cpuset_effective': read_effective_cpuset(cgroup_dir)})
+        if failures:
+            unmeasured[role] = 'no cgroup for ' + '; '.join(failures)
+        elif resolved:
+            members[role] = resolved
+    return members, unmeasured
+
+
+def controller_role_cpu(recorder, stop, interval=ROLE_CPU_INTERVAL_S,
+                        reader=None):
+    """Poll every role's cgroup into `recorder` until `stop` is set.
+
+    Not through the run's queue, for the reason the receiver poll is not
+    (docs/invariants/export-timing.md): `bench()`'s loop stops reading it at
+    convergence and the post-convergence workloads skip anything that is not a
+    monitor sample, so a CPU series fed through it would end where churn and
+    the reload begin -- the stretch a per-role reading is most wanted for.
+    This thread is the recorder's only writer and `finish_bench()` reads it
+    after the join.
+
+    Stamped before the read, on the rule both tester poll loops follow, and one
+    last pass is taken when `stop` is set, so the series ends at the run's end
+    rather than up to a poll before it.
+    """
+    read = reader or read_members
+
+    def poll():
+        while True:
+            sampled_s = time.monotonic()
+            try:
+                usage, errors = read(recorder.members)
+            except Exception as exc:
+                # Never let a sampling hiccup take down a running benchmark;
+                # every member counts as unread on this pass instead.
+                usage = {}
+                errors = {m['name']: '{0}: {1}'.format(type(exc).__name__, exc)
+                          for ms in recorder.members.values() for m in ms}
+            recorder.observe(sampled_s, usage, errors)
+            if stop.is_set():
+                return
+            stop.wait(interval)
+
+    t = Thread(target=poll)
+    t.daemon = True
+    t.start()
+    return t
+
+
+# Teardown patience for the final cgroup pass, not a measurement: reading a few
+# dozen files takes well under a millisecond.
+ROLE_CPU_TEARDOWN_WAIT_S = 5.0
+
+
 def controller_memory_free(queue):
     '''collect stats on the whole machine that is running the tests'''
     def stats():
@@ -3289,6 +3378,11 @@ def bench(args):
         print("Waiting extra 10 seconds for EOS ")
         time.sleep(10)
 
+    # Resolved before the clock starts; see role_cpu_members().
+    role_cpu_roles, role_cpu_unmeasured = role_cpu_members(
+        None if is_remote else target, m, testers, receiver_containers,
+        repeat=args.repeat)
+
     bench_clock_started_s = time.monotonic()
     lifecycle = MonitorEventRecorder(
         bench_clock_started_s, producer=m.name,
@@ -3305,6 +3399,9 @@ def bench(args):
     controller_idle_percent(q)
     controller_memory_free(q)
     controller_foreign_cpu(q)
+    role_cpu = RoleCpuRecorder(bench_clock_started_s, role_cpu_roles,
+                               role_cpu_unmeasured)
+    role_cpu_thread = controller_role_cpu(role_cpu, controller_stop)
     if not is_remote:
         target.stats(q)
         target.neighbor_stats(q)
@@ -3655,6 +3752,7 @@ def bench(args):
                     export_receiver_names=[r.name for r in receiver_containers],
                     export_unmeasured_reason=export_unmeasured,
                     export_thread=export_thread,
+                    role_cpu=(role_cpu, role_cpu_thread),
                     target_table=target_table_samples,
                     target_table_unmeasured_reason=target_table_unmeasured(
                         target, target_table_samples),
@@ -3746,6 +3844,7 @@ def bench(args):
                     export_receiver_names=[r.name for r in receiver_containers],
                     export_unmeasured_reason=export_unmeasured,
                     export_thread=export_thread,
+                    role_cpu=(role_cpu, role_cpu_thread),
                     churn_evidence=churn_evidence,
                     policy_reload_evidence=reload_evidence,
                     target_table=target_table_samples,
@@ -4072,7 +4171,8 @@ def write_event_artifact(args, events, prefix, status, testers=None,
                          export=None, target_table=None,
                          target_table_unmeasured_reason=None,
                          target_table_witness_rule=None,
-                         convergence_rule=None, instrument=None):
+                         convergence_rule=None, instrument=None,
+                         role_cpu=None):
     '''Atomically preserve lifecycle evidence before post-run collection.
 
     Returns the document it wrote, so the caller can print the findings it
@@ -4108,7 +4208,10 @@ def write_event_artifact(args, events, prefix, status, testers=None,
         # every run passes through.
         target_table_witness_rule=target_table_witness_rule,
         convergence_rule=convergence_rule,
-        instrument=instrument)
+        instrument=instrument,
+        # No fallback: a run built before this sampler, or one that never
+        # reached the clock, has no section rather than an empty one.
+        role_cpu=role_cpu)
     # Derived from the finished document rather than from the events, so the
     # policy can only ever reason about intervals this artifact published.
     #
@@ -4338,7 +4441,7 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
                  export_lifecycle=None, export_state=None,
                  export_read_failures=None, export_required=None,
                  export_receiver_names=(), export_unmeasured_reason=None,
-                 export_thread=None,
+                 export_thread=None, role_cpu=None,
                  churn_evidence=None, policy_reload_evidence=None,
                  target_table=None, target_table_unmeasured_reason=None,
                  target_table_witness_rule=None,
@@ -4391,6 +4494,19 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
                 'delivery window closed; a round still in flight may be '
                 'missing from these events'.format(wait_s))
 
+    # After `bench_stop` for the reason the receiver wait is: the final pass
+    # is teardown, and `total time` is a graphed column.
+    role_cpu_section = None
+    if role_cpu is not None:
+        role_cpu_recorder, role_cpu_thread = role_cpu
+        role_cpu_thread.join(timeout=ROLE_CPU_TEARDOWN_WAIT_S)
+        if role_cpu_thread.is_alive():
+            role_cpu_recorder.poll_incomplete = (
+                'the cgroup poll had not returned {0:.0f}s after the run '
+                'ended; its last pass may be missing'.format(
+                    ROLE_CPU_TEARDOWN_WAIT_S))
+        role_cpu_section = role_cpu_recorder.section()
+
     tester_events, tester_evidence = tester_lifecycle_summary(
         tester_lifecycles or {}, tester_observation_errors or {},
         tester_read_failures or {})
@@ -4410,7 +4526,8 @@ def finish_bench(args, output_stats, bench_stats, bench_start, target, m, tester
         target_table_unmeasured_reason=target_table_unmeasured_reason,
         target_table_witness_rule=target_table_witness_rule,
         convergence_rule=convergence_rule,
-        instrument=sampler_read_failures(target, m))
+        instrument=sampler_read_failures(target, m),
+        role_cpu=role_cpu_section)
 
     # Scan the tester logs only after the clock has stopped. These used to run
     # in bench() before bench_stop, so walking every tester log line by line --

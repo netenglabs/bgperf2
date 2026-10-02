@@ -1,0 +1,105 @@
+# 2026 daemon comparison, Phase 4 item 3: change one role's cores at a time
+# on the m7a.8xlarge (docs/2026-daemon-comparison-plan.md §6, run ID
+# 2026-comparison).
+#
+# WHY. §5's hardware gate asks whether single-host co-location biases two
+# results: OpenBGPD 9.3's ~70 s MRT wait, and RustyBGP master's time and
+# hold-timer expiries. Each variant here gives one role more cores while the
+# others keep Phase 3's counts, so a cell that moves names the role it moved
+# with. Item 1's per-role cgroup CPU (`events.json` `role_cpu`) is the
+# evidence beside the times.
+#
+# BASELINE. Each variant is read against item 2's rows of the same cell
+# (`benchmarks/2026-comparison-calib.yaml`, `results/2026/2026-comparison/
+# calib/`), measured on this host with Phase 3's pin
+# target=0-7,monitor=8-9,testers=10-15. Operator decision (A), 2026-10-02:
+# Phase 3's pinned rows stay the published baseline, with OpenBGPD 9.3 MRT's
+# +2 s offset on this host stated.
+#
+# VARIANTS. Only the pin differs from item 2: same workloads, RIB, monitor,
+# passes and labels.
+#   a. monitor x4      target=0-7,monitor=8-15,testers=16-21
+#                      OpenBGPD 9.3 MRT, BIRD 2.19.2 MRT
+#   b. testers x2.7    target=0-7,monitor=8-9,testers=16-31
+#                      RustyBGP master synthetic and MRT
+#   c. target 12 cores target=0-11,monitor=12-13,testers=14-19
+#                      RustyBGP master synthetic
+# Cores not named in a pin are left to the controller and the kernel, which
+# `--pin` does not confine (docs/invariants/workload-controls.md), as in
+# item 2.
+#
+# NAMES. Each variant and workload is its own test, so no two share a CSV,
+# progress or summary file, and none can rewrite item 2's. The pin is part of
+# every artifact's name, so the variants can share a results directory:
+# `results/2026/2026-comparison/cores/`.
+#
+# ORDER. `order: shuffle`, seed by Phase 3's rule: year, phase, item, 2026-4-3.
+tests:
+  -
+     name: 2026-comparison-cores-monitor-mrt
+     monitor: sink
+     pin: target=0-7,monitor=8-15,testers=16-21
+     repetitions: 3
+     neighbors: [10]
+     prefixes: [1_050_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 202643
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: openbgp
+         versions: [9.3]
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+  -
+     name: 2026-comparison-cores-testers-synth
+     monitor: sink
+     pin: target=0-7,monitor=8-9,testers=16-31
+     repetitions: 3
+     neighbors: [50]
+     prefixes: [100_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 202643
+     targets:
+       -
+         name: rustybgp
+         label: rustybgp default
+         tester_type: bird
+  -
+     name: 2026-comparison-cores-testers-mrt
+     monitor: sink
+     pin: target=0-7,monitor=8-9,testers=16-31
+     repetitions: 3
+     neighbors: [10]
+     prefixes: [1_050_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 202643
+     targets:
+       -
+         name: rustybgp
+         label: rustybgp default
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+  -
+     name: 2026-comparison-cores-target-synth
+     monitor: sink
+     pin: target=0-11,monitor=12-13,testers=14-19
+     repetitions: 3
+     neighbors: [50]
+     prefixes: [100_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 202643
+     targets:
+       -
+         name: rustybgp
+         label: rustybgp default
+         tester_type: bird

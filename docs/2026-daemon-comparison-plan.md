@@ -540,6 +540,13 @@ the three.
 RustyBGP master's hold-timer counts on both hosts are published as measured. Item 3 is read against
 item 2's rows.
 
+Item 3 config: `benchmarks/2026-comparison-cores.yaml`, written 2026-10-02 on the same host (`lscpu`:
+EPYC 9R14, 32 CPUs, one thread per core). It has four tests: variant (a), variant (b) synthetic,
+variant (b) MRT and variant (c). Each states `monitor: sink`, three passes and seed 202643. Each
+keeps item 2's workload, RIB and labels, and only its pin changes. That makes 15 rows. The batch
+guards accept every pin. Results go to `results/2026/2026-comparison/cores/`. The run waits for the
+operator's go-ahead, because it takes the whole host.
+
 ---
 
 ## 7. Not part of this plan: more memory

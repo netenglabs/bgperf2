@@ -1,0 +1,90 @@
+# 2026 daemon comparison, Phase 4 item 2: calibrate the m7a.8xlarge against
+# Phase 3 (docs/2026-daemon-comparison-plan.md §6, run ID 2026-comparison).
+#
+# WHY. Phase 4 answers the hardware gate on one m7a.8xlarge (32 vCPU, the same
+# EPYC 9R14 as Phase 3's m7a.4xlarge). Same CPU is not same machine: memory
+# bandwidth and cache per instance size may differ. This runs §5's bias-check
+# cells with Phase 3's pinning exactly, so that agreement within pass spread
+# makes Phase 3's pinned rows the baseline item 3's variants are read against.
+# Disagreement stops the phase for an operator decision.
+#
+# SHAPE. `benchmarks/2026-comparison-bias.yaml`'s cells, with Phase 3 items 1
+# and 2's `pin` put back, and nothing else changed: same workloads, RIB,
+# monitor and passes. The rows are compared with the pinned rows of the same
+# cells in `results/2026/2026-comparison/synth/` and `.../mrt/`, not with the
+# unpinned bias rows. Each test has its own name, so it cannot rewrite Phase
+# 3's CSV, progress or summary.
+#
+# PIN. target=0-7, monitor=8-9, testers=10-15, as Phase 3. Cores 16-31 are
+# left to the controller and the kernel, which `--pin` does not confine
+# (docs/invariants/workload-controls.md), so a difference from Phase 3 is the
+# host size, that headroom, or both.
+#
+# THE SINK BUILD. Phase 3 items 1 and 2 ran before `9efd294` (bgperf2-f22);
+# this runs after it. As in the bias check, that change only alters behaviour
+# after a decode or validation error, and all 24 pinned rows of these cells
+# recorded `refused_messages: 0`. A row here that logs a kept message is not
+# a host-only comparison and is not read as one.
+#
+# SUBSET. As the bias check, and for its reasons: BIRD 2.19.2, FRR 10.7,
+# OpenBGPD 9.3 and RustyBGP master synthetic; the same without FRR 10.7 on
+# MRT, where every FRR row is `inconclusive` and lands near 68 s or 97 s by an
+# unexplained tail (`bgperf2-5du`).
+#
+# ORDER. `order: shuffle`, seed by Phase 3's rule: year, phase, item, 2026-4-2.
+tests:
+  -
+     name: 2026-comparison-calib-synth
+     monitor: sink
+     pin: target=0-7,monitor=8-9,testers=10-15
+     repetitions: 3
+     neighbors: [50]
+     prefixes: [100_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 202642
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: frr_c
+         versions: [10.7]
+         tester_type: bird
+       -
+         name: openbgp
+         versions: [9.3]
+         tester_type: bird
+       -
+         name: rustybgp
+         label: rustybgp default
+         tester_type: bird
+  -
+     name: 2026-comparison-calib-mrt
+     monitor: sink
+     pin: target=0-7,monitor=8-9,testers=10-15
+     repetitions: 3
+     neighbors: [10]
+     prefixes: [1_050_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 202642
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: openbgp
+         versions: [9.3]
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: rustybgp
+         label: rustybgp default
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000

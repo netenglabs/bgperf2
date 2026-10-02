@@ -487,6 +487,15 @@ monitor and testers. The pinned run (`target=0-3,monitor=4-5,testers=6-7`) showe
 cpusets equal to the requested ones. The unpinned run showed `0-15` and `pinned: false`. Items 2 and
 3 wait for the operator's `m7a.8xlarge`.
 
+Host confirmed 2026-10-02: an on-demand `m7a.8xlarge` per the instance metadata, and `lscpu`
+reported AMD EPYC 9R14, 32 CPUs, one thread per core. It has 123 GiB of memory, Docker's root is
+`/data/docker` and the bench directory is `/data/bgperf-work`. `verify` reported every image item 2
+uses as ok and clean. FRR 10.7's version is read at run time, as in Phase 3. 2278 tests passed.
+Item 2 config: `benchmarks/2026-comparison-calib.yaml`. It is the bias check's config with Phase 3's
+`pin` restored, its own test names and seed 202642, and nothing else changed. Its rows are read
+against the pinned rows of the same cells in `synth/` and `mrt/`. Results go to
+`results/2026/2026-comparison/calib/`.
+
 ---
 
 ## 7. Not part of this plan: more memory

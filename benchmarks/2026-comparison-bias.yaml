@@ -1,0 +1,91 @@
+# 2026 daemon comparison, Phase 3 item 3: the bias check. A subset of items 1
+# and 2, unpinned, three passes (docs/2026-daemon-comparison-plan.md §5, run ID
+# 2026-comparison).
+#
+# WHY. Items 1 and 2 ran pinned, target=0-7, monitor=8-9, testers=10-15. This
+# runs the same builds and workloads with no `pin`, so the effect of
+# co-location is measured rather than assumed. The hardware gate (plan §5)
+# compares the two at the published resolution.
+#
+# SHAPE. Each test is its item's config with the matrix narrowed and `pin`
+# removed, and nothing else in the config changed: same workload, RIB, monitor
+# and passes. Each has its own test name, so it cannot rewrite items 1 and 2's
+# CSV, progress or summary.
+#
+# THE SINK BUILD DID CHANGE. Items 1 and 2 ran before `9efd294` (bgperf2-f22),
+# which makes the sink keep a malformed UPDATE (treat-as-withdraw) where it
+# used to reset the session. Every path that commit changed starts at a decode
+# or validation error, and all 24 pinned rows of the cells below recorded
+# `refused_messages: 0`, so none met one: on their input the two builds take
+# the same path. If an unpinned row here logs a kept message, its pair is
+# not a pin-only comparison and is not read as one.
+#
+# SUBSET. Four synthetic cells, one per daemon, and three of them on MRT:
+# - OpenBGPD 9.3: all nine pinned OpenBGPD MRT rows resolved to
+#   `target_or_monitor`, which is the evidence the gate reads.
+# - RustyBGP master: it sent `Hold timer expired` to 1, 4 and 1 generator
+#   sessions in item 1's pinned passes. Item 1 asked for it here, to separate
+#   pinning from the monitor change as the cause.
+# - BIRD 2.19.2: the reference BIRD, with tight pinned passes in both
+#   workloads.
+# - FRR 10.7, synthetic only: the fastest FRR release. Not on MRT, where every
+#   FRR row is `inconclusive` (plan §3 item 1) and `elapsed (s)` lands near
+#   68 s or 97 s by a tail nobody has explained (`bgperf2-5du`). Three
+#   unpinned passes could differ from the pinned 97 s by ~30 s for that
+#   reason alone, and the gate would read it as co-location.
+#
+# ORDER. `order: shuffle`, seed by item 1's rule: year, phase, item, 2026-3-3.
+tests:
+  -
+     name: 2026-comparison-bias-synth
+     monitor: sink
+     repetitions: 3
+     neighbors: [50]
+     prefixes: [100_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 202633
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: frr_c
+         versions: [10.7]
+         tester_type: bird
+       -
+         name: openbgp
+         versions: [9.3]
+         tester_type: bird
+       -
+         name: rustybgp
+         label: rustybgp default
+         tester_type: bird
+  -
+     name: 2026-comparison-bias-mrt
+     monitor: sink
+     repetitions: 3
+     neighbors: [10]
+     prefixes: [1_050_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 202633
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: openbgp
+         versions: [9.3]
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000
+       -
+         name: rustybgp
+         label: rustybgp default
+         tester_type: bgpdump2
+         mrt_file: mrt/rib.20260808.0000

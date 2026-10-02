@@ -1,6 +1,6 @@
 # 2026 daemon comparison plan
 
-**Status: Phases 0, 1 and 2 done; Phase 3 not started (`bgperf2-9su` and `bgperf2-0l7` are closed, and measurement plan Phase 7b is done; it still needs a campaign-class host). Written 2026-09-29.**
+**Status: Phases 0, 1 and 2 done; Phase 3 in progress (started 2026-10-02 on an on-demand `m7a.4xlarge`, EPYC 9R14). Written 2026-09-29.**
 
 **Epic:** `bgperf2-0y5`
 
@@ -268,7 +268,7 @@ plan Phase 7). Item 6 answered by the operator 2026-10-01 (keep the NO_EXPORT pe
 
 ## 5. Phase 3 — re-run on the current host class, then the hardware gate
 
-**Tracked by:** `bgperf2-0y5.4` · **Status:** not started
+**Tracked by:** `bgperf2-0y5.4` · **Status:** in progress
 
 **Requires measurement plan Phase 7 through 7b** (`bgperf2-8gg.10.2`). Phase 3 runs on the sink
 monitor at its finer resolution. The sink has been the default since 7d (2026-10-02). Write this
@@ -309,7 +309,7 @@ After Phase 3, look at the MRT and fan-out cells and decide with this table:
 | cells still resolve to `target_or_monitor`, **or** pinned and unpinned disagree by more than resolution | **Co-location is biasing the result.** Go to Phase 4 on new hardware. |
 | export fan-out still shows host CPU saturation with the monitor and receivers pinned apart from the target | **Phase 4** — the receivers need their own host. |
 
-Progress: —
+Progress: started 2026-10-02 on an on-demand `m7a.4xlarge` (16 vCPU, AMD EPYC 9R14, one thread per core, confirmed with `lscpu` and the instance metadata). Docker's root `/data/docker` carried the Phase 2.4 images over, and `verify` reported 32 images checked, all ok. Item 1 config: `benchmarks/2026-comparison-synth.yaml`. Its matrix has no `openbgp default` cell, because `openbgp:latest` is 9.3.
 
 ---
 

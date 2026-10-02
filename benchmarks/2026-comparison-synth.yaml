@@ -1,0 +1,88 @@
+# 2026 daemon comparison, Phase 3 item 1: synthetic 50 x 100k, pinned, three
+# passes (docs/2026-daemon-comparison-plan.md §5, run ID 2026-comparison).
+#
+# Written fresh rather than copied from a 2026-timing-* config, as §5 requires:
+# those state `monitor: gobgp` because that is what they ran under, and these
+# rows are measured by the sink. They stand on their own and are not read
+# against the timing-validation rows (a different instrument) or against
+# benchmarks/baseline/ (a different CPU).
+#
+# WORKLOAD. 50 peers x 100,000 unique IPv4 prefixes per peer, BIRD generator,
+# no policy: 5,000,000 distinct prefixes in the target's table. The default
+# per-peer `prefix_scope` is what makes `prefixes per peer` mean 100,000; do
+# not add `prefix_scope: total`, which would divide.
+#
+# MATRIX. Phase 2 item 5's table: FRR 8.5/9.1/10.0/10.7/master, BIRD
+# 2.19.2/3.3.2 (default threads and 4 threads)/master, OpenBGPD 8.8/9.2/9.3,
+# RustyBGP 2026-02/master. There is no `openbgp default` cell, unlike the
+# timing-validation matrix: `openbgp:latest` is 9.3 (plan §4 item 4), so it
+# would be the 9.3 cell measured twice under two names.
+#
+# PIN. target=0-7, monitor=8-9, testers=10-15, the layout the plan names. On
+# this host (m7a.4xlarge, EPYC 9R14) `lscpu` reports one thread per core, so
+# the sets are disjoint physical cores. The controller and network softirqs
+# are not pinned (docs/invariants/workload-controls.md).
+#
+# PASSES. `repetitions: 3` in one config, so the whole matrix repeats and each
+# pass is part of the run's name (docs/invariants/batch-passes.md). The
+# timing-validation campaign ran its passes as three blocks; this phase has no
+# block structure to keep.
+#
+# ORDER. `order: shuffle` with a stated seed, fixed by rule rather than chosen
+# for its permutation: the year, the plan phase and the item, 2026-3-1.
+#
+# MEMORY. OpenBGPD 8.8 came within 0.2 points of the 20% free-memory floor at
+# this size on this host class (timing-validation Block 2). Watch that cell.
+tests:
+  -
+     name: 2026-comparison-synth
+     monitor: sink
+     pin: target=0-7,monitor=8-9,testers=10-15
+     repetitions: 3
+     neighbors: [50]
+     prefixes: [100_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 202631
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bird
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (4 threads)
+         threads: 4
+         tester_type: bird
+       -
+         name: bird
+         label: bird default
+         tester_type: bird
+       -
+         name: frr_c
+         versions: [8.5, 9.1, 10.0, 10.7]
+         tester_type: bird
+       -
+         name: frr_c
+         label: frr default
+         tester_type: bird
+       -
+         name: openbgp
+         versions: [8.8, 9.2, 9.3]
+         tester_type: bird
+       -
+         name: rustybgp
+         version: 2026-02
+         label: rustybgp 2026-02
+         tester_type: bird
+       -
+         name: rustybgp
+         label: rustybgp default
+         tester_type: bird

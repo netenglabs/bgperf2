@@ -288,7 +288,7 @@ Workloads, three passes each, matrix repeated as a whole (`docs/invariants/batch
 new run ID `2026-comparison`:
 
 1. ~~synthetic 50 × 100k, pinned;~~ **Done 2026-10-02** (`03d824d`, `benchmarks/2026-comparison-synth.yaml`). 42 rows in `results/2026/2026-comparison/synth/`; see Progress.
-2. MRT 10 × 1.05 M (bgpdump2), pinned;
+2. ~~MRT 10 × 1.05 M (bgpdump2), pinned;~~ **Ran 2026-10-02** (`ebb1ff9`, `benchmarks/2026-comparison-mrt.yaml`). 42 rows in `results/2026/2026-comparison/mrt/`; RustyBGP 2026-02's three failed (`bgperf2-f22`); see Progress.
 3. **one bias check:** a small subset of both, unpinned, so pinned and unpinned can be compared
    on identical builds and the effect of co-location is measured rather than assumed.
 ~~4. Phase 7's bridge block (7c, `bgperf2-8gg.10.3`), in the same block as item 3.~~ **Dropped
@@ -340,6 +340,35 @@ The batch's own variance rule lists three pairs it cannot separate at n=3: FRR 1
 The controller spends about 2 min of single-threaded CPU per cell rendering and parsing the scenario before the measured interval starts. That is about 96 min of main-thread CPU across this batch, and 6% of one core during measurement. Tracked as `bgperf2-dyr`; it is outside this plan.
 
 Item 2 config: `benchmarks/2026-comparison-mrt.yaml`, item 1's config with only the workload changed (10 bgpdump2 peers on `mrt/rib.20260808.0000`, `prefixes: 1_050_000`) and seed 202632. Launched 2026-10-02 after the operator confirmed it; results go to `results/2026/2026-comparison/mrt/`.
+
+Item 2, 2026-10-02 06:11–07:12 UTC: 14 cells × 3 passes, same pinning and host, seed 202632. Log: `/data/bgperf-work/logs/2026-comparison-mrt-20261002T061109.*`. 39 rows converged and 3 failed. Per-cell `elapsed (s)`, the monitor's final count and the limiting component, from `2026-comparison-mrt.summary.json` and each row's `events.json`:
+
+| cell | passes | median | monitor final | limiting component |
+|---|---|---|---|---|
+| BIRD 2.19.2 | 29, 32, 29 | 29 | 1,056,779 | `tester` ×3 |
+| BIRD 3.3.2 (default threads) | 41, 39, 40 | 40 | 1,056,779 | `tester` ×3 |
+| BIRD 3.3.2 (4 threads) | 36, 36, 36 | 36 | 1,056,779 | `tester` ×3 |
+| BIRD master | 35, 33, 31 | 33 | 1,056,779 | `tester` ×3 |
+| FRR 8.5 | 97, 67, 97 | 97 | 968,635–973,203 | `inconclusive` ×3 |
+| FRR 9.1 | 97, 97, 97 | 97 | 968,523–974,411 | `inconclusive` ×3 |
+| FRR 10.0 | 97, 68, 70 | 70 | 965,351–971,501 | `inconclusive` ×3 |
+| FRR 10.7 | 97, 97, 96 | 97 | 972,788–974,642 | `inconclusive` ×3 |
+| FRR master | 94, 96, 94 | 94 | 970,320–972,985 | `inconclusive` ×3 |
+| OpenBGPD 8.8 | 121, 122, 121 | 121 | 1,056,779 | `target_or_monitor` ×3 |
+| OpenBGPD 9.2 | 77, 77, 76 | 77 | 1,056,779 | `target_or_monitor` ×3 |
+| OpenBGPD 9.3 | 75, 75, 76 | 75 | 1,056,779 | `target_or_monitor` ×3 |
+| RustyBGP 2026-02 | failed ×3 | — | 0 | `inconclusive` ×3 |
+| RustyBGP master | 25, 23, 23 | 23 | 1,081,180 | `tester` ×3 |
+
+Read these with four things in mind:
+- **RustyBGP 2026-02 has no MRT measurement.** In all three passes the sink refused one of its UPDATEs with `sent notification 3/11: malformed message type 2: unknown AS_PATH seg type` (`instrument.sink_log.last_refused`). That reset the monitor session, and the count fell to 0 by 7–18 s. The same build delivered 1,081,178 to the GoBGP 4.9.0 monitor in the timing-validation MRT blocks (2026-09-11), and the sink is built on the same `gobgp/v4 v4.9.0` packet library. Phase 7a's sink checks ran RustyBGP master, not 2026-02, on MRT, so this pairing was never run before. Whether the build emits a malformed AS_PATH that gobgpd tolerated, or the sink decodes differently from gobgpd, is not determined: `bgperf2-f22`, ledger §8 entry 5. Because the cell has no observation, the variance rule withholds a verdict for every cell grouped with it.
+- **FRR's check-point is unsound on this RIB, as Phase 1.1 found.** Its monitor count sits 65–74k under the 1,039,500 required in every row, so every row is `inconclusive` (`missing_timing_evidence`). Every row has a resolved `target_table.delivery` with `exported_final == monitor_final`. Its range here, 965,351–974,642, sits above the 956,893–961,057 the GoBGP-monitor rows recorded, which is consistent with an arrival-order cause but is not checked.
+- **FRR's `elapsed (s)` is a tail.** Every FRR row reaches 99.9% of its final count by 59–74 s. In 12 of 15 rows a last 4 to ~225 prefixes then reach the monitor at 92–95 s, after a ~25 s quiet gap. The three rows without it are the 67–70 s values. A median of 97 therefore measures that tail, not the table. Not explained: `bgperf2-5du`, ledger §8 entry 6.
+- **OpenBGPD resolves to `target_or_monitor` in all nine rows** (`post_injection_tail`). This is the evidence the hardware gate reads. The gate is read after item 3, so no row of its table is chosen here. Every row's `max foreign cpu %` stayed under the 100% contention threshold, and the lowest `min free mem` was 45.7 GB (RustyBGP master, peak 11.5 GB).
+
+The batch's variance rule cannot separate four pairs at n=3: FRR 8.5 from 10.7, 9.1 from 8.5, master from 8.5, and FRR 10.0 from OpenBGPD 9.2 and 9.3. It recommends `repetitions: 5` for each.
+
+**Before item 3, the operator decides how RustyBGP 2026-02's MRT cell is measured.** The plan records two routes. One is to re-check that cell with `monitor: gobgp`, which this phase keeps selectable for exactly this case. Its rows would then be on a different instrument from every other cell. The other is to resolve `bgperf2-f22` first and re-run the cell on the sink. Item 3's subset should also include RustyBGP master, as item 1 recorded.
 
 ---
 
@@ -444,6 +473,14 @@ named check would confirm it.
    the log (`frr.py` `write_config()`). No other daemon is configured to log at debug level.
    `bgpd.log` passes 1 GB on a full-table run. The CPU and I/O this costs FRR is part of
    every FRR row and **has not been measured**.
+5. **RustyBGP 2026-02 and the sink monitor cannot hold an MRT session.** The sink resets it
+   with NOTIFICATION 3/11 ("unknown AS_PATH seg type") in every pass. RustyBGP master, and
+   every other daemon, are unaffected, and gobgpd 4.9.0 kept the same build's session on
+   2026-09-11. Not yet attributed to either side. Effect: that cell has no MRT row on the sink.
+   Phase 3 item 2; `bgperf2-f22`.
+6. **FRR delivers its last few MRT prefixes (4 to ~225) about 25 s after the rest**, in 12 of 15 rows
+   of Phase 3 item 2. Effect: FRR's MRT `elapsed (s)` is bimodal (67–70 or 94–97 s) and its
+   median measures the tail. Not explained; `bgperf2-5du`.
 
 ---
 

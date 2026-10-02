@@ -768,22 +768,33 @@ Items, in order:
    per build and arrangement, `elapsed (s)` beside the hold-timer-expired session count (§8
    entry 7). Does head keep the bimodal time and the expiries, and do the expiries still follow the
    time? About 1.5 h. Confirm with the operator before the run.
-3. **Full-table peer curve, 10 → 17 distinct peers, all 14 builds.** MRT, steps of 10, 14 and 17
-   peers, three passes each, one pin across the whole curve, chosen and stated in the config when the
-   item starts. The testers need more cores than Phase 3's six at 17 generators. Stop a cell at the
-   20% free-memory guardrail (`docs/2026-memory-capacity-options.md`). The NO_EXPORT peer (index
-   10) is in every step, so FRR's check-point stays unsound and its rows are read through
-   `target_table.delivery`, as in Phase 3. 14 builds × 3 steps × 3 passes is 126 rows, about 9 h at
-   Phase 4 item 2's rate. It may run as one batch per step, each confirmed with the operator.
-4. **Survey 2026 RIBs for more full-table peers (read-only).** For each candidate collector (RIPE RIS
+3. **Full-table peer curve on RIS rrc00, from 10 peers, all 14 builds.** Changed 2026-10-02 by the
+   operator's decision on item 4 (Progress). The original plan was 10 → 17 peers on route-views2.
+   MRT, on `bview.20260808.0000` from rrc00, decompressed into `mrt/`. Three passes per step. The
+   steps and the pin are chosen and stated in the config when the item starts, and the pin is one
+   for the whole curve. The steps run from 10 up to rrc00's 38 distinct full-table peers. Past 38,
+   if the curve needs more, the generators wrap around rrc00
+   (`get_index_useful_neighbor()` takes `mrt-index` modulo the valid indexes, so no code change
+   is needed). Wrapped steps add sessions carrying identical paths, not a wider table, and are
+   labelled that way. Before the first row, `bgpdump2 -c` inside `bgperf/bgpdump2` must reproduce
+   the survey's 38 indexes on that file. The survey's counts came from its own parser, and
+   bgpdump2 has not read an RIS bview here. The testers need more cores than Phase 3's six. Stop a
+   cell at the 20% free-memory guardrail (`docs/2026-memory-capacity-options.md`). None of rrc00's
+   full-table peers tags a route NO_EXPORT, so FRR's check-point is sound on this RIB, unlike on
+   route-views2. These rows form their own series. Phase 3's and item 2's route-views2 MRT rows do
+   not sit on the same curve. Row count and hours are estimated once the steps are chosen. It may run
+   as one batch per step, each confirmed with the operator.
+4. ~~**Survey 2026 RIBs for more full-table peers (read-only).** For each candidate collector (RIPE RIS
    `rrc00` and the other Route Views collectors), take a RIB from the same day as
    `rib.20260808.0000` and record: peer count, full-table peer count, table size, and peers whose
    routes carry NO_EXPORT. It downloads and reads files, so it never runs while a benchmark does.
    **Exit:** a table of collectors, and an operator decision on the axis past 17: a new RIB,
-   wrap-around, or stop at 17.
+   wrap-around, or stop at 17.~~ Done 2026-10-02, `a945db8`, with the operator's decision recorded
+   in Progress.
 
 **Exit:** items 1–4 done. Each build's curve is recorded with `elapsed (s)`, `received` and peak
-memory per step, and the operator has decided the axis past 17.
+memory per step, and the operator has decided the axis past 17 (decided 2026-10-02: rrc00, then
+wrap-around on rrc00).
 
 Progress: started 2026-10-02 on the `m7a.8xlarge` (`lscpu`: AMD EPYC 9R14, 32 CPUs, one thread per
 core).
@@ -838,6 +849,9 @@ peer more than once.
 - **Wrap-around** on route-views2. Past 17, generators replay peers already in use: more sessions
   carrying identical paths, not a wider table.
 - **Stop at 17.**
+
+**Operator decision, 2026-10-02: the new RIB, rrc00. If the curve needs more peers than its 38,
+wrap around rrc00, not route-views2.** Item 3 is rewritten to match, and item 4 is done.
 
 ---
 

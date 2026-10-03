@@ -786,7 +786,7 @@ Items, in order:
    route-views2. These rows form their own series. Phase 3's and item 2's route-views2 MRT rows do
    not sit on the same curve. Row count and hours are estimated once the steps are chosen. It may run
    as one batch per step, each confirmed with the operator. Started 2026-10-03: steps 10, 17, 24, 31
-   and 38, configs `2006500`. Step 10 done 2026-10-03; step 17 launched 2026-10-03 on the operator's
+   and 38, configs `2006500`. Steps 10 and 17 done 2026-10-03; step 24 waits on the operator's
    confirmation. See Progress.
 4. ~~**Survey 2026 RIBs for more full-table peers (read-only).** For each candidate collector (RIPE RIS
    `rrc00` and the other Route Views collectors), take a RIB from the same day as
@@ -1006,6 +1006,54 @@ Step 17 was confirmed by the operator and launched 2026-10-03 03:17 UTC (`lscpu`
 thread per core). Step 10's last cell (OpenBGPD) was still up and idle, and the batch removed it on start.
 Log: `/data/bgperf-work/logs/2026-comparison-rrc00-n17-20261003T031714.*`. Results:
 `results/2026/2026-comparison/rrc00-n17/`.
+
+Step 17 ran 03:17–04:59 UTC, 102 min against the 1.7 h estimate. All 42 rows converged, with no
+tester errors or timeouts, and every row offered 17,850,000 prefixes (17 × 1,050,000) from all 17
+generators. `min free mem (GB)` bottomed at 89.81 of 123.12 (RustyBGP 2026-08), inside the 20%
+guardrail (24.6). `max foreign cpu %` peaked at 12. `elapsed (s)` per pass, the monitor's `received`,
+peak target memory and the limiting component, from the CSV, `2026-comparison-rrc00-n17.summary.json`
+and each row's `events.json`:
+
+| cell | passes | median | received | max mem (GB) | limiting component |
+|---|---|---|---|---|---|
+| BIRD 2.19.2 | 73, 76, 71 | 73 | 1,107,434 | 2.12 | `tester` ×3 |
+| BIRD 3.3.2 (default threads) | 69, 75, 84 | 75 | 1,107,434 | 2.71 | `tester` ×3 |
+| BIRD 3.3.2 (4 threads) | 74, 77, 71 | 74 | 1,107,434 | 2.72 | `tester` ×3 |
+| BIRD master | 72, 72, 77 | 72 | 1,107,434 | 2.12 | `tester` ×3 |
+| FRR 8.5 | 160, 161, 160 | 160 | 1,107,631 | 8.39 | `tester` ×3 |
+| FRR 9.1 | 161, 160, 160 | 160 | 1,107,631 | 8.89 | `tester` ×3 |
+| FRR 10.0 | 140, 160, 139 | 140 | 1,107,115–1,107,631 | 8.73 | `tester` ×3 |
+| FRR 10.7 | 133, 134, 133 | 133 | 1,107,379 | 9.85 | `target_or_monitor` ×3 |
+| FRR master | 135, 134, 134 | 134 | 1,107,379–1,107,434 | 9.86 | `target_or_monitor` ×3 |
+| OpenBGPD 8.8 | 272, 281, 275 | 275 | 1,107,434 | 8.38 | `target_or_monitor` ×3 |
+| OpenBGPD 9.2 | 169, 169, 176 | 169 | 1,107,434 | 4.86 | `target_or_monitor` ×3 |
+| OpenBGPD 9.3 | 168, 172, 170 | 170 | 1,107,434 | 4.85 | `target_or_monitor` ×3 |
+| RustyBGP 2026-02 | 20, 21, 21 | 21 | 1,107,631 | 4.17 | `target_or_monitor`, `tester` ×2 |
+| RustyBGP 2026-08 | 54, 53, 56 | 54 | 1,107,631 | 26.59 | `tester` ×3 |
+
+The summary's variance rule cannot separate four groups at n=3: all four BIRD cells; FRR 8.5 and 9.1;
+FRR 10.0, 10.7 and master (10.0 against each of the other two); and OpenBGPD 9.2 and 9.3.
+
+Observations, recorded and not explained:
+- **FRR 8.5 and 9.1 deliver RustyBGP's count, 197 above BIRD and OpenBGPD** (1,107,631 against
+  1,107,434), in all six rows. At step 10 they delivered about 3,500 fewer than BIRD. FRR 10.7
+  delivers 55 fewer than BIRD in all three rows, and master matches BIRD in two of three.
+- **FRR 10.0's one slow pass is the one that delivered the larger count**: pass 2 took 160 s and
+  received 1,107,631, as 8.5 and 9.1 do, and passes 1 and 3 took 139–140 s and received
+  1,107,115–1,107,152.
+- **FRR 10.7 and master's verdict moved from `tester` at step 10 to `target_or_monitor`**, and
+  10.7's step-10 bimodal time did not recur (133–134 s).
+- **RustyBGP 2026-08's peak memory grew 2.3× for 1.7× the peers** (11.39 → 26.59 GB). 2026-02 grew
+  from 2.33 to 4.17 GB. Elapsed grew from 25 to 54 s for 2026-08, and 13 to 21 s for 2026-02.
+- **The sink's `unknown evpn subtype: 249` treat-as-withdraw** recurred in all six RustyBGP rows and
+  one BIRD row (3.3.2 4 threads, pass 3), which still ended at 1,107,434.
+
+Step 10's rate per offered prefix put step 17 at 1.7 h, and it took 1.7 h. The same rate puts step 24
+(25,200,000 offered) at about 2.4 h. Free memory fell 16.7 GB for RustyBGP 2026-08 between steps 10
+and 17. Extrapolated linearly, it would bottom near 73 GB at step 24, and near 39 GB at step 38, both
+above the guardrail. Each step's reading still comes before the next step is confirmed.
+
+Next: step 24 (`benchmarks/2026-comparison-rrc00-n24.yaml`), after the operator confirms it.
 
 ---
 

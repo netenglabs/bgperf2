@@ -786,8 +786,8 @@ Items, in order:
    route-views2. These rows form their own series. Phase 3's and item 2's route-views2 MRT rows do
    not sit on the same curve. Row count and hours are estimated once the steps are chosen. It may run
    as one batch per step, each confirmed with the operator. Started 2026-10-03: steps 10, 17, 24, 31
-   and 38, configs `2006500`. Step 10 done 2026-10-03; step 17 waits on the operator's confirmation. See
-   Progress.
+   and 38, configs `2006500`. Step 10 done 2026-10-03; step 17 launched 2026-10-03 on the operator's
+   confirmation. See Progress.
 4. ~~**Survey 2026 RIBs for more full-table peers (read-only).** For each candidate collector (RIPE RIS
    `rrc00` and the other Route Views collectors), take a RIB from the same day as
    `rib.20260808.0000` and record: peer count, full-table peer count, table size, and peers whose
@@ -1001,6 +1001,11 @@ Observations, recorded and not explained:
 
 Next: step 17 (`benchmarks/2026-comparison-rrc00-n17.yaml`), after the operator confirms it. At
 step 10's rate per offered prefix, it should take about 1.7 h.
+
+Step 17 was confirmed by the operator and launched 2026-10-03 03:17 UTC (`lscpu`: EPYC 9R14, 32 CPUs, one
+thread per core). Step 10's last cell (OpenBGPD) was still up and idle, and the batch removed it on start.
+Log: `/data/bgperf-work/logs/2026-comparison-rrc00-n17-20261003T031714.*`. Results:
+`results/2026/2026-comparison/rrc00-n17/`.
 
 ---
 

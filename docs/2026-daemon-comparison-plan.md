@@ -785,7 +785,8 @@ Items, in order:
    full-table peers tags a route NO_EXPORT, so FRR's check-point is sound on this RIB, unlike on
    route-views2. These rows form their own series. Phase 3's and item 2's route-views2 MRT rows do
    not sit on the same curve. Row count and hours are estimated once the steps are chosen. It may run
-   as one batch per step, each confirmed with the operator.
+   as one batch per step, each confirmed with the operator. Started 2026-10-03: steps 10, 17, 24, 31
+   and 38, configs `2006500`. Step 10 is running. See Progress.
 4. ~~**Survey 2026 RIBs for more full-table peers (read-only).** For each candidate collector (RIPE RIS
    `rrc00` and the other Route Views collectors), take a RIB from the same day as
    `rib.20260808.0000` and record: peer count, full-table peer count, table size, and peers whose
@@ -927,6 +928,32 @@ its cause stays **not determined**. The archived logs show that a kept log would
 either. At default verbosity `rustybgpd` writes only its start banner, so only a panic would have
 shown. These five rows stand beside the four converged passes of item 2's cell, and the failed row
 stays on disk.
+
+Item 3 started 2026-10-03. Before the first row, `bgpdump2 -c` in `bgperf/bgpdump2` read
+`mrt/bview.20260808.0000` (the survey's rrc00 file, decompressed). It matches the survey's IPv4 count at
+all 108 indexes, and it gives the same 38 indexes at or above 1,050,000, from 35 ASes. Their counts run
+from 1,050,381 to 1,104,164. Output:
+`/data/bgperf-work/scratch/rib-survey/rrc00.bgpdump2c.txt`. Generator *i* replays the *i*-th of those
+indexes, so each step's peers are a prefix of the next step's.
+
+Choices, stated in each config (`2006500`):
+- **Steps:** 10, 17, 24, 31 and 38 peers, one batch per step, `benchmarks/2026-comparison-rrc00-n<N>.yaml`.
+  No wrapped step is configured.
+- **Matrix:** Phase 3's 14 builds. RustyBGP's default build runs as `2026-08`, image `c6ecdbef4ec5`, the
+  retagged `latest`.
+- **Pin:** `target=0-7,monitor=8-9,testers=10-27`, one pin for the whole curve. Cores 28–31 go to the
+  controller.
+- **Passes and order:** three passes, shuffled, seed `202653<N>`. That makes 42 rows per step and 210 in
+  all.
+- **Memory:** the memory note's envelope puts about 50 full-table peers within the 20% guardrail on this
+  host. Each step's `min free mem (GB)` is read before the next step is confirmed.
+
+The estimate is about 1.2 h for step 10, rising to about 3.5 h for step 38, roughly 11 h in all.
+Step 10 calibrates it.
+
+Step 10 was confirmed by the operator and launched 2026-10-03 01:33 UTC (`lscpu`: EPYC 9R14, 32 CPUs, one
+thread per core). Log: `/data/bgperf-work/logs/2026-comparison-rrc00-n10-20261003T013337.*`. Results:
+`results/2026/2026-comparison/rrc00-n10/`.
 
 ---
 

@@ -1,0 +1,109 @@
+# 2026 daemon comparison, Phase 5 item 3: full-table peer curve on RIPE RIS
+# rrc00, step 1 of 5, 10 peers (docs/2026-daemon-comparison-plan.md §9, run ID
+# 2026-comparison). Host: the on-demand m7a.8xlarge (EPYC 9R14, 32 CPUs, one
+# thread per core); confirm with `lscpu` before each step.
+#
+# CURVE. Five steps, one batch each, every step confirmed with the operator:
+# 10, 17, 24, 31, 38 peers (`2026-comparison-rrc00-n<N>.yaml`). 38 is every
+# distinct full-table peer rrc00 has. The steps differ only in `neighbors`,
+# test name and seed. Past 38 the generators would wrap around rrc00's indexes
+# (same paths, more sessions); no such step is configured.
+#
+# RIB. `mrt/bview.20260808.0000`, RIS rrc00 at 2026-08-08 00:00 UTC, the
+# survey's file decompressed. `bgpdump2 -c` in `bgperf/bgpdump2` reproduces the
+# survey's IPv4 count at all 108 indexes, and gives the same 38 indexes at or
+# above 1,050,000 (6, 8, 10, 12, 16-19, 32, 36, 39, 43, 45, 47, 48, 53, 55,
+# 57-60, 65, 67, 68, 74, 77-79, 88-90, 96, 98, 100, 101, 105-107; 35 ASes).
+# Generator i replays the i-th of those, so each step is a prefix of the
+# step above. None of them tags a route NO_EXPORT, so FRR's check-point is
+# sound here, unlike on route-views2.
+#
+# These rows are their own series. They do not sit on a curve with Phase 3's
+# or item 2's route-views2 MRT rows: a different table (largest peer 1,104,164
+# against 1,079,184) and a different host.
+#
+# WORKLOAD. As Phase 3's `2026-comparison-mrt.yaml`: bgpdump2 injectors,
+# `prefixes: 1_050_000` caps each injector and sets the check-point, no
+# policy. Do not add `prefix_scope: total`; it is refused for an MRT generator.
+#
+# MATRIX. Phase 3's fourteen builds. RustyBGP's default build is published as
+# `2026-08` (`bgperf2-c5d`): the `2026-08` tag is the retagged `latest`, image
+# c6ecdbef4ec5, the binary Phases 3 and 4 benched. No `openbgp default` cell:
+# `openbgp:latest` is 9.3.
+#
+# PIN. One for the whole curve: target=0-7, monitor=8-9, testers=10-27, so the
+# target and monitor keep Phase 3's cores and 38 injectors get 18 cores, not
+# six. Cores 28-31 are left to the controller and the kernel.
+#
+# MEMORY. The 20% free-memory guardrail on this 123 GiB host allows about 50
+# full-table peers by docs/2026-memory-capacity-options.md's envelope. Each
+# step's `min free mem (GB)` is read before the next step is confirmed; a
+# step that went below 20% stops the curve.
+#
+# PASSES. `repetitions: 3`, so the whole matrix repeats.
+#
+# ORDER. `order: shuffle`, seed by item 1's rule extended with the step:
+# year, phase, item, peers -> 2026-5-3-10.
+tests:
+  -
+     name: 2026-comparison-rrc00-n10
+     monitor: sink
+     pin: target=0-7,monitor=8-9,testers=10-27
+     repetitions: 3
+     neighbors: [10]
+     prefixes: [1_050_000]
+     filter_test: [None]
+     order: shuffle
+     seed: 20265310
+     targets:
+       -
+         name: bird
+         version: 2.19.2
+         label: bird 2.19.2
+         tester_type: bgpdump2
+         mrt_file: mrt/bview.20260808.0000
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (default threads)
+         tester_type: bgpdump2
+         mrt_file: mrt/bview.20260808.0000
+       -
+         name: bird
+         version: 3.3.2
+         label: bird 3.3.2 (4 threads)
+         threads: 4
+         tester_type: bgpdump2
+         mrt_file: mrt/bview.20260808.0000
+       -
+         name: bird
+         label: bird default
+         tester_type: bgpdump2
+         mrt_file: mrt/bview.20260808.0000
+       -
+         name: frr_c
+         versions: [8.5, 9.1, 10.0, 10.7]
+         tester_type: bgpdump2
+         mrt_file: mrt/bview.20260808.0000
+       -
+         name: frr_c
+         label: frr default
+         tester_type: bgpdump2
+         mrt_file: mrt/bview.20260808.0000
+       -
+         name: openbgp
+         versions: [8.8, 9.2, 9.3]
+         tester_type: bgpdump2
+         mrt_file: mrt/bview.20260808.0000
+       -
+         name: rustybgp
+         version: 2026-02
+         label: rustybgp 2026-02
+         tester_type: bgpdump2
+         mrt_file: mrt/bview.20260808.0000
+       -
+         name: rustybgp
+         version: 2026-08
+         label: rustybgp 2026-08
+         tester_type: bgpdump2
+         mrt_file: mrt/bview.20260808.0000

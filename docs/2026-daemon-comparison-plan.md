@@ -786,7 +786,8 @@ Items, in order:
    route-views2. These rows form their own series. Phase 3's and item 2's route-views2 MRT rows do
    not sit on the same curve. Row count and hours are estimated once the steps are chosen. It may run
    as one batch per step, each confirmed with the operator. Started 2026-10-03: steps 10, 17, 24, 31
-   and 38, configs `2006500`. Step 10 is running. See Progress.
+   and 38, configs `2006500`. Step 10 done 2026-10-03; step 17 waits on the operator's confirmation. See
+   Progress.
 4. ~~**Survey 2026 RIBs for more full-table peers (read-only).** For each candidate collector (RIPE RIS
    `rrc00` and the other Route Views collectors), take a RIB from the same day as
    `rib.20260808.0000` and record: peer count, full-table peer count, table size, and peers whose
@@ -954,6 +955,52 @@ Step 10 calibrates it.
 Step 10 was confirmed by the operator and launched 2026-10-03 01:33 UTC (`lscpu`: EPYC 9R14, 32 CPUs, one
 thread per core). Log: `/data/bgperf-work/logs/2026-comparison-rrc00-n10-20261003T013337.*`. Results:
 `results/2026/2026-comparison/rrc00-n10/`.
+
+Step 10 ran 01:33–02:34 UTC, 61 min against the 1.2 h estimate. All 42 rows converged, with no
+tester errors or timeouts, and every row offered 10,500,000 prefixes (10 × 1,050,000) from all 10
+generators. `min free mem (GB)` bottomed at 106.52 of 123.12 (RustyBGP 2026-08), far inside the 20%
+guardrail. `max foreign cpu %` peaked at 17. `elapsed (s)` per pass, the monitor's `received`, peak
+target memory and the limiting component, from the CSV, `2026-comparison-rrc00-n10.summary.json` and
+each row's `events.json`:
+
+| cell | passes | median | received | max mem (GB) | limiting component |
+|---|---|---|---|---|---|
+| BIRD 2.19.2 | 38, 37, 36 | 37 | 1,106,406 | 1.23 | `tester` ×3 |
+| BIRD 3.3.2 (default threads) | 40, 41, 39 | 40 | 1,106,406 | 1.63 | `tester` ×3 |
+| BIRD 3.3.2 (4 threads) | 37, 41, 36 | 37 | 1,106,406 | 1.65 | `tester` ×3 |
+| BIRD master | 38, 37, 39 | 38 | 1,106,406 | 1.24 | `tester` ×3 |
+| FRR 8.5 | 71, 70, 73 | 71 | 1,103,117–1,103,299 | 5.13 | `tester` ×3 |
+| FRR 9.1 | 72, 73, 73 | 73 | 1,102,893–1,103,107 | 5.40 | `tester` ×3 |
+| FRR 10.0 | 74, 73, 73 | 73 | 1,106,178 | 5.37 | `tester` ×3 |
+| FRR 10.7 | 98, 86, 98 | 98 | 1,105,896–1,106,406 | 6.06 | `tester` ×3 |
+| FRR master | 84, 85, 85 | 85 | 1,106,334–1,106,406 | 6.08 | `tester` ×3 |
+| OpenBGPD 8.8 | 150, 151, 151 | 151 | 1,106,406 | 5.06 | `target_or_monitor` ×3 |
+| OpenBGPD 9.2 | 90, 90, 89 | 90 | 1,106,406 | 3.07 | `target_or_monitor` ×3 |
+| OpenBGPD 9.3 | 89, 91, 89 | 89 | 1,106,406 | 3.06 | `target_or_monitor` ×3 |
+| RustyBGP 2026-02 | 13, 13, 13 | 13 | 1,106,599–1,106,601 | 2.33 | `tester` ×3 |
+| RustyBGP 2026-08 | 26, 24, 25 | 25 | 1,106,601 | 11.39 | `tester` ×3 |
+
+The summary's variance rule cannot separate three groups at n=3: the BIRD 2.19.2, 3.3.2 (both
+arrangements) and master cells; FRR 8.5, 9.1 and 10.0; and OpenBGPD 9.2 and 9.3.
+
+Observations, recorded and not explained:
+- **FRR's `received` is far closer to the union here than on route-views2.** FRR 10.0 and later
+  deliver within 510 of BIRD's 1,106,406, and 8.5 and 9.1 within about 3,500. On route-views2 FRR
+  delivered ~97k fewer than BIRD (§8 entry 2). Its verdict is `tester`, where it was `inconclusive`
+  on route-views2.
+- **RustyBGP delivers 195 more prefixes than BIRD and OpenBGPD** (1,106,601 against 1,106,406). On
+  route-views2 the difference was NO_EXPORT (§8 entry 1), but none of rrc00's full-table peers
+  tags a route NO_EXPORT, so that does not explain these 195.
+- **The sink treated one UPDATE as a withdrawal** (`kept_messages` 1,
+  `treat-as-withdraw 3/1: unknown evpn subtype: 249`) in all six RustyBGP rows and in three BIRD
+  rows (3.3.2 pass 1 in both arrangements, master pass 3). Its packet library rejects an extended
+  community this RIB carries. The BIRD rows that kept it still ended at 1,106,406, the same as
+  those that did not. RustyBGP 2026-02 pass 2 kept 3 messages, the last one §8 entry 5's
+  `unknown AS_PATH seg type`, and ended 2 prefixes short of its other passes, as entry 5 predicts.
+- **FRR 10.7's bimodal time** (86 or 98 s) has the shape of §8 entry 6's delivery tail.
+
+Next: step 17 (`benchmarks/2026-comparison-rrc00-n17.yaml`), after the operator confirms it. At
+step 10's rate per offered prefix, it should take about 1.7 h.
 
 ---
 

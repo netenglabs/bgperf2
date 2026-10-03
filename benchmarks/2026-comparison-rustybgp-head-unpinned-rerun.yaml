@@ -1,0 +1,32 @@
+# 2026 daemon comparison, Phase 5 item 2, re-run of one cell: RustyBGP 2026-09
+# (783d6dfd00) on synthetic 50 x 100k, unpinned, five passes
+# (docs/2026-daemon-comparison-plan.md §9, run ID 2026-comparison).
+#
+# WHY. Pass 5 of this cell in `benchmarks/2026-comparison-rustybgp-head.yaml`
+# failed at 16 s with nothing at the monitor, and the target's log was
+# overwritten by the next run before it was read. The operator decided on
+# 2026-10-03 to re-run the cell. Each pass's rustybgp.log and the container's
+# exit state are archived by a watcher outside bgperf2, so a failure this time
+# can be read.
+#
+# SHAPE. Item 2's unpinned test narrowed to this one target, nothing else
+# changed: same workload, monitor, image and passes. Its own test name, so it
+# cannot rewrite item 2's CSV, progress or summary. The failed row stays on
+# disk under `results/2026/2026-comparison/rustybgp-head/`.
+#
+# ORDER. One cell per pass, so there is nothing to shuffle: `order: matrix`.
+tests:
+  -
+     name: 2026-comparison-rustybgp-head-unpinned-rerun
+     monitor: sink
+     repetitions: 5
+     neighbors: [50]
+     prefixes: [100_000]
+     filter_test: [None]
+     order: matrix
+     targets:
+       -
+         name: rustybgp
+         version: 2026-09
+         label: rustybgp 2026-09
+         tester_type: bird

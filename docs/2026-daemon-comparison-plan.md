@@ -910,8 +910,23 @@ converged unpinned pass recorded a `prefix received (s)` of 1. The last neighbou
 the failed pass returned nothing from RustyBGP's gRPC, so the target's `neighbors_received` of 0 is
 not established as a count. The target's own log was overwritten by the next run before anyone read
 it, so whether head stalled, crashed or was only late is **not determined**. It is one pass of 15
-`2026-09` runs here, and `2026-08` had none in 15. Whether to re-run the cell, or reproduce it with
-the target's log kept, is for the operator.
+`2026-09` runs here, and `2026-08` had none in 15.
+
+**Operator decision, 2026-10-03: re-run the cell.** It ran 2026-10-03 01:03–01:20 UTC on the same
+host: item 2's unpinned test narrowed to `2026-09`, five passes, `order: matrix`, under its own test
+name (`benchmarks/2026-comparison-rustybgp-head-unpinned-rerun.yaml`, `1da4130`). Log:
+`/data/bgperf-work/logs/2026-comparison-rustybgp-head-unpinned-rerun-20261003T010350.*`. Results:
+`results/2026/2026-comparison/rustybgp-head-unpinned-rerun/`. A watcher outside bgperf2 archived each
+pass's `rustybgp.log`, and the container's start, die and OOM events, to
+`/data/bgperf-work/logs/rustybgp-head-rerun-target-logs/`.
+
+All five passes converged with 5,000,000 received and no tester errors: `elapsed (s)` 39, 40, 41, 39,
+47, median 40.0 (`*.summary.json`). Every target died with exit 137 at teardown, after its row, and
+none reported OOM. The failure did not recur: it is one failed pass in 20 unpinned `2026-09` runs, and
+its cause stays **not determined**. The archived logs show that a kept log would not have settled it
+either. At default verbosity `rustybgpd` writes only its start banner, so only a panic would have
+shown. These five rows stand beside the four converged passes of item 2's cell, and the failed row
+stays on disk.
 
 ---
 

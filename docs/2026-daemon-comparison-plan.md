@@ -727,7 +727,8 @@ named check would confirm it.
    passes without it took 88 and 93 s. Every run still converged with the full table. RustyBGP
    2026-02, BIRD, FRR and OpenBGPD show none. Effect: master's synthetic time is bimodal. Whether the
    expiries slow the run, or a slow run causes them, is not determined, and no one role's cores move it
-   (§6 item 3). Measured at `9eeeebbd50`, not current head (`bgperf2-97u`).
+   (§6 item 3). Head `783d6dfd00` (`2026-09`) keeps the expiries on every pinned pass and none
+   unpinned; §9 item 2.
 ---
 
 ## 9. Phase 5 — keep measuring on the m7a.8xlarge
@@ -759,15 +760,16 @@ Items, in order:
    in `RustyBGP.VERSION_REFS` (`bgperf2-c5d`). Re-read §8 entry 1's export path at `9eeeebbd50`
    (`bgperf2-kpf`). **Exit:** tests green; `dockerfile rustybgp --version 2026-08` renders that
    commit; §8 entry 1 cites the built commit.~~ Done 2026-10-02, `e5e39a7`. See Progress.
-2. **RustyBGP head against 2026-08 (`bgperf2-97u`).** Build current upstream head without cache, as
-   its own dated tag, and `verify` it. Then run head and 2026-08, five passes each:
-   - synthetic 50 × 100k, pinned with Phase 3's `target=0-7,monitor=8-9,testers=10-15` and unpinned;
-   - MRT 10 × 1.05 M, pinned.
+2. ~~**RustyBGP head against 2026-08 (`bgperf2-97u`).** Build current upstream head without cache, as
+   its own dated tag, and `verify` it. Then run head and 2026-08, five passes each:~~
+   ~~- synthetic 50 × 100k, pinned with Phase 3's `target=0-7,monitor=8-9,testers=10-15` and unpinned;~~
+   ~~- MRT 10 × 1.05 M, pinned.~~
 
-   Unpinned on this host means 32 cores, so those rows compare only with each other. **Reading:**
+   ~~Unpinned on this host means 32 cores, so those rows compare only with each other. **Reading:**
    per build and arrangement, `elapsed (s)` beside the hold-timer-expired session count (§8
    entry 7). Does head keep the bimodal time and the expiries, and do the expiries still follow the
-   time? About 1.5 h. Confirm with the operator before the run.
+   time? About 1.5 h. Confirm with the operator before the run.~~ Done 2026-10-03, `bb70f09` (label)
+   and `55474fa` (config). One unpinned head pass failed. See Progress.
 3. **Full-table peer curve on RIS rrc00, from 10 peers, all 14 builds.** Changed 2026-10-02 by the
    operator's decision on item 4 (Progress). The original plan was 10 → 17 peers on route-views2.
    MRT, on `bview.20260808.0000` from rrc00, decompressed into `mrt/`. Three passes per step. The
@@ -852,6 +854,64 @@ peer more than once.
 
 **Operator decision, 2026-10-02: the new RIB, rrc00. If the curve needs more peers than its 38,
 wrap around rrc00, not route-views2.** Item 3 is rewritten to match, and item 4 is done.
+
+Item 2 ran 2026-10-02 22:56 to 2026-10-03 00:20 UTC, after the operator confirmed it, on this host
+(`lscpu`: EPYC 9R14, 32 CPUs, one thread per core). Config: `benchmarks/2026-comparison-rustybgp-head.yaml`
+(`55474fa`), sink monitor, five passes, shuffle seed 202652. Log:
+`/data/bgperf-work/logs/2026-comparison-rustybgp-head-20261002T225600.*`. Results:
+`results/2026/2026-comparison/rustybgp-head/`.
+
+Builds. Head is `783d6dfd00` (upstream master on 2026-10-02, committed 2026-09-29), labelled `2026-09`
+(`bb70f09`). It is eight commits past `9eeeebbd50`, and none touches `api/`, so the default recipe
+(gobgp CLI 4.7.0) applies. It was built `update rustybgp --version 2026-09 -n` (log
+`/data/bgperf-work/logs/phase5.2-update-rustybgp-2026-09-20261002T225151.log`). `2026-08` is
+`bgperf/rustybgp:latest` retagged (image `c6ecdbef4ec5`), the operator's choice on 2026-10-02, so it
+is the binary Phases 3 and 4 benched. `verify` reported `rustybgpd v0.2.0-783d6dfd00` and
+`v0.2.0-9eeeebbd50` respectively, both clean of instrumentation, and 34 images ok. The two builds
+resolved their dependencies 40 days apart (no `Cargo.lock`), so a difference between them is the
+source and its dependency graph together.
+
+`elapsed (s)` per pass, with the hold-timer-expired session count in brackets. The count is the CSV's
+`tester errors`, and each nonzero count matches the distinct tester logs carrying `Hold timer
+expired` in that row's `tester-health.json`. A row with no tester errors writes no
+`tester-health.json`. Medians from each test's `*.summary.json`:
+
+| build, arrangement | pass 1 | 2 | 3 | 4 | 5 | median |
+|---|---|---|---|---|---|---|
+| 2026-08, synthetic pinned | 148 (5) | 165 (11) | 107 (0) | 155 (7) | 160 (6) | 155.0 |
+| 2026-09, synthetic pinned | 149 (5) | 175 (12) | 152 (7) | 143 (1) | 144 (4) | 149.0 |
+| 2026-08, synthetic unpinned | 43 (0) | 44 (0) | 39 (0) | 37 (0) | 47 (0) | 43.0 |
+| 2026-09, synthetic unpinned | 41 (0) | 43 (0) | 39 (0) | 46 (0) | failed | 42.0, 4 of 5 |
+| 2026-08, MRT pinned | 25 (0) | 24 (0) | 23 (0) | 25 (0) | 24 (0) | 24.0 |
+| 2026-09, MRT pinned | 20 (0) | 19 (0) | 25 (0) | 24 (0) | 24 (0) | 24.0 |
+
+Every converged synthetic row received 5,000,000, and every MRT row 1,081,180. The summary's variance
+rule does not separate the two builds pinned on either workload: synthetic medians 155.0 and 149.0
+inside a combined deviation of 36.3, MRT 24.0 and 24.0 inside 3.5.
+
+Reading:
+- **Head keeps the expiries.** All five pinned synthetic passes of `2026-09` had them (1–12 sessions),
+  as did four of five of `2026-08`. Neither build had any unpinned or on MRT.
+- **The bimodal time is shown by 2026-08 alone in these rows.** Its one pinned pass without expiries
+  took 107 s, and the four with them took 148–165 s. `2026-09` produced no pass without expiries, so
+  these rows neither show its fast mode nor rule it out.
+- **The expiries follow the time only loosely.** In both builds, the pass with the most expiries
+  (11, 12) was the slowest (165, 175 s), and the pass with none was the fastest. Between those, 1
+  expiry took 143 s and 7 took 152–155 s, so the count does not order the times.
+- **Unpinned on 32 cores, neither build expired a session**, and every converged pass took 37–47 s.
+  These rows compare only with each other, not with Phase 3's 16-core unpinned rows.
+
+**The failed pass, `2026-09` unpinned pass 5.** The 15 s no-progress rule (`convergence.py`,
+`NO_PROGRESS_DEADLINE_SECONDS`) ended it at 16 s with `FAILED: stuck received count 0
+neighbors_checked 0`. From its `events.json` and the log: all 50 tester sessions were up and all
+5,000,000 prefixes offered by 7.8 s. The target's memory rose to 7.26 GB, with CPU peaking at
+1,765%. The sink saw its session established and one update, with 0 routes kept and 0 refused. Every
+converged unpinned pass recorded a `prefix received (s)` of 1. The last neighbour read of
+the failed pass returned nothing from RustyBGP's gRPC, so the target's `neighbors_received` of 0 is
+not established as a count. The target's own log was overwritten by the next run before anyone read
+it, so whether head stalled, crashed or was only late is **not determined**. It is one pass of 15
+`2026-09` runs here, and `2026-08` had none in 15. Whether to re-run the cell, or reproduce it with
+the target's log kept, is for the operator.
 
 ---
 

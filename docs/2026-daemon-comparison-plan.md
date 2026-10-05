@@ -1202,6 +1202,19 @@ and those readings stand as written. Its first use is step 38. Step 24's free-me
 31's first RustyBGP 2026-08 row (45.11 GB) project step 38's floor at about 23 GB if the drop per step holds,
 and at 15–20 GB if the target's peak keeps growing about 1.4× per step. Step 31's full reading comes first.
 
+**Operator decision, 2026-10-05 05:47 UTC: the rest of item 3 is approved in advance**, to run
+unattended overnight. This stands in for the per-step confirmation item 3 requires, for step 38 and
+for the re-runs below, and for nothing else:
+- **Step 38 runs as configured, the full 14-build matrix**, once step 31 has finished and its
+  rows have been read. That includes RustyBGP 2026-08 even if step 31's floor projects it below the
+  15% guardrail. A row that falls below 15% is recorded and excluded from the curve. An
+  out-of-memory kill is a failed row (the host has no swap).
+- **A row that converges with `tester_incomplete`** (step 24's problem) is excluded, and its cell
+  is re-run at once, three passes under its own test name, as step 24's RustyBGP re-run was. The
+  excluded row stays on disk.
+- When step 38 is recorded, item 3 and Phase 5 (`bgperf2-0y5.6`) close if their exit criteria
+  hold. The epic stays open: what to publish is still the operator's.
+
 ---
 
 ## Tracking

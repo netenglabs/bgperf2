@@ -1322,6 +1322,28 @@ step's progress and summary before its first cell. The 31 remaining rows take ab
 instance that took the notice was spot, not on-demand as this section's host line says. A spot
 host can be reclaimed mid-step again, and the same command resumes it.
 
+**Operator decisions, 2026-10-05, on running the rest unattended on spot:**
+- **Every remaining step of this plan is approved** (07:15 UTC, while step 38 was launching: "after
+  this i approve of all the steps in the plan, continue ... to the end"). With the 05:47 approval
+  above, this covers step 38, the re-runs its rules call for, and closing item 3 and Phase 5. It
+  covers no decision this plan marks "(operator)" and none it has not written down.
+- **Spot instances stay**, for their cost, and the work is arranged to survive their reclaims.
+- **Unattended continuation.** `ec2m` runs `/data/on-launch.sh` at every launch, as `ubuntu`; the
+  operator installed it. It starts `scripts/spot_boot.sh` detached. On any host but the
+  `m7a.8xlarge` the driver alerts and runs nothing, and the instance **stays up**. On the right
+  host it runs the configs in `/data/bgperf-work/unattended/comparison-queue` in order (`run_comparison_step.sh
+  --wait`, which resumes). After each completed step, it starts one headless Claude session
+  (`scripts/unattended_comparison_prompt.md`) that records the step, edits the queue and reports
+  RECORDED, GATE or FAILED. Headless sessions are **approved by the operator**. They commit to
+  `unattended/comparison`, never master, and the operator merges. They may not start benchmarks,
+  touch docker, push or switch branch.
+- **Alerts go to an ntfy.sh topic**, through `scripts/notify_gate.sh` (closing the channel question
+  of `bgperf2-5p6` for this plan). The topic is in `/data/bgperf-work/unattended.env`, outside the
+  repository. A test message was delivered on 2026-10-05. The operator's own test run on the 8 vCPU
+  host alerted "wrong host" and ran nothing.
+
+The queue holds step 38. Nothing in it runs until a launch lands on an `m7a.8xlarge`.
+
 ---
 
 ## Tracking

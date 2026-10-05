@@ -70,6 +70,17 @@ What stays in the main session, whatever it costs in context:
 - **Commits, and `/code-review` before them.**
 - **Operator decisions.** No model makes them.
 
+## Unattended runs on spot
+
+Since 2026-10-05 the remaining steps also run without a session (plan §9, "Operator decisions,
+2026-10-05, on running the rest unattended on spot"). `scripts/spot_boot.sh` runs the configs in
+`/data/bgperf-work/unattended/comparison-queue` and starts a headless session to record each one, on branch
+`unattended/comparison`. Its log is `/data/bgperf-work/logs/spot-boot-*.log`. In an interactive
+session, check first whether it is running, because it holds the host:
+`pgrep -af 'scripts/spot_boot.sh'`. Also check what is left in the queue and what
+`unattended/comparison` holds that master does not. Never start a batch beside it. The queue is
+the operator's list: add to it only what an approval in the plan names.
+
 ## Running items in parallel
 
 Independent items may run at once, each in its own subagent. An item qualifies only if:

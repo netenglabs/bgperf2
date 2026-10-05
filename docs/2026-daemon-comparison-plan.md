@@ -786,8 +786,9 @@ Items, in order:
    route-views2. These rows form their own series. Phase 3's and item 2's route-views2 MRT rows do
    not sit on the same curve. Row count and hours are estimated once the steps are chosen. It may run
    as one batch per step, each confirmed with the operator. Started 2026-10-03: steps 10, 17, 24, 31
-   and 38, configs `2006500`. Steps 10, 17 and 24 done 2026-10-03. Step 31 waits on an operator
-   decision: step 24 ended one row on a single peer's table (`bgperf2-5o5`). See Progress.
+   and 38, configs `2006500`. Steps 10, 17 and 24 done 2026-10-03. Step 24 ended one row on a single
+   peer's table (`bgperf2-5o5`); the gap is closed in `f1539dd`, and that cell's re-run comes before
+   step 31. See Progress.
 4. ~~**Survey 2026 RIBs for more full-table peers (read-only).** For each candidate collector (RIPE RIS
    `rrc00` and the other Route Views collectors), take a RIB from the same day as
    `rib.20260808.0000` and record: peer count, full-table peer count, table size, and peers whose
@@ -1146,6 +1147,21 @@ bring up, so a row ending the same way is no less likely. The options:
   on to step 31.
 - **Re-run only step 24's RustyBGP 2026-08 cell** (three passes) and continue as configured,
   accepting the gap.
+
+**Operator decision, 2026-10-05: close the gap first**, the second option, which the operator took
+on the session's recommendation. Done in `f1539dd`: a run decided on the monitor's check-point alone
+now converges only when the count has held for the full 20-sample window after every generator
+reported completion. The rule and its limits are in `docs/invariants/convergence.md` ("What the
+looser gate costs"). Two-witness runs, and runs with no offering evidence, are decided as before.
+Checked against every `events.json` on disk: none of the 484 converged two-witness rows is gated.
+The seven one-witness rows whose generators all completed converged 22.6–32.7 s after the last
+completion, so none of them moves either. Steps 10, 17 and 24's other 41 rows stand. 2296 tests
+pass, but the gate has not yet run end to end. The re-run below is its first real run.
+
+Next: re-run step 24's RustyBGP 2026-08 cell, three passes, on `f1539dd` or later, under its own test
+name so the excluded row stays on disk. Its config is written when it starts, and it needs the
+operator's confirmation. Then step 31 (`benchmarks/2026-comparison-rrc00-n31.yaml`), after the
+operator confirms it. At step 24's rate per offered prefix, step 31 (32,550,000 offered) takes about 3.2 h.
 
 ---
 

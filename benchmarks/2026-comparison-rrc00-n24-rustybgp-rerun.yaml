@@ -1,0 +1,34 @@
+# 2026 daemon comparison, Phase 5 item 3, re-run of one cell: RustyBGP 2026-08
+# (9eeeebbd50, image c6ecdbef4ec5) at step 24 of the rrc00 curve, three passes
+# (docs/2026-daemon-comparison-plan.md §9, run ID 2026-comparison).
+#
+# WHY. Pass 1 of this cell in `benchmarks/2026-comparison-rrc00-n24.yaml`
+# converged at 7 s on generator 0's table alone while 23 of 24 generators were
+# still offering (bgperf2-5o5). The operator decided on 2026-10-05 to close
+# that gap first; f1539dd makes a run decided on the monitor's check-point
+# alone wait until every generator has reported completion. This is the first
+# real run of that gate. Run it on f1539dd or later.
+#
+# SHAPE. Step 24's test narrowed to this one target, nothing else changed:
+# same RIB, workload, monitor, pin and image. Its own test name, so it cannot
+# rewrite step 24's CSV, progress or summary. The excluded row stays on disk
+# under `results/2026/2026-comparison/rrc00-n24/`.
+#
+# ORDER. One cell per pass, so there is nothing to shuffle: `order: matrix`.
+tests:
+  -
+     name: 2026-comparison-rrc00-n24-rustybgp-rerun
+     monitor: sink
+     pin: target=0-7,monitor=8-9,testers=10-27
+     repetitions: 3
+     neighbors: [24]
+     prefixes: [1_050_000]
+     filter_test: [None]
+     order: matrix
+     targets:
+       -
+         name: rustybgp
+         version: 2026-08
+         label: rustybgp 2026-08
+         tester_type: bgpdump2
+         mrt_file: mrt/bview.20260808.0000

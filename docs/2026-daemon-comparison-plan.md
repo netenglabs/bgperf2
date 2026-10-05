@@ -788,7 +788,7 @@ Items, in order:
    as one batch per step, each confirmed with the operator. Started 2026-10-03: steps 10, 17, 24, 31
    and 38, configs `2006500`. Steps 10, 17 and 24 done 2026-10-03. Step 24 ended one row on a single
    peer's table (`bgperf2-5o5`). The gap is closed in `f1539dd`, and that cell was re-run on
-   2026-10-05. Step 31 waits on the operator's confirmation. See Progress.
+   2026-10-05. Step 31 launched 2026-10-05. See Progress.
 4. ~~**Survey 2026 RIBs for more full-table peers (read-only).** For each candidate collector (RIPE RIS
    `rrc00` and the other Route Views collectors), take a RIB from the same day as
    `rib.20260808.0000` and record: peer count, full-table peer count, table size, and peers whose
@@ -1185,6 +1185,11 @@ The first one-witness row from now on is its first real exercise, so read its
 
 Next: step 31 (`benchmarks/2026-comparison-rrc00-n31.yaml`), after the operator confirms it, about
 3.2 h.
+
+Step 31 was confirmed by the operator and launched 2026-10-05 02:58 UTC on `17b8b2b` (`lscpu`: EPYC
+9R14, 32 CPUs, one thread per core). The re-run's last cell (RustyBGP) was still up and idle, and the
+batch removed it on start. Log: `/data/bgperf-work/logs/2026-comparison-rrc00-n31-20261005T025839.*`.
+Results: `results/2026/2026-comparison/rrc00-n31/`.
 
 ---
 

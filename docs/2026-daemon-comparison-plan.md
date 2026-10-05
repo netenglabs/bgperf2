@@ -1251,7 +1251,7 @@ Observations, recorded and not explained:
   in this phase. §8 entry 7's expiries were on the synthetic workload.
 - **Received counts keep the two-level shape, but the upper level split.** BIRD and OpenBGPD deliver
   1,124,697 in every row. RustyBGP (both builds) delivers 1,124,904, and FRR 8.5 and 9.1 1,124,898,
-  6 fewer, where at step 24 all four matched. FRR master delivers 1,124,691 (6 fewer than BIRD),
+  6 fewer, where at step 24 RustyBGP and FRR 8.5 matched. FRR master delivers 1,124,691 (6 fewer than BIRD),
   and FRR 10.7 that in one pass and 1,124,636 in two.
 - **FRR 10.0's slow pass is again the one that delivered the upper count**: pass 1 took 343 s and
   received 1,124,898, as 8.5 and 9.1 do, and passes 2 and 3 took 330–331 s and received

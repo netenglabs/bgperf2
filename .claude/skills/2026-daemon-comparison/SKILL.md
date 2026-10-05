@@ -72,7 +72,7 @@ What stays in the main session, whatever it costs in context:
 
 ## Unattended runs on spot
 
-Since 2026-10-05 the remaining steps also run without a session (plan §9, "Operator decisions,
+The operator's runbook is `docs/spot-unattended-runbook.md`. Since 2026-10-05 the remaining steps also run without a session (plan §9, "Operator decisions,
 2026-10-05, on running the rest unattended on spot"). `scripts/spot_boot.sh` runs the configs in
 `/data/bgperf-work/unattended/comparison-queue` and starts a headless session to record each one, on branch
 `unattended/comparison`. Its log is `/data/bgperf-work/logs/spot-boot-*.log`. In an interactive

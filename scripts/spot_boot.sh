@@ -2,6 +2,7 @@
 set -uo pipefail
 
 # Keep the 2026 daemon comparison going across spot reclaims, unattended.
+# Operator's runbook: docs/spot-unattended-runbook.md
 #
 # Started at every launch by /data/on-launch.sh, which ec2m runs as part of its
 # user-data (the `[remote] launch` hook), as ubuntu under systemd-run so

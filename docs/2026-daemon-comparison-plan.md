@@ -1322,7 +1322,8 @@ step's progress and summary before its first cell. The 31 remaining rows take ab
 instance that took the notice was spot, not on-demand as this section's host line says. A spot
 host can be reclaimed mid-step again, and the same command resumes it.
 
-**Operator decisions, 2026-10-05, on running the rest unattended on spot:**
+**Operator decisions, 2026-10-05, on running the rest unattended on spot** (the operator's how-to is
+`docs/spot-unattended-runbook.md`):
 - **Every remaining step of this plan is approved** (07:15 UTC, while step 38 was launching: "after
   this i approve of all the steps in the plan, continue ... to the end"). With the 05:47 approval
   above, this covers step 38, the re-runs its rules call for, and closing item 3 and Phase 5. It

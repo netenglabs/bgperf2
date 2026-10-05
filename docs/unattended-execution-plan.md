@@ -3,9 +3,13 @@
 Status: proposed on 2026-09-03; steps 0 through 5 taken the same day. **Step 7 was
 taken on 2026-09-13** (`bgperf2-82b`, reviewed, commit `b1e8470`; its own section
 below states the problem it solved, not its status). **Step 6 is the only step
-outstanding**, and its exit criterion is unmet for a reason outside the code -- see
-its progress note of 2026-09-15 and the two `human` gates `bgperf2-cqi` and
-`bgperf2-5p6`. This line is the one a reader checks first, so it carries the whole
+outstanding**, and its exit criterion is unmet: no unattended run of
+`scripts/unattended_driver.sh` has completed an item yet (progress note of 2026-09-15). Its two
+`human` gates were answered on 2026-10-05 and are closed: the channel (`bgperf2-5p6`) is an
+ntfy.sh topic, in `/data/bgperf-work/unattended.env` as `BGPERF_NOTIFY_CMD`, and headless
+sessions are approved (`bgperf2-cqi`; the spend reset it waited on passed on 2026-09-18). Both
+were decided for the 2026 daemon comparison's spot driver, `docs/spot-unattended-runbook.md`, and
+nothing now stops step 6's run. This line is the one a reader checks first, so it carries the whole
 answer: a later session read "steps 0 through 5" here and reported step 7 as never
 started, three times.
 The continuation prompt at the end of this document is now an operator contract,

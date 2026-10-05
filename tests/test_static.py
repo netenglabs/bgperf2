@@ -114,7 +114,7 @@ def test_benchmark_config_versions_are_resolvable():
                     pytest.fail(f"{config.name}: {e}")
 
 
-def test_benchmark_configs_expand():
+def test_benchmark_configs_expand(monkeypatch):
     '''Every config in the tree has to survive expansion.
 
     A missing axis used to reach `expand_batch_cells()` as a bare KeyError --
@@ -127,6 +127,14 @@ def test_benchmark_configs_expand():
     '''
     yaml = pytest.importorskip('yaml')
     import bgperf2
+
+    # The configs are written for the host that runs them, and a `pin` naming
+    # cores 8-27 is correct there and refused here: whether *this* machine has
+    # those CPUs is the run-time check's question, not this one's. Answered
+    # with the live host, the suite went red on every smaller development
+    # host (bgperf2-8aa). A large machine keeps every structural pin rule --
+    # roles named, sets disjoint -- in force.
+    monkeypatch.setattr(bgperf2, 'host_cpus', lambda: frozenset(range(256)))
 
     checked = 0
     for config in sorted((REPO_ROOT / 'benchmarks').glob('*.yaml')):

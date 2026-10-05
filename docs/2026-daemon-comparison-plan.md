@@ -1278,6 +1278,12 @@ CPUs). Step 31's last cell (FRR) was still up and idle, and the batch removed it
 (39,900,000 offered) takes about 4.4 h. The host sat idle from 06:31 to 07:17, because the
 session's completion watcher matched its own command line and never fired.
 
+**Step 38 stopped at 08:36 UTC on an EC2 spot interruption notice** (terminate 08:37:25Z), with 11
+of 42 rows recorded in `results/2026/2026-comparison/rrc00-n38/`. The batch abandoned the row in
+progress and recorded nothing for it. The 11 rows are not yet read. The batch resumes from its
+`progress.json` under the same command, on a host confirmed with `lscpu`. Step 38 stays approved
+(operator, 2026-10-05).
+
 ---
 
 ## Tracking

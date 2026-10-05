@@ -786,8 +786,8 @@ Items, in order:
    route-views2. These rows form their own series. Phase 3's and item 2's route-views2 MRT rows do
    not sit on the same curve. Row count and hours are estimated once the steps are chosen. It may run
    as one batch per step, each confirmed with the operator. Started 2026-10-03: steps 10, 17, 24, 31
-   and 38, configs `2006500`. Steps 10 and 17 done 2026-10-03; step 24 launched 2026-10-03 on the
-   operator's confirmation. See Progress.
+   and 38, configs `2006500`. Steps 10, 17 and 24 done 2026-10-03. Step 31 waits on an operator
+   decision: step 24 ended one row on a single peer's table (`bgperf2-5o5`). See Progress.
 4. ~~**Survey 2026 RIBs for more full-table peers (read-only).** For each candidate collector (RIPE RIS
    `rrc00` and the other Route Views collectors), take a RIB from the same day as
    `rib.20260808.0000` and record: peer count, full-table peer count, table size, and peers whose
@@ -1059,6 +1059,93 @@ Step 24 was confirmed by the operator and launched 2026-10-03 05:02 UTC (`lscpu`
 thread per core). Step 17's last cell (FRR) was still up and idle, and the batch removed it on start.
 Log: `/data/bgperf-work/logs/2026-comparison-rrc00-n24-20261003T050246.*`. Results:
 `results/2026/2026-comparison/rrc00-n24/`.
+
+Step 24 ran 05:02–07:32 UTC, 150 min against the 2.4 h estimate. The instance was terminated some
+time after it finished, and this record was written on 2026-10-05 from what `/data` kept. The new
+boot is the same class (`lscpu`: EPYC 9R14, 32 CPUs, one thread per core, 123 GiB). All 42 rows
+report converged, with no tester errors or timeouts, but **one of them is not a measurement**:
+RustyBGP 2026-08 pass 1, below. Every row offered 25,200,000 prefixes (24 × 1,050,000) from all
+24 generators, except that one. `min free mem (GB)` bottomed at 67.33 of 123.12 (RustyBGP 2026-08),
+inside the 20% guardrail (24.6). `max foreign cpu %` peaked at 63 (OpenBGPD 9.3 pass 2) and 43 (FRR
+10.0 pass 1), against 17 and 12 at the earlier steps. The rows' artifacts do not name the processes,
+and neither row's findings raised a contention confounder. `elapsed (s)` per pass, the monitor's
+`received`, peak target memory and the limiting component, from the CSV,
+`2026-comparison-rrc00-n24.summary.json` and each row's `events.json`:
+
+| cell | passes | median | received | max mem (GB) | limiting component |
+|---|---|---|---|---|---|
+| BIRD 2.19.2 | 123, 128, 127 | 127 | 1,123,568 | 2.91 | `tester` ×3 |
+| BIRD 3.3.2 (default threads) | 120, 119, 121 | 120 | 1,123,568 | 3.70 | `tester` ×3 |
+| BIRD 3.3.2 (4 threads) | 124, 120, 120 | 120 | 1,123,513–1,123,568 | 3.71 | `tester` ×3 |
+| BIRD master | 125, 131, 133 | 131 | 1,123,568 | 2.91 | `tester` ×3 |
+| FRR 8.5 | 222, 223, 223 | 223 | 1,123,772 | 11.36 | `tester` ×3 |
+| FRR 9.1 | 227, 223, 223 | 223 | 1,123,717–1,123,772 | 12.08 | `tester` ×3 |
+| FRR 10.0 | 226, 225, 223 | 225 | 1,123,717 | 11.87 | `tester` ×3 |
+| FRR 10.7 | 197, 197, 197 | 197 | 1,123,513 | 13.38 | `target_or_monitor` ×3 |
+| FRR master | 199, 199, 198 | 199 | 1,123,513–1,123,568 | 13.40 | `target_or_monitor` ×3 |
+| OpenBGPD 8.8 | 452, 446, 440 | 446 | 1,123,568 | 11.73 | `target_or_monitor` ×3 |
+| OpenBGPD 9.2 | 261, 259, 264 | 261 | 1,123,568 | 6.66 | `target_or_monitor` ×3 |
+| OpenBGPD 9.3 | 263, 256, 265 | 263 | 1,123,568 | 6.64 | `target_or_monitor` ×3 |
+| RustyBGP 2026-02 | 33, 32, 32 | 32 | 1,123,772 | 5.90 | `tester` ×2, `target_or_monitor` |
+| RustyBGP 2026-08 | **7 (not a measurement)**, 89, 90 | 89 (summary, all three) | 1,049,977 (pass 1); 1,123,772 | 47.60 | `inconclusive` (pass 1), `tester` ×2 |
+
+**RustyBGP 2026-08 pass 1 ended on one peer's table.** Generator 0's session came up first and
+offered all 1,050,000 of its prefixes. RustyBGP re-advertised them, and the monitor reached
+1,049,977 at 6 s, over the check-point of 1,039,500 (99% of one injector's 1,050,000). The other 23
+generators were still connecting and sending: their offered counts were 51k–360k when the run ended.
+The monitor's count then held for the full 20-sample window, while RustyBGP's memory rose from 5.3
+to 10.7 GB and its neighbour counters showed one peer at the check-point throughout. The tracker
+declared convergence, and `elapsed (s)` recorded 7. The row's own findings refuse it
+(`tester_incomplete`: "1 of 24 generators reported completion", `limiting_component` `inconclusive`),
+and its `convergence_rule` says it was decided on the monitor's check-point alone. The CSV and the
+summary do not: the summary's median of 89 includes the 7, and so does its deviation for the cell,
+which is why the variance rule cannot separate RustyBGP 2026-08 from any BIRD cell below.
+
+This is the gap `docs/invariants/convergence.md` states under "What the looser gate costs". The
+tracker does not see the generators' offering evidence, so on a multi-generator run a monitor
+plateau can end the run while injectors are still sending. That document bounds the gap to targets
+whose per-neighbour counters are broken. RustyBGP's were not broken here, only behind its own
+ingest, so the bound did not hold. On rrc00, one injector's 1,050,000 prefixes are 93% of the
+1,123,568-prefix union, so one peer's table clears a check-point set per injector. A sweep of
+every `events.json` under `results/2026/2026-comparison/` finds this the only row of 305 that is
+`converged` with `tester_incomplete`. Tracked as `bgperf2-5o5`.
+
+The summary's variance rule cannot separate, at n=3: FRR 8.5, 9.1 and 10.0 (9.1 against each of the
+other two); OpenBGPD 9.2 and 9.3; and each BIRD cell against RustyBGP 2026-08, only because of the
+row above.
+
+Observations, recorded and not explained:
+- **Received counts have the same two-level shape as step 17.** BIRD and OpenBGPD deliver 1,123,568
+  in every row. RustyBGP (both builds) and FRR 8.5 deliver 204 more, 1,123,772. FRR 9.1 delivers
+  that in two passes and 1,123,717 in one, and FRR 10.0 1,123,717 in all three. FRR 10.7 delivers 55
+  fewer than BIRD in all three rows, as at step 17. FRR master and BIRD 3.3.2 (4 threads) match BIRD
+  in two passes and deliver 1,123,513 in one.
+- **FRR 10.7 and master stay `target_or_monitor`** and are the fastest FRR cells (197–199 s against
+  222–227 s), as at step 17.
+- **OpenBGPD 8.8 takes 1.7× as long as 9.2 and 9.3** (446 s against 261–263 s), against 1.6× at
+  step 17 (275 against 169–170).
+- **RustyBGP 2026-08's peak memory grew 1.8× for 1.4× the peers** (26.59 → 47.60 GB) in its two
+  real passes. Its free-memory floor fell 16.7 GB from step 10 to 17 and 22.5 GB from 17 to 24.
+- **The sink's `unknown evpn subtype: 249` treat-as-withdraw** recurred in all six RustyBGP rows and
+  one BIRD row (BIRD master pass 2), which still ended at 1,123,568.
+
+**Memory ahead.** These are extrapolations, not measurements. If the free-memory floor keeps
+falling by step 24's 22.5 GB per step, step 31 bottoms near 45 GB and step 38 near 22 GB. If the
+drop keeps growing as it did from step 17 to 24, step 31 bottoms near 39 GB and step 38 near 5 GB.
+Step 31 stays above the 24.6 GB guardrail either way. Step 38's RustyBGP 2026-08 cell falls below it
+on both.
+
+**Step 31 waits on an operator decision** about `bgperf2-5o5`. Step 31 adds seven more generators to
+bring up, so a row ending the same way is no less likely. The options:
+- **Run step 31 as configured** and check each row's findings for `tester_incomplete` afterwards.
+  A row that has it is excluded and its cell re-run, as step 24's RustyBGP 2026-08 cell would be.
+- **Close the gap first.** Give the tracker the offering evidence, so that no run converges while a
+  generator has not reported completion. That is a change to `convergence.py`, governed by
+  `docs/invariants/convergence.md`. It moves only rows that end before every generator completes,
+  so steps 10, 17 and 24's other 41 rows stand. Then re-run step 24's RustyBGP 2026-08 cell and go
+  on to step 31.
+- **Re-run only step 24's RustyBGP 2026-08 cell** (three passes) and continue as configured,
+  accepting the gap.
 
 ---
 

@@ -30,7 +30,8 @@ MIN_MEM_KB=$((120 * 1024 * 1024))
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/run_comparison_step.sh [CONFIG] [--fresh]
+  scripts/run_comparison_step.sh [CONFIG] [--fresh] [--wait]
+  scripts/run_comparison_step.sh --check-host
 
   CONFIG defaults to benchmarks/2026-comparison-rrc00-n38.yaml. Its results go
   to results/2026/2026-comparison/<name without "2026-comparison-">/, and its
@@ -39,15 +40,27 @@ Usage:
   A step any of whose tests has a progress file is resumed (`batch --resume`): completed
   cells are skipped and the recorded order continues. --fresh starts it over
   instead, which discards that step's progress and summary documents.
+
+  By default the batch is started detached and this returns at once. --wait
+  runs it in the foreground instead and exits with the batch's own status:
+  0 complete, 143 stopped at a cell boundary by a spot notice or a signal,
+  anything else failed. scripts/spot_boot.sh drives it that way.
+
+  --check-host runs only the host checks, and exits 0 when this is the host
+  Phase 5 measures on.
 EOF
 }
 
 CONFIG="benchmarks/2026-comparison-rrc00-n38.yaml"
 FRESH=0
+WAIT=0
+CHECK_HOST=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
     --fresh) FRESH=1 ;;
+    --wait) WAIT=1 ;;
+    --check-host) CHECK_HOST=1 ;;
     -*) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
     *) CONFIG="$1" ;;
   esac
@@ -55,11 +68,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 fail() { echo "REFUSED: $*" >&2; exit 1; }
-
-[[ -f "$CONFIG" ]] || fail "no config at $CONFIG"
-NAME="$(basename "$CONFIG" .yaml)"
-[[ "$NAME" == 2026-comparison-* ]] || fail "$CONFIG is not a 2026-comparison config"
-RESULTS_DIR="results/2026/2026-comparison/${NAME#2026-comparison-}"
 
 # The host.
 model="$(lscpu | sed -n 's/^Model name:[[:space:]]*//p')"
@@ -71,6 +79,12 @@ echo "host: $model, $cpus CPUs, $tpc thread(s) per core, $((mem_kb / 1024 / 1024
 [[ "$cpus" -eq "$EXPECTED_CPUS" ]] || fail "$cpus CPUs, not $EXPECTED_CPUS (the m7a.8xlarge)"
 [[ "$tpc" == "1" ]] || fail "$tpc threads per core, not 1"
 [[ "$mem_kb" -ge "$MIN_MEM_KB" ]] || fail "$((mem_kb / 1024 / 1024)) GiB of memory, the m7a.8xlarge has 123"
+[[ "$CHECK_HOST" -eq 0 ]] || exit 0
+
+[[ -f "$CONFIG" ]] || fail "no config at $CONFIG"
+NAME="$(basename "$CONFIG" .yaml)"
+[[ "$NAME" == 2026-comparison-* ]] || fail "$CONFIG is not a 2026-comparison config"
+RESULTS_DIR="results/2026/2026-comparison/${NAME#2026-comparison-}"
 
 # The work directory, by the same rule as the campaign runners.
 WORKDIR="$(campaign_default_workdir)"
@@ -122,6 +136,19 @@ fi
 
 mkdir -p "$WORKDIR/logs"
 LOG="$WORKDIR/logs/$NAME-$(date -u +%Y%m%dT%H%M%S)"
+
+if [[ "$WAIT" -eq 1 ]]; then
+  echo "running $NAME in the foreground on $(git -C "$REPO_ROOT" rev-parse --short HEAD); log $LOG.{stdout,stderr}.log"
+  "$PYTHON_BIN" bgperf2.py -d "$WORKDIR" batch -c "$CONFIG" \
+    --results-dir "$RESULTS_DIR" "${RESUME[@]}" \
+    > "$LOG.stdout.log" 2> "$LOG.stderr.log" < /dev/null &
+  echo "$!" > "$LOG.pid"
+  rc=0
+  wait "$!" || rc=$?
+  echo "$NAME exited $rc at $(date -u +%H:%M) UTC"
+  exit "$rc"
+fi
+
 setsid nohup "$PYTHON_BIN" bgperf2.py -d "$WORKDIR" batch -c "$CONFIG" \
   --results-dir "$RESULTS_DIR" "${RESUME[@]}" \
   > "$LOG.stdout.log" 2> "$LOG.stderr.log" < /dev/null &

@@ -787,8 +787,8 @@ Items, in order:
    not sit on the same curve. Row count and hours are estimated once the steps are chosen. It may run
    as one batch per step, each confirmed with the operator. Started 2026-10-03: steps 10, 17, 24, 31
    and 38, configs `2006500`. Steps 10, 17 and 24 done 2026-10-03. Step 24 ended one row on a single
-   peer's table (`bgperf2-5o5`); the gap is closed in `f1539dd`, and that cell's re-run comes before
-   step 31. See Progress.
+   peer's table (`bgperf2-5o5`). The gap is closed in `f1539dd`, and that cell was re-run on
+   2026-10-05. Step 31 waits on the operator's confirmation. See Progress.
 4. ~~**Survey 2026 RIBs for more full-table peers (read-only).** For each candidate collector (RIPE RIS
    `rrc00` and the other Route Views collectors), take a RIB from the same day as
    `rib.20260808.0000` and record: peer count, full-table peer count, table size, and peers whose
@@ -1162,6 +1162,29 @@ Next: re-run step 24's RustyBGP 2026-08 cell, three passes, on `f1539dd` or late
 name so the excluded row stays on disk. Its config is written when it starts, and it needs the
 operator's confirmation. Then step 31 (`benchmarks/2026-comparison-rrc00-n31.yaml`), after the
 operator confirms it. At step 24's rate per offered prefix, step 31 (32,550,000 offered) takes about 3.2 h.
+
+The re-run was confirmed by the operator and ran 2026-10-05 02:49–02:55 UTC on `d025b03`
+(`lscpu`: EPYC 9R14, 32 CPUs, one thread per core). Config:
+`benchmarks/2026-comparison-rrc00-n24-rustybgp-rerun.yaml` (`d025b03`), step 24's test narrowed to
+this one target. Log: `/data/bgperf-work/logs/2026-comparison-rrc00-n24-rustybgp-rerun-20261005T024933.*`.
+Results: `results/2026/2026-comparison/rrc00-n24-rustybgp-rerun/`.
+
+All three passes converged with all 24 generators complete (fleet `complete_s` 72.3–74.8 s), and no
+tester errors or timeouts. `elapsed (s)` was 86, 90 and 86, median 86, with `received` 1,123,772 in
+each, and `tester` limiting all three. Peak target memory was 46.85–47.88 GB, and `min free mem
+(GB)` bottomed at 67.12. These stand beside step 24's two real passes (89 and 90 s, 1,123,772), and
+the 7 s row stays on disk, excluded. The sink's `unknown evpn subtype: 249` treat-as-withdraw
+recurred once in each pass.
+
+**The gate was not exercised.** All three passes had both witnesses (no `convergence_rule`), so
+none of them reached the one-witness path that `f1539dd` gates. What this run shows is that the new
+wiring ran on every sample of three full-table runs without fault, and that the cell reproduces
+step 24's real passes. The gate's blocking path has only its unit tests (`tests/test_convergence.py`).
+The first one-witness row from now on is its first real exercise, so read its
+`convergence_rule.offering_complete` when it comes.
+
+Next: step 31 (`benchmarks/2026-comparison-rrc00-n31.yaml`), after the operator confirms it, about
+3.2 h.
 
 ---
 

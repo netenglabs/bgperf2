@@ -35,10 +35,10 @@
 # target and monitor keep Phase 3's cores and 38 injectors get 18 cores, not
 # six. Cores 28-31 are left to the controller and the kernel.
 #
-# MEMORY. The 20% free-memory guardrail on this 123 GiB host allows about 50
-# full-table peers by docs/2026-memory-capacity-options.md's envelope. Each
-# step's `min free mem (GB)` is read before the next step is confirmed; a
-# step that went below 20% stops the curve.
+# MEMORY. The guardrail is 15% free memory (18.5 GB available on this host),
+# lowered from the campaign's 20% for this plan by the operator on 2026-10-05
+# (plan §9 Progress). The previous step's `min free mem (GB)` is read before
+# this step is confirmed, and a cell that goes below 15% stops.
 #
 # PASSES. `repetitions: 3`, so the whole matrix repeats.
 #

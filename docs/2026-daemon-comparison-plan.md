@@ -781,7 +781,7 @@ Items, in order:
    labelled that way. Before the first row, `bgpdump2 -c` inside `bgperf/bgpdump2` must reproduce
    the survey's 38 indexes on that file. The survey's counts came from its own parser, and
    bgpdump2 has not read an RIS bview here. The testers need more cores than Phase 3's six. Stop a
-   cell at the 20% free-memory guardrail (`docs/2026-memory-capacity-options.md`). None of rrc00's
+   cell at the 15% free-memory guardrail, lowered from 20% by the operator on 2026-10-05 (Progress). None of rrc00's
    full-table peers tags a route NO_EXPORT, so FRR's check-point is sound on this RIB, unlike on
    route-views2. These rows form their own series. Phase 3's and item 2's route-views2 MRT rows do
    not sit on the same curve. Row count and hours are estimated once the steps are chosen. It may run
@@ -1190,6 +1190,17 @@ Step 31 was confirmed by the operator and launched 2026-10-05 02:58 UTC on `17b8
 9R14, 32 CPUs, one thread per core). The re-run's last cell (RustyBGP) was still up and idle, and the
 batch removed it on start. Log: `/data/bgperf-work/logs/2026-comparison-rrc00-n31-20261005T025839.*`.
 Results: `results/2026/2026-comparison/rrc00-n31/`.
+
+**Operator decision, 2026-10-05: the free-memory guardrail is 15% for the rest of this plan**, not
+the campaign's 20%. On this 123.12 GB host that is 18.5 GB available, against 24.6 GB. The reading
+is `min free mem (GB)`, which bgperf2 takes from the `available` column of `free -m`, so reclaimable
+page cache already counts as free. The guardrail is the plan's stop rule, not code. The only
+threshold in code is `findings.py`'s 5% `low_free_memory` confounder, below which a row's
+`limiting_component` is withheld. The change applies to this plan only: the campaign's 20% and
+`docs/2026-memory-capacity-options.md`'s envelope are unchanged. Steps 10–31 were read against 20%,
+and those readings stand as written. Its first use is step 38. Step 24's free-memory floor (67.33 GB) and step
+31's first RustyBGP 2026-08 row (45.11 GB) project step 38's floor at about 23 GB if the drop per step holds,
+and at 15–20 GB if the target's peak keeps growing about 1.4× per step. Step 31's full reading comes first.
 
 ---
 

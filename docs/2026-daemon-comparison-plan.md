@@ -1301,7 +1301,7 @@ and passes 2 and 3 of every cell, have not run. All 11 converged with every gene
 | OpenBGPD 8.8 | 884 | 1,131,785 | 18.45 | 93.29 | `target_or_monitor` |
 | OpenBGPD 9.2 | 493 | 1,131,785 | 10.33 | 101.19 | `target_or_monitor` |
 | OpenBGPD 9.3 | 480 | 1,131,785 | 10.33 | 101.23 | `target_or_monitor` |
-| RustyBGP 2026-02 | 59 | 1,131,993 | 10.02 | 101.59 | `target_or_monitor` |
+| RustyBGP 2026-02 | 59 | 1,131,993 | 10.02 | 101.59 | `unresolved` (injection not resolved at the poll resolution) |
 | RustyBGP 2026-08 | 194 (**excluded**) | 1,131,993 | 104.85 | **6.88** | `tester` |
 
 **RustyBGP 2026-08's row is excluded from the curve** by the operator's rule: free memory fell to

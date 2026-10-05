@@ -292,3 +292,14 @@ def test_one_generator_gets_no_fleet_line(capsys):
     bgperf2.print_tester_metrics([ORIGIN] + list(a.events), ['a'])
 
     assert 'generators' not in capsys.readouterr().out
+
+
+def test_a_recorder_says_live_whether_its_generator_completed():
+    '''Read by `bench()` on every monitor sample, so the convergence gate can
+    tell one peer's table from the whole workload (bgperf2-5o5).'''
+    partway = injector('a', [(1.0, dict(offered=0)), (2.0, dict(offered=50))])
+    assert partway.complete is False
+    done = injector('b', [(1.0, dict(offered=0)), (2.0, dict(offered=100))])
+    assert done.complete is True
+    assert bgperf2.tester_offering_complete(
+        {'a': partway, 'b': done}, {}) is False

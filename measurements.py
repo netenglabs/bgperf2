@@ -749,6 +749,16 @@ class TesterEventRecorder:
         return ordered_events(events)
 
     @property
+    def complete(self):
+        '''Whether this generator has reported offering its whole table.
+
+        Read live by `bench()`, so the convergence gate can tell a monitor that
+        has seen everything from one that has seen one peer's table.
+        '''
+        return unique_event(
+            self._events, EventKind.TESTER_COMPLETE) is not None
+
+    @property
     def backpressure(self):
         '''Blocked-write evidence, or an explicit statement that there is none.
 

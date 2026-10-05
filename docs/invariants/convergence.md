@@ -161,14 +161,48 @@ its neighbours, the monitor's count can plateau — a late injector replaying pr
 what is already in the table adds nothing to it — and twenty stable samples then end the run while
 that injector is still sending. The old gate held such a run until every generator reported done.
 
-Three things bound it. It reaches only targets whose per-neighbour counters are broken, since every
-other run still gets `neighbors_checkpoint` and is decided exactly as before. The window is the full
-twenty samples rather than the five a second witness buys, which is the reason the two constants were
-separated. And the run says so: `convergence_rule` names it, and `tester_fleet`'s `injection_s` and
-signed `post_injection_tail_s` are what a reader checks it against — a tail that is negative by more
-than the poll gap is a run whose generators were still sending. Closing it properly means giving the
-tracker the offering evidence, which it does not currently see; until then this paragraph is the
-honest version.
+It once reached only targets whose per-neighbour counters were *broken*, and that bound turned out
+not to hold: counters that are merely *behind* the target's ingest leave the same one witness. Seen
+on rrc00 at 24 peers (RustyBGP 2026-08, 2026-10-03, `bgperf2-5o5`): generator 0's session came up
+first, and the monitor reached 1,049,977 against a required 1,039,500 at 6s. One injector's table
+is 93% of rrc00's union, so it cleared a check-point set per injector on its own. The count held for
+twenty samples while the other 23 generators were still connecting and sending, and the run was
+published at 7s. Its findings said `tester_incomplete`, but its row and the batch summary did not.
+
+**So the one-witness path now waits for the generators.** `update()` takes `offering_complete`:
+whether every generator has reported offering its whole table (`TesterEventRecorder.complete`,
+folded by `tester_offering_complete()` in `bench()`). A run decided on the monitor's check-point
+alone converges only when the count has held for the full window **and** every generator has
+reported completion for that whole window. A count already steady when the last generator completes
+has not yet been seen steady with the workload offered. This restores what the old gate's "every
+generator reported done" bought, without making the target's counters necessary again.
+
+- **A two-witness run is untouched.** The target saying every neighbour is full already says the
+  offering arrived, and gating it here would move `elapsed (s)` for rows whose generator completion
+  is observed up to a tester poll late. Checked against every `events.json` on disk on 2026-10-05:
+  484 converged two-witness rows are not gated. The seven one-witness rows whose fleet completed
+  converged 22.6–32.7 s after the last completion, so the window after completion was already met
+  and none of them moves.
+- **No evidence is decided as before.** `None` means no tester in the run reports its offering
+  (ExaBGP), or a recorder that had not completed was retired over a fault in the measurement
+  wiring. `observe_tester_sample()` promises that such a fault never ends a run that is otherwise
+  producing a result, and stalling the run here would break that promise.
+- **A run held by the generators says so if it fails.** A generator that never reports completion,
+  on a target with no second witness, now ends at `STUCK_SAMPLES` instead of converging. Its message
+  says the generators' offering was incomplete, so it does not read as a target that stopped. It says
+  so only when the monitor reached the check-point and only the offering held the gate. A run that
+  never peered was held by the check-point, and blaming the generators would point at the wrong role.
+- **A generator that cannot be read keeps the gate shut**, and that is deliberate. Reads fail
+  routinely while containers come up and succeed afterwards, so withdrawing the evidence on any read
+  failure would switch the gate off in the very runs it is for. One that never reads again cannot be
+  shown to have offered its table, so its run fails loudly instead of converging on one peer's table.
+  That is the double fault of an unreadable generator and a target with no second witness. No row on
+  disk on 2026-10-05 had both.
+- **`convergence_rule` records it**: `offering_complete` is True when the generators gated the
+  verdict, and None when the deciding sample had no such evidence.
+- **`elapsed (s)` keeps its rule**: the convergence sample less the window. For a gated run whose
+  count never moves after the last completion, that is no earlier than completion. A workload is
+  not converged before it was offered.
 
 One consequence worth stating: this makes `bgperf2-sl1` — a target poll thread that dies and freezes
 the neighbour counts — cost a longer assurance window instead of the whole run, *provided* at least

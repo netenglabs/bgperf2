@@ -2413,6 +2413,32 @@ def observe_tester_sample(info, recorders, errors):
     return True
 
 
+def tester_offering_complete(recorders, errors):
+    """Whether every generator has reported offering its whole table.
+
+    True or False, or None where there is no evidence to gate on: no tester in
+    the run reports its offering, or a recorder that had not completed was
+    retired over a fault in the measurement wiring. A retired recorder must
+    not end or stall a run that is otherwise producing a result
+    (`observe_tester_sample()`), so such a run is decided as runs were before
+    the convergence gate read this.
+
+    A generator whose polls merely fail to read is deliberately *not* None.
+    Reads fail routinely while containers come up and succeed afterwards
+    (`note_tester_read_failure()`), so withdrawing the evidence on any failure
+    would switch the gate off for the run that needs it. One that never reads
+    again cannot be shown to have offered its table, and on a target with no
+    second witness that run ends at STUCK_S naming the generators rather than
+    converging on one peer's table.
+    """
+    if not recorders:
+        return None
+    for name, recorder in recorders.items():
+        if name in errors and not recorder.complete:
+            return None
+    return all(recorder.complete for recorder in recorders.values())
+
+
 def note_tester_read_failure(info, failures):
     '''Count a poll that could not be read, keeping the first reason.
 
@@ -3648,7 +3674,10 @@ def bench(args):
             status = tracker.update(elapsed.seconds, recved, neighbors_checked,
                                     neighbors_received_full, info['checked'],
                                     table_witness=latest_witness,
-                                    witness_monotonic_s=latest_witness_s)
+                                    witness_monotonic_s=latest_witness_s,
+                                    offering_complete=tester_offering_complete(
+                                        tester_lifecycles,
+                                        tester_observation_errors))
 
             if elapsed.seconds > 0:
                 rm_line()

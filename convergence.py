@@ -188,6 +188,11 @@ class ConvergenceTracker(object):
         # converged on one account of itself rather than two, and waited the
         # full assurance window for it.
         self.converged_without_neighbors_checkpoint = False
+        # Consecutive samples on which every generator had reported offering
+        # its whole table, and the latest sample's answer. Read only by the
+        # one-witness path of the convergence gate; see update().
+        self.offering_complete_samples = 0
+        self.last_offering_complete = None
 
     @property
     def assurance_samples(self):
@@ -338,18 +343,34 @@ class ConvergenceTracker(object):
             'sample_interval_s': self.sample_interval_s,
             'neighbors_checked_at_convergence': self.last_neighbors_checked,
             'monitor_peak': self.peak_recved,
+            # Whether the generators' own offering gated the verdict: True when
+            # every one had reported completion for the whole window, None when
+            # the deciding sample had no such evidence and was decided as runs
+            # were before the gate existed.
+            'offering_complete': self.last_offering_complete,
         }
 
     def update(self, elapsed_seconds, recved, neighbors_checked,
                neighbors_received_full, checked,
-               table_witness=None, witness_monotonic_s=None):
+               table_witness=None, witness_monotonic_s=None,
+               offering_complete=None):
         '''Fold in one monitor sample and return the resulting status.
 
         `table_witness` is the target's own reading of the table it holds, as
         `bird.table_witness()` returns it, and `witness_monotonic_s` is when
         that reading was taken. Both default to absent, and a run that supplies
         neither is decided exactly as it was before this witness existed.
+
+        `offering_complete` is whether every generator has reported offering
+        its whole table: True, False, or None where the run has no such
+        evidence. It gates only a run decided on the monitor's check-point
+        alone; see the convergence gate below.
         '''
+        self.last_offering_complete = offering_complete
+        if offering_complete:
+            self.offering_complete_samples += 1
+        else:
+            self.offering_complete_samples = 0
         previous_recved = self.last_recved
         # Read first, and on every sample: the carry counter this rule depends
         # on advances per monitor sample, so a witness consulted only inside
@@ -552,8 +573,31 @@ class ConvergenceTracker(object):
         # monitor having actually reached the configured count, so a target
         # that never delivered still has neither checkpoint and still fails --
         # nothing here converges a run on stability alone.
+        #
+        # And the one-witness path waits for the generators. The check-point is
+        # a fraction of one injector's declared table, so on an MRT RIB where
+        # every peer carries most of the union, one peer's table clears it.
+        # Seen for real: rrc00 at 24 peers, RustyBGP 2026-08. Generator 0's
+        # session came up first, the monitor reached 1,049,977 against a
+        # required 1,039,500 at 6s, and held there for twenty samples while the
+        # other 23 generators were still connecting and sending and the target
+        # was still ingesting them. RustyBGP's neighbour counters lagged, so
+        # there was no second witness, and the run was published at 7s. Here,
+        # with offering evidence, such a run converges only once the count has
+        # held for the full window *after* every generator reported
+        # completion, which is the window the old gate's "every generator
+        # reported done" used to buy. A run whose deciding sample has no
+        # offering evidence (`None`: no generator reports it, or a recorder
+        # was retired) is decided as before, and a two-witness run is
+        # untouched: the target saying every neighbour is full already says
+        # the offering arrived.
+        offering_holds = (self.neighbors_checkpoint
+                          or offering_complete is None
+                          or self.offering_complete_samples
+                          >= self.assurance_samples)
         if ((self.neighbors_checkpoint or self.recved_checkpoint)
                 and self.last_recved_count >= self.assurance_samples
+                and offering_holds
                 and (dropped <= DROP_FRACTION
                      or (witness_holds and checked
                          and self.witness_carried_samples == 0))):
@@ -578,6 +622,13 @@ class ConvergenceTracker(object):
         if self.last_recved_count >= self.stuck_samples:
             self.fail_msg = (f"FAILED: stuck received count {recved} "
                              f"neighbors_checked {neighbors_checked}")
+            if (self.recved_checkpoint and dropped <= DROP_FRACTION
+                    and not offering_holds):
+                # The gate above was held by the generators, not the count:
+                # say so, or this reads as a target that stopped. Only then:
+                # a run that never reached the check-point was held by that,
+                # and blaming the generators would point at the wrong role.
+                self.fail_msg += " with the generators' offering incomplete"
             return self.FAILED
 
         # Below the stuck check, so a run that is merely slow is still

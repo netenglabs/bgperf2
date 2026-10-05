@@ -355,7 +355,8 @@ loop that feeds it.
   count of zero never attests, and a run the witness alone is keeping alive still ends.
 - The target's per-neighbour counters **shorten** the assurance window; they are not what makes
   convergence possible. Either checkpoint opens the gate, neither does not, and a run decided on one
-  witness says so.
+  witness says so — and, when the generators report their offering, waits until every one has
+  completed.
 
 
 ## Targets and images

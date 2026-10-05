@@ -788,7 +788,8 @@ Items, in order:
    as one batch per step, each confirmed with the operator. Started 2026-10-03: steps 10, 17, 24, 31
    and 38, configs `2006500`. Steps 10, 17 and 24 done 2026-10-03. Step 24 ended one row on a single
    peer's table (`bgperf2-5o5`). The gap is closed in `f1539dd`, and that cell was re-run on
-   2026-10-05. Step 31 done 2026-10-05, and step 38 launched. See Progress.
+   2026-10-05. Step 31 done 2026-10-05. Step 38 stopped at 11 of 42 rows on a spot interruption; resume with
+   `scripts/run_comparison_step.sh`. See Progress.
 4. ~~**Survey 2026 RIBs for more full-table peers (read-only).** For each candidate collector (RIPE RIS
    `rrc00` and the other Route Views collectors), take a RIB from the same day as
    `rib.20260808.0000` and record: peer count, full-table peer count, table size, and peers whose
@@ -1280,9 +1281,46 @@ session's completion watcher matched its own command line and never fired.
 
 **Step 38 stopped at 08:36 UTC on an EC2 spot interruption notice** (terminate 08:37:25Z), with 11
 of 42 rows recorded in `results/2026/2026-comparison/rrc00-n38/`. The batch abandoned the row in
-progress and recorded nothing for it. The 11 rows are not yet read. The batch resumes from its
+progress and recorded nothing for it. The batch resumes from its
 `progress.json` under the same command, on a host confirmed with `lscpu`. Step 38 stays approved
 (operator, 2026-10-05).
+
+The 11 rows, read 2026-10-05 on the replacement host (8 vCPU / 30 GiB, EPYC 9R14, too small to
+measure on). Each is pass 1 of its cell. Pass 1 of BIRD 2.19.2, BIRD 3.3.2 (4 threads) and FRR 9.1,
+and passes 2 and 3 of every cell, have not run. All 11 converged with every generator complete. No row has
+`tester_incomplete` and none was decided on one witness. From the CSV and each row's `events.json`:
+
+| cell | elapsed (s) | received | max mem (GB) | min free mem (GB) | limiting component |
+|---|---|---|---|---|---|
+| BIRD 3.3.2 (default threads) | 237 | 1,131,785 | 5.97 | 105.72 | `tester` |
+| BIRD master | 258 | 1,131,785 | 4.68 | 106.99 | `tester` |
+| FRR 8.5 | 466 | 1,131,987 | 17.27 | 98.14 | `tester` |
+| FRR 10.0 | 466 | 1,131,987 | 18.11 | 97.31 | `tester` |
+| FRR 10.7 | 355 | 1,131,724 | 20.78 | 94.59 | `target_or_monitor` |
+| FRR master | 353 | 1,131,779 | 20.80 | 94.62 | `target_or_monitor` |
+| OpenBGPD 8.8 | 884 | 1,131,785 | 18.45 | 93.29 | `target_or_monitor` |
+| OpenBGPD 9.2 | 493 | 1,131,785 | 10.33 | 101.19 | `target_or_monitor` |
+| OpenBGPD 9.3 | 480 | 1,131,785 | 10.33 | 101.23 | `target_or_monitor` |
+| RustyBGP 2026-02 | 59 | 1,131,993 | 10.02 | 101.59 | `target_or_monitor` |
+| RustyBGP 2026-08 | 194 (**excluded**) | 1,131,993 | 104.85 | **6.88** | `tester` |
+
+**RustyBGP 2026-08's row is excluded from the curve** by the operator's rule: free memory fell to
+6.88 GB, 5.6% of the host, below the 15% guardrail and just above `findings.py`'s 5%
+`low_free_memory` line, so its findings raised no confounder. The extrapolation from step 31 put the
+floor near 12 GB and the target's peak at 103–114 GB; the peak was 104.85 GB. The row also has 5
+tester errors, all `Hold Timer Expired` (`mrt-injector0`, `5`, `7`, `29` and `31`, 08:10:46–08:11:29,
+`tester-health.json`). It still received 1,131,993, as RustyBGP 2026-02 did. Its passes 2 and 3 are
+expected to land the same way. They run anyway, under the approval, and are excluded the same way
+if they do.
+
+**Resuming step 38.** On the `m7a.8xlarge`, run `scripts/run_comparison_step.sh`. It refuses any
+host that is not EPYC 9R14, 32 CPUs, one thread per core and at least 120 GiB, and any `/data`
+that is not mounted. It also refuses while another `bgperf2.py` is running, or if the RIB is
+missing. Otherwise it resumes step 38 detached, with `--resume`, and prints the pid, the log and how
+to check progress. **Do not re-run the bare `batch` command**: without `--resume` it deletes the
+step's progress and summary before its first cell. The 31 remaining rows take about 3.3 h. The
+instance that took the notice was spot, not on-demand as this section's host line says. A spot
+host can be reclaimed mid-step again, and the same command resumes it.
 
 ---
 

@@ -1,6 +1,6 @@
 # 2026 daemon comparison plan
 
-**Status: Phases 0–4 done. Phase 3's hardware gate landed on its second row; on 2026-10-02 the operator chose to answer it on one `m7a.8xlarge` (§6), and Phase 4 did so and is done (2026-10-02): OpenBGPD's MRT wait is the target's, and no one role's cores move any cell beyond pass spread. Phase 5 (§9) keeps measuring on the same host. Written 2026-09-29.**
+**Status: Phases 0–4 done. Phase 3's hardware gate landed on its second row; on 2026-10-02 the operator chose to answer it on one `m7a.8xlarge` (§6), and Phase 4 did so and is done (2026-10-02): OpenBGPD's MRT wait is the target's, and no one role's cores move any cell beyond pass spread. Phase 5 (§9) kept measuring on the same host and is done (2026-10-06): the rrc00 peer curve runs 10 → 38 peers for all 14 builds. What to publish is the operator's. Written 2026-09-29.**
 
 **Epic:** `bgperf2-0y5`
 
@@ -733,7 +733,7 @@ named check would confirm it.
 
 ## 9. Phase 5 — keep measuring on the m7a.8xlarge
 
-**Tracked by:** `bgperf2-0y5.6` · **Status:** in progress
+**Tracked by:** `bgperf2-0y5.6` · **Status:** done
 
 **Decided by the operator on 2026-10-02**, after Phase 4: keep measuring, and turn the results into
 as many articles as are useful afterwards. What Phases 0–4 hold already supports one article: how
@@ -770,7 +770,7 @@ Items, in order:
    entry 7). Does head keep the bimodal time and the expiries, and do the expiries still follow the
    time? About 1.5 h. Confirm with the operator before the run.~~ Done 2026-10-03, `bb70f09` (label)
    and `55474fa` (config). One unpinned head pass failed. See Progress.
-3. **Full-table peer curve on RIS rrc00, from 10 peers, all 14 builds.** Changed 2026-10-02 by the
+3. ~~**Full-table peer curve on RIS rrc00, from 10 peers, all 14 builds.**~~ Changed 2026-10-02 by the
    operator's decision on item 4 (Progress). The original plan was 10 → 17 peers on route-views2.
    MRT, on `bview.20260808.0000` from rrc00, decompressed into `mrt/`. Three passes per step. The
    steps and the pin are chosen and stated in the config when the item starts, and the pin is one
@@ -788,8 +788,9 @@ Items, in order:
    as one batch per step, each confirmed with the operator. Started 2026-10-03: steps 10, 17, 24, 31
    and 38, configs `2006500`. Steps 10, 17 and 24 done 2026-10-03. Step 24 ended one row on a single
    peer's table (`bgperf2-5o5`). The gap is closed in `f1539dd`, and that cell was re-run on
-   2026-10-05. Step 31 done 2026-10-05. Step 38 stopped at 11 of 42 rows on a spot interruption; resume with
-   `scripts/run_comparison_step.sh`. See Progress.
+   2026-10-05. Step 31 done 2026-10-05. **Done 2026-10-06:** step 38 finished all 42 rows on
+   `795e39b` after six spot stops, and RustyBGP 2026-08's three rows are excluded below the 15%
+   guardrail. No row needed a re-run, and no step past 38 was configured. See Progress.
 4. ~~**Survey 2026 RIBs for more full-table peers (read-only).** For each candidate collector (RIPE RIS
    `rrc00` and the other Route Views collectors), take a RIB from the same day as
    `rib.20260808.0000` and record: peer count, full-table peer count, table size, and peers whose
@@ -1344,6 +1345,70 @@ host can be reclaimed mid-step again, and the same command resumes it.
   host alerted "wrong host" and ran nothing.
 
 The queue holds step 38. Nothing in it runs until a launch lands on an `m7a.8xlarge`.
+
+**Step 38 finished 2026-10-06 06:18 UTC, unattended, on `795e39b`.** `spot_boot.sh` resumed it six
+times on an `m7a.8xlarge` (each launch passed `lscpu`: EPYC 9R14, 32 CPUs, one thread per core, 123
+GiB). Five launches ended on a spot notice at a cell boundary (20:32, 22:07, 23:30, 02:31 and 03:49
+UTC), and the sixth ran 04:25–06:18 to the end. One earlier launch, at 20:02, landed on an
+`m7a.2xlarge` and ran nothing. Logs: `/data/bgperf-work/logs/spot-boot-2026100[56]T*.log` and
+`2026-comparison-rrc00-n38-*.{stdout,stderr}.log`. All 42 rows are in
+`results/2026/2026-comparison/rrc00-n38/`, read with `scripts/comparison_step_table.py` and each row's
+`events.json`. Every row converged with all 38 generators complete (`testers_complete` 38,
+`incomplete_testers` empty). No row has `tester_incomplete` and none has a `convergence_rule` (none
+was decided on one witness), so **nothing is re-run**. `max foreign cpu %` peaked at 49 (OpenBGPD 8.8,
+pass 3). The 11 pass-1 rows read on 2026-10-05 above are the same rows:
+
+| cell | passes | median | received | max mem (GB) | min free mem (GB) | limiting component |
+|---|---|---|---|---|---|---|
+| BIRD 2.19.2 | 262, 250, 264 | 262 | 1,131,785 | 4.68 | 107.28 | `tester` ×3 |
+| BIRD 3.3.2 (default threads) | 237, 246, 231 | 237 | 1,131,785 | 5.99 | 105.72 | `tester` ×3 |
+| BIRD 3.3.2 (4 threads) | 276, 251, 259 | 259 | 1,131,785 | 6.00 | 105.97 | `tester` ×3 |
+| BIRD master | 258, 260, 260 | 260 | 1,131,785 | 4.69 | 106.99 | `tester` ×3 |
+| FRR 8.5 | 466, 468, 468 | 468 | 1,131,987 | 17.28 | 98.14 | `tester` ×3 |
+| FRR 9.1 | 493, 466, 498 | 493 | 1,131,987 | 18.45 | 97.31 | `tester` ×3 |
+| FRR 10.0 | 466, 462, 467 | 466 | 1,131,932–1,131,987 | 18.13 | 97.31 | `tester` ×3 |
+| FRR 10.7 | 355, 347, 354 | 354 | 1,131,724–1,131,779 | 20.81 | 94.59 | `target_or_monitor` ×3 |
+| FRR master | 353, 347, 352 | 352 | 1,131,779 | 20.83 | 94.62 | `target_or_monitor` ×3 |
+| OpenBGPD 8.8 | 884, 855, 851 | 855 | 1,131,785 | 18.46 | 93.29 | `target_or_monitor` ×3 |
+| OpenBGPD 9.2 | 493, 515, 496 | 496 | 1,131,785 | 10.33 | 101.19 | `target_or_monitor` ×3 |
+| OpenBGPD 9.3 | 480, 479, 496 | 480 | 1,131,785 | 10.33 | 101.23 | `target_or_monitor` ×3 |
+| RustyBGP 2026-02 | 59, 59, 59 | 59 | 1,131,993 | 10.25 | 101.59 | `unresolved` ×2, `target_or_monitor` |
+| RustyBGP 2026-08 (**excluded**) | 194, 178, 184 | 184 | 1,131,993 | 110.79 | **1.31** | `tester`, `unresolved` ×2 |
+
+**All three RustyBGP 2026-08 rows are excluded from the curve** by the operator's 15% rule (18.47
+GB on this host). Free memory bottomed at 6.88, 1.31 and 3.97 GB in passes 1–3. Passes 2 and 3 fell
+below `findings.py`'s 5% line, so their findings are `unresolved` ("free memory fell to 1.1% of the
+host, so these intervals include page pressure", pass 2). The target peaked at 110.79 GB on a
+123.12 GB host with no swap, and no row was killed. So RustyBGP 2026-08's publishable curve ends at
+step 31. RustyBGP 2026-02's two `unresolved` rows are a different refusal: "the fleet injection was
+not resolved at this poll resolution" (pass 1), as in its pass-1 row read on 2026-10-05. Those rows stay on the curve,
+since that refusal withholds the attribution, not the time.
+
+The summary's variance rule (`2026-comparison-rrc00-n38.summary.json`) separates only four cells
+from their nearest rival at n=3: BIRD 3.3.2 (default threads), OpenBGPD 8.8, and the two RustyBGP
+builds. It cannot separate BIRD 2.19.2, 3.3.2 (4 threads) and master; FRR 8.5 and 10.0; FRR 9.1
+from OpenBGPD 9.2 and 9.3; or FRR 10.7 and master.
+
+Observations, recorded and not explained:
+- **RustyBGP 2026-08 had hold-timer expiries in every pass**: 5 sessions in pass 1 (above), 1 in pass
+  2 (`mrt-injector12`, 23:28:27) and 2 in pass 3 (`mrt-injector5` and `8`, 04:50:25–04:50:44),
+  from `tester-health.json`. Each still received 1,131,993, as RustyBGP 2026-02 did.
+- **FRR 9.1 split from 8.5 and 10.0**: two passes took 493 and 498 s, and one took 466 s, the time
+  of every pass of 8.5 and 10.0. All three 9.1 passes received the upper count, 1,131,987. At step 31
+  the three releases were 331–345 s.
+- **Received counts keep step 31's levels**: BIRD and OpenBGPD deliver 1,131,785, RustyBGP 1,131,993, FRR
+  8.5 and 9.1 1,131,987, and FRR 10.7 and master 1,131,724–1,131,779.
+- **OpenBGPD 8.8 takes 1.7–1.8× as long as 9.2 and 9.3** (855 s against 480–496 s), as at steps
+  24 and 31.
+- **The sink's treat-as-withdraw** (`unknown evpn subtype: 249`) recurred in all six RustyBGP rows
+  and in BIRD 3.3.2 (default threads) pass 1. Each of those rows received its cell's count.
+
+**Item 3 and Phase 5 are done.** Phase 5's exit holds: items 1–4 are done, and each build's curve
+from 10 to 38 peers is recorded here with `elapsed (s)`, `received` and peak memory per step. RustyBGP
+2026-08's step 38 is recorded and excluded. The axis past 17 was decided on 2026-10-02. No step past 38 was configured in
+`2006500`, and no approval names one, so the wrap-around steps item 3 allows are not run. The
+epic `bgperf2-0y5` stays open: what to publish, and where, is the operator's (§6, "Operator
+decisions"). The unattended queue is empty.
 
 ---
 

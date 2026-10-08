@@ -4,6 +4,11 @@
 
 **Epic:** `bgperf2-0y5`
 
+**Repository report, 2026-10-08:** the operator chose a comparison report in this repository.
+The [report](2026-daemon-comparison-report.md) is prepared for review, with exact summary
+references, the corrected rrc00 curve, exclusions and selected original bgperf2 graphs.
+External publication remains undecided; the epic stays open.
+
 This plan exists to publish one thing: **a comparison of the open-source BGP daemons and their
 versions that says what changed between releases and can be defended**. Before that, it has to
 settle what the 2026-09-15 timing-validation report

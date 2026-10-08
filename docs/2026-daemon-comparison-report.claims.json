@@ -1,0 +1,2753 @@
+{
+  "schema": "bgperf2/comparison-report-evidence/v1",
+  "report": "2026-daemon-comparison-report.md",
+  "figures": [
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 72.0
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 46.0
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 78.0
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 99.0
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 78.0
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 610.0
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 695.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 855.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 496.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 480.0
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        78,
+        76,
+        78
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 0.761
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        99,
+        98,
+        99
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 1.094
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        78,
+        78,
+        77
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 1.207
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        78,
+        78,
+        77
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 78.0
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "bird default",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 0.775
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        72,
+        72,
+        72
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 8.275
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        72,
+        72,
+        72
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 72.0
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 8.204
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        71,
+        71,
+        72
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 71.0
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 7.664
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        45,
+        51,
+        46
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 6.251
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        46,
+        47,
+        47
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 47.0
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "frr default",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 5.714
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        610,
+        617,
+        605
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 37.437
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        695,
+        690,
+        708
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 18.686
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        714,
+        701,
+        701
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 701.0
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 18.594
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        73,
+        76,
+        76
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 76.0
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 12.233
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "rustybgp default",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        154,
+        168,
+        146
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "rustybgp default",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 154.0
+    },
+    {
+      "source": "results/2026/2026-comparison/synth/2026-comparison-synth.summary.json",
+      "cell": "rustybgp default",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 17.077
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 37.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 73.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 127.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 187.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 262.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 40.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 75.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 120.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 177.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 237.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 37.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 74.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 120.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 184.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 259.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 38.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 72.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 131.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 189.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 260.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 71.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 160.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 223.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 344.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 468.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 73.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 160.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 223.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 345.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 493.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 73.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 140.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 225.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 331.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 466.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 98.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 133.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 197.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 270.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 354.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 85.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 134.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 199.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 268.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 352.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 151.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 275.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 446.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 629.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 90.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 169.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 261.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 367.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 89.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 170.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 263.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 370.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 13.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 21.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 32.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 49.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 59.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 25.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 54.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24-rustybgp-rerun/2026-comparison-rrc00-n24-rustybgp-rerun.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 86.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 133.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 1.234
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 2.12
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 2.913
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 3.742
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 4.684
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 1.633
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 2.713
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 3.703
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 4.707
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 5.989
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 1.652
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 2.717
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 3.712
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 4.705
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 6.005
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "bird default",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 1.242
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "bird default",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 2.12
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "bird default",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 2.911
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "bird default",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 3.744
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird default",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 4.693
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 5.132
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 8.389
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 11.362
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 14.456
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 17.28
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 5.404
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 8.893
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 12.077
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 15.412
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 18.447
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 5.369
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 8.727
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 11.87
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 15.137
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 18.134
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 6.062
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 9.849
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 13.381
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 17.012
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 20.813
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr default",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 6.075
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr default",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 9.86
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr default",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 13.399
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr default",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 17.009
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr default",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 20.828
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 5.056
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 8.376
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 11.726
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 15.086
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 18.46
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 3.065
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 4.857
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 6.659
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 8.481
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 10.331
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 3.063
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 4.848
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 6.644
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 8.477
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 10.332
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 2.329
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 4.169
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 5.898
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 7.701
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 10.247
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 11.386
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 26.59
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24-rustybgp-rerun/2026-comparison-rrc00-n24-rustybgp-rerun.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 47.877
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 73.829
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "max mem (GB)",
+      "field": "max",
+      "value": 110.789
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "min free mem (GB)",
+      "field": "min",
+      "value": 1.314
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "received",
+      "field": "min",
+      "value": 1131785
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "received",
+      "field": "max",
+      "value": 1131785
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        262,
+        250,
+        264
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "received",
+      "field": "min",
+      "value": 1131785
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "received",
+      "field": "max",
+      "value": 1131785
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        237,
+        246,
+        231
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "received",
+      "field": "min",
+      "value": 1131785
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "received",
+      "field": "max",
+      "value": 1131785
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        276,
+        251,
+        259
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird default",
+      "metric": "received",
+      "field": "min",
+      "value": 1131785
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird default",
+      "metric": "received",
+      "field": "max",
+      "value": 1131785
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        258,
+        260,
+        260
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "received",
+      "field": "min",
+      "value": 1131987
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "received",
+      "field": "max",
+      "value": 1131987
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        466,
+        468,
+        468
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "received",
+      "field": "min",
+      "value": 1131987
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "received",
+      "field": "max",
+      "value": 1131987
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        493,
+        466,
+        498
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "received",
+      "field": "min",
+      "value": 1131932
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "received",
+      "field": "max",
+      "value": 1131987
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        466,
+        462,
+        467
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "received",
+      "field": "min",
+      "value": 1131724
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "received",
+      "field": "max",
+      "value": 1131779
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        355,
+        347,
+        354
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr default",
+      "metric": "received",
+      "field": "min",
+      "value": 1131779
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr default",
+      "metric": "received",
+      "field": "max",
+      "value": 1131779
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        353,
+        347,
+        352
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "received",
+      "field": "min",
+      "value": 1131785
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "received",
+      "field": "max",
+      "value": 1131785
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        884,
+        855,
+        851
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "received",
+      "field": "min",
+      "value": 1131785
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "received",
+      "field": "max",
+      "value": 1131785
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        493,
+        515,
+        496
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "received",
+      "field": "min",
+      "value": 1131785
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "received",
+      "field": "max",
+      "value": 1131785
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        480,
+        479,
+        496
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "received",
+      "field": "min",
+      "value": 1131993
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "received",
+      "field": "max",
+      "value": 1131993
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        59,
+        59,
+        59
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rustybgp-head/2026-comparison-rustybgp-head-synth.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        148,
+        165,
+        107,
+        155,
+        160
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rustybgp-head/2026-comparison-rustybgp-head-synth.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 155.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rustybgp-head/2026-comparison-rustybgp-head-synth.summary.json",
+      "cell": "rustybgp 2026-09",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        149,
+        175,
+        152,
+        143,
+        144
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rustybgp-head/2026-comparison-rustybgp-head-synth.summary.json",
+      "cell": "rustybgp 2026-09",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 149.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rustybgp-head/2026-comparison-rustybgp-head-synth-unpinned.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        43,
+        44,
+        39,
+        37,
+        47
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rustybgp-head/2026-comparison-rustybgp-head-synth-unpinned.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 43.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rustybgp-head/2026-comparison-rustybgp-head-synth-unpinned.summary.json",
+      "cell": "rustybgp 2026-09",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        41,
+        43,
+        39,
+        46
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rustybgp-head/2026-comparison-rustybgp-head-synth-unpinned.summary.json",
+      "cell": "rustybgp 2026-09",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 42.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rustybgp-head/2026-comparison-rustybgp-head-mrt.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        25,
+        24,
+        23,
+        25,
+        24
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rustybgp-head/2026-comparison-rustybgp-head-mrt.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 24.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rustybgp-head/2026-comparison-rustybgp-head-mrt.summary.json",
+      "cell": "rustybgp 2026-09",
+      "metric": "elapsed (s)",
+      "field": "values",
+      "value": [
+        20,
+        19,
+        25,
+        24,
+        24
+      ]
+    },
+    {
+      "source": "results/2026/2026-comparison/rustybgp-head/2026-comparison-rustybgp-head-mrt.summary.json",
+      "cell": "rustybgp 2026-09",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 24.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rustybgp-head-unpinned-rerun/2026-comparison-rustybgp-head-unpinned-rerun.summary.json",
+      "cell": "rustybgp 2026-09",
+      "metric": "elapsed (s)",
+      "field": "median",
+      "value": 40.0
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 36
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 38
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 71
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 76
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 123
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 128
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 185
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 190
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 250
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 2.19.2",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 264
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 39
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 41
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 69
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 84
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 119
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 121
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 164
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 179
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 231
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 3.3.2 (default threads)",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 246
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 36
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 41
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 71
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 77
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 120
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 124
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 183
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 189
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 251
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird 3.3.2 (4 threads)",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 276
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 37
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 39
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 72
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 77
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 125
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 133
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 189
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 193
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 258
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "bird default",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 260
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 70
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 73
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 160
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 161
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 222
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 223
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 343
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 344
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 466
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 8.5",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 468
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 72
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 73
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 160
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 161
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 223
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 227
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 344
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 345
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 466
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 9.1",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 498
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 73
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 74
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 139
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 160
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 223
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 226
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 330
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 343
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 462
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 10.0",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 467
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 86
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 98
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 133
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 134
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 197
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 197
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 268
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 279
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 347
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr_c 10.7",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 355
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 84
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 85
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 134
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 135
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 198
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 199
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 268
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 268
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 347
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "frr default",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 353
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 150
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 151
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 272
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 281
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 440
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 452
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 629
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 639
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 851
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 8.8",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 884
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 89
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 90
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 169
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 176
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 259
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 264
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 362
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 389
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 493
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 9.2",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 515
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 89
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 91
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 168
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 172
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 256
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 265
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 364
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 379
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 479
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "openbgp 9.3",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 496
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 13
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 13
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 20
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 21
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 32
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24/2026-comparison-rrc00-n24.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 33
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 48
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 50
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 59
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n38/2026-comparison-rrc00-n38.summary.json",
+      "cell": "rustybgp 2026-02",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 59
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 24
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n10/2026-comparison-rrc00-n10.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 26
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 53
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n17/2026-comparison-rrc00-n17.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 56
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24-rustybgp-rerun/2026-comparison-rrc00-n24-rustybgp-rerun.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 86
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n24-rustybgp-rerun/2026-comparison-rrc00-n24-rustybgp-rerun.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 90
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "min",
+      "value": 133
+    },
+    {
+      "source": "results/2026/2026-comparison/rrc00-n31/2026-comparison-rrc00-n31.summary.json",
+      "cell": "rustybgp 2026-08",
+      "metric": "elapsed (s)",
+      "field": "max",
+      "value": 138
+    }
+  ]
+}

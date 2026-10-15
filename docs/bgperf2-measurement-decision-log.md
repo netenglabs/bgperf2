@@ -1,5 +1,11 @@
 # bgperf2 Measurement Implementation Decision Log
 
+Historical path note (2026-10-15): campaign configs, analysis and publication
+records moved to the optional private [research repository](https://github.com/jopietsch/second-looks-labs-research);
+runners and operations moved to [lab](https://github.com/jopietsch/second-looks-lab).
+Old inline paths and issue IDs below retain their dated meaning. Engine
+measurement decisions remain authoritative here; they do not authorize a campaign.
+
 Why each change in
 [`bgperf2-measurement-implementation-plan.md`](bgperf2-measurement-implementation-plan.md)
 was made the way it was, what was measured to decide it, and what the Docker

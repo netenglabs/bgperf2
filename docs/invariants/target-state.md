@@ -2,7 +2,7 @@
 
 The per-daemon `get_neighbors_state` wart, the table witness, and the delivery measurement derived off it.
 
-**Read this before editing:** `bgperf2.py` (the monitor poll), `base.py` (`Target.sample_target_state()`), `frr.py`, `frr_compiled.py`, `bird.py`, `gobgp.py`, `measurements.py` (`target_table_section()`, `delivery_metrics()`, `check_events()`), `scripts/check_timing_evidence.py`
+**Read this before editing:** `bgperf2.py` (the monitor poll), `base.py` (`Target.sample_target_state()`), `frr.py`, `frr_compiled.py`, `bird.py`, `gobgp.py`, `measurements.py` (`target_table_section()`, `delivery_metrics()`)
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 
@@ -252,26 +252,6 @@ backed-out rules, both of which decided from the samples in hand.
   plan's Required Measurements carries the amendment saying so, because the
   campaign may not silently re-define what a correct row is between blocks.
 
-**`check_timing_evidence.py` judges an MRT row on consistency plus a size
-floor**, never on the absolute alone -- that part stayed. Consistency is the
-monitor's count against the target's own export count; but those are the two
-ends of one link and agree whenever the link works, so a target that imported a
-tenth of the RIB would show them agreeing at a tenth. The floor is the target's
-accepted-path count against what the generators report offering. Neither half of the
-check-point survives as a rule on its own: treating it as *necessary* rejected
-every FRR row, and it is not *sufficient* either, because `0.99 * -p` is about
-4% below the union the ten peers actually hold -- so a target can clear it
-having dropped several percent of the table, and the convergence tracker will
-not catch that, since routes never delivered are not a decline from the run's
-own peak. The floor therefore applies as well as the check-point wherever there
-is a gauge, and clearing the check-point is the *fallback* where there is none,
-which is how OpenBGPD and RustyBGP rows are still judged. A row below the
-check-point with no usable import gauge is rejected, because nothing vouches
-for it. A **filtered** MRT row is that same fallback reached from the other
-side: its gauge exists but is post-policy for both daemons that publish one, so
-it cannot be compared with the offered count either, and the check-point is all
-that is left -- clearing it passes the row, below it nothing bounds the table
-and the row is rejected. The refusal that names the missing evidence names
-*which half of the run* it is missing from, never generalising to the target: a
-gauge that reported fine beside generators that publish no offered count
-(`gobgp`, `exabgp_mrtparse`) is not a target without a gauge.
+Campaign MRT acceptance rules moved with the checker to the optional private
+[research analysis contracts](https://github.com/jopietsch/second-looks-labs-research/blob/main/bgp/2026/docs/analysis-contracts.md).
+Engine delivery measurements and their refusal rules remain above.

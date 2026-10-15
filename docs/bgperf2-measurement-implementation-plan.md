@@ -1,5 +1,11 @@
 # bgperf2 Measurement Integrity Implementation Plan
 
+Historical path note (2026-10-15): campaign configs, analysis and publication
+records moved to the optional private [research repository](https://github.com/jopietsch/second-looks-labs-research);
+runners and operations moved to [lab](https://github.com/jopietsch/second-looks-lab).
+Old inline paths and issue IDs below retain their dated meaning. Engine
+measurement decisions remain authoritative here; they do not authorize a campaign.
+
 ## Purpose
 
 This is the implementation plan for repairing `bgperf2` timing semantics and
@@ -22,7 +28,7 @@ The implementation objective is:
 ## Relationship to the Follow-Up Campaign
 
 The follow-up campaign is specified in
-[`completed/2026-64gb-timing-validation-plan.md`](./completed/2026-64gb-timing-validation-plan.md).
+[`completed/2026-64gb-timing-validation-plan.md`](https://github.com/jopietsch/second-looks-labs-research/blob/main/bgp/2026/docs/completed/2026-64gb-timing-validation-plan.md).
 That campaign could not begin until the release gate in this document passed; the
 gate passed on 2026-09-08, the campaign ran, and it **completed on 2026-09-15 and
 is archived**.

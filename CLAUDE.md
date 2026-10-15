@@ -25,7 +25,7 @@ having parts, and since 2026-09-12 it has three:
   Code only** — Codex reads this file through the `AGENTS.md` symlink but loads neither
   `.claude/skills/` nor the hook, so for it the index below and the skill files are ordinary
   documents it has to choose to open.
-- **`.claude/skills/*`**, one per operator contract, loaded in full when its trigger phrase is said.
+- **`.claude/skills/*`**, engine implementation guidance loaded when its trigger phrase is said.
 
 What made the old `AGENTS.md` dangerous was that it could go on looking right while saying something
 different from the source. An index line cannot, because it names a document and a rule rather than
@@ -83,7 +83,7 @@ pip install -r pip-requirements.txt
 ./bgperf2.py dockerfile frr_c --version 8.0          # print a recipe without building it
 ./bgperf2.py bench -t bird -n 10 -p 1000    # one run: 10 peers x 1000 prefixes
 ./bgperf2.py bench -t frr_c --version 10.1  # a specific release
-./bgperf2.py batch -c bench.yaml  # matrix of runs -> CSV + PNG graphs
+./bgperf2.py batch -c benchmarks/example.yaml  # matrix of runs -> CSV + PNG graphs
 ./bgperf2.py config -o out.yml    # emit scenario.yaml without running
 ```
 
@@ -94,14 +94,15 @@ images were built before that refuses the run until `./bgperf2.py prepare -t sin
 
 ```bash
 venv/bin/pip install -r test-requirements.txt
-venv/bin/python -m pytest tests/ -q        # ~0.5s, no Docker needed
+venv/bin/python -m pytest tests/ -q        # no Docker needed
 venv/bin/python -m pytest tests/test_convergence.py -q
 ```
 
 The test suite deliberately needs **no Docker daemon and no privileges** — it covers the pure layers
 (stats row/header contract, convergence rules, host-contention detection, CLI-output parsers,
-module imports). Importing
-`bgperf2` works without a reachable daemon, which is what makes that possible; keep it that way.
+module imports). Tests replace the eager Docker runtime client before importing
+`bgperf2` and fail unmocked runtime operations. Ordinary CLI imports still initialize
+that client; changing runtime initialization is separate engine work.
 There is no coverage of the container orchestration itself, so a real `bench` is still the only
 end-to-end check. Use `-n1 -p1` for the fastest one.
 
@@ -128,9 +129,9 @@ Every `bench` run creates containers on a dedicated Docker bridge network (`<ben
   purpose-built counter that writes its own timestamped count to a log in its bind-mounted
   directory, which the controller reads on the host. `--monitor gobgp` (batch: `monitor: gobgp`)
   selects the old instrument, a GoBGP that `bench` polls with `gobgp neighbor -j` once a second.
-  It is kept as the reference a surprising sink result can be re-checked against. Every 2026
-  config under `benchmarks/` that ran before the flip states `monitor: gobgp`, because that is
-  what it ran. Those rows are superseded, not bridged (measurement plan Phase 7).
+  It is kept as the reference a surprising sink result can be re-checked against.
+  Historical campaign configs now live in research and preserve their explicit monitor.
+  Engine examples under `benchmarks/` run independently of those private records.
 - **testers** — one or more route generators peered with the target. BIRD (default) or ExaBGP for
   synthetic prefixes; bgpdump2 or ExaBGP-mrtparse for MRT file playback. GoBGP is **only** the
   selectable monitor (and its export receivers) — it was removed as a target and as an MRT
@@ -244,26 +245,19 @@ claims.
   `-r/--repeat` in both directions.
 
 **`docs/invariants/batch-passes.md`** — `bgperf2.py`'s `expand_batch_cells()`/`batch_report_rows()`/
-`create_batch_graphs()`, `summary.py`, `graphs.py`, `scripts/timing_variance_review.py`,
-`scripts/check_repetition_configs.py`, `scripts/build_timing_report.py`.
+`create_batch_graphs()`, `summary.py`, `graphs.py`.
 
 - A repetition repeats the whole matrix, not each cell, and is part of a run's *name*, never a
   column beside it.
-- A cell's cross-pass identity is its axes and its target, **never its ordinal** — a block that
-  repeats part of an earlier matrix moves the survivors' ordinals while they stay the same cells.
-  A pass that covers only part of a series says so, and the declaration is enforced both ways.
 - A cell id says what the cell is, never when it ran; execution order is not report order.
 - Nothing absent is published as a zero: a withheld statistic is `null` with its reason beside it,
   and an unsampled extreme is not an observation.
 - **A pass that failed and a pass that has not run are never described by one clause**, at any level
   of aggregation. Collapsed three times.
 - `summary.py` reads the stats row by column name and must not import `bgperf2`.
-- The report computes no statistic; every claim cites figures resolved against the review before it
-  is written, matched exactly, and `testers (s)` is neither published nor cited.
 
 **`docs/invariants/target-state.md`** — `frr.py`, `bird.py`, `gobgp.py`, `base.py`'s
-`sample_target_state()`, `measurements.py`'s `target_table_section()`/`delivery_metrics()`,
-`scripts/check_timing_evidence.py`.
+`sample_target_state()`, `measurements.py`'s `target_table_section()`/`delivery_metrics()`.
 
 - **Never read a BIRD stats table positionally.** BIRD 3 inserts columns, which made every BIRD 3
   target report `accepted` 0 for every neighbour, silently.
@@ -274,8 +268,7 @@ claims.
 - A daemon with no gauge reports `None`, never 0. FRR withholds `best_paths` deliberately.
 - `monitor_required_reached` is the monitor's count against the check-point; a second rule for it
   was built, verified and backed out. `delivery_metrics()` is the sound version and carries ten
-  named refusals; `check_events()` accepts it in place of that event only for an MRT generator,
-  only for that one event, and only when it resolved.
+  named refusals. Campaign acceptance of that measurement lives with research analysis.
 
 **`docs/invariants/tester-offering.md`** — `measurements.py`'s `TesterOffering`,
 `TesterEventRecorder`, `tester_metrics()`, `tester_fleet_metrics()`; `Tester.offering_stats()`;
@@ -452,34 +445,20 @@ default), which bgperf2 then cannot clean up; `sudo rm -rf /var/tmp/bgperf2` whe
 
 ### Operator contracts
 
-Five contracts are each triggered by an exact user phrase — which is precisely what a skill
-description is — so each one is a skill under `.claude/skills/` and is loaded **in full** on
-invocation. Nothing about them has been condensed and the plan documents they drive are unchanged:
+The `measurement-implementation` skill drives the engine implementation plan and
+its decision log when the user says `continue the bgperf2 measurement implementation plan`.
+Read `.claude/skills/measurement-implementation/SKILL.md` in full on invocation.
+It permits up to three separately reviewed and committed change sets, stopping
+at an operator decision, phase boundary or hardware requirement.
 
-| the user says | skill | drives |
-|---|---|---|
-| `continue the 2026 benchmark campaign` | `2026-benchmark-campaign` | run ID `2026-baseline`, `results/2026`, `/data/bgperf-work` |
-| `continue the bgperf2 measurement implementation plan` | `measurement-implementation` | `docs/bgperf2-measurement-implementation-plan.md` and its decision log |
-| `continue the 64 GB timing validation campaign` | `timing-validation-campaign` | **complete 2026-09-15, plan archived** — `docs/completed/2026-64gb-timing-validation-plan.md`, `scripts/run_timing_validation_block.sh`. The skill refuses a new block and says so; the host-class rule it carries still governs. |
-| `continue the unattended execution plan` | `unattended-execution` | `docs/unattended-execution-plan.md` |
-| `continue the 2026 daemon comparison` | `2026-daemon-comparison` | `docs/2026-daemon-comparison-plan.md`, epic `bgperf2-0y5`; `scripts/check_plan_beads.py` checks the plan and its beads agree before any work |
-
-All five have one shape: inspect durable state first, never run two things concurrently, complete
-exactly one reviewable unit, then stop and tell the user to use the same prompt again. Two are
-exceptions, both by the operator's choice on 2026-10-01. The measurement plan may run up to three
-change sets in a row. Each is still reviewed and committed on its own, and the run stops early at
-any operator decision, phase boundary or hardware requirement; its skill says when. The daemon
-comparison is the other exception. It may run independent
-items in parallel through subagents, each still its own commit and record, and never while
-anything shares the host with a benchmark. Its skill's "Delegation" section says which model does
-which job and what never leaves the main session.
-
-**The campaign host is a class, not a machine**, and that is cross-cutting enough to state here: 16
-vCPU / 61.44 GiB AMD EPYC 9R14 (`m7a.4xlarge`), an EC2 spot instance reclaimed without warning, of
-which only `/data` survives a reclaim — which is why the work directory is `/data/bgperf-work` and
-not `/var/tmp`. Rows measured on it may never be read against
-`benchmarks/baseline/baseline-benchmark.csv`, which was produced on a different CPU. The
-timing-validation skill carries the full rule.
+Campaign and unattended execution contracts now belong to the optional private
+[Second Looks Lab](https://github.com/jopietsch/second-looks-lab). Research plans,
+analysis and publications belong to
+[Second Looks research](https://github.com/jopietsch/second-looks-labs-research).
+Neither is needed to build, test, configure or run this engine. Historical issue
+IDs remain in engine decision records; their tracking recovery is unresolved.
+`scripts/check_plan_beads.py` remains a legacy helper, not a prerequisite for
+engine use or for work in the new repositories.
 
 ### Code conventions
 
@@ -581,10 +560,10 @@ this repository that no one asked it to. The resolutions:
   opt-in and this repository does not opt in. Note `bd config show` reports
   `beads.role = maintainer`, inferred from the git remote — that is beads' write-routing role,
   **not** the team-maintainer profile, and it is not an opt-in to anything.
-- **The ban on "markdown files for task tracking" does not reach the plan documents.** All
-  four operator contracts here are driven by `docs/*.md`, and every one of them requires the
-  worker to record progress in a plan document -- or, for the measurement plan, in its decision
-  log -- as part of being done. A driver that took the
+- **The ban on "markdown files for task tracking" does not reach the plan documents.** The
+  retained measurement implementation contract is driven by `docs/*.md` and requires the
+  worker to record progress in its decision log as part of being done. Campaign contracts
+  moved to the lab repository, where Markdown plans remain authoritative. A driver that took the
   injection literally would stop writing the record its own contract is defined by. Items in
   beads link to a document anchor; the document stays the durable account. The bans on
   `TodoWrite` and `MEMORY.md` are narrower still: a per-turn todo list is execution state

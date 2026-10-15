@@ -2,7 +2,7 @@
 
 How a matrix becomes an ordered list of runs, and what the passes of one cell are allowed to say about each other.
 
-**Read this before editing:** `bgperf2.py` (`expand_batch_cells()`, `batch_report_rows()`, `bench_output_prefix()`, `create_batch_graphs()`), `summary.py`, `graphs.py`, `scripts/timing_variance_review.py`, `scripts/check_repetition_configs.py`, `scripts/build_timing_report.py`
+**Read this before editing:** `bgperf2.py` (`expand_batch_cells()`, `batch_report_rows()`, `bench_output_prefix()`, `create_batch_graphs()`), `summary.py`, `graphs.py`
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 
@@ -52,156 +52,11 @@ run the matrix unfiltered.
   have to move and an in-flight batch from an older build still resumes instead of costing the
   operator every completed cell.
 
-## Pooling the passes of a partial repetition
+## Campaign analysis
 
-A campaign block does not always repeat the whole of what an earlier block ran. Block 10 repeats
-three of Block 8's five screen scenarios, and within the peer sweep only the three 250-peer cells —
-the 50-peer comparison lies inside the 1s resolution of `elapsed (s)` and no number of passes can
-separate it, and the 500-peer comparison had two of its three rows excluded on `tester_health`,
-which the plan does not allow expanding. Two rules hold that together, and each replaces something
-that used to be implicit.
-
-- **A cell's cross-pass identity is its axes and its target, never its ordinal.**
-  `cell_identity_key()` drops `test`, `repetition` *and* `ordinal`. The first two are obvious; the
-  third is the one that bites. `ordinal` is a cell's position within its own matrix, so it is stable
-  across passes over the same matrix and only across those: dropping six of nine cells moves the
-  survivors from ordinals 3–5 to 0–2 while they stay the same three cells, and keyed on ordinal they
-  pool with nothing — each pass reporting three cells missing from the other two, every comparison
-  stuck at one observation, which is the exact opposite of what a repetition block is for. Two cells
-  of one matrix cannot share axes and target, because `check_batch_run_names()` refuses two targets
-  in one test that share a run name, so nothing is lost by dropping it. Report order is unaffected:
-  `build_groups()` takes the ordinal from the first pass that holds the cell.
-- **A pass that runs part of a series must declare what it covers**, and the declaration is checked
-  in both directions. Dropping ordinal from the key also drops what ordinal was quietly doing —
-  catching a matrix that moved between passes with nothing saying so — so that check moves somewhere
-  it can be stated rather than inferred. A pass entry's `covers` names the identity fields its cells
-  all share; a cell inside that coverage which the pass does not hold is still missing work and is
-  reported, and a cell the pass holds which its coverage excludes is refused, because otherwise the
-  declaration is decoration and a config that ran more than was asked has its extra row pooled into
-  a comparison nobody planned. A pass with no `covers` is expected to hold every cell of its series,
-  exactly as before.
-
-Three consequences follow from dropping `ordinal`, and each was found by review rather than
-foreseen.
-
-- **A matrix axis lists each value once.** `neighbors: [250, 250]` produced two cells with distinct
-  ids and *one* cross-pass identity, so `build_groups()` kept whichever it read last and published
-  `n` as though the other run never happened — where `ordinal` used to keep them apart.
-  `check_batch_test()` refuses a repeated value now (`repetitions:` is the mechanism for measuring a
-  cell twice, and it names its passes), and `build_groups()` reports a collision anyway, because a
-  progress file written before that guard can still hold one.
-- **An execution position is comparable only across passes of the same length.** Pass 1 of the peer
-  sweep has positions 1–9 and passes 2–3 have 1–3; sorted onto one scale, the pass that ran first
-  can come out "latest" purely because its matrix was larger, and `order_relation()` would publish
-  "rises with position" off an artifact of matrix size. It is withheld by name for a series whose
-  passes ran different-sized matrices — a relation that cannot be read is not a relation of
-  `neither`.
-- **What a series' caption promises has to be true of every cell under it.** `screen-peers` is
-  repeated *in part*, so three of its nine cells have three observations and six still have one.
-  Dropping "(one observation per cell)" because the scenario gained passes promises a dispersion for
-  rows that do not have one; the caveat says which cells were repeated instead.
-
-And one about the selection document: **a selection is a plan, and what may be asked of it depends on
-whether the block it plans has run.** Before, the question is whether it adds an observation — asking
-for three where three already ran is refused. After, the question is whether it was *carried out*,
-and asking the first question again fires on the selection being executed: Block 10 **is** passes 2
-and 3 of the scenarios its own selection names, so every entry reported "asks for 3 passes and 3
-already ran". Simply excluding the planned block's passes fixes that and costs the guard entirely —
-the count would be pinned at 1 forever and a later selection could never be refused. The check
-changes question instead, and the second question catches a block that ran fewer passes than the
-selection asked for, which nothing else here would notice.
-
-The same split shows up one level out. `review_blocks()` checks COMPLETE markers, host class and
-image ids for **the blocks the reviewed series actually read**, not for every block in the campaign:
-under `--series`, demanding a marker on blocks whose rows nobody opened is a refusal about evidence
-the review never looked at. And a block's own passes cannot be in the pooled read until that block
-is accepted — which is why Blocks 10 and 11 guard their matrices with `check_repetition_configs.py`,
-a pure document check that the cells each config runs are exactly the cells its selection names and
-that the passes of a comparison differ in the test `name` and the seed and nothing else. The pooled
-read of those passes happens at acceptance, not during the block. One script and one table for both
-blocks, with a `--block` it refuses to default: the block and its selection are two halves of one
-statement, a defaulted half is the mistake the script exists to catch made by the script itself, and
-a copied check is one that stops being run against the block it was copied for.
-
-**A regenerated review is staged, never deleted first.** `run_variance_review()` rebuilds the whole
-of `review/` because a leftover series document is a statistic nobody computed sitting beside ones
-somebody did — but it refuses whenever a later block has been built and not yet accepted, which is
-the ordinary state of the campaign, since a pass is declared as soon as its block is built. Deleting
-first meant a `block-9 --force` destroyed an accepted block's published review and could not rebuild
-it; the next block's own decision document cites that review by path as its evidence. It is written
-to staging and moved into place once it has qualified.
-
-**A block that has not run and a block whose rows nobody reviewed are different refusals**, at this
-level as at every other. The first is work to do and the second is work to review, and the host and
-image checks read only the blocks that ran: a block with no directory recorded no host and no image,
-and reporting that as a provenance gap describes work that has not happened in the words used for
-work that happened unrecorded.
-
-**A selection's arithmetic is counted through its own planned block, never over every pass the
-series will ever have.** A series can be expanded twice — `screen-peers` has passes 1, 2–3 and 4–5 in
-three different blocks — and counting all five against Block 10's selection reported "asks for 3
-passes and 5 ran", a later block falsifying an earlier one that was carried out exactly as written.
-What a selection can be held to is the campaign up to the end of the block it planned; the document
-names that block (`planned_block`), and an absent one means Block 10's, which is the only selection
-written before there was a second. The same shape holds in the config check: what a block adds is
-`len(configs)`, and what already exists is `prior_passes`, so the Block 10 form of the arithmetic —
-a literal `+ 1` — would have accepted a Block 11 selection asking for three passes, satisfied by a
-block that added no observation at all.
-
-## Publishing the passes — the report
-
-The campaign's report is the last thing to read these documents, and it is the place where a number
-that has drifted becomes a sentence somebody quotes. Four rules hold it, and the first is what the
-other three are for.
-
-- **The report computes no statistic of its own.** Not a median, not a percentage, not a difference
-  between two medians. Every figure is read from a series document, which read it from
-  `summary.py`, which is the module each block used on its own passes. A report that re-derived its
-  numbers would disagree with the blocks eventually, on exactly the rows a reader cared about, and
-  nothing would say which of the two was wrong.
-- **Every claim cites the figures it rests on, and the citations are resolved before the report is
-  written.** The prose is the part that cannot be derived from the rows, so it is written by hand in
-  a claims document naming series, cell, metric, field and the value the author believes is there; a
-  citation that is absent or disagrees refuses the build and names both numbers. This is not
-  hypothetical hygiene — the first real build refused eight citations, every one of them a figure
-  transcribed from a rounded table into prose that would have been published beside a table
-  contradicting it.
-- **A citation is matched exactly, never rounded into agreement.** The review has already rounded
-  these; a tolerance here would be the report deciding how far a published number may sit from the
-  one it cites, which is the judgement the whole arrangement exists to remove.
-- **`testers (s)` is neither published nor cited.** It is a real column in every stats row and it is
-  the legacy field whose reading this campaign replaced, so the plan's exit criterion is that no
-  claim depends on it. The decomposition is published in its place, and a claim whose *text* names
-  the field is refused along with one that cites it.
-
-Two refusals that look like polish and are not. **A citation must state the value it rests on**, or
-nothing compares the prose to the review — the citation resolves, publishes whatever the review says,
-and the claim above it is unchecked while looking checked. And **a claim may not rest on a figure the
-review withheld**: that citation resolves too, and renders as "= withheld" directly beneath the
-conclusion it supposedly supports. **A claim's section must be one the page actually renders**, for
-the same family of reason: a section that is neither the summary nor a series name passes every
-check, is counted, is written to the machine-readable artifact, and then never appears — a validated
-invisible conclusion, which is worse than a missing one.
-
-And the withholding carries all the way to the page: a dispersion over one observation is printed as
-the reason it has none, an interval a cell never published is `withheld` rather than blank, and
-everything the report declined to publish is gathered into a section of its own — a reader should
-not have to find every empty cell to learn what is missing. **The reason is the review's own**, never
-one derived from the observation count: `summary.py` distinguishes five, and four of them are not
-"fewer than two observations" — the never-sampled sentinel in particular has a full set of
-observations and is the case that sentinel exists for. **A withheld figure and a published figure
-with no dispersion are separate statements**, or the inventory fills with notes about a withholding
-the report does not make: 132 of the first build's 207 were that.
-
-**An interval is a duration of something only if something crossed it.** `injection_s` comes back
-`0.0` from a BIRD 2.19 generator whose offered count is queue-side and saturates before the first
-poll, so the span is one nothing crossed and not a send that took no time. The witness
-(`offered_in_interval`) is published beside it and the interval is withheld by name where that
-witness is zero — the first real build printed the bare `0` on 34 cells, under a column header
-promising "where a table crossed it", on a page whose own preamble promises no absent figure is
-printed as a zero. An optional interval appears only in the
-series that measured it, because a column of `withheld` in six other series says nothing except that
-a policy reload is not part of an MRT playback.
+The partial-series and publication contracts moved with their implementations to
+[research analysis contracts](https://github.com/jopietsch/second-looks-labs-research/blob/main/bgp/2026/docs/analysis-contracts.md)
+(private, optional context). Engine repetition, order and summary contracts stay here.
 
 ## Order
 

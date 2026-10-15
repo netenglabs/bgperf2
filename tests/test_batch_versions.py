@@ -291,6 +291,8 @@ class TestSecondRoundFixes:
         --version destroyed the previous run's containers before failing.
         CLAUDE.md keeps those around deliberately for investigation.
         '''
+        # This case tests ordering, independent of installed monitor images.
+        monkeypatch.setattr(base, 'img_exists', lambda *a, **k: True)
         order = []
         monkeypatch.setattr(bgperf2, 'remove_target_containers',
                             lambda: order.append('teardown'))

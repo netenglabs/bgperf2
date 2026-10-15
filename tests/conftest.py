@@ -1,5 +1,6 @@
 import datetime
 import sys
+from types import ModuleType
 from argparse import Namespace
 from pathlib import Path
 
@@ -8,6 +9,25 @@ import pytest
 # The modules under test live at the repo root, not in a package.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
+
+
+class NoDocker:
+    """Allow method patching, but fail any unmocked runtime operation."""
+    _version = '1.41'
+
+    @property
+    def api_version(self):
+        return self._version
+
+    def __getattr__(self, name):
+        def forbidden(*args, **kwargs):
+            raise AssertionError(f'Docker forbidden in engine unit tests: {name}')
+        return forbidden
+
+
+settings = ModuleType('settings')
+settings.dckr = NoDocker()
+sys.modules['settings'] = settings
 
 FIXTURES = Path(__file__).resolve().parent / 'fixtures'
 

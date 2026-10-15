@@ -79,11 +79,10 @@ GOVERNS = '**Read this before editing:** '
 def governed_modules(name):
     """Every `x.py` the document claims to govern.
 
-    The whole paragraph, not its first line, and a name may carry a directory:
-    `target-state.md` governs `scripts/check_timing_evidence.py`, and a pattern
-    anchored on a leading backtick left that file -- the one encoding the timing
-    campaign's Acceptance Rules -- governed by nothing, in the hook and in this
-    function alike, so the test compared the blind spot against itself.
+    Read the whole paragraph, including directory-qualified source paths. The
+    original parser missed the campaign's checker because it matched only a
+    leading backtick, and the hook shared that blind spot. A synthetic mapping
+    below keeps this regression covered after the campaign code moves.
 
     Reading one line here while the
     hook also read one line meant the test compared a truncation against the
@@ -102,10 +101,10 @@ def governed_modules(name):
     return sorted(set(re.findall(r'`(?:[A-Za-z0-9_]+/)*([A-Za-z0-9_]+\.py)`', ' '.join(paragraph))))
 
 
-def run_hook(payload):
+def run_hook(payload, root=REPO_ROOT):
     result = subprocess.run(
         ['sh', str(HOOK)], input=json.dumps(payload), capture_output=True, text=True,
-        env={**os.environ, 'CLAUDE_PROJECT_DIR': str(REPO_ROOT)},
+        env={**os.environ, 'CLAUDE_PROJECT_DIR': str(root)},
     )
     assert result.returncode == 0, result.stderr
     if not result.stdout.strip():
@@ -311,7 +310,8 @@ def test_the_skills_between_them_drive_the_plan_documents():
     named = set()
     for name in SKILL_DIRS:
         named |= set(re.findall(r'`(docs/[A-Za-z0-9_./-]+\.md)`', (SKILLS / name / 'SKILL.md').read_text()))
-    assert len(named) >= 3, f'only {named} named across every skill'
+    assert {'docs/bgperf2-measurement-implementation-plan.md',
+            'docs/bgperf2-measurement-decision-log.md'} <= named, f'only {named} named across every skill'
 
 
 @pytest.mark.parametrize('name', SKILL_DIRS)
@@ -352,10 +352,19 @@ def test_every_skill_is_reachable_through_the_agents_directory(name):
     assert link.resolve() == (SKILLS / name).resolve()
 
 
-def test_a_module_named_with_a_directory_is_still_governed():
-    """`target-state.md` governs `scripts/check_timing_evidence.py`."""
-    path = REPO_ROOT / 'scripts' / 'check_timing_evidence.py'
-    assert run_hook({'tool_input': {'file_path': str(path)}}) == ['docs/invariants/target-state.md']
+def test_a_module_named_with_a_directory_is_still_governed(tmp_path, monkeypatch):
+    """Directory-qualified mappings remain covered after the campaign scripts move."""
+    invariants = tmp_path / 'docs/invariants'
+    invariants.mkdir(parents=True)
+    (invariants / 'example.md').write_text(
+        '# Example\n\n**Read this before editing:** `scripts/example.py`\n\n')
+    source = tmp_path / 'scripts/example.py'
+    source.parent.mkdir()
+    source.touch()
+    monkeypatch.setitem(globals(), 'INVARIANTS', invariants)
+    assert governed_modules('example.md') == ['example.py']
+    assert run_hook({'tool_input': {'file_path': str(source)}}, root=tmp_path) == [
+        'docs/invariants/example.md']
 
 
 def test_running_the_cli_is_not_editing_it():

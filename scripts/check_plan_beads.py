@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Check that a plan document and its beads epic say the same thing.
 
+Legacy helper retained pending tracking recovery; current research/lab repos
+do not use Beads. Supply an explicitly selected legacy plan.
+
 The plan document is the source of intent and evidence; each bead is a title,
-a status and a pointer to a section of the plan (see `CLAUDE.md`, "Beads is
-task tracking, and nothing else"). With the reasoning kept in one place, the
+a status and a pointer to a section of the plan (see `CLAUDE.md`
+for the retained legacy tracking workflow). With the reasoning kept in one place, the
 only thing left to drift is status, and that is what this checks:
 
-    scripts/check_plan_beads.py docs/2026-daemon-comparison-plan.md
+    scripts/check_plan_beads.py path/to/legacy-plan.md
 
 The plan declares its epic once and each tracked section declares its bead and
 status on lines of their own:

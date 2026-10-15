@@ -96,9 +96,9 @@ def test_a_bead_carrying_reasoning_is_named():
     assert 'reasoning' in finding
 
 
-def test_the_real_plan_parses():
-    """The one plan that uses the format must keep parsing."""
-    text = (REPO_ROOT / 'docs' / '2026-daemon-comparison-plan.md').read_text()
+def test_the_preserved_historical_tracking_format_parses():
+    """Historical syntax stays covered without requiring the private research plan."""
+    text = (REPO_ROOT / 'tests/fixtures/legacy-plan-tracking.txt').read_text()
     epic, sections = cpb.parse_plan(text)
     assert epic and len(sections) >= 5
     assert all(s in cpb.PLAN_STATUSES for _, _, s in sections)

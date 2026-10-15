@@ -4,14 +4,6 @@
 
 set -u
 
-# The benchmark configs under benchmarks/ refer to mrt/rib.20210801.0000
-mkdir -p mrt
-if [ ! -f mrt/rib.20210801.0000 ]; then
-    wget -q -O mrt/rib.20210801.0000.bz2 \
-        http://archive.routeviews.org/bgpdata/2021.08/RIBS/rib.20210801.0000.bz2 \
-        && bzip2 -d mrt/rib.20210801.0000.bz2 &
-fi
-
 sudo apt update
 sudo apt upgrade --yes
 sudo apt install docker.io --yes
@@ -21,8 +13,6 @@ sudo usermod -aG docker "$USER"
 
 python3 -m venv venv
 venv/bin/pip install -r pip-requirements.txt
-
-wait
 
 echo
 echo "Setup done. Reboot (or log out and back in) so the docker group applies, then:"

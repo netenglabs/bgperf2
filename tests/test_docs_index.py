@@ -19,7 +19,6 @@ from conftest import REPO_ROOT
 
 CLAUDE_MD = REPO_ROOT / 'CLAUDE.md'
 INVARIANTS = REPO_ROOT / 'docs' / 'invariants'
-SKILLS = REPO_ROOT / '.claude' / 'skills'
 HOOK = REPO_ROOT / '.claude' / 'hooks' / 'invariants-guard.sh'
 SETTINGS = REPO_ROOT / '.claude' / 'settings.json'
 
@@ -221,35 +220,14 @@ def test_the_hook_is_registered_and_executable():
         for h in entry['hooks']
     ]
     assert any('invariants-guard.sh' in c for c in commands), (
-        'the guard is not registered in .claude/settings.json. Note bd rewrites that file '
-        'whole on drift and bd setup appends rather than reverts -- re-read it after either.'
+        'the invariant guard is not registered in .claude/settings.json'
     )
 
 
-SKILL_DIRS = sorted(p.name for p in SKILLS.iterdir() if p.is_dir()) if SKILLS.is_dir() else []
 
 
-@pytest.mark.parametrize('name', SKILL_DIRS)
-def test_every_skill_declares_itself_and_is_indexed(name):
-    text = (SKILLS / name / 'SKILL.md').read_text()
-    assert re.search(rf'^name: {re.escape(name)}$', text, re.M), (
-        f'{name}/SKILL.md declares a different name than its directory'
-    )
-    assert re.search(r'^description: \S', text, re.M), f'{name} has no description to trigger on'
-    assert name in claude_md(), f'{name} is not named in CLAUDE.md, so nothing says it exists'
 
 
-@pytest.mark.parametrize('name', SKILL_DIRS)
-def test_every_operator_contract_keeps_its_trigger_phrase(name):
-    '''The phrase is the whole interface: a contract nobody can say is unreachable.'''
-    text = (SKILLS / name / 'SKILL.md').read_text()
-    phrases = re.findall(r'When the user says `([^`]+)`', text)
-    assert phrases, f'{name} states no trigger phrase'
-    for phrase in phrases:
-        assert phrase in text.split('---', 2)[1], (
-            f'{name} triggers on "{phrase}" but its description does not mention it'
-        )
-        assert phrase in claude_md(), f'CLAUDE.md does not list the phrase "{phrase}"'
 
 
 def test_a_governs_paragraph_may_be_rewrapped():
@@ -285,71 +263,12 @@ def test_the_single_file_note_is_withheld_when_several_files_are_named():
         assert 'This file is governed by most of them' not in many, command
 
 
-@pytest.mark.parametrize('name', SKILL_DIRS)
-def test_every_document_a_skill_names_exists_at_the_path_it_names(name):
-    """The plan documents are the entire payload of these contracts.
-
-    They were repo-root-relative when this text lived in CLAUDE.md and came
-    across verbatim, so as markdown links they pointed at
-    `.claude/skills/<name>/docs/...`. Rewriting the hrefs to `../../../docs/...`
-    fixed the reading from the skill directory and broke the one from the repo
-    root, which is the cwd an agent runs `cat` in -- so the link syntax is gone
-    and a backticked repo path is what is left, correct in both readings.
-    """
-    text = (SKILLS / name / 'SKILL.md').read_text()
-    assert '](../' not in text, f'{name} carries a relative link that escapes the repo'
-    # Not every contract drives a plan document -- `2026-benchmark-campaign`
-    # drives a script -- so this checks the ones that do name one.
-    referenced = set(re.findall(r'`(docs/[A-Za-z0-9_./-]+\.md)`', text))
-    for ref in referenced:
-        assert (REPO_ROOT / ref).is_file(), f'{name} names {ref}, which is not there'
 
 
-def test_the_skills_between_them_drive_the_plan_documents():
-    """Keeps the two checks above from passing over an empty set."""
-    named = set()
-    for name in SKILL_DIRS:
-        named |= set(re.findall(r'`(docs/[A-Za-z0-9_./-]+\.md)`', (SKILLS / name / 'SKILL.md').read_text()))
-    assert {'docs/bgperf2-measurement-implementation-plan.md',
-            'docs/bgperf2-measurement-decision-log.md'} <= named, f'only {named} named across every skill'
 
 
-@pytest.mark.parametrize('name', SKILL_DIRS)
-def test_the_plan_a_skill_drives_points_back_at_the_skill(name):
-    """A pointer that resolved before the move and not after is a rule lost.
-
-    `docs/unattended-execution-plan.md` said its continuation prompt "is now an
-    operator contract in `CLAUDE.md` ... see the contract", and after the move a
-    worker following that found only the index table. The plan documents are
-    older than the skills, so nothing else pins the direction.
-    """
-    text = (SKILLS / name / 'SKILL.md').read_text()
-    plans = [
-        REPO_ROOT / ref for ref in re.findall(r'`(docs/[A-Za-z0-9_./-]+plan\.md)`', text)
-    ]
-    for plan in plans:
-        body = plan.read_text()
-        # Only a plan that says its contract *lives* in CLAUDE.md: an incidental
-        # mention of the file is not a pointer at anything that moved.
-        if not re.search(r'(contract|prompt)[^.]{0,80}in `CLAUDE\.md`', body):
-            continue
-        assert name in body, (
-            f'{plan.name} refers to CLAUDE.md but never names the {name} skill that now '
-            f'carries its contract'
-        )
 
 
-@pytest.mark.parametrize('name', SKILL_DIRS)
-def test_every_skill_is_reachable_through_the_agents_directory(name):
-    """Codex reads this repo through `AGENTS.md` and loads no `.claude/skills/`.
-
-    The symlinks under `.agents/skills/` are the only thing that puts these
-    contracts in front of it, and a fifth skill added without one would be lost
-    for that reader in silence.
-    """
-    link = REPO_ROOT / '.agents' / 'skills' / name
-    assert link.is_symlink(), f'{name} has no .agents/skills entry, so Codex cannot see it'
-    assert link.resolve() == (SKILLS / name).resolve()
 
 
 def test_a_module_named_with_a_directory_is_still_governed(tmp_path, monkeypatch):
@@ -402,7 +321,7 @@ def test_the_note_appears_only_when_every_document_applies():
 
 
 RELOCATED = sorted(
-    [INVARIANTS / n for n in DOCS] + [SKILLS / n / 'SKILL.md' for n in SKILL_DIRS]
+    [INVARIANTS / n for n in DOCS]
 )
 
 

@@ -8,7 +8,6 @@ bgperf2 is a performance measurement tool for BGP implementation. This was forke
 * [How bgperf2 works](https://github.com/netenglabs/bgperf2/blob/master/docs/how_bgperf_works.md)
 * [Benchmark remote target](https://github.com/netenglabs/bgperf2/blob/master/docs/benchmark_remote_target.md)
 * [MRT injection](https://github.com/netenglabs/bgperf2/blob/master/docs/mrt.md)
-* [Engine architecture](docs/architecture-and-benchmark-roadmap.md)
 * [Measurement definitions](docs/measurement-dictionary.md)
 
 ## Updates from original bgperf
@@ -212,10 +211,10 @@ waiting for — or, more often, saying which measurement forbids naming it. All
 of them are in `<prefix>.events.json`, and each run records the bgperf2
 revision and schema versions that produced them.
 
-The [measurement implementation plan](docs/bgperf2-measurement-implementation-plan.md)
-and [decision log](docs/bgperf2-measurement-decision-log.md) record engine changes
-and the evidence behind them. Historical campaign validation is optional context
-in the private research repository.
+The [measurement dictionary](docs/measurement-dictionary.md) defines current
+measurements and their limits. Development plans and implementation history live
+in optional private [Second Looks Lab](https://github.com/jopietsch/second-looks-lab/tree/main/bgp/docs/engine-development);
+research reports and historical validation live in Second Looks research.
 
 ### IPv4 only
 

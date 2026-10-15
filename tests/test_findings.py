@@ -597,14 +597,6 @@ class TestTesterLimitedDoesNotNameAWeakGenerator:
             'to be in the row and not only in the section below it'
         )
 
-    def test_the_plan_states_it_at_the_cpu_attribution_boundary(self):
-        text = self._doc('docs', 'bgperf2-measurement-implementation-plan.md')
-        boundary = text.split('## CPU Attribution Boundary', 1)[1]
-        boundary = boundary.split('\n## ', 1)[0]
-        assert 'tester_limited' in boundary, (
-            "the plan's CPU attribution boundary no longer names the published "
-            'consequence it already has'
-        )
 
     def test_the_invariant_carries_the_rule(self):
         text = self._doc('docs', 'invariants', 'findings.md')

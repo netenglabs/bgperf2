@@ -14,7 +14,7 @@ document that is confidently out of date is worse than no document, because it i
 
 So: **do not recreate a condensed agent file.** That rule is about a second *copy* — a summary
 living beside the thing it summarises, free to drift in silence. It is not a rule against this file
-having parts, and since 2026-09-12 it has three:
+having parts, and it has two:
 
 - **this file**, always loaded: the rules, the shape of the system, and an index naming every
   invariant there is;
@@ -23,9 +23,8 @@ having parts, and since 2026-09-12 it has three:
   the index line, and a `PreToolUse` hook names the right document whenever the source it governs is
   about to be edited, so following it is not the model's to skip. **That last part holds for Claude
   Code only** — Codex reads this file through the `AGENTS.md` symlink but loads neither
-  `.claude/skills/` nor the hook, so for it the index below and the skill files are ordinary
-  documents it has to choose to open.
-- **`.claude/skills/*`**, engine implementation guidance loaded when its trigger phrase is said.
+  `.claude/skills/` nor the hook, so it must open the invariant documents named in the index below itself.
+
 
 What made the old `AGENTS.md` dangerous was that it could go on looking right while saying something
 different from the source. An index line cannot, because it names a document and a rule rather than
@@ -445,20 +444,21 @@ default), which bgperf2 then cannot clean up; `sudo rm -rf /var/tmp/bgperf2` whe
 
 ### Operator contracts
 
-The `measurement-implementation` skill drives the engine implementation plan and
-its decision log when the user says `continue the bgperf2 measurement implementation plan`.
-Read `.claude/skills/measurement-implementation/SKILL.md` in full on invocation.
-It permits up to three separately reviewed and committed change sets, stopping
-at an operator decision, phase boundary or hardware requirement.
-
-Campaign and unattended execution contracts now belong to the optional private
-[Second Looks Lab](https://github.com/jopietsch/second-looks-lab). Research plans,
-analysis and publications belong to
+Development plans, the measurement implementation decision log and the
+`measurement-implementation` continuation skill now live in optional private
+[Second Looks Lab](https://github.com/jopietsch/second-looks-lab/tree/main/bgp/docs/engine-development).
+Invoke `continue the bgperf2 measurement implementation plan` there with an
+explicit engine checkout. Current measurement definitions and invariants remain
+in this engine repository. Research plans, analysis and publications belong to
 [Second Looks research](https://github.com/jopietsch/second-looks-labs-research).
-Neither is needed to build, test, configure or run this engine. Historical issue
-IDs remain in engine decision records; their tracking recovery is unresolved.
-`scripts/check_plan_beads.py` remains a legacy helper, not a prerequisite for
-engine use or for work in the new repositories.
+Neither private repository is required to build, test, configure or run bgperf2.
+
+Beads is retired by operator decision on 2026-10-15. Do not initialize it,
+create issues or run its session-close/sync commands. Use Markdown plans and Git
+history for progress; historical issue IDs remain source references, not active
+tasks or proof of completion. Retirement of the EC2 database is a separate
+operator action documented in the lab runbook. Do not commit or push without
+current user authorization.
 
 ### Code conventions
 
@@ -479,119 +479,3 @@ engine use or for work in the new repositories.
   every batch CSV by one column.
 - Resource files are resolved from `REPO_ROOT` (defined in `base.py`), not the working directory, so
   bgperf2 can run from anywhere. Generated output goes to `--results-dir` (default `results/`).
-
-
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:6cd5cc61 -->
-## Beads Issue Tracker
-
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
-
-### Quick Reference
-
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
-```
-
-### Rules
-
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
-
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
-
-## Agent Context Profiles
-
-The managed Beads block is task-tracking guidance, not permission to override repository, user, or orchestrator instructions.
-
-- **Conservative (default)**: Use `bd` for task tracking. Do not run git commits, git pushes, or Dolt remote sync unless explicitly asked. At handoff, report changed files, validation, and suggested next commands.
-- **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
-- **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
-
-## Session Completion
-
-This protocol applies when ending a Beads implementation workflow. It is subordinate to explicit user, repository, and orchestrator instructions.
-
-1. **File issues for remaining work** - Create beads for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **Handle git/sync by active profile**:
-   ```bash
-   # Conservative/minimal/default: report status and proposed commands; wait for approval.
-   git status
-
-   # Team-maintainer opt-in only, unless current instructions forbid it:
-   git pull --rebase
-   git push
-   git status
-   ```
-5. **Hand off** - Summarize changes, validation, issue status, and any blocked sync/commit/push step
-
-**Critical rules:**
-- Explicit user or orchestrator instructions override this Beads block.
-- Do not commit or push without clear authority from the active profile or the current user request.
-- If a required sync or push is blocked, stop and report the exact command and error.
-<!-- END BEADS INTEGRATION -->
-
-### Beads is task tracking, and nothing else
-
-The managed block above was written by `bd init` (beads v1.2.2) and is rewritten by `bd`
-whenever it drifts, so nothing in it is worth editing. **This section governs the block and
-everything else beads says**, including the `bd prime` text the `SessionStart` hook injects
-into every session — which restates the same instructions far more forcefully ("🚨 SESSION
-CLOSE PROTOCOL 🚨", "**Prohibited**: Do NOT use TodoWrite, TaskCreate, or markdown files for
-task tracking") and arrives ahead of anything a session reads. That injection is not an
-exception to the rules below; it is the main thing they are about. Beads is scoped to issue
-tracking, and where it reaches past that, this file wins — which the block itself says. Three
-of its instructions meet rules stated elsewhere here, and `bd init` changed three things about
-this repository that no one asked it to. The resolutions:
-
-- **`bd remember` does not replace the plan documents.** The block offers it for persistent
-  knowledge. The reasoning in `docs/*.md` and in this file is the most valuable content in
-  this repository, and the first trap in the unattended execution plan is exactly this: once
-  an item body starts accumulating reasoning there are two sources of truth and neither is
-  complete. An item links to a document anchor; it does not summarize it.
-- **Commit discipline is unchanged** — `/code-review` before every code commit, and
-  unattended work commits to its own branch, never master. The block describes a
-  "team-maintainer" profile that closes beads and pushes at session close; that profile is
-  opt-in and this repository does not opt in. Note `bd config show` reports
-  `beads.role = maintainer`, inferred from the git remote — that is beads' write-routing role,
-  **not** the team-maintainer profile, and it is not an opt-in to anything.
-- **The ban on "markdown files for task tracking" does not reach the plan documents.** The
-  retained measurement implementation contract is driven by `docs/*.md` and requires the
-  worker to record progress in its decision log as part of being done. Campaign contracts
-  moved to the lab repository, where Markdown plans remain authoritative. A driver that took the
-  injection literally would stop writing the record its own contract is defined by. Items in
-  beads link to a document anchor; the document stays the durable account. The bans on
-  `TodoWrite` and `MEMORY.md` are narrower still: a per-turn todo list is execution state
-  within one turn, and the harness's own memory directory lives outside this repo and is not
-  beads' to govern.
-- **`bd` decides nothing about git.** `bd init` committed its own setup to the current branch
-  without review, and it repointed `core.hooksPath` at `.beads/hooks`, so `.git/hooks/` is
-  now inert and five hooks there run `bd`. Nothing lived in `.git/hooks/` when that happened,
-  so nothing broke — but a repo git hook added later has to go in `.beads/hooks/` to run at
-  all. Two hazards come with that: those hooks are **tracked files**, so checking out a branch
-  changes what runs on your next commit, and `master` has no `.beads/`, so checking it out
-  leaves `core.hooksPath` naming a directory that does not exist and every hook silently stops.
-  Also, any `bd` failure there — a held Dolt lock, a stopped server — fails the whole
-  `git commit`, the driver's included; that is loud rather than silent, so it is left alone.
-  The review hook now matches `bd init|setup|migrate|dolt|hooks` as well as `git commit`,
-  because a `bd` command that touches git is otherwise a commit no one reviewed. It also
-  matches `git -C <dir> commit`, which it never did before — see the plan's step 2.
-- **`bd init` pointed `sync.remote` at `origin` — the shared public upstream — and it has been
-  unset.** `bd dolt push` writes issue state to `refs/dolt/data` on that remote, which is both
-  outside the review discipline and outside this repository's branch rule. One worker on one
-  host needs no cross-machine sync; `.beads/config.yaml` records why.
-- **`.claude/settings.json` is now tool-managed, and `bd setup` is not idempotent against it.**
-  `bd` rewrites it whole on drift — reordering keys and re-escaping `&`, `<` and `>` — so a real
-  hook edit arrives inside a whole-file diff; read it for the hook bodies, not the line count.
-  Worse, `bd setup claude` does not revert an edited hook, it **appends a second unguarded copy
-  beside it**, so both run while the edited one still looks right. Re-review that file after any
-  `bd setup`, and do not run one casually. It now also registers
-  `.claude/hooks/invariants-guard.sh`, which is what points an editor at the invariant document
-  governing the file they are changing; `tests/test_docs_index.py` fails if that registration is
-  ever dropped, because a guard that silently stops firing is the failure this whole split is
-  arranged against.

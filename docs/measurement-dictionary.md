@@ -719,7 +719,7 @@ they would, do not:
 **What would separate them: per-role, time-aligned CPU** -- the target at its
 own ceiling through the interval is a target that was the constraint; a target
 with headroom while the generators sent slowly is not. That is the
-[CPU attribution boundary](bgperf2-measurement-implementation-plan.md#cpu-attribution-boundary),
+[historical CPU attribution boundary (optional private context)](https://github.com/jopietsch/second-looks-lab/blob/main/bgp/docs/engine-development/bgperf2-measurement-implementation-plan.md#cpu-attribution-boundary),
 and until a rule reads that series this finding may not be read as a
 statement about the generator. The series is published as the
 [`role_cpu` section](#event-artifact-the-role_cpu-section); no rule reads it yet.

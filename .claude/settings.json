@@ -4,7 +4,7 @@
       {
         "hooks": [
           {
-            "command": "c=$(jq -r \".tool_input.command // \\\"\\\"\"); if printf \"%s\" \"$c\" | grep -qE \"(^|[;&|])[^;&|]*(git( +[^ ;&|]+)* +commit\\b|(\\S*/)?bd +(init|setup|migrate|bootstrap|dolt +(push|pull|commit|fetch|clone)|hooks +(install|uninstall|run)|worktree +(create|remove)|backup +(sync|create)|vc +commit|doctor [^;&|]*--fix)\\b)\"; then jq -nc \"{hookSpecificOutput:{hookEventName:\\\"PreToolUse\\\",additionalContext:\\\"CLAUDE.md requires /code-review on the diff before committing. bd init/setup/bootstrap/doctor --fix and friends change git state themselves. If no review has run for this change, run it and act on the findings first. If it already ran, or this commit changes no code, proceed.\\\"}}\"; fi",
+            "command": "c=$(jq -r '.tool_input.command // \"\"'); if printf '%s' \"$c\" | grep -qE '(^|[;&|])[^;&|]*git( +[^ ;&|]+)* +commit\\b'; then jq -nc '{hookSpecificOutput:{hookEventName:\"PreToolUse\",additionalContext:\"CLAUDE.md requires /code-review on the diff before committing. Review code changes and act on findings before committing.\"}}'; fi",
             "timeout": 10,
             "type": "command"
           },
@@ -25,18 +25,6 @@
           }
         ],
         "matcher": "Edit|Write|Bash"
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "command": "command -v bd >/dev/null 2>&1 && bd prime --hook-json || true",
-            "timeout": 20,
-            "type": "command"
-          }
-        ],
-        "matcher": ""
       }
     ]
   },

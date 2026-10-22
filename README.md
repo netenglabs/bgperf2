@@ -624,6 +624,22 @@ before — and adding `repetitions` to a config that has already run re-runs it,
 one unnamed row beside `#2` and `#3`.
 
 The batch writes a CSV, per-run artifacts and graphs under `results/`.
+
+### Running a batch in pieces
+
+Each cell also records its row in `<test>.cells/<key>.json`, and the CSV, summary and graphs can be
+rebuilt from those files. That lets a batch be run a few cells at a time, or on your own schedule:
+
+```bash
+$ ./bgperf2.py batch -c my.yaml --list-cells            # every cell, in run order, with its key (JSON; no Docker)
+$ ./bgperf2.py batch -c my.yaml --cells 3f2a... 9c01... # run just these cells, then report
+$ ./bgperf2.py batch -c my.yaml --report                # rebuild CSV, summary and graphs from recorded cells
+```
+
+The report names any cell that has no result yet and leaves the graphs until every cell has one.
+A plain `batch` starts fresh and clears the previous cell results; `--cells` and `--report` keep
+them. A shuffled test that is run in pieces should state `seed:`, since `--list-cells` otherwise
+draws a new seed each time.
 For a Docker-free check of the engine's pure layers:
 
 ```bash

@@ -2,7 +2,7 @@
 
 How a matrix becomes an ordered list of runs, and what the passes of one cell are allowed to say about each other.
 
-**Read this before editing:** `bgperf2.py` (`expand_batch_cells()`, `batch_report_rows()`, `bench_output_prefix()`, `create_batch_graphs()`), `summary.py`, `graphs.py`
+**Read this before editing:** `bgperf2.py` (`expand_batch_cells()`, `batch_report_rows()`, `bench_output_prefix()`, `create_batch_graphs()`, `report_batch_from_cell_results()`, `load_batch_cell_results()`), `summary.py`, `graphs.py`
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 
@@ -51,6 +51,37 @@ run the matrix unfiltered.
   single-pass id has exactly its pre-repetition shape, so `BATCH_PROGRESS_SCHEMA_VERSION` did not
   have to move and an in-flight batch from an older build still resumes instead of costing the
   operator every completed cell.
+
+## Cell results and running in pieces
+
+Every cell writes its row to `<test>.cells/<key>.json`, where `key` is the first 16 hex digits of
+the SHA-256 of its cell id and the full id is stored inside. `--list-cells`, `--cells` and
+`--report` let a caller run a batch in pieces and rebuild the CSV, summary and graphs from those
+documents.
+
+- **A batch run in pieces reports exactly what one invocation reports.** The report is built from
+  the same rows by the same `batch_report_rows()` and summary path, in matrix order, so neither the
+  invocation a cell ran in nor its execution order reaches the output.
+  `tests/test_batch_cell_results.py` pins the equality for a shuffled, repeated matrix.
+- **A missing cell is named, never filled**, and the graphs wait until no cell is missing:
+  `create_graph()` pairs bar heights with labels by position, so a group short of one target puts
+  bars under the wrong names. A test with no results at all writes nothing, rather than
+  replacing an existing CSV with an empty one.
+- **A malformed or misnamed result document is refused, not skipped.** A report quietly missing a
+  row reads as a cell that never ran.
+- **The cell results are the record; the progress file follows them.** `--resume` takes every
+  recorded cell result over the progress file's row, so a cell re-measured with `--cells` is not
+  reported from its old row and a cell run only that way does not run again, and it writes a
+  document for any row only the progress file holds (a batch begun by an older build). Each new
+  result is written before its progress checkpoint.
+- **A recorded result is never replaced in silence.** `--cells` refuses a cell that already has a
+  document; re-measuring means removing it first. A plain `batch` starts fresh and says how many
+  recorded results it removed; `--resume`, `--cells` and `--report` keep them.
+- **A shuffled test listed for running in pieces states its seed.** `--list-cells` refuses a drawn
+  one, since it would list an order no later invocation follows. Two tests in one config may not
+  share a name: it is the stem of every file they write and part of every cell id and key.
+- A withheld graph set leaves earlier PNGs in place, and the report says they were drawn from
+  other rows.
 
 ## Campaign analysis
 

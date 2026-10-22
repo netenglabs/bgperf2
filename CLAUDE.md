@@ -83,6 +83,9 @@ pip install -r pip-requirements.txt
 ./bgperf2.py bench -t bird -n 10 -p 1000    # one run: 10 peers x 1000 prefixes
 ./bgperf2.py bench -t frr_c --version 10.1  # a specific release
 ./bgperf2.py batch -c benchmarks/example.yaml  # matrix of runs -> CSV + PNG graphs
+./bgperf2.py batch -c x.yaml --list-cells      # cells in run order with --cells keys; no Docker
+./bgperf2.py batch -c x.yaml --cells KEY...    # run only these cells, then report
+./bgperf2.py batch -c x.yaml --report          # rebuild CSV/summary/graphs from <test>.cells/
 ./bgperf2.py config -o out.yml    # emit scenario.yaml without running
 ```
 
@@ -244,7 +247,7 @@ claims.
   `-r/--repeat` in both directions.
 
 **`docs/invariants/batch-passes.md`** — `bgperf2.py`'s `expand_batch_cells()`/`batch_report_rows()`/
-`create_batch_graphs()`, `summary.py`, `graphs.py`.
+`create_batch_graphs()`/`report_batch_from_cell_results()`/`load_batch_cell_results()`, `summary.py`, `graphs.py`.
 
 - A repetition repeats the whole matrix, not each cell, and is part of a run's *name*, never a
   column beside it.
@@ -254,6 +257,8 @@ claims.
 - **A pass that failed and a pass that has not run are never described by one clause**, at any level
   of aggregation. Collapsed three times.
 - `summary.py` reads the stats row by column name and must not import `bgperf2`.
+- A batch run in pieces (`--cells`, `--report`) reports exactly what one invocation reports; a
+  missing cell is named, never filled, and the graphs wait for it.
 
 **`docs/invariants/target-state.md`** — `frr.py`, `bird.py`, `gobgp.py`, `base.py`'s
 `sample_target_state()`, `measurements.py`'s `target_table_section()`/`delivery_metrics()`.
@@ -431,7 +436,7 @@ the compiled daemons:
   whether it is current, and passes `force` to match — `build_dockerfile()` skips an existing tag
   otherwise, so it would be planned and then quietly not built.
 
-Note that `batch()` assigns `args.target` straight from the yaml, so it bypasses argparse's `choices`
+Note that `batch_cell_args()` assigns `args.target` straight from the yaml, so it bypasses argparse's `choices`
 validation — `tests/test_static.py` checks the benchmark configs instead.
 
 Commercial NOSes (Junos cRPD, Arista cEOS, SR Linux) are never built. Download them out of band and
@@ -471,7 +476,7 @@ current user authorization.
 - Stats flow through a single `queue.Queue` fed by daemon threads (one per container plus two for
   host-level CPU/memory). Consumers dispatch on the `who` key.
 - `batch()` runs `bench()` in-process by synthesizing an `argparse.Namespace` per cell of the matrix,
-  so any new `bench` argument must also be added to the field lists in `batch()` or it will be
+  so any new `bench` argument must also be added to the field lists in `batch_cell_args()` or it will be
   missing at runtime.
 - Graph column indices in `create_batch_graphs()` are positional into the stats row built by
   `create_output_stats()`, and `stats_header()` names those columns by position too. All three must

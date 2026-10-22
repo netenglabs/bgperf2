@@ -1,12 +1,11 @@
 """A checkpoint that a hard termination can lose is not a checkpoint.
 
-`results/` is gitignored and lives only on the `/data` EBS volume, so every
-campaign row exists in exactly one place. These cover the writers, which is
-what the exit criterion of the unattended plan's step 7 names: the progress
-file and a completed cell's versions manifest survive a simulated power-off,
-and no stray `*.tmp` is left beside a durable document.
+`results/` is not tracked, so every row exists in one place until someone
+copies it. These cover the writers: a cell result and a completed cell's
+versions manifest survive a simulated power-off, and no stray `*.tmp` is left
+beside a durable document.
 
-Pure: no Docker, no EC2. `fsync` durability itself cannot be tested without
+Pure: no Docker. `fsync` durability itself cannot be tested without
 cutting power, so what is tested is that the calls are made and that the
 document is never observed half-written.
 """
@@ -115,14 +114,14 @@ class TestSweepingAnInterruptedCheckpoint:
     """SIGKILL never reaches `atomic_write()`'s `finally`."""
 
     def test_a_stray_temp_is_removed_and_named(self, tmp_path):
-        open(str(tmp_path / 'bench.progress.json'), 'w').write('{}')
-        open(str(tmp_path / 'bench.progress.json.tmp'), 'w').write('{"half')
+        open(str(tmp_path / 'bench.summary.json'), 'w').write('{}')
+        open(str(tmp_path / 'bench.summary.json.tmp'), 'w').write('{"half')
         swept = bgperf2.sweep_stale_temp_files(str(tmp_path))
-        assert swept == ['bench.progress.json.tmp']
-        assert os.listdir(str(tmp_path)) == ['bench.progress.json']
+        assert swept == ['bench.summary.json.tmp']
+        assert os.listdir(str(tmp_path)) == ['bench.summary.json']
 
     def test_a_clean_directory_reports_nothing(self, tmp_path):
-        open(str(tmp_path / 'bench.progress.json'), 'w').write('{}')
+        open(str(tmp_path / 'bench.summary.json'), 'w').write('{}')
         assert bgperf2.sweep_stale_temp_files(str(tmp_path)) == []
 
     def test_durable_documents_are_never_touched(self, tmp_path):
@@ -136,13 +135,18 @@ class TestSweepingAnInterruptedCheckpoint:
         assert bgperf2.sweep_stale_temp_files(
             str(tmp_path / 'nope')) == []
 
+    def test_a_killed_cell_result_write_is_named(self, tmp_path):
+        (tmp_path / 'b.cells').mkdir()
+        (tmp_path / 'b.cells' / 'k.json.tmp').write_text('{"half')
+        assert bgperf2.sweep_stale_temp_files(str(tmp_path)) == ['b.cells/k.json.tmp']
+
 
 class TestProvenanceIsWrittenAtomically:
     """The worse of the two holes: a plain `json.dump` truncates.
 
     A half-written `versions.json` beside a completed cell is a row whose
     target version cannot be established -- and `--resume` will then skip that
-    cell, because its result is already in the progress file.
+    cell, because its cell result is already recorded.
     """
 
     def test_write_provenance_goes_through_atomic_write(self):
@@ -163,12 +167,11 @@ class TestAStopUnwindsTheWholeBatch:
 
     Breaking out of the cell loop alone let `batch()` finish that test, walk on
     to the next one in the config, and return -- so the process exited 0, which
-    is exactly what the 143 exists to distinguish from a host that was taken
-    away. The campaign runner reads that 0 as success and stamps RAN over a
-    truncated matrix. The second test below is the sharper half: the per-test
-    preamble unlinks a test's progress and summary documents when the batch is
-    not resuming, so a stop that walked on would discard the previous results
-    of tests it never ran.
+    is exactly what the 143 exists to distinguish from a stopped run. A caller
+    reads that 0 as success over a truncated matrix. The sharper half: the
+    per-test preamble clears a test's cell results and summary when the batch
+    is not resuming, so a stop that walked on would discard the previous
+    results of tests it never ran.
     """
 
     def _config(self, tmp_path):
@@ -203,15 +206,13 @@ class TestAStopUnwindsTheWholeBatch:
         called = []
         monkeypatch.setattr(bgperf2, 'check_batch_images', lambda targets: None)
         monkeypatch.setattr(bgperf2, 'check_batch_monitor_images', lambda tests: None)
-        monkeypatch.setattr(bgperf2, 'start_interruption_watch', lambda: None)
         monkeypatch.setattr(bgperf2, 'install_stop_handlers', lambda: None)
         monkeypatch.setattr(bgperf2, 'bench', lambda a: called.append(a))
 
         results = tmp_path / 'results'
         results.mkdir(parents=True)
         # The second test's documents, from a run that finished earlier.
-        survivor = results / 'second.progress.json'
-        survivor.write_text('{"schema_version": 1, "cells": {"x": []}}')
+        bgperf2.write_batch_cell_result(str(results), 'second', 'x', [])
         summary = results / 'second.summary.json'
         summary.write_text('{"test": "second"}')
 
@@ -225,5 +226,5 @@ class TestAStopUnwindsTheWholeBatch:
         # No cell was begun, which is the point of stopping at the boundary.
         assert called == []
         # And the test that never ran still has the results it had.
-        assert json.loads(survivor.read_text())['cells'] == {'x': []}
+        assert bgperf2.load_batch_cell_results(str(results), 'second') == {'x': []}
         assert summary.exists()

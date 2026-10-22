@@ -686,7 +686,7 @@ class TestBatchPublishesTheSummary:
 
     def test_a_row_from_an_older_build_costs_its_pass_and_not_the_document(
             self, fake_img_exists, tmp_path, monkeypatch):
-        '''`--resume` onto a progress file written before a column was appended
+        '''`--resume` onto a cell result written before a column was appended
         is supported, and such a row is one field short.
         '''
         import json
@@ -698,9 +698,8 @@ class TestBatchPublishesTheSummary:
         # A completed pass 1 written by a build with one column fewer.
         targets = bgperf2.expand_target_versions(a_test()['targets'])
         cells = bgperf2.expand_batch_cells(a_test(repetitions=2), targets)
-        bgperf2.write_batch_progress(
-            str(tmp_path / 'sum.progress.json'),
-            {bgperf2.batch_cell_id('sum', cells[0]): a_row()[:-1]})
+        bgperf2.write_batch_cell_result(
+            str(tmp_path), 'sum', bgperf2.batch_cell_id('sum', cells[0]), a_row()[:-1])
         monkeypatch.setattr(bgperf2, 'bench',
                             lambda a: a_row(**{'elapsed (s)': 44}))
         bgperf2.batch(args)

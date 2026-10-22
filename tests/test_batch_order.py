@@ -193,38 +193,45 @@ class TestBatchRunsInTheOrderItRecorded:
         assert ran != matrix, 'seed 7 permutes this matrix'
         assert (tmp_path / 'ord.csv').read_text().splitlines()[1:] == matrix
 
-    def test_the_seed_is_recorded_before_the_first_cell(
+    def test_a_drawn_seed_is_stored_with_every_cell_result(
             self, fake_img_exists, tmp_path, monkeypatch):
-        '''A seed written only once a cell finished would be missing from
-        exactly the batches that died early.'''
+        '''The sequence a batch ran in can be rebuilt from its results alone,
+        even when the seed was drawn and the batch died part way.'''
+        import json
         fake_img_exists(lambda name: True)
-        seeds = []
-
-        def record_then_fail(a):
-            seeds.append(bgperf2.load_batch_progress_document(
-                str(tmp_path / 'ord.progress.json')).get('seed'))
-            raise RuntimeError('interrupted')
-
-        monkeypatch.setattr(bgperf2, 'bench', record_then_fail)
-        with pytest.raises(RuntimeError):
-            bgperf2.batch(Namespace(
-                batch_config=self.write(tmp_path, order='shuffle'),
-                results_dir=str(tmp_path)))
-        assert len(seeds) == 1 and isinstance(seeds[0], int)
-
-    def test_resume_finishes_the_sequence_it_planned(
-            self, fake_img_exists, tmp_path, monkeypatch):
-        '''An interrupted batch resumed under a fresh permutation has run two
-        orders, and neither one is the order it recorded.'''
-        fake_img_exists(lambda name: True)
-        config = self.write(tmp_path, order='shuffle')
-        args = Namespace(batch_config=config, results_dir=str(tmp_path), resume=True)
-
-        planned = []
+        ran = []
         with pytest.raises(RuntimeError, match='interrupted'):
-            self.run(tmp_path, monkeypatch, args, planned, fail_on='bird-1n')
-        seed = bgperf2.load_batch_progress_document(
-            str(tmp_path / 'ord.progress.json'))['seed']
+            self.run(tmp_path, monkeypatch, Namespace(
+                batch_config=self.write(tmp_path, order='shuffle'),
+                results_dir=str(tmp_path)), ran, fail_on='frr_c-2n')
+        documents = [json.loads(path.read_text())
+                     for path in (tmp_path / 'ord.cells').glob('*.json')]
+        assert documents, 'at least one cell ran before the interruption'
+        seeds = {d['sequence']['seed'] for d in documents}
+        assert len(seeds) == 1 and isinstance(seeds.pop(), int)
+        assert {d['sequence']['order'] for d in documents} == {'shuffle'}
+
+    def test_resume_continues_a_drawn_seed(
+            self, fake_img_exists, tmp_path, monkeypatch):
+        '''A drawn seed is recovered from the recorded cells rather than a
+        fresh one dealing the remaining cells in a new order.'''
+        import json
+        fake_img_exists(lambda name: True)
+        monkeypatch.setattr(bgperf2, 'create_batch_graphs', lambda *a, **k: None)
+        args = Namespace(batch_config=self.write(tmp_path, order='shuffle'),
+                         results_dir=str(tmp_path), resume=True)
+        ran = []
+
+        def bench(a):
+            if len(ran) == 3:
+                raise RuntimeError('interrupted')
+            ran.append('{0}-{1}n'.format(a.target, a.neighbor_num))
+            return [ran[-1]]
+        monkeypatch.setattr(bgperf2, 'bench', bench)
+        with pytest.raises(RuntimeError, match='interrupted'):
+            bgperf2.batch(args)
+        seed = json.loads(next((tmp_path / 'ord.cells').glob('*.json')).read_text())[
+            'sequence']['seed']
         expected = [
             '{0}-{1}n'.format(c['target']['name'], c['neighbors'])
             for c in bgperf2.order_batch_cells(
@@ -233,13 +240,58 @@ class TestBatchRunsInTheOrderItRecorded:
 
         resumed = []
         self.run(tmp_path, monkeypatch, args, resumed)
+        assert ran + resumed == expected
+
+    def test_resume_refuses_an_edited_seed(
+            self, fake_img_exists, tmp_path, monkeypatch):
+        fake_img_exists(lambda name: True)
+        self.run(tmp_path, monkeypatch, Namespace(
+            batch_config=self.write(tmp_path, order='shuffle', seed=7),
+            results_dir=str(tmp_path)), [])
+        with pytest.raises(SystemExit, match='shuffle seed 7'):
+            self.run(tmp_path, monkeypatch, Namespace(
+                batch_config=self.write(tmp_path, order='shuffle', seed=8),
+                results_dir=str(tmp_path), resume=True), [])
+
+    def test_resume_refuses_a_progress_file_from_an_older_build(
+            self, fake_img_exists, tmp_path, monkeypatch):
+        fake_img_exists(lambda name: True)
+        (tmp_path / 'ord.progress.json').write_text('{}')
+        with pytest.raises(SystemExit, match='older bgperf2'):
+            self.run(tmp_path, monkeypatch, Namespace(
+                batch_config=self.write(tmp_path), results_dir=str(tmp_path),
+                resume=True), [])
+
+    def test_cells_need_a_stated_seed_under_shuffle(
+            self, fake_img_exists, tmp_path, monkeypatch):
+        fake_img_exists(lambda name: True)
+        with pytest.raises(SystemExit, match='seed'):
+            self.run(tmp_path, monkeypatch, Namespace(
+                batch_config=self.write(tmp_path, order='shuffle'),
+                results_dir=str(tmp_path), cells=['x']), [])
+
+    def test_resume_finishes_the_sequence_it_planned(
+            self, fake_img_exists, tmp_path, monkeypatch):
+        '''With the seed stated, an interrupted batch resumes in the order
+        it began.'''
+        fake_img_exists(lambda name: True)
+        config = self.write(tmp_path, order='shuffle', seed=7)
+        args = Namespace(batch_config=config, results_dir=str(tmp_path), resume=True)
+        expected = [
+            '{0}-{1}n'.format(c['target']['name'], c['neighbors'])
+            for c in bgperf2.order_batch_cells(
+                'ord', bgperf2.expand_batch_cells(a_test(), a_test()['targets']),
+                'shuffle', 7)]
+
+        planned = []
+        with pytest.raises(RuntimeError, match='interrupted'):
+            self.run(tmp_path, monkeypatch, args, planned, fail_on=expected[2])
+        resumed = []
+        self.run(tmp_path, monkeypatch, args, resumed)
 
         # The interrupted cell did not complete, so it is the first thing the
-        # resumed pass runs -- and the sequence either side of it is the one
-        # the recorded seed describes.
+        # resumed pass runs.
         assert planned[:-1] + resumed == expected
-        assert bgperf2.load_batch_progress_document(
-            str(tmp_path / 'ord.progress.json'))['seed'] == seed
 
     def test_a_bad_order_stops_before_the_first_container(
             self, fake_img_exists, tmp_path, monkeypatch):
@@ -255,113 +307,3 @@ class TestBatchRunsInTheOrderItRecorded:
         with pytest.raises(SystemExit):
             bgperf2.batch(Namespace(batch_config=str(config), results_dir=str(tmp_path)))
         assert ran == []
-
-    def test_a_seed_the_config_states_is_not_overridden_by_the_record(
-            self, fake_img_exists, tmp_path, monkeypatch):
-        '''Recovering a drawn seed keeps a resumed batch on the sequence it
-        planned; overriding a stated one would ignore an edit the operator
-        made deliberately.'''
-        fake_img_exists(lambda name: True)
-        config = self.write(tmp_path, order='shuffle', seed=7)
-        args = Namespace(batch_config=config, results_dir=str(tmp_path), resume=True)
-
-        planned = []
-        with pytest.raises(RuntimeError, match='interrupted'):
-            self.run(tmp_path, monkeypatch, args, planned, fail_on='bird-1n')
-        done = set(planned[:-1])
-        assert done, 'the interrupted pass has to have completed something'
-        self.write(tmp_path, order='shuffle', seed=11)
-
-        resumed = []
-        self.run(tmp_path, monkeypatch, args, resumed)
-
-        assert bgperf2.load_batch_progress_document(
-            str(tmp_path / 'ord.progress.json'))['seed'] == 11
-        assert resumed == [
-            row for row in (
-                '{0}-{1}n'.format(c['target']['name'], c['neighbors'])
-                for c in bgperf2.order_batch_cells(
-                    'ord', bgperf2.expand_batch_cells(a_test(), a_test()['targets']),
-                    'shuffle', 11))
-            if row not in done]
-
-    def test_a_superseded_seed_is_kept_beside_the_new_one(
-            self, fake_img_exists, tmp_path, monkeypatch):
-        '''The progress file is rewritten whole on every checkpoint, so a seed
-        that is simply dropped leaves the document describing an order that
-        some of its own completed rows did not run in.'''
-        fake_img_exists(lambda name: True)
-        config = self.write(tmp_path, order='shuffle', seed=7)
-        args = Namespace(batch_config=config, results_dir=str(tmp_path), resume=True)
-
-        with pytest.raises(RuntimeError, match='interrupted'):
-            self.run(tmp_path, monkeypatch, args, [], fail_on='bird-1n')
-        self.write(tmp_path, order='shuffle', seed=11)
-        self.run(tmp_path, monkeypatch, args, [])
-
-        document = bgperf2.load_batch_progress_document(
-            str(tmp_path / 'ord.progress.json'))
-        assert document['seed'] == 11
-        assert document['previous_seeds'] == [{'order': 'shuffle', 'seed': 7}]
-
-    def test_a_seed_no_row_ran_under_supersedes_nothing(
-            self, fake_img_exists, tmp_path, monkeypatch):
-        '''A batch that died in its first cell recorded a seed and no rows, so
-        there is nothing for the old sequence to describe.'''
-        fake_img_exists(lambda name: True)
-        self.write(tmp_path, order='shuffle', seed=7)
-        args = Namespace(batch_config=str(tmp_path / 'ord.yaml'),
-                         results_dir=str(tmp_path), resume=True)
-        monkeypatch.setattr(bgperf2, 'create_batch_graphs', lambda *a, **k: None)
-        monkeypatch.setattr(bgperf2, 'bench', lambda a: (_ for _ in ()).throw(
-            RuntimeError('interrupted')))
-        with pytest.raises(RuntimeError, match='interrupted'):
-            bgperf2.batch(args)
-        assert bgperf2.load_batch_progress_document(
-            str(tmp_path / 'ord.progress.json'))['cells'] == {}
-
-        self.write(tmp_path, order='shuffle', seed=11)
-        self.run(tmp_path, monkeypatch, args, [])
-
-        document = bgperf2.load_batch_progress_document(
-            str(tmp_path / 'ord.progress.json'))
-        assert document['seed'] == 11 and 'previous_seeds' not in document
-
-    def test_a_matrix_pass_resumed_as_a_shuffle_is_superseded(
-            self, fake_img_exists, tmp_path, monkeypatch):
-        '''The rows already on disk ran in matrix order. Recording only the new
-        shuffle would have the file claim they ran under a permutation.'''
-        fake_img_exists(lambda name: True)
-        self.write(tmp_path, order='matrix')
-        args = Namespace(batch_config=str(tmp_path / 'ord.yaml'),
-                         results_dir=str(tmp_path), resume=True)
-        with pytest.raises(RuntimeError, match='interrupted'):
-            self.run(tmp_path, monkeypatch, args, [], fail_on='bird-2n')
-        self.write(tmp_path, order='shuffle', seed=11)
-        self.run(tmp_path, monkeypatch, args, [])
-
-        document = bgperf2.load_batch_progress_document(
-            str(tmp_path / 'ord.progress.json'))
-        assert document['seed'] == 11
-        assert document['previous_seeds'] == [{'order': 'matrix', 'seed': None}]
-
-    def test_a_file_that_names_no_order_ran_in_the_only_one_there_was(
-            self, fake_img_exists, tmp_path, monkeypatch):
-        '''A progress file from a build without ordering resumes in matrix
-        order and supersedes nothing -- there was no other order to have run
-        in, so nothing about the record has changed.'''
-        import json
-        fake_img_exists(lambda name: True)
-        self.write(tmp_path)
-        progress = tmp_path / 'ord.progress.json'
-        args = Namespace(batch_config=str(tmp_path / 'ord.yaml'),
-                         results_dir=str(tmp_path), resume=True)
-        with pytest.raises(RuntimeError, match='interrupted'):
-            self.run(tmp_path, monkeypatch, args, [], fail_on='bird-2n')
-        legacy = bgperf2.load_batch_progress_document(str(progress))
-        progress.write_text(json.dumps(
-            {'schema_version': 1, 'cells': legacy['cells']}))
-
-        self.run(tmp_path, monkeypatch, args, [])
-
-        assert 'previous_seeds' not in bgperf2.load_batch_progress_document(str(progress))

@@ -83,6 +83,7 @@ pip install -r pip-requirements.txt
 ./bgperf2.py bench -t bird -n 10 -p 1000    # one run: 10 peers x 1000 prefixes
 ./bgperf2.py bench -t frr_c --version 10.1  # a specific release
 ./bgperf2.py batch -c benchmarks/example.yaml  # matrix of runs -> CSV + PNG graphs
+./bgperf2.py batch -c x.yaml --resume          # skip cells already recorded, same sequence
 ./bgperf2.py batch -c x.yaml --list-cells      # cells in run order with --cells keys; no Docker
 ./bgperf2.py batch -c x.yaml --cells KEY...    # run only these cells, then report
 ./bgperf2.py batch -c x.yaml --report          # rebuild CSV/summary/graphs from <test>.cells/
@@ -259,6 +260,9 @@ claims.
 - `summary.py` reads the stats row by column name and must not import `bgperf2`.
 - A batch run in pieces (`--cells`, `--report`) reports exactly what one invocation reports; a
   missing cell is named, never filled, and the graphs wait for it.
+- Cell results are the only record: `--resume` skips recorded cells, continues a drawn seed, and
+  refuses results the config no longer lists or that ran under another sequence. SIGTERM records nothing for the cell in flight and exits
+  143. Attempt records and host-reclaim watching belong to the caller, not the engine.
 
 **`docs/invariants/target-state.md`** — `frr.py`, `bird.py`, `gobgp.py`, `base.py`'s
 `sample_target_state()`, `measurements.py`'s `target_table_section()`/`delivery_metrics()`.

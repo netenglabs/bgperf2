@@ -74,7 +74,7 @@ FAILED = 'failed'
 NOT_RUN = 'not run'
 # A row that cannot be read against this header at all. It is kept apart from
 # `failed` because it is not a result about the daemon: `--resume` onto a
-# progress file written before a column was appended is a supported path, and
+# cell result written before a column was appended is a supported path, and
 # such a row is one field short. One of them must cost that pass and not the
 # whole document.
 UNREADABLE = 'unreadable'
@@ -698,9 +698,8 @@ def summarize_cell(header, group, unavailable=None):
     which cell it was.  The rows supply what came back.
 
     A row that is not this header's width costs its own pass and nothing else.
-    `--resume` onto a progress file written before a column was appended is a
-    supported path -- `BATCH_PROGRESS_SCHEMA_VERSION` deliberately did not move
-    for `max foreign cpu %` -- and one short row indexed against this header
+    `--resume` onto a cell result written before a column was appended is a
+    supported path, and one short row indexed against this header
     raises `IndexError`, which the caller catches into *no summary at all* for
     the whole test, naming neither the cell nor the pass.  A row that is the
     right width but the wrong layout cannot be caught here at all, which is why

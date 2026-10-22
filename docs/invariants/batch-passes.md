@@ -69,11 +69,24 @@ documents.
   replacing an existing CSV with an empty one.
 - **A malformed or misnamed result document is refused, not skipped.** A report quietly missing a
   row reads as a cell that never ran.
-- **The cell results are the record; the progress file follows them.** `--resume` takes every
-  recorded cell result over the progress file's row, so a cell re-measured with `--cells` is not
-  reported from its old row and a cell run only that way does not run again, and it writes a
-  document for any row only the progress file holds (a batch begun by an older build). Each new
-  result is written before its progress checkpoint.
+- **The cell results are the only record, and `--resume` reads them.** It skips every cell with a
+  result, whichever invocation or mode wrote it, and runs the rest in the planned order. There is
+  no separate progress file to disagree with them. Each result also stores the sequence (`order`,
+  `seed`) it ran under. Recording attempts, refusing to continue after a failure and watching for a
+  host being reclaimed belong to whatever drives the batch.
+- **`--resume` refuses what it cannot honestly continue** (`check_resumable()`), before anything
+  asks Docker: results for cells the config no longer lists, results that ran under a different
+  stated order or seed, and a `<test>.progress.json` from an older bgperf2, whose rows it does not
+  read. A cell id names every dimension that changes what runs, including the monitor, so an
+  edited axis, target, monitor or repetition count turns its old results into unlisted ones rather
+  than rows mixed beside new ones. A shuffled test with a drawn seed continues the one its
+  recorded cells name, and is refused when they do not name exactly one.
+- **A killed write is reported.** `sweep_stale_temp_files()` removes and names `*.tmp` left in the
+  results directory and its `<test>.cells/` by a SIGKILL, at the start of any batch that runs
+  cells, since a resumed batch carrying one is the only trace that the last attempt was killed.
+- **SIGTERM stops at the next check, records nothing for the cell in flight and exits 143.** The
+  stop raises through the whole batch rather than breaking one test's loop, which would exit 0 over
+  a truncated matrix and let later tests' preambles clear results that were still wanted.
 - **A recorded result is never replaced in silence.** `--cells` refuses a cell that already has a
   document; re-measuring means removing it first. A plain `batch` starts fresh and says how many
   recorded results it removed; `--resume`, `--cells` and `--report` keep them.
@@ -108,13 +121,12 @@ Shuffling does not remove that drift; it stops it lining up with one axis.
   recording a seed is that the sequence can be rebuilt later, and a Mersenne Twister draw is a
   property of the interpreter as much as of the seed. `tests/test_batch_order.py` pins one seed's
   order so changing the keying scheme has to be deliberate.
-- **The seed is recorded in the progress file before the first cell runs**, and `--resume` uses
-  the recorded one. A seed written only on a cell's completion would be missing from exactly the
-  batches that died early, and a resumed batch drawing a fresh permutation has run two orders,
-  neither of which is the one it recorded. Only a *drawn* seed is recovered that way — a seed the
-  config states is left alone, since editing it by hand is an instruction to re-sequence. An
-  omitted seed is drawn rather than defaulted to a constant: one shared default is itself a
-  permutation nobody chose. A `seed` under `order: matrix` is rejected rather than ignored.
+- **The seed is recorded with every cell result**, so the order a batch ran in can be rebuilt
+  from its results even when the seed was drawn, and `--resume` continues that seed. `--list-cells`
+  and `--cells` need a stated seed: each invocation would otherwise draw its own, and record a
+  sequence no invocation followed. An omitted seed is drawn rather than
+  defaulted to a constant: one shared default is itself a permutation nobody chose. A `seed` under
+  `order: matrix` is rejected rather than ignored.
 - **Execution order is not report order.** `batch_report_rows()` emits the CSV and the graphs in
   matrix order whatever order the cells ran in, because `create_graph()` keys the x axis off the
   row names it sees and appends one bar height per row, pairing the two positionally — that only
@@ -123,12 +135,9 @@ Shuffling does not remove that drift; it stops it lining up with one axis.
   length mismatch, at the end of a batch that has already run for hours.
 - Identity is untouched by the order: `ordinal` stays a cell's place in the matrix, so `--resume`
   matches its completed cells whichever way either pass ran.
-- **A superseded sequence stays in the file.** The progress document is rewritten whole on every
-  checkpoint, so a sequence dropped when the config is edited mid-batch leaves the record
-  describing an order that some of its own completed rows did not run in. It moves to
-  `previous_seeds` instead, and only when rows exist to describe. That covers a matrix pass
-  resumed as a shuffle, not just a changed seed — a file naming no order at all was written before
-  ordering existed, and is read as matrix, because that was the only order there was.
+- A changed seed does not change any cell id, so `--resume` compares the sequence each recorded
+  result names with the config's and refuses a mismatch. A driver that deliberately continues
+  under a new sequence records that itself.
 
 ## Summarising the passes — `summary.py`
 
@@ -161,8 +170,7 @@ would be arithmetic nobody could check. `docs/measurement-dictionary.md` has the
   its walk, with a `mem` that comes from a `.get('usage', 0)`. `min idle%` and `max cpu %` are
   deliberately excluded: 100 and a peak rounding to 0 are both values a real run can report.
 - **A stored row that is not the header's width costs its own pass, not the document.** `--resume`
-  onto a progress file written before a column was appended is a supported path — the schema version
-  deliberately did not move for `max foreign cpu %` — and one short row indexed against the current
+  onto a cell result written before a column was appended is a supported path, and one short row indexed against the current
   header raises, which the wrapper turns into *no summary at all* for that test. Such a pass is
   `unreadable`, kept apart from `failed`. A right-width, wrong-layout row cannot be caught here at
   all, which is why `stats_header()` is the contract.
@@ -177,7 +185,7 @@ would be arithmetic nobody could check. `docs/measurement-dictionary.md` has the
 - **A summariser that raises costs the summary, not the rows.** It runs after the CSV is on disk and
   `publish_batch_summary()` catches — same rule as `write_event_artifact()` and its findings.
 - **It is written before the first cell, then after each one**, and a non-resumed batch unlinks its
-  predecessor's summary along with its progress file — otherwise a write that then fails leaves the
+  predecessor's summary along with its cell results — otherwise a write that then fails leaves the
   previous run's document beside a rewritten CSV. Every call site prints a failure line, including
   the two that do not ask for the description: it is the only report that the document beside the
   CSV is not the one describing it.

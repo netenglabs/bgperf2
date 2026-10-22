@@ -232,15 +232,20 @@ class TestResumeAcrossTheFlip:
     '''Rows one instrument measured must not be resumed under another. Found
     in review twice: a test with no `monitor:` (GoBGP before 7d, the sink
     after), and then an explicit `monitor:` edited between runs. Each re-ran
-    every cell and carried the old rows forward beside the new ones.'''
+    every cell and carried the old rows forward beside the new ones. A cell id
+    names its instrument, so `--resume` refuses results the config no longer
+    lists.'''
 
     def write(self, tmp_path, test, monitor):
         cells = bgperf2.expand_batch_cells(dict(test, monitor=monitor),
                                            test['targets'])
-        bgperf2.write_batch_progress(
-            str(tmp_path / 't.progress.json'),
-            {bgperf2.batch_cell_id('t', c): ['row'] for c in cells},
-            order='matrix', seed=None, previous_seeds=[])
+        for c in cells:
+            bgperf2.write_batch_cell_result(str(tmp_path), 't',
+                                            bgperf2.batch_cell_id('t', c), ['row'])
+
+    def expanded(self, test):
+        return [(test, test['targets'],
+                 bgperf2.expand_batch_cells(test, test['targets']), 'matrix', None)]
 
     def a_test(self, **kw):
         test = {'name': 't', 'neighbors': [10], 'prefixes': [100],
@@ -251,26 +256,15 @@ class TestResumeAcrossTheFlip:
     def test_gobgp_rows_under_a_test_naming_no_monitor_are_refused(self, tmp_path):
         test = self.a_test()
         self.write(tmp_path, test, 'gobgp')
-        with pytest.raises(SystemExit, match='1 cell\\(s\\) under gobgp, and this '
-                           'test runs under sink'):
-            bgperf2.check_resume_across_monitor_flip([test], str(tmp_path))
+        with pytest.raises(SystemExit, match='1 result\\(s\\) for cells this config does not list'):
+            bgperf2.check_resumable(self.expanded(test), str(tmp_path))
 
     def test_an_edited_monitor_is_refused_too(self, tmp_path):
-        test = self.a_test()
-        self.write(tmp_path, test, 'gobgp')
-        with pytest.raises(SystemExit, match='under gobgp'):
-            bgperf2.check_resume_across_monitor_flip(
-                [self.a_test(monitor='sink')], str(tmp_path))
-        self.write(tmp_path, test, 'sink')
-        with pytest.raises(SystemExit, match='under sink, and this test runs under gobgp'):
-            bgperf2.check_resume_across_monitor_flip(
-                [self.a_test(monitor='gobgp')], str(tmp_path))
+        self.write(tmp_path, self.a_test(), 'gobgp')
+        with pytest.raises(SystemExit, match='does not list'):
+            bgperf2.check_resumable(self.expanded(self.a_test(monitor='sink')), str(tmp_path))
 
     def test_rows_of_the_instrument_the_test_runs_resume(self, tmp_path):
-        test = self.a_test()
-        self.write(tmp_path, test, 'gobgp')
-        bgperf2.check_resume_across_monitor_flip(
-            [self.a_test(monitor='gobgp')], str(tmp_path))
-        self.write(tmp_path, test, 'sink')
-        bgperf2.check_resume_across_monitor_flip([test], str(tmp_path))
-        bgperf2.check_resume_across_monitor_flip([test], str(tmp_path / 'none'))
+        self.write(tmp_path, self.a_test(), 'gobgp')
+        bgperf2.check_resumable(self.expanded(self.a_test(monitor='gobgp')), str(tmp_path))
+        bgperf2.check_resumable(self.expanded(self.a_test()), str(tmp_path / 'none'))

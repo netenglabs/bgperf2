@@ -1,12 +1,18 @@
-docker
-jinja2
-pyyaml
-pyroute2
-nsenter
-netaddr
-mako
-packaging
-psutil
-matplotlib
-numpy
-toml
+# Pinned to the set the Docker-free test suite last passed with, on Python 3.14.
+# Unpinned, a fresh install picked up whatever was newest, so two hosts could
+# run the same revision against different libraries. Update deliberately: bump,
+# run the test suite, commit.
+docker==7.2.0
+jinja2==3.1.6
+pyyaml==6.0.3
+pyroute2==0.9.6
+nsenter==0.2
+netaddr==1.3.0
+mako==1.4.1
+packaging==26.3
+psutil==7.2.2
+matplotlib==3.11.1
+numpy==2.5.1
+toml==0.10.2
+# Imported directly (ConnectionError) as well as through docker.
+requests==2.34.2

@@ -1,2 +1,2 @@
 -r pip-requirements.txt
-pytest
+pytest==9.1.1

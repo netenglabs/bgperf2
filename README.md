@@ -45,9 +45,8 @@ and compares them in a CSV, a summary and graphs.
 
 * Linux with Docker; your user must be in the `docker` group.
 * `sysstat` and `procps` (`bench` shells out to `mpstat` and `free`).
-* Python 3. Development and tests use 3.14; older interpreters are untested.
-  `pip-requirements.txt` is unpinned, so pip picks the newest releases your
-  interpreter supports.
+* Python 3.12 or later. `pip-requirements.txt` pins the versions the test suite
+  passes with (numpy 2.5 needs 3.12); development uses 3.14.
 
 ## <a name="install"></a>Install
 

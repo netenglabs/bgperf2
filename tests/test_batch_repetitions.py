@@ -222,18 +222,6 @@ class TestProgressSchema:
             'filter': 'None', 'target': {'name': 'bird'},
         }
 
-    def test_the_schema_version_did_not_have_to_move(self, tmp_path):
-        import json
-        path = tmp_path / 'old.progress.json'
-        path.write_text(json.dumps({'schema_version': 1, 'cells': {'id': ['row']}}))
-        assert bgperf2.load_batch_progress(str(path)) == {'id': ['row']}
-
-    def test_a_written_file_reads_back(self, tmp_path):
-        path = str(tmp_path / 'p.json')
-        bgperf2.write_batch_progress(path, {'id': ['row']})
-        assert bgperf2.load_batch_progress(path) == {'id': ['row']}
-
-
 class TestBatchGraphsSurviveRepetitions:
     '''create_graph() de-duplicates row names but not row data.
 
@@ -298,7 +286,7 @@ class TestNameAndIdentityAgree:
                         for c in bgperf2.expand_batch_cells(repeated, repeated['targets'])}
         assert not (single_ids & repeated_ids)
 
-    def test_resume_across_that_change_re_runs_rather_than_mixing(
+    def test_resume_across_that_change_is_refused_rather_than_mixing(
             self, fake_img_exists, tmp_path, monkeypatch):
         fake_img_exists(lambda name: True)
         monkeypatch.setattr(bgperf2, 'create_batch_graphs', lambda *a, **k: None)
@@ -315,11 +303,9 @@ class TestNameAndIdentityAgree:
 
         ran.clear()
         config.write_text(yaml.safe_dump({'tests': [a_test(neighbors=[1], repetitions=3)]}))
-        bgperf2.batch(args)
-
-        assert ran == ['bird #1', 'bird #2', 'bird #3']
-        rows = (tmp_path / 'reps.csv').read_text().splitlines()[1:]
-        assert rows == ['bird #1', 'bird #2', 'bird #3'], 'an unnamed pass survived'
+        with pytest.raises(SystemExit, match='does not list'):
+            bgperf2.batch(args)
+        assert ran == [], 'an unnamed pass would have been resumed beside #2 and #3'
 
 
 class TestCheckBatchTest:

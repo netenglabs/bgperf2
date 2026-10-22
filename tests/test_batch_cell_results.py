@@ -81,9 +81,9 @@ class TestCellResults:
         bgperf2.batch(batch_args(config, tmp_path))
 
         completed = bgperf2.load_batch_cell_results(str(tmp_path), 'cells')
-        progress = bgperf2.load_batch_progress(str(tmp_path / 'cells.progress.json'))
-        assert completed == progress
         assert len(completed) == 4
+        csv_rows = (tmp_path / 'cells.csv').read_text().splitlines()[1:]
+        assert sorted(','.join(map(str, row)) for row in completed.values()) == sorted(csv_rows)
 
     def test_a_fresh_batch_clears_its_predecessors_results(
             self, fake_img_exists, no_graphs, fake_bench, tmp_path):
@@ -154,7 +154,6 @@ class TestSelectedCells:
         bgperf2.batch(batch_args(config, tmp_path, cells=[cells[3]['key'], cells[0]['key']]))
 
         assert fake_bench == [('frr_c', 2), ('bird', 1)]
-        assert not (tmp_path / 'cells.progress.json').exists()
 
     @pytest.mark.parametrize('keys', [['0000000000000000'], ['dup', 'dup']])
     def test_bad_keys_stop_before_the_first_container(
@@ -236,21 +235,6 @@ class TestCommandLine:
 
 
 class TestReviewFixes:
-    def test_resume_gives_progress_only_rows_their_documents(
-            self, fake_img_exists, no_graphs, fake_bench, tmp_path, capsys):
-        '''A batch begun by a build with no cell results must keep its rows.'''
-        fake_img_exists(lambda name: True)
-        config = write_config(tmp_path)
-        bgperf2.batch(batch_args(config, tmp_path))
-        for path in (tmp_path / 'cells.cells').glob('*.json'):
-            path.unlink()
-        fake_bench.clear()
-
-        bgperf2.batch(batch_args(config, tmp_path, resume=True))
-        assert fake_bench == []
-        bgperf2.batch(batch_args(config, tmp_path, report=True))
-        assert len((tmp_path / 'cells.csv').read_text().splitlines()) == 5
-
     def test_resume_reports_the_recorded_result_and_skips_its_cell(
             self, fake_img_exists, no_graphs, fake_bench, tmp_path, capsys):
         fake_img_exists(lambda name: True)
@@ -305,7 +289,26 @@ class TestReviewFixes:
         with pytest.raises(SystemExit, match='same'):
             bgperf2.expand_batch_config(str(path))
 
-    def test_interrupted_cell_writes_are_swept(self, tmp_path):
-        (tmp_path / 'cells.cells').mkdir()
-        (tmp_path / 'cells.cells' / 'abc.json.tmp').write_text('')
-        assert bgperf2.sweep_stale_temp_files(str(tmp_path)) == ['cells.cells/abc.json.tmp']
+    def test_no_report_records_the_cells_only(
+            self, fake_img_exists, no_graphs, fake_bench, tmp_path, capsys):
+        fake_img_exists(lambda name: True)
+        config = write_config(tmp_path)
+        key = listed(capsys, config, tmp_path)['tests'][0]['cells'][0]['key']
+        bgperf2.batch(batch_args(config, tmp_path, cells=[key], no_report=True))
+
+        assert len(bgperf2.load_batch_cell_results(str(tmp_path), 'cells')) == 1
+        assert not (tmp_path / 'cells.csv').exists()
+
+    def test_resume_refuses_results_the_config_does_not_list(
+            self, fake_img_exists, no_graphs, fake_bench, tmp_path):
+        fake_img_exists(lambda name: True)
+        bgperf2.batch(batch_args(write_config(tmp_path), tmp_path))
+        fake_bench.clear()
+        with pytest.raises(SystemExit, match='does not list'):
+            bgperf2.batch(batch_args(write_config(tmp_path, neighbors=[1]), tmp_path,
+                                     resume=True))
+        assert fake_bench == []
+
+    def test_no_report_without_cells_is_refused(self, tmp_path):
+        with pytest.raises(SystemExit, match='--no-report'):
+            bgperf2.batch(batch_args(write_config(tmp_path), tmp_path, no_report=True))

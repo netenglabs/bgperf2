@@ -444,15 +444,15 @@ dropped by the operator in favour of re-benching.
   and review found the GoBGP half of all three monitor-pair configs had become a second sink run.
   With it, their cell ids are byte-identical to the ones recorded, because GoBGP is the unmarked
   instrument.
-- **`--resume` refuses rows another instrument measured** (`check_resume_across_monitor_flip()`),
-  before anything asks Docker. A cell id names its instrument, so such rows match nothing: every
-  cell would re-run, and each checkpoint would carry the old rows forward beside the new ones in
-  one progress file. It catches both ways in: a config with no `monitor:` key that ran GoBGP
-  before the flip, and a `monitor:` edited between runs. The message names both ways out: state
-  the instrument the rows ran under, or rerun without `--resume`.
+- **`--resume` refuses rows another instrument measured** (`check_resumable()`), before anything
+  asks Docker. A cell id names its instrument, so such rows are results for cells the config no
+  longer lists, and continuing would report them beside rows measured under the new one. It
+  catches both ways in: a config with no `monitor:` key that ran GoBGP before the flip, and a
+  `monitor:` edited between runs. The way out is a new `--results-dir`, or stating the instrument
+  the rows ran under.
 - **An absent monitor in a cell id is `UNMARKED_MONITOR`** (`cell_monitor()`), never the
   default, and `batch()` runs a cell under the same reading. An id omits the key on GoBGP, and
-  `timing_variance_review.py` reads ids back from progress files; read as the default, every
+  analysis reads ids back from recorded results; read as the default, every
   GoBGP cell measured before the flip would be described as a sink cell.
 - **Recorded under `-f` too**, in both `run` blocks and as the manifest's `monitor.daemon`,
   because bgperf2 starts the monitor whatever wrote the scenario. Not a CSV column: the

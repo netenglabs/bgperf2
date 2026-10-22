@@ -59,11 +59,10 @@ from mrt_tester import ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
 from monitor import Monitor, Receiver, SinkMonitor, SinkReceiver
 from sink import SINK_CLOCK_OFFSET_LIMIT_NS, Sink
-import reclaim
 from convergence import ConvergenceTracker
 from role_cpu import (ROLE_CPU_INTERVAL_S, RoleCpuRecorder, cgroup_dir_for_pid,
                       read_effective_cpuset, read_members)
-from reclaim import StopRequested, StopSignal, watch_for_interruption
+from stop import StopRequested, StopSignal
 from policy import (DEFAULT_POLICY_RELOAD_BLOCKS,
                     PolicyReloadConfigurationError, PolicyReloadTracker,
                     policy_reload_counts, rejected_block_indexes,
@@ -2238,75 +2237,20 @@ controller_stop = threading.Event()
 #
 # Deliberately *not* cleared per run, unlike `controller_stop`. A stop asked
 # for during cell 7 must still be refused-upon at cell 8; clearing it between
-# cells would let a batch answer a reclaim by starting another cell.
+# cells would let a batch answer a stop by starting another cell.
 stop_signal = StopSignal()
-
-
-def read_instance_metadata(path, headers):
-    """One IMDS read, returning `(status, body)`. The only EC2-aware code here.
-
-    `requests` is already a dependency (docker-py pulls it, and this module
-    imports its ConnectionError). Timeouts are short and connect and read are
-    bounded separately: on a non-EC2 host the link-local address usually
-    blackholes rather than refusing, so the connect timeout is what makes the
-    first poll fail fast instead of hanging the thread that owns it.
-    """
-    import requests
-    url = reclaim.IMDS_BASE + path
-    timeout = (reclaim.IMDS_TIMEOUT_S, reclaim.IMDS_TIMEOUT_S)
-    if path == reclaim.TOKEN_PATH:
-        response = requests.put(
-            url, timeout=timeout,
-            headers={'X-aws-ec2-metadata-token-ttl-seconds':
-                     str(reclaim.TOKEN_TTL_SECONDS)})
-    else:
-        response = requests.get(url, timeout=timeout, headers=headers or {})
-    return response.status_code, response.text
-
-
-def start_interruption_watch():
-    """Begin watching for a spot reclamation notice, if this host has one.
-
-    Silent on a host that is not EC2: the watcher gives up after a few failed
-    reads and says nothing, because every developer machine is "not EC2" and a
-    warning nobody can act on is a warning everybody learns to skip.
-
-    Idempotent -- a batch calls it once and every cell's `bench()` inherits the
-    same watcher, rather than starting one per cell and leaving forty behind.
-    """
-    global interruption_watcher
-    if interruption_watcher is not None:
-        return interruption_watcher
-
-    def on_notice(notice):
-        # Printed from the watcher thread, which is the only place that knows
-        # the notice arrived rather than the stop being asked for some other
-        # way. The cell loop prints what it *does* about it.
-        print('\n{0}'.format(notice))
-        print('stopping at the next cell boundary; the cell in flight is '
-              'abandoned rather than recorded')
-
-    interruption_watcher = threading.Thread(
-        target=watch_for_interruption,
-        args=(stop_signal, read_instance_metadata),
-        kwargs={'on_notice': on_notice},
-        daemon=True)
-    interruption_watcher.start()
-    return interruption_watcher
-
-
-interruption_watcher = None
 
 
 def install_stop_handlers():
     """Make SIGTERM an orderly stop rather than a killed process.
 
-    A spot reclaim is SIGTERM, then SIGKILL about two minutes later. Two
-    minutes does not finish a cell -- an MRT cell runs for tens of minutes --
-    so this never tries to save the cell in flight. It marks the stop, and the
-    loops that would otherwise keep running for another half hour abandon what
-    they are doing at their next check. What is saved is everything already
-    checkpointed, and the guarantee that nothing half-done is recorded as done.
+    A host being shut down sends SIGTERM and then SIGKILL shortly after, which
+    does not finish a cell -- an MRT cell runs for tens of minutes -- so this
+    never tries to save the cell in flight. It marks the stop, and the loops
+    that would otherwise keep running abandon what they are doing at their
+    next check, stopping the samplers on the way out. What is kept is every
+    cell result already written, and the guarantee that nothing half-done is
+    recorded as done. The process then exits 143.
 
     **SIGINT is left alone.** Ctrl-C already raises `KeyboardInterrupt`, which
     unwinds immediately; routing it through here would make an interactive
@@ -2829,14 +2773,9 @@ def scenario_mrt_tester_class(tester):
 
 
 def bench(args):
-    # Here as well as in `batch()`, because a `bench` run is also a thing a
-    # reclaim can take away -- `scripts/calibration_case.sh` drives one
-    # directly, and so does anyone debugging a cell. Both calls are idempotent:
-    # re-installing a signal handler replaces it with itself, and the watcher
-    # returns the thread it already started, so the forty cells of a batch
-    # share the one watcher the batch began.
+    # Here as well as in `batch()`, because a single `bench` can be stopped
+    # too. Idempotent: re-installing a handler replaces it with itself.
     install_stop_handlers()
-    start_interruption_watch()
 
     output_stats = {}
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
@@ -3582,8 +3521,8 @@ def bench(args):
     tracker = ConvergenceTracker(sample_interval_s=MONITOR_POLL_INTERVAL_S)
     while True:
         # Checked once per queue message, which is at least once a second: a
-        # cell that would otherwise run for tens of minutes past a reclaim
-        # notice gives the window back to the batch instead.
+        # cell that would otherwise run for tens of minutes past a SIGTERM
+        # gives the time back instead.
         if stop_signal.is_set():
             abandon_run(stop_signal.reason, target, m, testers)
         info = q.get()
@@ -4084,7 +4023,7 @@ def write_provenance(args, provenance, prefix):
     # record this repository says must never guess: a half-written
     # `versions.json` beside a completed cell is a row whose target version
     # cannot be established, which `--resume` will then skip because its
-    # result is already in the progress file. See
+    # cell result is already recorded. See
     # docs/invariants/provenance-and-verify.md.
     def write(f):
         json.dump(doc, f, indent=2, sort_keys=True)
@@ -4436,7 +4375,7 @@ def abandon_run(reason, target, m, testers=()):
     daemon threads polling `docker exec` once a second, and the one time they
     were left running, bgperf went on sampling through the next cell and
     **manufactured the very contention it reports** -- see
-    docs/invariants/host-and-environment.md. A reclaim that left forty of them
+    docs/invariants/host-and-environment.md. A stop that left forty of them
     behind would do it forty times over.
 
     Containers are deliberately *not* removed. `bench()` already calls
@@ -4448,8 +4387,8 @@ def abandon_run(reason, target, m, testers=()):
 
     Raises `StopRequested` rather than returning, so nothing downstream can
     mistake an abandoned run for a row: `batch()`'s
-    `completed[cell_id] = bench(a)` never executes, and the cell stays absent
-    from the progress file rather than recorded as done.
+    `completed[cell_id] = bench(a)` never executes, and the cell has no result
+    document rather than one recorded as done.
     """
     m.stop_monitoring = True
     # None on a remote run, which has no target container to sample.
@@ -6318,8 +6257,9 @@ def batch_order(test):
     that names a seed is asking to be permuted. An omitted seed is generated,
     not fixed at a constant: a default seed shared by every batch is one
     permutation, and a permutation nobody chose is exactly the pattern this
-    exists to break. It is recorded in the progress file, so the sequence stays
-    reproducible after the fact and a resumed batch keeps the order it planned.
+    exists to break. It is recorded in every cell result, so the sequence stays
+    reproducible after the fact. `--resume` requires a stated seed, since a
+    drawn one would deal the remaining cells in a different order.
     """
     order = test.get('order', 'matrix')
     if order not in BATCH_ORDERS:
@@ -6340,8 +6280,8 @@ def batch_order(test):
 
 
 def describe_batch_sequence(order, seed):
-    """One phrase for a sequence, so the planned one and a superseded one read
-    the same way. Matrix order has no seed to name."""
+    """One phrase for a sequence, so every message names one the same way.
+    Matrix order has no seed to name."""
     if order == 'matrix' or seed is None:
         return order
     return '{0} seed {1}'.format(order, seed)
@@ -6580,7 +6520,7 @@ def expand_batch_config(path):
         check_batch_run_names(test, targets)
         order, seed = batch_order(test)
         expanded.append((test, targets, expand_batch_cells(test, targets), order, seed))
-    # A test's name is the stem of its CSV, summary, progress file and cell
+    # A test's name is the stem of its CSV, summary and cell
     # results, and part of every cell id, so two tests sharing one would write
     # over each other's evidence and give their cells the same keys.
     names = [test['name'] for test, _t, _c, _o, _s in expanded]
@@ -6597,37 +6537,43 @@ def batch(args):
 
     it iterates through a list of targets, number of neighbors and number of prefixes
     other variables can be set, but not iterated through
+
+    `--resume` skips every cell that already has a result in --results-dir.
+    Anything more -- a record of attempts, refusing to continue after a
+    failure, watching for a host being reclaimed -- belongs to whatever drives
+    the batch, through `--list-cells`, `--cells` and `--report`.
     """
     # Neither runs a cell, and both print documents a caller parses, so they
-    # return before the preamble below can print anything of its own.
+    # return before anything below can print anything of its own.
     if getattr(args, 'list_cells', False):
         return list_batch_cells(expand_batch_config(args.batch_config))
     if getattr(args, 'report', False):
         return report_batch_from_cell_results(
             expand_batch_config(args.batch_config), args.results_dir)
 
-    # Before anything long-running, and before the first cell: a reclaim that
-    # arrives during cell 1 should already have somewhere to be recorded.
-    install_stop_handlers()
-    start_interruption_watch()
+    if getattr(args, 'no_report', False) and not getattr(args, 'cells', None):
+        sys.exit('--no-report applies only to --cells')
 
-    # An interrupted checkpoint leaves its temp file behind -- `atomic_write()`
-    # cleans up in a `finally`, which SIGKILL never reaches. Swept here rather
-    # than ignored, and *reported*, because a resumed batch carrying one is the
-    # only visible trace that the last attempt was killed rather than finished.
+    # Before the first cell: a SIGTERM during cell 1 must already abandon it.
+    install_stop_handlers()
+
+    # A SIGKILL never reaches `atomic_write()`'s cleanup. Swept and *reported*,
+    # because a resumed batch carrying one is the only visible trace that the
+    # last attempt was killed rather than finished.
     swept = sweep_stale_temp_files(args.results_dir)
     if swept:
-        print('found {0} unfinished checkpoint file(s) from an interrupted '
-              'run, removed: {1}'.format(len(swept), ', '.join(swept)))
+        print('found {0} unfinished write(s) from an interrupted run, removed: '
+              '{1}'.format(len(swept), ', '.join(swept)))
 
     expanded = expand_batch_config(args.batch_config)
     if getattr(args, 'cells', None):
         return run_selected_batch_cells(args, expanded)
-    # Reads only local files, so before anything that asks Docker: its remedy
-    # can make an image check moot.
-    if getattr(args, 'resume', False):
-        check_resume_across_monitor_flip(
-            [test for test, _, _, _, _ in expanded], args.results_dir)
+    resume = getattr(args, 'resume', False)
+    recorded = {}
+    if resume:
+        # Reads only local files, so before anything that asks Docker: its
+        # remedy can make an image check moot.
+        expanded, recorded = check_resumable(expanded, args.results_dir)
     # One entry per target, not per cell: a repeated matrix asks about the same
     # images every pass, and reporting a missing image once per repetition
     # buries the list this exists to print.
@@ -6637,72 +6583,29 @@ def batch(args):
 
     for test, _targets, cells, order, seed in expanded:
         repetitions = batch_repetitions(test)
-        progress_path = results_path(args.results_dir, f"{test['name']}.progress.json")
         summary_path = results_path(args.results_dir, f"{test['name']}.summary.json")
-        resume = getattr(args, 'resume', False)
-        document = load_batch_progress_document(progress_path) if resume else {'cells': {}}
-        completed = document['cells']
         if resume:
-            # The cell results are the record a report is built from, so they
-            # win over the progress file: a cell re-measured by `--cells` must
-            # not be reported from its old row, and a cell run only that way
-            # must not run again. A row only the progress file holds -- written
-            # by a build that had no cell results -- is given its document, or
-            # a later `--report` would drop it.
-            recorded = load_batch_cell_results(args.results_dir, test['name'])
-            for cell_id, row in completed.items():
-                if cell_id not in recorded:
-                    write_batch_cell_result(args.results_dir, test['name'],
-                                            cell_id, row)
-            completed.update(recorded)
-        if not resume and os.path.exists(progress_path):
-            os.unlink(progress_path)
-        if not resume:
+            completed = recorded[test['name']]
+        else:
+            completed = {}
             # A fresh batch is a new set of observations, so its predecessor's
-            # cell results go with its progress file: left behind, a later
-            # `--report` would mix two runs' rows under one config.
+            # cell results go: left behind, a later `--report` would mix two
+            # runs' rows under one config.
             cleared = clear_batch_cell_results(args.results_dir, test['name'])
             if cleared:
                 print("test '{0}': starting fresh, removed {1} recorded cell "
-                      'result(s); use --resume or --report to keep '
-                      'them'.format(test['name'], cleared))
+                      'result(s); use --resume or --report to keep them'.format(
+                          test['name'], cleared))
         if not resume and os.path.exists(summary_path):
             # The rows of a discarded batch are replaced by its successor's
-            # first checkpoint, but a summary that then fails to write would
-            # leave the previous run's document -- three passes that no longer
-            # exist -- beside the rewritten CSV.
+            # first cell, but a summary that then fails to write would leave
+            # the previous run's document -- passes that no longer exist --
+            # beside the rewritten CSV.
             os.unlink(summary_path)
-        # A progress file written before ordering existed names no order, and
-        # there was only one to have run in: reading it as matrix is what makes
-        # the comparison below honest rather than vacuous.
-        recorded = {'order': document.get('order') or 'matrix',
-                    'seed': document.get('seed')}
-        superseded = list(document.get('previous_seeds') or [])
-        if (resume and test.get('seed') is None
-                and recorded['order'] == order and recorded['seed'] is not None):
-            # Recover the drawn seed rather than dealing the remaining cells
-            # again: an interrupted run resumed under a fresh permutation has
-            # run two orders, and neither of them is the one it recorded. A
-            # seed the config states is left alone -- changing it by hand is an
-            # instruction to re-sequence, not a resume to be corrected.
-            seed = recorded['seed']
-        elif (resume and completed
-                and (recorded['order'], recorded['seed']) != (order, seed)):
-            # The cells already on disk ran under the recorded sequence. The
-            # document is rewritten from scratch on every checkpoint, so a
-            # superseded seed that is simply dropped leaves the file describing
-            # an order that some of its own rows did not run in.
-            superseded.append(recorded)
-            print('order: {0} completed cell(s) ran under {1}; keeping that as '
-                  'a superseded sequence'.format(
-                      len(completed), describe_batch_sequence(**recorded)))
         if order != 'matrix':
-            print('order: {0} (recorded in {1})'.format(
-                describe_batch_sequence(order, seed), progress_path))
-        # Written before the first cell so the seed survives a batch that dies
-        # in it, and so --resume finds the sequence rather than drawing another.
-        write_batch_progress(progress_path, completed, order=order, seed=seed,
-                             previous_seeds=superseded)
+            # Also stored in every cell result, so a drawn seed survives a
+            # batch that dies early and the sequence can be rebuilt.
+            print('order: {0}'.format(describe_batch_sequence(order, seed)))
         # Written before the first cell too, so the file describes *this*
         # batch's cells from the outset rather than leaving a previous run's
         # summary in place -- a stale document claiming three passes that were
@@ -6714,51 +6617,25 @@ def batch(args):
         for cell in order_batch_cells(test['name'], cells, order, seed):
             cell_id = batch_cell_id(test['name'], cell)
             if cell_id in completed:
-                print("resume: skipping completed cell: {0}".format(
+                print('resume: skipping recorded cell: {0}'.format(
                     batch_cell_description(cell, repetitions)))
                 continue
 
-            # The cell boundary, and the whole point of the two-minute
-            # warning: a cell begun here cannot finish before the host goes
-            # away, so beginning it spends the window on a row nobody will
-            # keep. Everything already in `completed` is on disk and
-            # `--resume` picks up exactly here.
-            #
-            # **Raised, not `break`ed**, and the difference is the whole
-            # contract. A `break` leaves only this cell loop: `batch()` then
-            # finishes this test normally, walks on to the *next* test in the
-            # config, and returns -- so the process exits 0, which is exactly
-            # what the 143 below exists to distinguish from a run that was
-            # taken away. `run_batch()` in the campaign runner reads that 0 as
-            # success and the block stamps RAN over a truncated matrix. Worse,
-            # each remaining test re-enters the preamble above, which on a
-            # batch without `--resume` unlinks that test's progress and summary
-            # documents -- so a stop would discard the previous results of
-            # tests it never ran.
-            #
-            # Nothing is lost by unwinding here: the CSV, the summary and the
-            # progress file are rewritten after every completed cell, so what
-            # is on disk is current as of the last cell that finished.
+            # **Raised, not `break`ed.** A `break` leaves only this cell loop:
+            # `batch()` would finish this test normally, walk on to the next
+            # test, and return -- so the process exits 0 over a truncated
+            # matrix, and each remaining test's preamble would discard its
+            # predecessor's results for tests that never ran. Every completed
+            # cell is already on disk, so nothing is lost by unwinding.
             if stop_signal.is_set():
                 print('\nstopping before {0}: {1}'.format(
                     batch_cell_description(cell, repetitions),
                     stop_signal.reason))
-                print('re-invoke the identical command with --resume to '
-                      'continue from this cell')
                 raise StopRequested(stop_signal.reason)
 
             completed[cell_id] = bench(batch_cell_args(args, cell))
-
-            # The cell's own record first, so a progress file never names a
-            # cell whose result document is missing.
             write_batch_cell_result(args.results_dir, test['name'], cell_id,
-                                    completed[cell_id])
-            # Checkpoint both files atomically after every cell. If the process
-            # dies later, --resume can skip every cell whose result made it to
-            # disk -- including a repetition interrupted part way through, since
-            # a cell's identity does not depend on how many of its siblings ran.
-            write_batch_progress(progress_path, completed, order=order, seed=seed,
-                                 previous_seeds=superseded)
+                                    completed[cell_id], order=order, seed=seed)
             write_batch_csv(results_path(args.results_dir, f"{test['name']}.csv"),
                             batch_report_rows(test['name'], cells, completed))
             # Kept current cell by cell, like the CSV: a batch that dies in its
@@ -6768,14 +6645,70 @@ def batch(args):
                                               describe=False):
                 print(line)
 
-        # A crash after the progress checkpoint but before its matching CSV
-        # replacement can leave the CSV one cell behind. Rebuild it even when
-        # resume skipped every cell.
         results = batch_report_rows(test['name'], cells, completed)
         write_batch_csv(results_path(args.results_dir, f"{test['name']}.csv"), results)
         print_batch_report(test['name'], results, summary_path, cells, completed,
                            repetitions)
         create_batch_graphs(results, test['name'], results_dir=args.results_dir)
+
+
+def check_resumable(expanded, results_dir):
+    """Refuse a `--resume` the recorded results cannot honestly continue.
+
+    Returns the expanded tests, with a drawn shuffle seed replaced by the one
+    the recorded cells ran under, and each test's recorded results.
+
+    Every recorded result must be a cell this config lists: an edited axis,
+    target, monitor or repetition count changes cell ids, and continuing would
+    put rows measured under the old config beside rows measured under the new
+    one. Every result must have run under the sequence this resume will
+    continue: a stated seed or order edited since is refused, since the batch
+    would have run two sequences with nothing naming the switch. A progress
+    file from an older bgperf2 holds rows this version does not read, so it is
+    refused rather than silently re-measured.
+    """
+    resumable = []
+    recorded = {}
+    for test, targets, cells, order, seed in expanded:
+        name = test['name']
+        legacy = results_path(results_dir, f"{name}.progress.json")
+        if os.path.exists(legacy):
+            sys.exit("test '{0}': {1} was written by an older bgperf2, whose rows this "
+                     'version does not read. Resume it with that version, or measure '
+                     'into a new --results-dir'.format(name, legacy))
+        listed = {batch_cell_id(name, cell) for cell in cells}
+        completed = load_batch_cell_results(results_dir, name)
+        foreign = set(completed) - listed
+        if foreign:
+            sys.exit("test '{0}': {1} holds {2} result(s) for cells this config does "
+                     'not list (an edited axis, target, monitor or repetition count '
+                     'changes cell ids). Use a new --results-dir to measure the edited '
+                     'config'.format(name, batch_cell_results_dir(results_dir, name),
+                                     len(foreign)))
+        stored = load_batch_cell_sequences(results_dir, name)
+        # A result written before sequences were stored names none; it is
+        # unknown, not evidence of matrix order.
+        sequences = {(s.get('order'), s.get('seed')) for s in stored if s}
+        unknown = len(stored) - sum(1 for s in stored if s)
+        if completed and order == 'shuffle' and test.get('seed') is None:
+            # A drawn seed: continue the one the recorded cells ran under.
+            drawn = {s for o, s in sequences if o == 'shuffle'}
+            if unknown or len(sequences) != 1 or len(drawn) != 1:
+                sys.exit("test '{0}': its recorded cells do not name one shuffle "
+                         'seed to continue; state `seed:` to choose the '
+                         'sequence'.format(name))
+            seed = drawn.pop()
+            print("test '{0}': resuming shuffle seed {1}".format(name, seed))
+        elif completed and sequences - {(order, seed)}:
+            ran = ', '.join(sorted(describe_batch_sequence(o, s)
+                                   for o, s in sequences - {(order, seed)}))
+            sys.exit("test '{0}': recorded cells ran under {1}, and this config "
+                     'runs {2}. Restore it, or measure into a new '
+                     '--results-dir'.format(name, ran,
+                                            describe_batch_sequence(order, seed)))
+        resumable.append((test, targets, cells, order, seed))
+        recorded[name] = completed
+    return resumable, recorded
 
 
 def batch_cell_args(args, cell):
@@ -6896,13 +6829,19 @@ def run_selected_batch_cells(args, expanded):
     """Run only the cells named by `--cells`, in the order they were named.
 
     Every key is resolved before any container starts, so a typo costs nothing.
-    Nothing here reads or writes a progress file: the caller chose which cells
-    to run, so deciding what is left is the caller's. Each cell writes its
-    result document, and every test touched is then reported from all the
-    results its directory holds.
+    The caller chose which cells to run, so deciding what is left is the
+    caller's. Each cell writes its result document, and every test touched is
+    then reported from all the results its directory holds -- unless
+    `--no-report` leaves that to a later `--report`.
     """
     index = {}
-    for test, _targets, cells, _order, _seed in expanded:
+    sequences = {}
+    for test, _targets, cells, order, seed in expanded:
+        if order == 'shuffle' and test.get('seed') is None:
+            sys.exit("test '{0}': --cells needs `seed:` under order: shuffle; a drawn "
+                     'seed would be recorded for an order no invocation '
+                     'follows'.format(test['name']))
+        sequences[test['name']] = (order, seed)
         for cell in cells:
             index[batch_cell_key(batch_cell_id(test['name'], cell))] = (test, cell)
     unknown = [key for key in args.cells if key not in index]
@@ -6934,8 +6873,12 @@ def run_selected_batch_cells(args, expanded):
                 batch_cell_description(cell, repetitions), stop_signal.reason))
             raise StopRequested(stop_signal.reason)
         cell_id = batch_cell_id(test['name'], cell)
+        order, seed = sequences[test['name']]
         write_batch_cell_result(args.results_dir, test['name'], cell_id,
-                                bench(batch_cell_args(args, cell)))
+                                bench(batch_cell_args(args, cell)),
+                                order=order, seed=seed)
+    if getattr(args, 'no_report', False):
+        return
     touched = {test['name'] for test, _cell in selected}
     report_batch_from_cell_results(
         [entry for entry in expanded if entry[0]['name'] in touched],
@@ -6994,17 +6937,21 @@ def batch_cell_results_dir(results_dir, test_name):
     return results_path(results_dir, f"{test_name}.cells")
 
 
-def write_batch_cell_result(results_dir, test_name, cell_id, row):
+def write_batch_cell_result(results_dir, test_name, cell_id, row, order=None,
+                            seed=None):
     """Record one cell's row in its own document, atomically.
 
     This is the durable record a report is built from, whichever invocation
     ran the cell. The full id is stored inside, so the file name is only an
-    index and a renamed or misplaced file is caught on reading.
+    index and a renamed or misplaced file is caught on reading. The sequence
+    the cell ran under is stored too, so a drawn seed is never lost.
     """
     directory = batch_cell_results_dir(results_dir, test_name)
     os.makedirs(directory, exist_ok=True)
     document = {'schema_version': BATCH_CELL_RESULT_SCHEMA_VERSION,
                 'cell_id': cell_id, 'row': row}
+    if order is not None:
+        document['sequence'] = {'order': order, 'seed': seed}
 
     atomic_write_json(os.path.join(directory, batch_cell_key(cell_id) + '.json'),
                       document)
@@ -7031,6 +6978,17 @@ def load_batch_cell_results(results_dir, test_name):
             raise ValueError('unsupported or malformed batch cell result: {0}'.format(path))
         completed[cell_id] = document['row']
     return completed
+
+
+def load_batch_cell_sequences(results_dir, test_name):
+    """The sequence each recorded cell ran under; `{}` for one that names none."""
+    directory = batch_cell_results_dir(results_dir, test_name)
+    sequences = []
+    for path in sorted(glob.glob(os.path.join(directory, '*.json'))):
+        with open(path, 'r') as f:
+            document = json.load(f)
+        sequences.append(document.get('sequence') or {})
+    return sequences
 
 
 def clear_batch_cell_results(results_dir, test_name):
@@ -7137,76 +7095,13 @@ def batch_cell_description(cell, repetitions=1):
     return described
 
 
-# Unchanged by repetitions: a single-pass cell id has the shape it always had,
-# so a file written by an older build still resumes rather than costing the
-# operator every completed cell.
-BATCH_PROGRESS_SCHEMA_VERSION = 1
-
-
-def check_resume_across_monitor_flip(tests, results_dir):
-    """Refuse to `--resume` a test into rows another instrument measured.
-
-    A cell id names its instrument, so rows measured under one monitor match
-    nothing once the test runs under another: every cell re-runs, and each
-    checkpoint carries the old rows forward beside the new ones in one
-    progress file, which `timing_variance_review.py` would read as one pass.
-    It happens two ways -- a test with no `monitor:` that ran GoBGP before
-    measurement plan 7d made the sink the default, and a `monitor:` edited
-    between runs -- and both are refused here, before any container, with both
-    ways out named.
-    """
-    for test in tests:
-        wanted = batch_test_monitor(test)
-        path = results_path(results_dir, f"{test['name']}.progress.json")
-        try:
-            completed = load_batch_progress_document(path)['cells']
-        except (OSError, ValueError):
-            # `batch()` reports an unreadable file itself, at the same read.
-            continue
-        measured = {}
-        for cell_id in completed:
-            try:
-                monitor = cell_monitor(json.loads(cell_id))
-            except (ValueError, AttributeError):
-                continue
-            if monitor != wanted:
-                measured[monitor] = measured.get(monitor, 0) + 1
-        if measured:
-            other = ', '.join('{0} cell(s) under {1}'.format(n, m)
-                              for m, n in sorted(measured.items()))
-            sys.exit("test '{0}': {1} holds {2}, and this test runs under {3}. "
-                     'Set `monitor:` to what those rows ran under to resume '
-                     'them, or rerun without --resume to measure the test '
-                     'again under {3}'.format(test['name'], path, other, wanted))
-
-
-def load_batch_progress_document(path):
-    """The whole progress file: the completed cells, and how they were sequenced.
-
-    The sequencing keys are optional, so a file written before ordering existed
-    still loads at the same schema version and resumes as it always did.
-    """
-    if not os.path.exists(path):
-        return {'cells': {}}
-    with open(path, 'r') as f:
-        document = json.load(f)
-    if (document.get('schema_version') != BATCH_PROGRESS_SCHEMA_VERSION
-            or not isinstance(document.get('cells'), dict)):
-        raise ValueError('unsupported or malformed batch progress file: {0}'.format(path))
-    return document
-
-
-def load_batch_progress(path):
-    return load_batch_progress_document(path)['cells']
-
-
 def fsync_directory(path):
     """Make a rename in `path` durable, not merely ordered.
 
     `os.replace()` orders the rename against the data already fsynced into the
     temp file, so a reader never sees a half-written document. It does not make
-    the *directory entry* durable: on a hard termination -- an EC2 spot
-    instance being terminated is one -- the entry can still point at the old
+    the *directory entry* durable: on a hard termination -- a host being shut
+    down is one -- the entry can still point at the old
     file, or at neither. One `fsync` on the containing directory closes that,
     and it is the whole difference between a checkpoint and a document that
     was probably written.
@@ -7248,8 +7143,8 @@ def sweep_stale_temp_files(directory):
     never reaches -- so a hard termination leaves one behind, and nothing
     removed it. Harmless in itself (nothing reads them, and the next write to
     the same document truncates), but it is the visible trace of an interrupted
-    checkpoint, and a resumed batch that carries one looks exactly as clean as
-    one that was never interrupted.
+    write, and a resumed batch that carries one looks exactly as clean as one
+    that was never interrupted.
 
     Returns what it removed, so a resumed run can *say* it was interrupted
     rather than quietly tidying the evidence away. Best-effort: a file that
@@ -7273,24 +7168,6 @@ def sweep_stale_temp_files(directory):
             continue
         swept.append(os.path.relpath(name, directory))
     return swept
-
-
-def write_batch_progress(path, completed, order=None, seed=None, previous_seeds=None):
-    document = {'schema_version': BATCH_PROGRESS_SCHEMA_VERSION, 'cells': completed}
-    if order is not None:
-        document['order'] = order
-    if previous_seeds:
-        # Sequences some of these rows ran under before the config was edited.
-        # Kept because the file is rewritten whole on every checkpoint, so
-        # anything not carried forward is gone.
-        document['previous_seeds'] = previous_seeds
-    if seed is not None:
-        # The one durable record of the sequence a batch ran in. It is written
-        # before the first cell, not after it: a seed that only appeared once a
-        # cell had finished would be missing from exactly the runs that died
-        # early, and a resumed batch would draw a new one.
-        document['seed'] = seed
-    atomic_write_json(path, document)
 
 
 def atomic_write_json(path, document):
@@ -7932,13 +7809,17 @@ def create_args_parser(main=True):
                                    'default: {}'.format(DEFAULT_RESULTS_DIR))
     batch_mode = parser_batch.add_mutually_exclusive_group()
     batch_mode.add_argument('--resume', action='store_true',
-                            help='resume a partial batch by skipping cells with durable results')
+                            help='skip every cell that already has a result in --results-dir; '
+                                 'a shuffled test must state seed:')
     batch_mode.add_argument('--list-cells', action='store_true',
                             help='print every cell, in run order, with the key --cells accepts, '
                                  'as JSON; runs nothing and needs no Docker')
     batch_mode.add_argument('--cells', nargs='+', metavar='KEY',
                             help='run only these cells, in this order, then report from every '
                                  'cell result in --results-dir')
+    parser_batch.add_argument('--no-report', action='store_true',
+                              help='with --cells: record the cells only; build the report '
+                                   'later with --report')
     batch_mode.add_argument('--report', action='store_true',
                             help='rebuild the CSV, summary and graphs from the cell results '
                                  'in --results-dir; runs nothing')
@@ -7965,11 +7846,10 @@ if __name__ == '__main__':
     try:
         args.func(args)
     except StopRequested as e:
-        # An orderly stop, not a crash: a spot reclaim or a SIGTERM asked for
-        # it, everything already checkpointed is on disk, and re-invoking the
-        # identical command resumes. Exit 143 -- 128 + SIGTERM -- so a shell
-        # driver can tell "the host was taken away" from "the run failed",
-        # which a 0 would hide and a 1 would misattribute to the benchmark.
+        # An orderly stop, not a crash: a SIGTERM asked for it, and every cell
+        # result already written is on disk. Exit 143 -- 128 + SIGTERM -- so a
+        # caller can tell "stopped" from "failed", which a 0 would hide and a
+        # 1 would misattribute to the benchmark.
         print('stopped: {0}'.format(e.reason))
         sys.exit(143)
     except (ImageNotBuilt, VersionNotSupported, ImageBuildFailed) as e:

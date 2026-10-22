@@ -618,10 +618,16 @@ observation of the first few cells.
 
 Each pass gets its own run name (`bird 2.19.2 #1`, `#2`, `#3`), so its CSV row, its graph bar and
 its `.events.json` / `.versions.json` are its own; a shared name would have the second pass
-overwrite the first one's files. `--resume` skips exactly the passes that finished, including an
-interruption part way through one. A test without `repetitions` runs once and is named exactly as
-before — and adding `repetitions` to a config that has already run re-runs it, rather than leaving
-one unnamed row beside `#2` and `#3`.
+overwrite the first one's files. A test without `repetitions` runs once and is named exactly as
+before.
+
+### Stopping and resuming
+
+SIGTERM stops a batch at the next check: the cell in flight is abandoned rather than recorded, and
+the process exits 143. `--resume` then skips every cell that already has a result and runs the rest
+in the planned order, continuing a drawn shuffle seed. It refuses results for cells the config no
+longer lists and results that ran under a different order or seed — edit an axis, target, monitor,
+`repetitions` or `seed` and measure into a new `--results-dir` instead.
 
 The batch writes a CSV, per-run artifacts and graphs under `results/`.
 
@@ -637,8 +643,8 @@ $ ./bgperf2.py batch -c my.yaml --report                # rebuild CSV, summary a
 ```
 
 The report names any cell that has no result yet and leaves the graphs until every cell has one.
-A plain `batch` starts fresh and clears the previous cell results; `--cells` and `--report` keep
-them. A shuffled test that is run in pieces should state `seed:`, since `--list-cells` otherwise
+A plain `batch` starts fresh and clears the previous cell results; `--resume`, `--cells` and
+`--report` keep them. Add `--no-report` to `--cells` to record cells without rebuilding the report. A shuffled test that is run in pieces should state `seed:`, since `--list-cells` otherwise
 draws a new seed each time.
 For a Docker-free check of the engine's pure layers:
 

@@ -805,7 +805,7 @@ One entry per matrix cell, in matrix order whatever order the cells ran in.
 | `passes_expected` | count | How many passes this cell has, i.e. the test's `repetitions`. |
 | `observations` | count | How many of them produced a usable row. |
 | `observed_passes` | list | Which repetitions those were, in the same order as every metric's `values`, so a reader can say which pass produced which number. |
-| `passes` | list of objects | Every pass, in repetition order, with `state` `observed`, `failed` (plus the run's `MSG`), `not run`, or `unreadable`. A failed pass and a pass that has not run are counted apart: one is a result and the other is unfinished work. `unreadable` is a stored row that is not the current header's width — `--resume` onto a progress file written before a column was appended is a supported path, and such a row is one field short. It costs its own pass and nothing else; indexed against this header it would otherwise raise and cost the whole test's document. |
+| `passes` | list of objects | Every pass, in repetition order, with `state` `observed`, `failed` (plus the run's `MSG`), `not run`, or `unreadable`. A failed pass and a pass that has not run are counted apart: one is a result and the other is unfinished work. `unreadable` is a stored row that is not the current header's width — `--resume` onto a cell result written before a column was appended is a supported path, and such a row is one field short. It costs its own pass and nothing else; indexed against this header it would otherwise raise and cost the whole test's document. |
 | `metrics` | object | One entry per column in `summary.METRIC_COLUMNS`, keyed by the CSV column name. |
 | `variance` | object | Whether this cell's passes separate it from the cells drawn beside it, and so whether it has earned more of them. Decided against the *binding* rival, not the nearest — see [The variance rule](#the-variance-rule) below. |
 
@@ -1040,7 +1040,7 @@ hours, the rows are the evidence and this is an opinion about them. That line is
 printed from every one of the three call sites, including the two that do not
 ask for the description, because it is the only report that the document beside
 the CSV is not the one describing it. A non-resumed batch also unlinks its
-predecessor's summary along with its progress file, so a write that then fails
+predecessor's summary along with its cell results, so a write that then fails
 cannot leave a document describing passes that no longer exist.
 
 Values are written with `allow_nan=False`, and a non-finite observation is

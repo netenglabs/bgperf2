@@ -253,5 +253,5 @@ backed-out rules, both of which decided from the samples in hand.
   campaign may not silently re-define what a correct row is between blocks.
 
 Campaign MRT acceptance rules moved with the checker to the optional private
-[research analysis contracts](https://github.com/jopietsch/second-looks-labs-research/blob/main/bgp/2026/docs/analysis-contracts.md).
+[research analysis contracts](https://github.com/jopietsch/second-looks-lab-research/blob/main/bgp/2026/docs/analysis-contracts.md).
 Engine delivery measurements and their refusal rules remain above.

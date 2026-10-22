@@ -459,7 +459,7 @@ Development plans, the measurement implementation decision log and the
 Invoke `continue the bgperf2 measurement implementation plan` there with an
 explicit engine checkout. Current measurement definitions and invariants remain
 in this engine repository. Research plans, analysis and publications belong to
-[Second Looks research](https://github.com/jopietsch/second-looks-labs-research).
+[Second Looks research](https://github.com/jopietsch/second-looks-lab-research).
 Neither private repository is required to build, test, configure or run bgperf2.
 
 Beads is retired by operator decision on 2026-10-15. Do not initialize it,

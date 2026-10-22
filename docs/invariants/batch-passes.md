@@ -99,7 +99,7 @@ documents.
 ## Campaign analysis
 
 The partial-series and publication contracts moved with their implementations to
-[research analysis contracts](https://github.com/jopietsch/second-looks-labs-research/blob/main/bgp/2026/docs/analysis-contracts.md)
+[research analysis contracts](https://github.com/jopietsch/second-looks-lab-research/blob/main/bgp/2026/docs/analysis-contracts.md)
 (private, optional context). Engine repetition, order and summary contracts stay here.
 
 ## Order

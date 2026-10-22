@@ -202,6 +202,7 @@ class TestAStopUnwindsTheWholeBatch:
     def test_it_raises_rather_than_running_on(self, tmp_path, monkeypatch):
         called = []
         monkeypatch.setattr(bgperf2, 'check_batch_images', lambda targets: None)
+        monkeypatch.setattr(bgperf2, 'check_batch_monitor_images', lambda tests: None)
         monkeypatch.setattr(bgperf2, 'start_interruption_watch', lambda: None)
         monkeypatch.setattr(bgperf2, 'install_stop_handlers', lambda: None)
         monkeypatch.setattr(bgperf2, 'bench', lambda a: called.append(a))

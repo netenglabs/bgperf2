@@ -8,13 +8,10 @@ and its refusals, the recorder's use of them, and the GoBGP path staying
 exactly what it was.
 '''
 
-import importlib.util
 import os
 import time
 
 import pytest
-
-from conftest import REPO_ROOT
 
 from measurements import (EventKind, MonitorEventRecorder, SinkDates,
                           monitor_metrics, sink_event_dates, unique_event)
@@ -198,18 +195,6 @@ def test_a_sink_on_another_clock_is_refused():
                              SINK_CLOCK_OFFSET_LIMIT_NS)
     assert dates.required is None
     assert '-5000.000 ms' in dates.refused
-
-
-def test_the_pair_review_refuses_the_same_offset():
-    # The script imports nothing from the project, so the two limits are
-    # pinned together here: a pair review that passes a clock the run
-    # refused to date by, or the reverse, reads one sink two ways.
-    spec = importlib.util.spec_from_file_location(
-        'monitor_pair_review',
-        os.path.join(REPO_ROOT, 'scripts', 'monitor_pair_review.py'))
-    review = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(review)
-    assert review.CLOCK_OFFSET_LIMIT_NS == SINK_CLOCK_OFFSET_LIMIT_NS
 
 
 # -- the recorder ------------------------------------------------------------

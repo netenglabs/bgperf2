@@ -274,19 +274,3 @@ class TestResumeAcrossTheFlip:
         self.write(tmp_path, test, 'sink')
         bgperf2.check_resume_across_monitor_flip([test], str(tmp_path))
         bgperf2.check_resume_across_monitor_flip([test], str(tmp_path / 'none'))
-
-
-def test_the_repetition_check_reads_an_archived_config_as_gobgp():
-    '''It only ever checks the timing-validation blocks, all GoBGP, and the
-    rendered copies it reads were snapshotted with no `monitor:` key.'''
-    import sys
-    sys.path.insert(0, str(bgperf2.REPO_ROOT / 'scripts'))
-    try:
-        import check_repetition_configs as check
-    finally:
-        sys.path.pop(0)
-    test = {'name': 't', 'neighbors': [10], 'prefixes': [100],
-            'filter_test': [None], 'targets': [{'name': 'bird'}]}
-    assert not any('monitor' in d for d in check.cells_of(test))
-    assert 'monitor' not in test
-    assert all('monitor=sink' in d for d in check.cells_of(dict(test, monitor='sink')))

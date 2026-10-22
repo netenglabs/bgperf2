@@ -1,0 +1,11 @@
+# Local engine example: 2 sessions, 100 synthetic prefixes per session.
+# Build bird and sink images first. No private definitions or MRT input needed.
+tests:
+  - name: example
+    monitor: sink
+    neighbors: [2]
+    prefixes: [100]
+    filter_test: [None]
+    targets:
+      - name: bird
+        tester_type: bird

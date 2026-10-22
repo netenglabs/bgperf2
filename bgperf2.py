@@ -6559,6 +6559,38 @@ def check_batch_monitor_images(tests):
         sys.exit('\n'.join(['this batch cannot run:'] + ['  ' + m for m in missing]))
 
 
+def expand_batch_config(path):
+    """Read a batch config and expand and check every test in it.
+
+    Every test is checked before any of them runs. Checking each test as it
+    came up still let a missing axis in test 3 surface only after tests 1 and 2
+    had run, which is the multi-hour wait this is meant to prevent. Docker-free,
+    so `--list-cells` and `--report` can use it on any machine.
+    """
+    with open(path, 'r') as f:
+        batch_config = yaml.load(f, Loader=BatchLoader)
+    expanded = []
+    for test in batch_config['tests']:
+        # Before anything reads the test, including `test['targets']` itself:
+        # `check_batch_test()` exists so a missing or mistyped axis is named
+        # rather than arriving as a bare KeyError, and every read that comes
+        # first is a way to get that KeyError anyway.
+        check_batch_test(test)
+        targets = expand_target_versions(test['targets'])
+        check_batch_run_names(test, targets)
+        order, seed = batch_order(test)
+        expanded.append((test, targets, expand_batch_cells(test, targets), order, seed))
+    # A test's name is the stem of its CSV, summary, progress file and cell
+    # results, and part of every cell id, so two tests sharing one would write
+    # over each other's evidence and give their cells the same keys.
+    names = [test['name'] for test, _t, _c, _o, _s in expanded]
+    repeated = sorted({name for name in names if names.count(name) > 1})
+    if repeated:
+        sys.exit('{0}: test name(s) used more than once: {1}'.format(
+            path, ', '.join(map(str, repeated))))
+    return expanded
+
+
 def batch(args):
     """ runs several tests together, produces all the stats together and creates graphs
     requires a yaml file to describe the batch of tests to run
@@ -6566,6 +6598,14 @@ def batch(args):
     it iterates through a list of targets, number of neighbors and number of prefixes
     other variables can be set, but not iterated through
     """
+    # Neither runs a cell, and both print documents a caller parses, so they
+    # return before the preamble below can print anything of its own.
+    if getattr(args, 'list_cells', False):
+        return list_batch_cells(expand_batch_config(args.batch_config))
+    if getattr(args, 'report', False):
+        return report_batch_from_cell_results(
+            expand_batch_config(args.batch_config), args.results_dir)
+
     # Before anything long-running, and before the first cell: a reclaim that
     # arrives during cell 1 should already have somewhere to be recorded.
     install_stop_handlers()
@@ -6580,23 +6620,9 @@ def batch(args):
         print('found {0} unfinished checkpoint file(s) from an interrupted '
               'run, removed: {1}'.format(len(swept), ', '.join(swept)))
 
-    with open(args.batch_config, 'r') as f:
-        batch_config = yaml.load(f, Loader=BatchLoader)
-
-    # Expand and check every test before running any of them. Checking each test
-    # as it came up still let a missing image in test 3 surface only after tests
-    # 1 and 2 had run, which is the multi-hour wait this is meant to prevent.
-    expanded = []
-    for test in batch_config['tests']:
-        # Before anything reads the test, including `test['targets']` itself:
-        # `check_batch_test()` exists so a missing or mistyped axis is named
-        # rather than arriving as a bare KeyError, and every read that comes
-        # first is a way to get that KeyError anyway.
-        check_batch_test(test)
-        targets = expand_target_versions(test['targets'])
-        check_batch_run_names(test, targets)
-        order, seed = batch_order(test)
-        expanded.append((test, targets, expand_batch_cells(test, targets), order, seed))
+    expanded = expand_batch_config(args.batch_config)
+    if getattr(args, 'cells', None):
+        return run_selected_batch_cells(args, expanded)
     # Reads only local files, so before anything that asks Docker: its remedy
     # can make an image check moot.
     if getattr(args, 'resume', False):
@@ -6616,8 +6642,30 @@ def batch(args):
         resume = getattr(args, 'resume', False)
         document = load_batch_progress_document(progress_path) if resume else {'cells': {}}
         completed = document['cells']
+        if resume:
+            # The cell results are the record a report is built from, so they
+            # win over the progress file: a cell re-measured by `--cells` must
+            # not be reported from its old row, and a cell run only that way
+            # must not run again. A row only the progress file holds -- written
+            # by a build that had no cell results -- is given its document, or
+            # a later `--report` would drop it.
+            recorded = load_batch_cell_results(args.results_dir, test['name'])
+            for cell_id, row in completed.items():
+                if cell_id not in recorded:
+                    write_batch_cell_result(args.results_dir, test['name'],
+                                            cell_id, row)
+            completed.update(recorded)
         if not resume and os.path.exists(progress_path):
             os.unlink(progress_path)
+        if not resume:
+            # A fresh batch is a new set of observations, so its predecessor's
+            # cell results go with its progress file: left behind, a later
+            # `--report` would mix two runs' rows under one config.
+            cleared = clear_batch_cell_results(args.results_dir, test['name'])
+            if cleared:
+                print("test '{0}': starting fresh, removed {1} recorded cell "
+                      'result(s); use --resume or --report to keep '
+                      'them'.format(test['name'], cleared))
         if not resume and os.path.exists(summary_path):
             # The rows of a discarded batch are replaced by its successor's
             # first checkpoint, but a summary that then fails to write would
@@ -6664,7 +6712,6 @@ def batch(args):
                                           describe=False):
             print(line)
         for cell in order_batch_cells(test['name'], cells, order, seed):
-            t = cell['target']
             cell_id = batch_cell_id(test['name'], cell)
             if cell_id in completed:
                 print("resume: skipping completed cell: {0}".format(
@@ -6700,68 +6747,12 @@ def batch(args):
                       'continue from this cell')
                 raise StopRequested(stop_signal.reason)
 
-            a = argparse.Namespace(**vars(args))
-            a.func = bench
-            if 'image' in t:
-                a.image = t['image']
-            else:
-                a.image = None
-            a.output = None
-            a.target = t['name']
-            a.prefix_num = cell['prefixes']
-            a.neighbor_num = cell['neighbors']
-            # Already per-peer: `expand_batch_cells()` applied the test's
-            # `prefix_scope` when it built the cell, because the cell identity,
-            # the CSV row and the artifact names all have to be the per-peer
-            # count. Passing the scope through as well would divide twice.
-            a.prefix_scope = 'per-peer'
-            # From the cell, not from the test: the cell is what the id, the
-            # row and the artifact names were built from, and reading the test
-            # again here would let a config edited mid-batch run a cell under a
-            # diversity its own id does not record.
-            a.path_diversity = cell.get('path_diversity') or DEFAULT_PATH_DIVERSITY
-            a.receivers = cell.get('receivers') or DEFAULT_RECEIVERS
-            # From the cell for the same reason the two above are: the cell is
-            # what the id, the row and the artifact names were built from.
-            a.churn_prefixes = cell.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
-            a.churn_bursts = cell.get('churn_bursts') or DEFAULT_CHURN_BURSTS
-            a.policy_reload_blocks = (cell.get('policy_reload_blocks')
-                                      or DEFAULT_POLICY_RELOAD_BLOCKS)
-            a.pin = cell.get('pin')
-            # Read directly: `expand_batch_cells()` always sets it, from the
-            # same reading of the test that `check_batch_monitor_images()`
-            # checked the image for. A fallback here would be a second reading
-            # of an absent key that could disagree with that check.
-            a.monitor = cell['monitor']
-            a.filter_test = cell['filter'] if cell['filter'] != 'None' else None
-            # None for a single-pass test, so its rows, graphs and event
-            # artifacts keep the names they have always had; set for every pass
-            # of a repeated one, including the first, because a run named
-            # `bird 2.19.2` sitting beside `bird 2.19.2 #2` reads as a
-            # different thing rather than as the first of three.
-            a.repetition = cell['repetition']
-            # read any config attribute that was specified in the yaml batch file
-            a.local_address_prefix = t['local_address_prefix'] if 'local_address_prefix' in t else '10.10.0.0/16'
-            # Refused by `check_batch_test()` when true, so it is never copied.
-            a.single_table = False
-            for field in ['docker_network_name', 'repeat', 'file', 'target_local_address',
-                            'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
-                            'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
-                            'tester_type', 'license_file', 'version', 'threads',
-                            'tester_trace_io']:
-                # Keyed on the value, not on the key being present: a target
-                # written `tester_type:` with nothing after it parses as None,
-                # which is the very slip the default exists to catch, and a
-                # presence test skips the default for exactly that case.
-                value = t.get(field)
-                setattr(a, field,
-                        batch_target_defaults(t).get(field) if value is None
-                        else value)
+            completed[cell_id] = bench(batch_cell_args(args, cell))
 
-            for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
-                setattr(a, field, t[field]) if field in t else setattr(a, field, 0)
-            completed[cell_id] = bench(a)
-
+            # The cell's own record first, so a progress file never names a
+            # cell whose result document is missing.
+            write_batch_cell_result(args.results_dir, test['name'], cell_id,
+                                    completed[cell_id])
             # Checkpoint both files atomically after every cell. If the process
             # dies later, --resume can skip every cell whose result made it to
             # disk -- including a repetition interrupted part way through, since
@@ -6782,24 +6773,273 @@ def batch(args):
         # resume skipped every cell.
         results = batch_report_rows(test['name'], cells, completed)
         write_batch_csv(results_path(args.results_dir, f"{test['name']}.csv"), results)
-
-        print()
-        print(stats_header())
-        for stat in results:
-            print(','.join(map(str, stat)))
-
-        # Every pass's row is above; this says what they do and do not agree
-        # about. The rows are never replaced by it -- a summary that hid the
-        # observations behind it would be a number nobody could check. A
-        # single-pass test with nothing to report prints nothing at all.
-        summary_lines = publish_batch_summary(summary_path, test['name'], cells,
-                                              completed, repetitions)
-        if summary_lines:
-            print()
-            for line in summary_lines:
-                print(line)
-
+        print_batch_report(test['name'], results, summary_path, cells, completed,
+                           repetitions)
         create_batch_graphs(results, test['name'], results_dir=args.results_dir)
+
+
+def batch_cell_args(args, cell):
+    """The `bench` arguments for one batch cell, built from the cell alone."""
+    t = cell['target']
+    a = argparse.Namespace(**vars(args))
+    a.func = bench
+    if 'image' in t:
+        a.image = t['image']
+    else:
+        a.image = None
+    a.output = None
+    a.target = t['name']
+    a.prefix_num = cell['prefixes']
+    a.neighbor_num = cell['neighbors']
+    # Already per-peer: `expand_batch_cells()` applied the test's
+    # `prefix_scope` when it built the cell, because the cell identity,
+    # the CSV row and the artifact names all have to be the per-peer
+    # count. Passing the scope through as well would divide twice.
+    a.prefix_scope = 'per-peer'
+    # From the cell, not from the test: the cell is what the id, the
+    # row and the artifact names were built from, and reading the test
+    # again here would let a config edited mid-batch run a cell under a
+    # diversity its own id does not record.
+    a.path_diversity = cell.get('path_diversity') or DEFAULT_PATH_DIVERSITY
+    a.receivers = cell.get('receivers') or DEFAULT_RECEIVERS
+    # From the cell for the same reason the two above are: the cell is
+    # what the id, the row and the artifact names were built from.
+    a.churn_prefixes = cell.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
+    a.churn_bursts = cell.get('churn_bursts') or DEFAULT_CHURN_BURSTS
+    a.policy_reload_blocks = (cell.get('policy_reload_blocks')
+                              or DEFAULT_POLICY_RELOAD_BLOCKS)
+    a.pin = cell.get('pin')
+    # Read directly: `expand_batch_cells()` always sets it, from the
+    # same reading of the test that `check_batch_monitor_images()`
+    # checked the image for. A fallback here would be a second reading
+    # of an absent key that could disagree with that check.
+    a.monitor = cell['monitor']
+    a.filter_test = cell['filter'] if cell['filter'] != 'None' else None
+    # None for a single-pass test, so its rows, graphs and event
+    # artifacts keep the names they have always had; set for every pass
+    # of a repeated one, including the first, because a run named
+    # `bird 2.19.2` sitting beside `bird 2.19.2 #2` reads as a
+    # different thing rather than as the first of three.
+    a.repetition = cell['repetition']
+    # read any config attribute that was specified in the yaml batch file
+    a.local_address_prefix = t['local_address_prefix'] if 'local_address_prefix' in t else '10.10.0.0/16'
+    # Refused by `check_batch_test()` when true, so it is never copied.
+    a.single_table = False
+    for field in ['docker_network_name', 'repeat', 'file', 'target_local_address',
+                    'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
+                    'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
+                    'tester_type', 'license_file', 'version', 'threads',
+                    'tester_trace_io']:
+        # Keyed on the value, not on the key being present: a target
+        # written `tester_type:` with nothing after it parses as None,
+        # which is the very slip the default exists to catch, and a
+        # presence test skips the default for exactly that case.
+        value = t.get(field)
+        setattr(a, field,
+                batch_target_defaults(t).get(field) if value is None
+                else value)
+
+    for field in ['as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num']:
+        setattr(a, field, t[field]) if field in t else setattr(a, field, 0)
+    return a
+
+
+def print_batch_report(test_name, results, summary_path, cells, completed,
+                       repetitions):
+    print()
+    print(stats_header())
+    for stat in results:
+        print(','.join(map(str, stat)))
+
+    # Every pass's row is above; this says what they do and do not agree
+    # about. The rows are never replaced by it -- a summary that hid the
+    # observations behind it would be a number nobody could check. A
+    # single-pass test with nothing to report prints nothing at all.
+    summary_lines = publish_batch_summary(summary_path, test_name, cells,
+                                          completed, repetitions)
+    if summary_lines:
+        print()
+        for line in summary_lines:
+            print(line)
+
+
+def list_batch_cells(expanded):
+    """Print every test's cells, in the order a batch would run them, as JSON.
+
+    Each cell carries its `key`, the short name `--cells` accepts, beside its
+    full id. A shuffled test must state `seed:`: a drawn one would list an
+    order that neither a later listing nor `--resume` follows.
+    """
+    for test, _targets, _cells, order, _seed in expanded:
+        if order == 'shuffle' and test.get('seed') is None:
+            sys.exit("test '{0}': --list-cells needs `seed:` under order: shuffle; "
+                     'a drawn seed would list an order no later invocation '
+                     'reproduces'.format(test['name']))
+    document = {'tests': []}
+    for test, _targets, cells, order, seed in expanded:
+        repetitions = batch_repetitions(test)
+        listed = []
+        for cell in order_batch_cells(test['name'], cells, order, seed):
+            cell_id = batch_cell_id(test['name'], cell)
+            listed.append({'key': batch_cell_key(cell_id),
+                           'id': cell_id,
+                           'description': batch_cell_description(cell, repetitions),
+                           'ordinal': cell['ordinal'],
+                           'repetition': cell['repetition']})
+        document['tests'].append({'name': test['name'], 'order': order,
+                                  'seed': seed, 'repetitions': repetitions,
+                                  'cells': listed})
+    print(json.dumps(document, indent=2, sort_keys=True))
+
+
+def run_selected_batch_cells(args, expanded):
+    """Run only the cells named by `--cells`, in the order they were named.
+
+    Every key is resolved before any container starts, so a typo costs nothing.
+    Nothing here reads or writes a progress file: the caller chose which cells
+    to run, so deciding what is left is the caller's. Each cell writes its
+    result document, and every test touched is then reported from all the
+    results its directory holds.
+    """
+    index = {}
+    for test, _targets, cells, _order, _seed in expanded:
+        for cell in cells:
+            index[batch_cell_key(batch_cell_id(test['name'], cell))] = (test, cell)
+    unknown = [key for key in args.cells if key not in index]
+    if unknown:
+        sys.exit('--cells: no cell in {0} has key(s) {1}; `batch --list-cells` '
+                 'prints them'.format(args.batch_config, ', '.join(unknown)))
+    repeated = sorted({key for key in args.cells if args.cells.count(key) > 1})
+    if repeated:
+        sys.exit('--cells: key(s) named more than once: {0}'.format(', '.join(repeated)))
+    selected = [index[key] for key in args.cells]
+    # A recorded result is an observation, and running its cell again would
+    # replace it without a trace. Re-measuring is a decision to say out loud:
+    # remove the document first.
+    recorded = [os.path.join(batch_cell_results_dir(args.results_dir, test['name']),
+                             key + '.json')
+                for key, (test, _cell) in zip(args.cells, selected)]
+    recorded = [path for path in recorded if os.path.exists(path)]
+    if recorded:
+        sys.exit('--cells: already recorded, remove to measure again: {0}'.format(
+            ', '.join(recorded)))
+    tests = list({id(test): test for test, _cell in selected}.values())
+    check_batch_images([cell['target'] for _test, cell in selected])
+    check_batch_monitor_images(tests)
+    check_batch_pin_and_repeat(tests)
+    for test, cell in selected:
+        repetitions = batch_repetitions(test)
+        if stop_signal.is_set():
+            print('\nstopping before {0}: {1}'.format(
+                batch_cell_description(cell, repetitions), stop_signal.reason))
+            raise StopRequested(stop_signal.reason)
+        cell_id = batch_cell_id(test['name'], cell)
+        write_batch_cell_result(args.results_dir, test['name'], cell_id,
+                                bench(batch_cell_args(args, cell)))
+    touched = {test['name'] for test, _cell in selected}
+    report_batch_from_cell_results(
+        [entry for entry in expanded if entry[0]['name'] in touched],
+        args.results_dir)
+
+
+def report_batch_from_cell_results(expanded, results_dir):
+    """Rebuild each test's CSV, summary and graphs from its cell results.
+
+    Missing cells are named, never filled. The summary already tells a pass
+    that has not run from one that failed; the graphs are skipped while any
+    cell is missing, since `create_graph()` pairs bar heights with labels by
+    position within each group and a group short of a target would put bars
+    under the wrong names.
+    """
+    for test, _targets, cells, _order, _seed in expanded:
+        name = test['name']
+        repetitions = batch_repetitions(test)
+        completed = load_batch_cell_results(results_dir, name)
+        missing = [cell for cell in cells
+                   if batch_cell_id(name, cell) not in completed]
+        if len(missing) == len(cells):
+            print("test '{0}': no cell results in {1}; nothing reported".format(
+                name, batch_cell_results_dir(results_dir, name)))
+            continue
+        results = batch_report_rows(name, cells, completed)
+        write_batch_csv(results_path(results_dir, f"{name}.csv"), results)
+        summary_path = results_path(results_dir, f"{name}.summary.json")
+        print_batch_report(name, results, summary_path, cells, completed,
+                           repetitions)
+        if missing:
+            print()
+            print("test '{0}': {1} of {2} cell(s) have no result; graphs not "
+                  'drawn:'.format(name, len(missing), len(cells)))
+            for cell in missing:
+                print('  missing: {0}'.format(
+                    batch_cell_description(cell, repetitions)))
+            stale = [path for path in batch_graph_paths(name, results_dir)
+                     if os.path.exists(path)]
+            if stale:
+                print('  graphs already in {0} were drawn from other rows and '
+                      'are not updated'.format(results_dir))
+            continue
+        create_batch_graphs(results, name, results_dir=results_dir)
+
+
+BATCH_CELL_RESULT_SCHEMA_VERSION = 1
+
+
+def batch_cell_key(cell_id):
+    """A short, filename-safe name for a cell id: the id itself is JSON."""
+    return hashlib.sha256(cell_id.encode('utf-8')).hexdigest()[:16]
+
+
+def batch_cell_results_dir(results_dir, test_name):
+    return results_path(results_dir, f"{test_name}.cells")
+
+
+def write_batch_cell_result(results_dir, test_name, cell_id, row):
+    """Record one cell's row in its own document, atomically.
+
+    This is the durable record a report is built from, whichever invocation
+    ran the cell. The full id is stored inside, so the file name is only an
+    index and a renamed or misplaced file is caught on reading.
+    """
+    directory = batch_cell_results_dir(results_dir, test_name)
+    os.makedirs(directory, exist_ok=True)
+    document = {'schema_version': BATCH_CELL_RESULT_SCHEMA_VERSION,
+                'cell_id': cell_id, 'row': row}
+
+    atomic_write_json(os.path.join(directory, batch_cell_key(cell_id) + '.json'),
+                      document)
+
+
+def load_batch_cell_results(results_dir, test_name):
+    """Every recorded cell of one test, as {cell id: row}.
+
+    A document whose schema, shape or name does not match is refused rather
+    than skipped: a report quietly missing a row it was given reads as a cell
+    that never ran.
+    """
+    directory = batch_cell_results_dir(results_dir, test_name)
+    completed = {}
+    for path in sorted(glob.glob(os.path.join(directory, '*.json'))):
+        with open(path, 'r') as f:
+            document = json.load(f)
+        if not isinstance(document, dict):
+            raise ValueError('unsupported or malformed batch cell result: {0}'.format(path))
+        cell_id = document.get('cell_id')
+        if (document.get('schema_version') != BATCH_CELL_RESULT_SCHEMA_VERSION
+                or not isinstance(cell_id, str) or 'row' not in document
+                or os.path.basename(path) != batch_cell_key(cell_id) + '.json'):
+            raise ValueError('unsupported or malformed batch cell result: {0}'.format(path))
+        completed[cell_id] = document['row']
+    return completed
+
+
+def clear_batch_cell_results(results_dir, test_name):
+    """Remove one test's recorded cell results; return how many there were."""
+    directory = batch_cell_results_dir(results_dir, test_name)
+    results = glob.glob(os.path.join(directory, '*.json'))
+    for path in results + glob.glob(os.path.join(directory, '*.tmp')):
+        os.unlink(path)
+    return len(results)
 
 
 def batch_cell_id(test_name, cell):
@@ -7016,12 +7256,14 @@ def sweep_stale_temp_files(directory):
     vanishes underneath this, or a directory that cannot be listed, is not
     worth failing a run for.
 
-    Only `<results>/*.tmp` -- not recursive, and never a bench work directory,
-    whose files belong to containers that may still be running.
+    Only `<results>/*.tmp` and `<results>/<test>.cells/*.tmp` -- never a
+    bench work directory, whose files belong to containers that may still be
+    running.
     """
     swept = []
     try:
-        names = sorted(glob.glob(os.path.join(directory, '*.tmp')))
+        names = sorted(glob.glob(os.path.join(directory, '*.tmp'))
+                       + glob.glob(os.path.join(directory, '*.cells', '*.tmp')))
     except OSError:
         return swept
     for name in names:
@@ -7029,7 +7271,7 @@ def sweep_stale_temp_files(directory):
             os.unlink(name)
         except OSError:
             continue
-        swept.append(os.path.basename(name))
+        swept.append(os.path.relpath(name, directory))
     return swept
 
 
@@ -7048,7 +7290,10 @@ def write_batch_progress(path, completed, order=None, seed=None, previous_seeds=
         # cell had finished would be missing from exactly the runs that died
         # early, and a resumed batch would draw a new one.
         document['seed'] = seed
+    atomic_write_json(path, document)
 
+
+def atomic_write_json(path, document):
     def write(f):
         json.dump(document, f, indent=2, sort_keys=True)
         f.write('\n')
@@ -7062,10 +7307,9 @@ def write_batch_csv(path, results):
             f.write(','.join(map(str, stat)) + '\n')
     atomic_write(path, write)
 
-def create_batch_graphs(results, name, results_dir=DEFAULT_RESULTS_DIR):
-    # stat_index values are positions in the row built by create_output_stats();
-    # changing that row's layout silently mislabels every graph below.
-    for test_name, stat_index, suffix, ylabel in [
+# stat_index values are positions in the row built by create_output_stats();
+# changing that row's layout silently mislabels every graph below.
+BATCH_GRAPHS = [
         ('total time', 11, 'total_time', 'seconds'),
         ('elapsed', 8, 'elapsed', 'seconds'),
         # index 7 is monitor_wait_time -- the wait for the monitor's session to
@@ -7079,7 +7323,16 @@ def create_batch_graphs(results, name, results_dir=DEFAULT_RESULTS_DIR):
         ('min free mem', 15, 'min_free', 'GB'),
         ('tester errors', 20, 'tester_error', 'errors'),
         ('prefixes at monitor', 6, 'monitor_prefixes', 'seconds'),
-    ]:
+]
+
+
+def batch_graph_paths(name, results_dir=DEFAULT_RESULTS_DIR):
+    return [os.path.join(results_dir or DEFAULT_RESULTS_DIR, f"bgperf_{name}_{suffix}.png")
+            for _test_name, _stat_index, suffix, _ylabel in BATCH_GRAPHS]
+
+
+def create_batch_graphs(results, name, results_dir=DEFAULT_RESULTS_DIR):
+    for test_name, stat_index, suffix, ylabel in BATCH_GRAPHS:
         create_graph(results, test_name=test_name, stat_index=stat_index,
                      test_file=f"bgperf_{name}_{suffix}.png", ylabel=ylabel,
                      results_dir=results_dir)
@@ -7677,8 +7930,18 @@ def create_args_parser(main=True):
     parser_batch.add_argument('--results-dir', default=DEFAULT_RESULTS_DIR,
                               help='directory for generated graphs and CSVs; '
                                    'default: {}'.format(DEFAULT_RESULTS_DIR))
-    parser_batch.add_argument('--resume', action='store_true',
-                              help='resume a partial batch by skipping cells with durable results')
+    batch_mode = parser_batch.add_mutually_exclusive_group()
+    batch_mode.add_argument('--resume', action='store_true',
+                            help='resume a partial batch by skipping cells with durable results')
+    batch_mode.add_argument('--list-cells', action='store_true',
+                            help='print every cell, in run order, with the key --cells accepts, '
+                                 'as JSON; runs nothing and needs no Docker')
+    batch_mode.add_argument('--cells', nargs='+', metavar='KEY',
+                            help='run only these cells, in this order, then report from every '
+                                 'cell result in --results-dir')
+    batch_mode.add_argument('--report', action='store_true',
+                            help='rebuild the CSV, summary and graphs from the cell results '
+                                 'in --results-dir; runs nothing')
     parser_batch.set_defaults(func=batch)
 
     return parser

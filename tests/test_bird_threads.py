@@ -65,8 +65,11 @@ def test_gen_conf_passes_threads_through():
 
 
 def test_batch_passes_threads_through_to_bench():
-    '''batch() copies a fixed field list onto the bench args; a field missing
-    from that list is silently dropped at runtime.
+    '''batch_cell_args() copies a fixed field list onto the bench args; a field
+    missing from that list is silently dropped at runtime.
     '''
-    import inspect
-    assert "'threads'" in inspect.getsource(bgperf2.batch)
+    from argparse import Namespace
+    test = {'name': 't', 'neighbors': [1], 'prefixes': [10], 'filter_test': ['None'],
+            'targets': [{'name': 'bird', 'threads': 4}]}
+    [cell] = bgperf2.expand_batch_cells(test, test['targets'])
+    assert bgperf2.batch_cell_args(Namespace(), cell).threads == 4

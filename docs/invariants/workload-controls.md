@@ -2,7 +2,7 @@
 
 What `bench`/`batch` may be asked to run, and the guards that refuse the rest.
 
-**Read this before editing:** `bgperf2.py` (argument guards, `bench()`, `batch()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`), `churn.py`, `policy.py`, `bird.py` (the churn protocol and the reload command)
+**Read this before editing:** `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`), `churn.py`, `policy.py`, `bird.py` (the churn protocol and the reload command)
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 
@@ -63,7 +63,7 @@ still reaches `write_provenance()` and `bench_output_prefix()`, so a default the
 matters: a CLI mistake costs one run, a batch mistake costs a matrix, and nobody is watching it.
 
 A test key written under a *target* is refused (`BATCH_TEST_ONLY_KEYS`). There is no allowlist of
-target keys -- `batch()` reads a fixed field list and ignores the rest -- and every knob an operator
+target keys -- `batch_cell_args()` reads a fixed field list and ignores the rest -- and every knob an operator
 sets is a target key, so a test key one level too deep is the natural slip and fails silently:
 `prefix_scope: total` under a target runs that target at `neighbors x prefixes`, converges, and
 writes rows that read as a peer sweep.

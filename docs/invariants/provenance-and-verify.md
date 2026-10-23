@@ -2,7 +2,7 @@
 
 Recording which build produced a result, and the one check the Docker-free test suite cannot make.
 
-**Read this before editing:** `base.py` (`Container.version_string()`, `collect_provenance()`,
+**Read this before editing:** `run_lifecycle.py` (run orchestration), `base.py` (`Container.version_string()`, `collect_provenance()`,
 `RECIPE_LABEL_KEY`, `recipe_hash()`, `img_recipe_label()`, `Container.current_recipe_hash()`,
 `Container.override_buildargs()`, `Container.recipe_status()`), `bgperf2.py` (`verify`, `doctor`,
 `images`, `prepare`, `checkable_versions()`), and every module carrying a version command: `bird.py`,

@@ -122,6 +122,15 @@ See [the environment guide](docs/python-environment.md).
 
 ## Architecture
 
+### Run orchestration
+
+`run_lifecycle.py` owns `bench()`, its observation loop, `finish_bench()` and
+`abandon_run()`. The CLI keeps compatibility entry points and passes its module
+as the runtime dependency object, so adapter registries, stop state and test
+substitutions remain shared. The extraction preserves existing ordering,
+measurement boundaries and cleanup behavior; it does not introduce stage
+records, a new result schema or a new failure policy.
+
 ### The three roles
 
 Every `bench` run creates containers on a dedicated Docker bridge network (`<bench-name>-br`):

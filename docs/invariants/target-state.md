@@ -2,7 +2,7 @@
 
 The per-daemon `get_neighbors_state` wart, the table witness, and the delivery measurement derived off it.
 
-**Read this before editing:** `bgperf2.py` (the monitor poll), `base.py` (`Target.sample_target_state()`), `frr.py`, `frr_compiled.py`, `bird.py`, `gobgp.py`, `measurements.py` (`target_table_section()`, `delivery_metrics()`)
+**Read this before editing:** `run_lifecycle.py` (run orchestration), `bgperf2.py` (the monitor poll), `base.py` (`Target.sample_target_state()`), `frr.py`, `frr_compiled.py`, `bird.py`, `gobgp.py`, `measurements.py` (`target_table_section()`, `delivery_metrics()`)
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 

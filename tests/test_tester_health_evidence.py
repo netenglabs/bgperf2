@@ -368,15 +368,14 @@ class TestOnlyAScannedRunSupersedesAnEarlierCapture:
     A run that scanned and found nothing supersedes an earlier document; a run
     that did not scan supersedes nothing.
 
-    Asserted against the source because `finish_bench()` cannot be driven
-    without Docker, and the whole point is *where* the call sits. Same approach
-    as tests/test_export_fanout.py.
+    Asserted against the extracted source to pin *where* the call sits.
+    Fake-runtime execution is also covered by tests/test_run_lifecycle.py.
     """
 
     def _finish_bench(self):
         src = open(os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'bgperf2.py')).read()
+            'run_lifecycle.py')).read()
         for node in ast.walk(ast.parse(src)):
             if isinstance(node, ast.FunctionDef) and node.name == 'finish_bench':
                 return node
@@ -385,8 +384,10 @@ class TestOnlyAScannedRunSupersedesAnEarlierCapture:
     def _calls(self, node):
         return [n for n in ast.walk(node)
                 if isinstance(n, ast.Call)
-                and isinstance(n.func, ast.Name)
-                and n.func.id == 'write_tester_health_artifact']
+                and isinstance(n.func, ast.Attribute)
+                and isinstance(n.func.value, ast.Name)
+                and n.func.value.id == 'runtime'
+                and n.func.attr == 'write_tester_health_artifact']
 
     def test_the_writer_runs_only_where_the_logs_were_scanned(self):
         fn = self._finish_bench()

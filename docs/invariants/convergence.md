@@ -2,7 +2,7 @@
 
 When a run is CONVERGED, when it is FAILED, and the five rules that were each broken once.
 
-**Read this before editing:** `convergence.py`, `bgperf2.py` (the monitor loop that feeds `update()`)
+**Read this before editing:** `run_lifecycle.py` (run orchestration), `convergence.py`, `bgperf2.py` (the monitor loop that feeds `update()`)
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 

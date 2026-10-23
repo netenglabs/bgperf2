@@ -271,7 +271,7 @@ class TestWhatARepeatDoesWithTheFanOut:
         establishment wait that keeps the export work from landing mid-run.
         """
         import inspect
-        source = inspect.getsource(bgperf2.bench)
+        source = inspect.getsource(bgperf2.run_lifecycle.bench)
         creation = source.index('r.run(conf, dckr_net_name)')
         assert 'surplus_receiver_names(' in source[:creation]
         assert 'if not args.repeat' not in \

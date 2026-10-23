@@ -2,7 +2,7 @@
 
 Whether the machine was yours, and where the run is allowed to write.
 
-**Read this before editing:** `contention.py`, `role_cpu.py`, `bgperf2.py` (`warn_if_machine_is_busy()`, `controller_foreign_cpu()`, `controller_role_cpu()`, `role_cpu_members()`, `warn_if_log_dir_is_in_ram()`, `warn_if_log_dir_is_short_on_space()`, the controller threads)
+**Read this before editing:** `run_lifecycle.py` (run orchestration), `contention.py`, `role_cpu.py`, `bgperf2.py` (`warn_if_machine_is_busy()`, `controller_foreign_cpu()`, `controller_role_cpu()`, `role_cpu_members()`, `warn_if_log_dir_is_in_ram()`, `warn_if_log_dir_is_short_on_space()`, the controller threads)
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 

@@ -2,7 +2,7 @@
 
 Export-side timing: what the receiver fan-out was served, and when.
 
-**Read this before editing:** `bgperf2.py` (`controller_export_stats()`, `finish_bench()`), `monitor.py` (`Receiver`, `SinkReceiver`), `measurements.py` (`ExportEventRecorder`)
+**Read this before editing:** `run_lifecycle.py` (run orchestration), `bgperf2.py` (`controller_export_stats()`, `finish_bench()`), `monitor.py` (`Receiver`, `SinkReceiver`), `measurements.py` (`ExportEventRecorder`)
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 

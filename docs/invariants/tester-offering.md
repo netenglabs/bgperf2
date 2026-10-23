@@ -2,7 +2,7 @@
 
 Tester offering polls, the fleet summary, and what a bgpdump2 injector reports about itself.
 
-**Read this before editing:** `bgperf2.py` (the offering poll), `base.py` (`Tester.offering_stats()`), `tester.py`, `mrt_tester.py`, `measurements.py` (`TesterOffering`, `TesterEventRecorder`, `tester_metrics()`, `tester_fleet_metrics()`), `bird.py`, `bgpdump2.py`, `exabgp.py`, `monitor.py` (`Monitor.stats()`'s cadence and the rule that
+**Read this before editing:** `run_lifecycle.py` (run orchestration), `bgperf2.py` (the offering poll), `base.py` (`Tester.offering_stats()`), `tester.py`, `mrt_tester.py`, `measurements.py` (`TesterOffering`, `TesterEventRecorder`, `tester_metrics()`, `tester_fleet_metrics()`), `bird.py`, `bgpdump2.py`, `exabgp.py`, `monitor.py` (`Monitor.stats()`'s cadence and the rule that
 both poll loops stamp the sample before the read)
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.

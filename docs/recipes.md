@@ -2,8 +2,9 @@
 
 The recipe interface exports, validates, inspects and plans one existing batch
 cell offline. Its explicit `check` command reports observed local prerequisites
-without changing the host or acquiring images. It does not prepare images or
-execute experiments. Existing
+without changing the host or acquiring images. `prepare` reports a local image
+acquisition plan; explicit `prepare --pull` may acquire selected missing
+repository digests. It does not execute experiments. Existing
 `bench`, `batch`, CSV, event and provenance formats retain their current behavior.
 
 Use the locked Python environment described in [the environment guide](python-environment.md).
@@ -108,10 +109,69 @@ before any probe.
 `checks_passed` describes only the listed observations at that instant. Workload
 resource estimates, foreign CPU qualification, runtime capabilities, hardware
 suitability and source/build reconstruction remain unknown or unassessed. It is
-not a readiness or performance-comparison verdict. Preparation and recipe
-execution remain unimplemented, so phase 1 acceptance has not been reached.
+not a readiness or performance-comparison verdict. Recipe execution remains
+unimplemented, so phase 1 acceptance has not been reached.
 The public fixture has synthetic image pins and a historical engine revision;
 its successful offline plan does not imply that it can pass a local check.
+
+## Prepare selected images
+
+Use the same locked Python bootstrap above on an idle development host. Review
+the recipe's selected digest references and the publisher you trust before
+authorizing acquisition:
+
+```sh
+venv/bin/python recipes.py prepare recipe.json
+venv/bin/python recipes.py prepare recipe.json --pull
+```
+
+Unlike the fully offline `plan`, `prepare` probes the local prerequisites and
+inspects all selected immutable images to produce a local acquisition plan.
+Its default performs no pull. Existing exact images are kept; shared role
+references are inspected and acquired once, with all roles retained in the report.
+Only `--pull` permits Docker to pull missing selected `repository@sha256:...`
+references. The complete acquisition plan is printed to stderr and flushed
+before the first pull; the final JSON report is written to stdout. The library
+entry point requires an `emit_disclosure` callback whenever a pull is needed.
+
+A bare `sha256:...` image ID can be reused if present locally. If missing, it
+cannot be pulled: the ID supplies no repository name. That blocks every pull in
+the request. Supply that exact image separately or obtain a recipe with a real
+repository digest; preparation never infers a repository, substitutes a tag,
+builds images, or invokes the legacy `bgperf2.py prepare` command.
+
+Preparation checks the exact clean engine revision, Linux, tools, local Docker
+endpoint and existing hashed environment with the same active measurement
+guard as `check`. All selected references are inspected before acquisition.
+Only a typed Docker inspect failure naming the exact missing image counts as
+absence; permissions, timeouts, malformed responses and identity mismatches
+block all pulls. The guard runs again after disclosure before every pull.
+Pulls have a separate bounded timeout from the 15-second read-only probes.
+Timeout or interruption stops and reaps the owned Docker CLI process group;
+it cannot guarantee cancellation of the Docker daemon's download or cache work.
+Ctrl-C and SIGTERM propagate with exits 130 and 143 respectively, without a
+guaranteed final JSON report. Ordinary acquisition failures return a JSON refusal
+report recording partial progress.
+Each successful pull is reinspected against the selected immutable pin before
+continuing. A failure stops pending acquisitions. Images already acquired stay
+cached and the report records partial progress; no rollback or deletion occurs.
+
+Reports use `bgperf2/preparation/v1alpha1`, with `status` equal to `planned`,
+`prepared` or `refused`. Each deduplicated `items` entry retains its exact
+`requested` reference and `roles`, its `action` (`keep`, `pull` or `unavailable`)
+and its `state` (`available`, `missing`, `acquired`, `failed` or `skipped`).
+Observed image identity, repository digests, platform and local size are recorded
+when available. Download and incremental storage sizes remain unknown;
+Docker's local `Size` is not a download size. Source, build and binary provenance
+also remain unverified. Digest pinning identifies selected content and does not
+establish publisher trust or prove a reconstructible build.
+
+The CLI exits 0 for `planned` or `prepared`, and 2 for `refused`. Malformed
+recipes are refused before probing or mutation. `execution: not_implemented`
+and `comparison: not_assessed` remain explicit. Preparation does not start
+containers, change runtime networks or volumes, collect measurements, execute a
+recipe or satisfy full phase 1 acceptance. The public fixture's synthetic image
+pins are examples, not downloadable acquisition targets.
 
 ## Recipe envelope
 

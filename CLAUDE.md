@@ -127,8 +127,11 @@ See [the environment guide](docs/python-environment.md).
 
 `recipes.py` is the standalone contract entry point for export, validation,
 inspection and offline planning of one selected batch cell. Its explicit `check`
-command uses `recipe_preflight.py` for read-only local prerequisite probes; it
-does not initialize the engine runtime or execute a recipe. Read `docs/recipes.md`
+command uses `recipe_preflight.py` for read-only local prerequisite probes.
+`recipe_prepare.py` plans selected immutable image acquisition locally; only
+explicit `prepare --pull` may pull missing repository digests after disclosure.
+Both share `recipe_preflight.py` probes and guards without initializing the engine
+runtime or executing a recipe. Read `docs/recipes.md`
 before changing its recipe/result schemas or status meanings. It currently
 supports only the documented synthetic IPv4 BIRD/BIRD/sink subset; recipe
 execution is not implemented. Declared identities are not verified images or
@@ -349,7 +352,7 @@ component, and `bgperf2.py`'s `write_event_artifact()`, which catches for it.
   component: a throttled generator and one blocked writing to an undrained target are the same
   measurement, and three controlled runs of one shape all return it.
 
-**`docs/invariants/host-and-environment.md`** — `recipe_preflight.py`, `contention.py`, `role_cpu.py`, the controller
+**`docs/invariants/host-and-environment.md`** — `recipe_preflight.py`, `recipe_prepare.py`, `contention.py`, `role_cpu.py`, the controller
 threads, and the `-d` warnings.
 
 - **Measure CPU as a delta between two `/proc` samples, never `ps -eo pcpu`**, which fails in both
@@ -365,7 +368,7 @@ threads, and the `-d` warnings.
 - Per-role CPU is a cgroup delta, summed only when every member was read, and changes no verdict.
 - The bench directory must not be in RAM, and must not be on the root filesystem.
 
-**`docs/invariants/provenance-and-verify.md`** — `Container.version_string()`,
+**`docs/invariants/provenance-and-verify.md`** — `recipe_preflight.py`, `recipe_prepare.py`, `Container.version_string()`,
 `collect_provenance()`, `verify`, and every module carrying a version command (`rustybgp.py` and
 `openbgp.py` included — both had the bug this document is about).
 

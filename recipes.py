@@ -428,12 +428,15 @@ def main(argv=None):
     export.add_argument('--expected-outcome', choices=EXPECTED_OUTCOMES,
                         default='experiment_completed')
     export.add_argument('-o', '--output')
-    for name in ('validate', 'inspect', 'result-validate', 'plan', 'check'):
+    for name in ('validate', 'inspect', 'result-validate', 'plan', 'check', 'prepare'):
         command = commands.add_parser(name)
         command.add_argument('document')
         if name == 'check':
             command.add_argument('--workdir', required=True)
             command.add_argument('--results-dir', required=True)
+        if name == 'prepare':
+            command.add_argument('--pull', action='store_true',
+                                 help='explicitly acquire missing selected repository digests after disclosure')
     args = parser.parse_args(argv)
     try:
         if args.command == 'export':
@@ -447,16 +450,25 @@ def main(argv=None):
             document = read_document(args.document)
             if args.command == 'inspect':
                 _write_document(inspect_recipe(document))
-            elif args.command in ('plan', 'check'):
+            elif args.command in ('plan', 'check', 'prepare'):
                 # Also validate in this module before importing the host layer:
                 # direct script execution names this module __main__, while the
                 # preflight library imports recipes and its ContractError class.
                 validate_recipe(document)
                 # Keep ordinary contract imports independent of host probes.
-                from recipe_preflight import check_recipe, plan_recipe
-                report = (plan_recipe(document) if args.command == 'plan' else
-                          check_recipe(document, workdir=args.workdir,
-                                       results_dir=args.results_dir))
+                if args.command == 'prepare':
+                    from recipe_prepare import prepare_recipe
+
+                    def disclose(report):
+                        print(json.dumps(report, indent=2, sort_keys=True),
+                              file=sys.stderr, flush=True)
+
+                    report = prepare_recipe(document, pull=args.pull, emit_disclosure=disclose)
+                else:
+                    from recipe_preflight import check_recipe, plan_recipe
+                    report = (plan_recipe(document) if args.command == 'plan' else
+                              check_recipe(document, workdir=args.workdir,
+                                           results_dir=args.results_dir))
                 _write_document(report)
                 return 2 if report['status'] == 'refused' else 0
             elif args.command == 'result-validate':

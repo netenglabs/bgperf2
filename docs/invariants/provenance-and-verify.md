@@ -2,7 +2,7 @@
 
 Recording which build produced a result, and the one check the Docker-free test suite cannot make.
 
-**Read this before editing:** `run_lifecycle.py` (run orchestration), `base.py` (`Container.version_string()`, `collect_provenance()`,
+**Read this before editing:** `recipe_preflight.py` (exact immutable image inspection), `recipe_prepare.py` (selected digest acquisition), `run_lifecycle.py` (run orchestration), `base.py` (`Container.version_string()`, `collect_provenance()`,
 `RECIPE_LABEL_KEY`, `recipe_hash()`, `img_recipe_label()`, `Container.current_recipe_hash()`,
 `Container.override_buildargs()`, `Container.recipe_status()`), `bgperf2.py` (`verify`, `doctor`,
 `images`, `prepare`, `checkable_versions()`), and every module carrying a version command: `bird.py`,
@@ -38,6 +38,17 @@ is the instrument the timings are read from.
   graphs. Appending at the end is required — `create_batch_graphs()` indexes the row positionally.
 
 ## Image build provenance limits
+
+Recipe preparation reuses only exact local immutable identities and pulls only
+the selected missing `repository@sha256:...` references with explicit `--pull`.
+A missing bare image ID has no recoverable repository name and blocks the whole
+acquisition; never infer a tag or repository from it. Inspect every selected
+reference before pulling, then verify the exact requested pin again after each
+pull. A failed later acquisition preserves earlier cached images and reports the
+partial outcome; it must not claim all images were prepared or delete evidence.
+An immutable digest identifies content, not a trusted publisher, source revision,
+reconstructible build or verified daemon binary. Those provenance claims remain
+unknown. Docker's local `Size` is not the registry download size.
 
 BIRD clones `https://gitlab.nic.cz/labs/bird.git` with Git's default TLS
 certificate verification and installs `ca-certificates` explicitly. A certificate

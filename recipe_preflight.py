@@ -19,6 +19,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 
 import recipes
 
@@ -30,32 +31,58 @@ PROBE_TIMEOUT_SECONDS = 15
 
 
 class ProbeError(ValueError):
-    """A bounded read-only prerequisite probe could not be completed."""
+    """A bounded prerequisite or image-acquisition command could not be completed."""
 
 
-def run_command(argv, *, env=None):
-    """Return stdout from one bounded command; reap its whole group on timeout."""
+class CommandError(ProbeError):
+    """A completed command failed, retaining its exact response for classification."""
+
+    def __init__(self, argv, returncode, stdout, stderr):
+        self.argv = tuple(str(arg) for arg in argv)
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+        message = (stderr or stdout).strip()[-2000:]
+        super().__init__(f'{self.argv[0]} exited {returncode}: {message}')
+
+
+def _terminate_command(signum, frame):
+    raise SystemExit(128 + signum)
+
+
+def run_command(argv, *, env=None, timeout=PROBE_TIMEOUT_SECONDS):
+    """Return stdout from a bounded command; reap its group on timeout or interrupt."""
+    previous_handler = None
+    if (threading.current_thread() is threading.main_thread() and
+            signal.getsignal(signal.SIGTERM) == signal.SIG_DFL):
+        # The default terminates Python without unwinding this owned subprocess.
+        # Leave callers' custom or ignored handlers in place.
+        previous_handler = signal.signal(signal.SIGTERM, _terminate_command)
     try:
         with subprocess.Popen([str(arg) for arg in argv], cwd=ROOT, env=env,
                               shell=False, start_new_session=True,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               text=True) as process:
             try:
-                stdout, stderr = process.communicate(timeout=PROBE_TIMEOUT_SECONDS)
-            except subprocess.TimeoutExpired as exc:
+                stdout, stderr = process.communicate(timeout=timeout)
+            except BaseException as exc:
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
                 process.communicate()
-                raise ProbeError(f'{argv[0]} timed out after {PROBE_TIMEOUT_SECONDS}s; '
-                                 'its probe process group was stopped') from exc
+                if not isinstance(exc, subprocess.TimeoutExpired):
+                    raise
+                raise ProbeError(f'{argv[0]} timed out after {timeout}s; '
+                                 'its command process group was stopped') from exc
             if process.returncode:
-                message = (stderr or stdout).strip()[-2000:]
-                raise ProbeError(f'{argv[0]} exited {process.returncode}: {message}')
+                raise CommandError(argv, process.returncode, stdout, stderr)
             return stdout
     except (OSError, UnicodeError) as exc:
         raise ProbeError(f'Cannot run {argv[0]}: {exc}') from exc
+    finally:
+        if previous_handler is not None:
+            signal.signal(signal.SIGTERM, previous_handler)
 
 
 def _add(report, name, status, reason, **details):

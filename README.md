@@ -16,7 +16,7 @@ rewritten.
 * [Targets and versions](#targets)
 * [Debugging](#debugging)
 * [Roadmap and development plans](docs/roadmap.md)
-* [Portable recipe and result contracts](docs/recipes.md) (export, validate, plan and check prerequisites; no execution)
+* [Portable recipe and result contracts](docs/recipes.md) (export, validate, plan, check and selected image preparation; no execution)
 * [How bgperf2 works](docs/how_bgperf_works.md) ·
   [Benchmarking a remote target](docs/benchmark_remote_target.md) ·
   [MRT injection](docs/mrt.md) ·
@@ -91,8 +91,9 @@ The separate `venv/bin/python recipes.py` entry point offers `export`, `validate
 `inspect`, `plan` and `result-validate` without probing the host or Docker.
 `check` explicitly takes a read-only prerequisite snapshot using the local Docker
 CLI; it never acquires images or starts containers. It supports a small synthetic
-IPv4 recipe contract; image preparation and execution through recipes are future
-work. See the [recipe guide and public fixture](docs/recipes.md).
+IPv4 recipe contract. `prepare RECIPE` reports a local image acquisition plan;
+only `prepare RECIPE --pull` can acquire missing selected repository digests.
+Recipe execution remains future work. See the [recipe guide and public fixture](docs/recipes.md).
 
 ## <a name="first-run"></a>Your first run
 

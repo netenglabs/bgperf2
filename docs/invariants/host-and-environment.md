@@ -2,14 +2,20 @@
 
 Whether the machine was yours, and where the run is allowed to write.
 
-This document also governs read-only recipe prerequisite snapshots in `recipe_preflight.py`.
+This document also governs recipe prerequisite snapshots and shared bounded
+local probes in `recipe_preflight.py` and selected image preparation
+in `recipe_prepare.py`.
 Read [the recipe guide](../recipes.md) before changing its probes or status claims.
 Its capacity observations are not workload estimates or host qualification;
 destination checks must not create directories, modify evidence, or accept
 RAM-backed paths. Bootstrap verification reuses the existing idle measurement
 guard. No prerequisite report authorizes a benchmark.
+Preparation must pass that guard before inspecting images and recheck it after
+plan disclosure immediately before every explicit pull. It creates no runtime
+containers, networks, volumes or attempt directories. A local acquisition plan
+does not authorize acquisition without `--pull`, or qualify measurement idleness.
 
-**Read this before editing:** `recipe_preflight.py` (read-only prerequisites), `run_lifecycle.py` (run orchestration), `contention.py`, `role_cpu.py`, `bgperf2.py` (`warn_if_machine_is_busy()`, `controller_foreign_cpu()`, `controller_role_cpu()`, `role_cpu_members()`, `warn_if_log_dir_is_in_ram()`, `warn_if_log_dir_is_short_on_space()`, the controller threads)
+**Read this before editing:** `recipe_preflight.py` (read-only prerequisites and shared probes), `recipe_prepare.py` (selected image preparation), `run_lifecycle.py` (run orchestration), `contention.py`, `role_cpu.py`, `bgperf2.py` (`warn_if_machine_is_busy()`, `controller_foreign_cpu()`, `controller_role_cpu()`, `role_cpu_members()`, `warn_if_log_dir_is_in_ram()`, `warn_if_log_dir_is_short_on_space()`, the controller threads)
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 

@@ -462,22 +462,25 @@ default), which bgperf2 then cannot clean up; `sudo rm -rf /var/tmp/bgperf2` whe
 
 ## Conventions
 
-### Operator contracts
+### Development plans and project boundaries
 
-Development plans, the measurement implementation decision log and the
-`measurement-implementation` continuation skill now live in optional private
-[Second Looks Lab](https://github.com/jopietsch/second-looks-lab/tree/main/bgp/docs/engine-development).
-Invoke `continue the bgperf2 measurement implementation plan` there with an
-explicit engine checkout. Current measurement definitions and invariants remain
-in this engine repository. Research plans, analysis and publications belong to
-[Second Looks research](https://github.com/jopietsch/second-looks-lab-research).
-Neither private repository is required to build, test, configure or run bgperf2.
+The [public roadmap](docs/roadmap.md) is the authoritative index of active engine
+plans and deferred ideas. Detailed plans live in `docs/plans/`; keep their
+statuses, acceptance checks, implementation decisions and commit references with
+the code. Read the relevant plan before implementation. The current priority is
+portable developer performance testing; policy, IPv6 and other workload expansion
+remain deferred until explicitly selected.
 
-Beads is retired by operator decision on 2026-10-15. Do not initialize it,
-create issues or run its session-close/sync commands. Use Markdown plans and Git
-history for progress; historical issue IDs remain source references, not active
-tasks or proof of completion. Retirement of the EC2 database is a separate
-operator action documented in the lab runbook. Do not commit or push without
+Current measurement contracts and invariants remain in this repository.
+Downstream projects own their deployments, campaigns, research and evidence;
+they consume documented CLI commands and versioned artifacts. No external
+repository, private plan, historical campaign continuation skill or particular
+checkout layout is required to build, test, configure, run or contribute to
+bgperf2. A plan is not proof that a capability is implemented or an authorization
+to run benchmarks, provision infrastructure or publish results.
+
+Beads is retired. Do not initialize it or use its issue/session synchronization
+commands. Track work in Markdown and Git history. Do not commit or push without
 current user authorization.
 
 ### Code conventions

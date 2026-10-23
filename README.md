@@ -15,6 +15,7 @@ rewritten.
 * [Getting results you can trust](#trust)
 * [Targets and versions](#targets)
 * [Debugging](#debugging)
+* [Roadmap and development plans](docs/roadmap.md)
 * [How bgperf2 works](docs/how_bgperf_works.md) ·
   [Benchmarking a remote target](docs/benchmark_remote_target.md) ·
   [MRT injection](docs/mrt.md) ·
@@ -737,6 +738,14 @@ venv/bin/python -m pytest tests/ -q
 
 It covers the measurement, parsing and batch layers; a real `bench` is the only
 end-to-end check.
+
+## Development
+
+The [public roadmap](docs/roadmap.md) indexes current priorities, detailed plans
+and deferred workload ideas. Engine plans and implementation decisions live in
+this repository. Proposed capabilities are labelled separately from supported
+commands; no other project or private repository is needed to use or contribute
+to bgperf2. Read [contributor/agent guidance](CLAUDE.md) before changes.
 
 ## History
 

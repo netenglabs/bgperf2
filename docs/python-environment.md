@@ -84,8 +84,8 @@ Docker contexts are ignored. Hooks do not launch benchmarks or authorize pushes.
 Linked worktrees also require their own bootstrapped venv. Install hooks with
 bootstrap in every clone; Git does not enable them on clone.
 Agent commits use the same hooks; no `--no-verify` without operator approval.
-The cross-repository guard contract and validation live in the lab's
-[infrastructure cleanup plan](https://github.com/jopietsch/second-looks-lab/blob/main/docs/infrastructure-cleanup-plan.md#4-local-quality-gate-in-git-hooks).
+Historical cross-repository guard validation is preserved in the
+[cleanup record at lab cd2d9e9](https://github.com/jopietsch/second-looks-lab/blob/cd2d9e98e159b4467a6e8fc7ba26f28fba1ca6c7/docs/infrastructure-cleanup-plan.md#4-local-quality-gate-in-git-hooks).
 
 ## Hosted quality checks
 

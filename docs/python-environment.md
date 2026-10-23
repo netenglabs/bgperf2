@@ -86,3 +86,42 @@ bootstrap in every clone; Git does not enable them on clone.
 Agent commits use the same hooks; no `--no-verify` without operator approval.
 The cross-repository guard contract and validation live in the lab's
 [infrastructure cleanup plan](https://github.com/jopietsch/second-looks-lab/blob/main/docs/infrastructure-cleanup-plan.md#4-local-quality-gate-in-git-hooks).
+
+## Hosted quality checks
+
+The [quality workflow](../.github/workflows/quality.yml) defines the engine's
+checks for pushes, pull requests and manual dispatch on a standard GitHub-hosted
+Ubuntu 24.04 runner. Once published, it uses the existing Python 3.14 bootstrap
+to install hashed wheels, verify the locked inventory/freeze, run `pip check`,
+enable hooks and run the Docker-free suite. The runner must have a reachable
+local Docker daemon for the bootstrap's normal idle guard. There is no separate
+CI Python installation script, and the pip download cache is keyed by the lock;
+each job creates a fresh venv.
+
+Incoming whitespace is checked against the push's previous commit or the pull
+request's base. The pull request tests the checkout action's default merge
+revision. A force-push predecessor absent from the fetched history is fetched
+explicitly; failure to retrieve it fails the check. New refs and manual runs
+check only the current commit's whitespace, preserving legacy fixtures, and
+conservatively run the entire sink suite.
+
+Existing refs run `scripts/sink_go_test.sh` when `sink/`, `sink.py`, the sink
+runner or this workflow changes. It runs Go vet and race tests using the same
+digest-pinned toolchain image as the sink recipe; its module cache lives under
+the runner's temporary directory. No daemon image is built and no benchmark
+runs. Python checks run on every event regardless of sink selection.
+
+The workflow uses immutable action commit pins, a read-only contents token,
+checkout without persisted credentials, no private repository bindings or
+secrets, a 20-minute job limit and cancellation of superseded runs on the same
+ref or pull request. It uses `pull_request`, never `pull_request_target`, and
+no self-hosted or measurement runner. Local hooks remain required. Publishing
+the workflow activates hosted execution; changing repository Actions settings
+or branch-protection requirements is a separate operator action.
+
+For action inputs and workflow semantics, see the official
+[checkout](https://github.com/actions/checkout/tree/v7.0.1),
+[setup-python](https://github.com/actions/setup-python/tree/v7.1.0) and
+[workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)
+documentation. Update action SHA pins and version comments together after
+review; Python dependencies continue to use the lock update process above.

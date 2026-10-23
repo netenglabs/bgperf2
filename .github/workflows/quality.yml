@@ -1,0 +1,71 @@
+name: Quality checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Locked Python and sink checks
+    if: github.event.deleted != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      DOCKER_HOST: unix:///var/run/docker.sock
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the tested revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select incoming checks and verify whitespace
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ -n "$BASE_SHA" && ! "$BASE_SHA" =~ ^0+$ ]]; then
+            # A force-push predecessor may not be in the fetched ancestry.
+            if ! git cat-file -e "${BASE_SHA}^{commit}"; then
+              git fetch --no-tags origin "$BASE_SHA"
+            fi
+            git diff --check "$BASE_SHA" HEAD
+            changed="$(git diff --name-only "$BASE_SHA" HEAD)"
+            if printf '%s\n' "$changed" | grep -Eq '^(sink/|sink\.py$|scripts/sink_go_test\.sh$|\.github/workflows/quality\.yml$)'; then
+              echo 'sink=true' >> "$GITHUB_OUTPUT"
+            else
+              echo 'sink=false' >> "$GITHUB_OUTPUT"
+            fi
+          else
+            # New refs/manual runs: test the whole sink conservatively, but
+            # do not reject legacy fixture whitespace across the whole tree.
+            git show --format= --check HEAD
+            echo 'sink=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up supported Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
+          cache: pip
+          cache-dependency-path: requirements.lock
+
+      - name: Bootstrap the hashed environment and run Docker-free tests
+        run: python3.14 scripts/bootstrap.py
+
+      - name: Run sink Go vet and race tests
+        if: steps.changes.outputs.sink == 'true'
+        env:
+          GOMODCACHE_DIR: ${{ runner.temp }}/bgperf-gomod
+        run: scripts/sink_go_test.sh

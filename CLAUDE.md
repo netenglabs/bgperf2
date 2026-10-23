@@ -47,9 +47,10 @@ code-review:
 finds before committing — fix it, or say plainly why you are committing anyway. Skip only for
 commits that change no code at all (docs-only, or moving files without editing them).
 
-This is not ceremony. There is no CI on this repo and the test suite deliberately cannot touch
-Docker, so it covers the pure layers only — a real `bench` is the sole end-to-end check and nobody
-runs one per commit. Review is the only thing standing between a bad edit and master.
+The hosted quality workflow and local hooks cover the pure layers; their Python
+suite deliberately cannot touch Docker. A real `bench` remains a separate
+end-to-end check, and nobody runs one per commit. Code review remains required
+alongside those automated checks. See `docs/python-environment.md` for CI scope.
 
 git:
   never-cd: required

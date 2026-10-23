@@ -46,9 +46,51 @@ and phase interfaces must leave room for future workloads without implementing
 them now. No GUI, scheduling service, distributed execution framework or language
 rewrite is required for this work.
 
-## Delivery sequence
+## Feedback-driven execution
 
-Each phase is a separate reviewable milestone. Split code into small commits,
+Execution policy updated 2026-10-23: work in complete user-facing milestones.
+The technical phases below remain the scope, dependency and acceptance map;
+individual commands, helper extractions and commits are internal work units.
+They are not routine handoff points to the operator.
+
+When asked to continue or do the next step, advance the current execution
+milestone through all remaining authorized implementation, independent review,
+tests, documentation and progress recording. Keep changes reviewable in separate
+commits and continue after each commit. There is no fixed commit or substep limit.
+Use parallel implementation and review where the work is independent. Routine
+implementation choices and fixable test failures do not need operator feedback.
+
+Pause when the operator can make a concrete decision: review a usable workflow
+or report, choose a new daemon/reproduction case, resolve a material compatibility
+or measurement-definition tradeoff, or authorize a specified runtime validation.
+Prepare the implementation, examples, test evidence and proposed validation
+commands before that handoff. Identify the exact decision, recommended choice,
+alternatives and remaining work; do not hand back an unfinished internal slice
+merely because its tests pass. A blocking runtime check must not stop independent
+implementation and fake-runtime validation that can still be completed safely.
+
+Existing execution restrictions still apply. Real downloads, source builds,
+benchmarks, host access, provisioning and publication require their applicable
+authorization; this execution policy grants none. Keep implementation ready for
+feedback distinct from runtime qualification. A milestone whose hardware or
+adapter acceptance checks are deferred is not fully accepted.
+
+| Execution milestone | Complete before the feedback handoff | Operator feedback or decision |
+| --- | --- | --- |
+| A. Usable newcomer reproduction workflow — current | Finish phase 1: run one supported recipe through the existing runtime with exact role identities, isolated attempts, result/artifact production and verification, actionable failures, public instructions and a maintained fresh-checkout smoke entry point. Include the timeout, interruption, owned-resource cleanup and partial-result handling needed for this workflow, plus the existing completion/reproduction outcomes. Exercise the complete workflow with fake runtimes and review it end to end. | Review the actual CLI walkthrough and returned result package. Present an exact, bounded real-image/qualified-host smoke proposal for authorization. Select the next daemon or concrete bug when that choice affects the following milestone. |
+| B. Test and diagnose a local fix | Complete phases 2–3 and the existing-workload assertions needed from phase 5: supplied-image/local-source target overrides, recorded build differences, useful crash/memory diagnostics and preserved partial evidence. Deliver one coherent baseline/fix investigation using controlled fixtures and the selected adapter. Keep generator, observer and workload identities fixed. | Review the reproduction/fix report and diagnostic usefulness. Decide any remaining source-build trust, instrumentation or adapter choices that affect real validation. |
+| C. Trustworthy baseline/candidate comparison | Complete phases 4–5: repeated/interleaved comparisons, explicit existing-workload correctness assertions, separate memory/CPU/timing results, missing/failed attempts and confounders, machine-readable output and a useful human report. Include controlled differences, noise and inconclusive examples. | Review comparison outputs and a concrete calibration proposal. Select acceptable effect sizes, measurement budget and any regression policy before calibrated performance verdicts are enabled. |
+| D. Automated regression localization | Complete phase 6 for supported deterministic predicates: bounded revision search, identity-based build caching, resume, skipped/ambiguous revisions and confirmation evidence. Keep performance bisection conditional on milestone C's calibration. | Review the resulting revision boundary and evidence; decide whether to prioritize broader daemon support, calibrated performance bisection or the separately deferred minimization work. |
+
+Milestone A includes only the lifecycle robustness and assertions necessary for
+a reliable first reproduction workflow. Full diagnostic capture and generalized
+assertion interfaces remain in B/C. Phase 7 minimization, policy, IPv6 and other
+new workload families remain deferred until explicitly selected.
+
+## Technical delivery sequence
+
+Each phase supplies acceptance criteria within the execution milestones above.
+Split code into small commits,
 keep mechanical refactors separate from behavior changes, and record actual
 commit references and validation here when implementation is authorized.
 Later phases describe intended operations. The shipped phase 0 interface is
@@ -252,13 +294,14 @@ host purchases are authorized by this document. Public recipe examples must
 contain no private evidence paths or credentials. Artifact export must preserve
 original evidence and explicitly select what can be shared.
 
-Next development unit, when requested: phase 1c's isolated, one-cell recipe
-execution and result production through the existing runtime. Preserve selected
-role identities, workload/cell identity and measurement definitions; use fake
-runtime tests for execution and failure paths before real host qualification.
-Add a maintained, explicitly invoked fresh-checkout smoke entry point once that
-workflow exists, keeping real execution separate from the ordinary test gate.
-Real downloads, builds and benchmarks still need explicit runtime scope.
+Next execution milestone, when requested: complete milestone A's newcomer
+reproduction workflow. Phase 1c's one-cell execution bridge is an internal part
+of that work, followed by result/artifact production and verification, required
+failure handling, end-to-end fake-runtime validation, public instructions and
+the maintained smoke entry point. Preserve selected role identities, legacy cell
+identity and measurement definitions throughout. Continue through reviewed
+commits until the workflow is ready for concrete operator feedback or a required
+runtime authorization; do not stop after implementing the bridge alone.
 Use the
 [architecture design](architecture-design.md) for background,
 without treating its historical proposed interfaces as current behavior.
@@ -365,3 +408,12 @@ deferred checks; phases are not complete merely because their code is committed.
   binary provenance, resource estimates, complete host/runtime qualification,
   isolated recipe execution, result/artifact production and the fresh-checkout
   smoke. Phase 1's full acceptance remains unmet.
+
+### Execution milestone decision — 2026-10-23
+
+The operator requested larger execution batches organized around points where
+their feedback is needed. The feedback-driven execution policy above replaces
+the earlier command-by-command handoffs. Completed phase 0/1a/1b records and
+commit references remain unchanged. The next continuation targets the complete
+remaining newcomer workflow and a reviewable runtime-validation proposal.
+This is a planning change; no runtime execution or new workload is authorized.

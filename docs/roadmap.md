@@ -23,8 +23,12 @@ boundaries incrementally while keeping current CLI and output compatibility.
 Phase 0 ships a Docker-free [recipe/result contract](recipes.md) and public
 fixtures. Phase 1a adds offline planning and explicit read-only prerequisite
 reports. Phase 1b adds selected-image preparation with explicit digest pulls;
-real acquisition validation remains deferred. The next unit is isolated recipe
-execution and result production through the existing runtime.
+real acquisition validation remains deferred. The next execution milestone is
+the complete newcomer reproduction workflow, including isolated execution,
+results, failure handling, documentation and a smoke entry point. Follow the
+plan's [feedback-driven execution policy](plans/performance-testing-development-plan.md#feedback-driven-execution):
+continue through internal commits until a usable milestone or a concrete operator
+decision is ready for review.
 The architecture proposal is supporting material, not a second execution order.
 New policy semantics, IPv6 and protocol/topology expansion remain deferred until
 separately selected. A roadmap entry neither implements a feature nor authorizes

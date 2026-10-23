@@ -123,6 +123,15 @@ See [the environment guide](docs/python-environment.md).
 
 ## Architecture
 
+### Pure batch cells
+
+`batch_cells.py` owns the version-preserving YAML loader, target-version
+expansion, prefix-scope normalization, matrix construction and historical cell
+identity/key functions. It imports no runtime client. `bgperf2.py` retains its
+existing validation and compatibility entry points; raw target dictionaries,
+normalized workloads and legacy identities must remain distinct. The same pure
+helpers support portable recipe contracts without initializing Docker.
+
 ### Run orchestration
 
 `run_lifecycle.py` owns `bench()`, its observation loop, `finish_bench()` and

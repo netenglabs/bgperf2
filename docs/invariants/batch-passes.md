@@ -2,7 +2,7 @@
 
 How a matrix becomes an ordered list of runs, and what the passes of one cell are allowed to say about each other.
 
-**Read this before editing:** `bgperf2.py` (`expand_batch_cells()`, `batch_report_rows()`, `bench_output_prefix()`, `create_batch_graphs()`, `report_batch_from_cell_results()`, `load_batch_cell_results()`), `summary.py`, `graphs.py`
+**Read this before editing:** `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `bgperf2.py` (`expand_batch_cells()`, `batch_report_rows()`, `bench_output_prefix()`, `create_batch_graphs()`, `report_batch_from_cell_results()`, `load_batch_cell_results()`), `summary.py`, `graphs.py`
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 

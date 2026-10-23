@@ -1,9 +1,10 @@
 # bgperf2 developer performance testing plan
 
-Created 2026-10-23. Status: phase 0 complete; phase 1 planned.
+Created 2026-10-23. Status: phase 0 complete; phase 1 in progress.
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
-The operator authorized phase 0 implementation on 2026-10-23. This work starts
+The operator authorized phase 0 and phase 1a prerequisite implementation on
+2026-10-23. This work starts
 no daemon builds, benchmarks, provisioning or publication, and changes no host
 qualification gate.
 
@@ -85,7 +86,9 @@ to introduce the envelope.
 
 ### 1. Deliver the newcomer reproduction workflow
 
-Status: planned. Depends on phase 0; first useful public release milestone.
+Status: in progress. Phase 1a's offline plan and read-only prerequisite report
+are complete locally; image preparation and recipe execution remain pending.
+Depends on phase 0; first useful public release milestone.
 
 - Provide export, inspect/plan, prepare and run operations over the same recipe.
   One documented entry point guides a newcomer through the workflow after
@@ -248,9 +251,11 @@ host purchases are authorized by this document. Public recipe examples must
 contain no private evidence paths or credentials. Artifact export must preserve
 original evidence and explicitly select what can be shared.
 
-Next development unit, when requested: phase 1's newcomer workflow, beginning
-with inspection and prerequisite checks against the existing recipe contract.
-Preparation and execution still need implementation and explicit runtime scope.
+Next development unit, when requested: phase 1b's selected-image preparation
+workflow, building on the existing plan/check reports. Specify acquisition
+disclosure and immutable identity verification, and test that only the selected
+roles can be prepared. Real downloads, builds and execution still need explicit
+runtime scope. Recipe execution and result production follow separately.
 Use the
 [architecture design](architecture-design.md) for background,
 without treating its historical proposed interfaces as current behavior.
@@ -286,3 +291,33 @@ deferred checks; phases are not complete merely because their code is committed.
   checksum verification belong to phase 1 or later. No real benchmark, daemon
   build, provisioning, measurement-host access or push occurred. Fixtures declare
   synthetic image identities and do not represent an executed experiment.
+
+### Phase 1a implementation — 2026-10-23
+
+- `6c79203` adds `recipes.py plan` and `check`, documented in the
+  [recipe guide](../recipes.md). Offline planning performs no host/runtime
+  probes. Explicit checks return a versioned prerequisite snapshot with named
+  pass, refusal and unknown observations; they do not qualify execution or
+  performance comparison.
+- The local check verifies Linux/Python, tools, the clean requested engine
+  revision and the existing hashed environment through `bootstrap.py --check`.
+  This reuses the active-measurement guard and keeps one Python bootstrap path.
+  Docker probes are bounded, local-only and limited to the three selected
+  immutable role images. New work/results destinations must be isolated,
+  disk-backed and outside the checkout; inspection creates neither directory.
+- Independent review covered probe isolation, timeout process-group cleanup,
+  immutable image matching, source validation, Git environment isolation,
+  destination preservation and report limitations. The 25 focused prerequisite
+  tests passed, and the normal full commit gate passed 1,996 tests. The guide
+  and invariant mapping passed the documentation checks in that suite.
+- Local read-only validation used a temporary in-memory copy of the public
+  synthetic recipe bound to `6c79203`'s full revision. Checkout, tools, bootstrap,
+  capacity and destination observations passed; each synthetic role image was
+  correctly refused as missing. No acquisition occurred and neither prospective
+  work nor results directory was created. This validates refusal behavior,
+  not an executed workload or a qualified measurement host.
+- Deferred: selected image acquisition/preparation, verified build provenance,
+  resource estimates, foreign CPU qualification, runtime capabilities, hardware
+  qualification, fresh-checkout execution smoke, result production and artifact
+  verification. Phase 1's full acceptance remains unmet. No benchmarks, daemon
+  builds, provisioning, measurement-host access or pushes occurred.

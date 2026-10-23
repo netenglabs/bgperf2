@@ -2,7 +2,7 @@
 
 What `bench`/`batch` may be asked to run, and the guards that refuse the rest.
 
-**Read this before editing:** `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `run_lifecycle.py` (run orchestration), `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`), `churn.py`, `policy.py`, `bird.py` (the churn protocol and the reload command)
+**Read this before editing:** `recipes.py` (portable source validation), `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `run_lifecycle.py` (run orchestration), `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`), `churn.py`, `policy.py`, `bird.py` (the churn protocol and the reload command)
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 
@@ -475,3 +475,13 @@ Batch configs take `versions: [...]` on a target, expanded by `expand_target_ver
 run per version with an auto label. Batch yaml is parsed with `BatchLoader`, which drops YAML's
 float resolver — plain `yaml.safe_load` reads `10.10` as `10.1` and would silently bench the wrong
 release.
+
+## Portable recipe source validation
+
+The read-only `recipes.py` interface validates a strict subset of batch YAML
+for portable synthetic IPv4 BIRD/BIRD/sink recipes. It uses `batch_cells.py`
+for shared construction and historical IDs, and rejects unsupported source
+fields before selecting a cell. This is not another benchmark execution entry
+point; prepare/run support is separate work. The authoritative envelope and
+status contracts live in [the recipe guide](../recipes.md). The existing batch
+and scenario guards above retain their behavior.

@@ -1,0 +1,58 @@
+{
+  "artifacts": [
+    {
+      "availability": "missing",
+      "kind": "events",
+      "path": null,
+      "reason": "Contract fixture only; no experiment ran.",
+      "sha256": null
+    },
+    {
+      "availability": "missing",
+      "kind": "provenance",
+      "path": null,
+      "reason": "Contract fixture only; no experiment ran.",
+      "sha256": null
+    },
+    {
+      "availability": "missing",
+      "kind": "samples",
+      "path": null,
+      "reason": "Contract fixture only; no experiment ran.",
+      "sha256": null
+    },
+    {
+      "availability": "missing",
+      "kind": "configuration",
+      "path": null,
+      "reason": "Contract fixture only; no experiment ran.",
+      "sha256": null
+    },
+    {
+      "availability": "missing",
+      "kind": "log",
+      "path": null,
+      "reason": "Contract fixture only; no experiment ran.",
+      "sha256": null
+    }
+  ],
+  "attempt": {
+    "id": "contract-fixture-no-execution"
+  },
+  "comparison": {
+    "qualification": "not_assessed",
+    "reason": "Contract fixture only; no host or performance evidence."
+  },
+  "engine": {
+    "revision": "a4b271529478b02076b5c7f8518c63eea0f2c9f4"
+  },
+  "exit_code": 5,
+  "recipe_sha256": "ea8bff402234def946b1c6ed0d16e951cf5ab7db9e434d057240121ada60f787",
+  "reproduction": {
+    "evidence": [],
+    "outcome": "not_evaluated",
+    "reason": "Contract fixture only; no experiment ran."
+  },
+  "schema": "bgperf2/result/v1alpha1",
+  "status": "inconclusive"
+}

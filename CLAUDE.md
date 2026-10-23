@@ -123,6 +123,15 @@ See [the environment guide](docs/python-environment.md).
 
 ## Architecture
 
+### Portable recipe contracts
+
+`recipes.py` is the standalone Docker-free contract entry point for export,
+validation and inspection of one selected batch cell. Read `docs/recipes.md`
+before changing its recipe/result schemas or status meanings. It currently
+supports only the documented synthetic IPv4 BIRD/BIRD/sink subset; recipe
+execution is not implemented. Declared identities are not verified images or
+host qualification, and experiment status is separate from reproduction outcome.
+
 ### Pure batch cells
 
 `batch_cells.py` owns the version-preserving YAML loader, target-version

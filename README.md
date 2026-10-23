@@ -16,6 +16,7 @@ rewritten.
 * [Targets and versions](#targets)
 * [Debugging](#debugging)
 * [Roadmap and development plans](docs/roadmap.md)
+* [Portable recipe and result contracts](docs/recipes.md) (export, validate and inspect; no execution)
 * [How bgperf2 works](docs/how_bgperf_works.md) ·
   [Benchmarking a remote target](docs/benchmark_remote_target.md) ·
   [MRT injection](docs/mrt.md) ·
@@ -85,6 +86,11 @@ Global options go before the command: `-d/--dir` is the work directory for
 configs and logs (default `/var/tmp`; see
 [where the work directory lives](#workdir)) and `-b/--bench-name` names the run's
 subdirectory and Docker network (default `bgperf2`). Every command has `--help`.
+
+The separate `venv/bin/python recipes.py` entry point offers `export`, `validate`,
+`inspect` and `result-validate` without importing Docker. It supports a small
+synthetic IPv4 recipe contract; image preparation and execution through recipes
+are future work. See the [recipe guide and public fixture](docs/recipes.md).
 
 ## <a name="first-run"></a>Your first run
 

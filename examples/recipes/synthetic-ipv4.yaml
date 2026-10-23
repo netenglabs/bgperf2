@@ -1,0 +1,10 @@
+# Redistributable synthetic input; no external data or private paths.
+# Export selects one cell explicitly. This definition executes nothing itself.
+tests:
+  - name: synthetic-ipv4
+    monitor: sink
+    neighbors: [1, 2]
+    prefixes: [100]
+    filter_test: [None]
+    targets:
+      - name: bird

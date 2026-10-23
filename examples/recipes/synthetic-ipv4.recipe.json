@@ -1,0 +1,75 @@
+{
+  "completion": {
+    "contract": "bgperf2/existing-convergence",
+    "engine_revision": "a4b271529478b02076b5c7f8518c63eea0f2c9f4"
+  },
+  "engine": {
+    "revision": "a4b271529478b02076b5c7f8518c63eea0f2c9f4"
+  },
+  "inputs": [],
+  "legacy": {
+    "cell_id": "{\"filter\":\"None\",\"monitor\":\"sink\",\"neighbors\":1,\"ordinal\":0,\"prefixes\":100,\"target\":{\"name\":\"bird\"},\"test\":\"synthetic-ipv4\"}",
+    "cell_key": "f94a3878b2dad49e"
+  },
+  "reproduction": {
+    "expected_outcome": "experiment_completed",
+    "question": "Does the target complete this synthetic workload?"
+  },
+  "resolved": {
+    "filter": null,
+    "monitor": "sink",
+    "neighbors": 1,
+    "ordinal": 0,
+    "path_diversity": 1,
+    "prefix_scope": "per-peer",
+    "prefixes_per_peer": 100,
+    "receivers": 0,
+    "repetition": null,
+    "target": {
+      "filter_type": "in",
+      "image": null,
+      "label": null,
+      "name": "bird",
+      "tester_type": "bird",
+      "threads": null,
+      "version": null
+    }
+  },
+  "resources": {
+    "cpus": null,
+    "memory_bytes": null,
+    "storage_bytes": null
+  },
+  "roles": {
+    "generator": {
+      "adapter": "bird",
+      "image": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "observer": {
+      "adapter": "sink",
+      "image": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "target": {
+      "adapter": "bird",
+      "image": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    }
+  },
+  "schema": "bgperf2/recipe/v1alpha1",
+  "seeds": {
+    "order": "matrix",
+    "seed": null,
+    "workload": null
+  },
+  "selection": {
+    "cell_key": "f94a3878b2dad49e",
+    "test": "synthetic-ipv4"
+  },
+  "source": {
+    "format": "bgperf2/batch",
+    "raw_target": {
+      "name": "bird"
+    },
+    "sha256": "72d20b3950bc38e8cb7d0b605bbca7dd38d78615e62612d8e9042a30ef1659eb",
+    "text": "# Redistributable synthetic input; no external data or private paths.\n# Export selects one cell explicitly. This definition executes nothing itself.\ntests:\n  - name: synthetic-ipv4\n    monitor: sink\n    neighbors: [1, 2]\n    prefixes: [100]\n    filter_test: [None]\n    targets:\n      - name: bird\n"
+  }
+}

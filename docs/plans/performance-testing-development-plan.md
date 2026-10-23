@@ -1,10 +1,10 @@
 # bgperf2 developer performance testing plan
 
-Created 2026-10-23. Status: phase 0 complete; phase 1 in progress.
+Created 2026-10-23. Status: phase 0 complete; milestone A implementation ready for feedback; real-runtime acceptance pending.
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
-The operator authorized phase 0 and phase 1a–b prerequisite/preparation implementation on
-2026-10-23. This work starts
+The operator authorized phase 0, phase 1a–b prerequisites/preparation and complete
+milestone A implementation on 2026-10-23. This work starts
 no daemon builds, benchmarks, provisioning or publication, and changes no host
 qualification gate.
 
@@ -77,7 +77,7 @@ adapter acceptance checks are deferred is not fully accepted.
 
 | Execution milestone | Complete before the feedback handoff | Operator feedback or decision |
 | --- | --- | --- |
-| A. Usable newcomer reproduction workflow — current | Finish phase 1: run one supported recipe through the existing runtime with exact role identities, isolated attempts, result/artifact production and verification, actionable failures, public instructions and a maintained fresh-checkout smoke entry point. Include the timeout, interruption, owned-resource cleanup and partial-result handling needed for this workflow, plus the existing completion/reproduction outcomes. Exercise the complete workflow with fake runtimes and review it end to end. | Review the actual CLI walkthrough and returned result package. Present an exact, bounded real-image/qualified-host smoke proposal for authorization. Select the next daemon or concrete bug when that choice affects the following milestone. |
+| A. Usable newcomer reproduction workflow — ready for feedback | Finish phase 1: run one supported recipe through the existing runtime with exact role identities, isolated attempts, result/artifact production and verification, actionable failures, public instructions and a maintained fresh-checkout smoke entry point. Include the timeout, interruption, owned-resource cleanup and partial-result handling needed for this workflow, plus the existing completion/reproduction outcomes. Exercise the complete workflow with fake runtimes and review it end to end. | Review the actual CLI walkthrough and returned result package. Present an exact, bounded real-image/qualified-host smoke proposal for authorization. Select the next daemon or concrete bug when that choice affects the following milestone. |
 | B. Test and diagnose a local fix | Complete phases 2–3 and the existing-workload assertions needed from phase 5: supplied-image/local-source target overrides, recorded build differences, useful crash/memory diagnostics and preserved partial evidence. Deliver one coherent baseline/fix investigation using controlled fixtures and the selected adapter. Keep generator, observer and workload identities fixed. | Review the reproduction/fix report and diagnostic usefulness. Decide any remaining source-build trust, instrumentation or adapter choices that affect real validation. |
 | C. Trustworthy baseline/candidate comparison | Complete phases 4–5: repeated/interleaved comparisons, explicit existing-workload correctness assertions, separate memory/CPU/timing results, missing/failed attempts and confounders, machine-readable output and a useful human report. Include controlled differences, noise and inconclusive examples. | Review comparison outputs and a concrete calibration proposal. Select acceptable effect sizes, measurement budget and any regression policy before calibrated performance verdicts are enabled. |
 | D. Automated regression localization | Complete phase 6 for supported deterministic predicates: bounded revision search, identity-based build caching, resume, skipped/ambiguous revisions and confirmation evidence. Keep performance bisection conditional on milestone C's calibration. | Review the resulting revision boundary and evidence; decide whether to prioritize broader daemon support, calibrated performance bisection or the separately deferred minimization work. |
@@ -128,9 +128,10 @@ to introduce the envelope.
 
 ### 1. Deliver the newcomer reproduction workflow
 
-Status: in progress. Phase 1a's offline plan/read-only prerequisite report and
-phase 1b's selected-image preparation are complete locally. Recipe execution
-and result production remain pending; real acquisition has not been validated.
+Status: implementation ready for feedback. Offline prerequisites, selected image
+preparation, isolated execution, result packaging/verification and the maintained
+simulated newcomer smoke are complete locally. Real acquisition and adapter/host
+acceptance remain pending under the [runtime proposal](milestone-a-runtime-validation.md).
 Depends on phase 0; first useful public release milestone.
 
 - Provide export, inspect/plan, prepare and run operations over the same recipe.
@@ -294,17 +295,10 @@ host purchases are authorized by this document. Public recipe examples must
 contain no private evidence paths or credentials. Artifact export must preserve
 original evidence and explicitly select what can be shared.
 
-Next execution milestone, when requested: complete milestone A's newcomer
-reproduction workflow. Phase 1c's one-cell execution bridge is an internal part
-of that work, followed by result/artifact production and verification, required
-failure handling, end-to-end fake-runtime validation, public instructions and
-the maintained smoke entry point. Preserve selected role identities, legacy cell
-identity and measurement definitions throughout. Continue through reviewed
-commits until the workflow is ready for concrete operator feedback or a required
-runtime authorization; do not stop after implementing the bridge alone.
-Use the
-[architecture design](architecture-design.md) for background,
-without treating its historical proposed interfaces as current behavior.
+Current handoff: milestone A implementation is ready for feedback; see its
+record below and the [runtime validation proposal](milestone-a-runtime-validation.md).
+Real adapter/host acceptance is pending. Review the workflow and returned package
+before selecting milestone B or authorizing runtime work.
 
 Progress record: 2026-10-23, this plan records the operator's priorities. No
 engine behavior, measurement definitions or experiments changed. This document
@@ -417,3 +411,58 @@ the earlier command-by-command handoffs. Completed phase 0/1a/1b records and
 commit references remain unchanged. The next continuation targets the complete
 remaining newcomer workflow and a reviewable runtime-validation proposal.
 This is a planning change; no runtime execution or new workload is authorized.
+
+
+### Milestone A implementation and feedback handoff — 2026-10-23
+
+- `049fbbf` completes the authorized newcomer implementation: `recipes.py run`,
+  exact BIRD/BIRD/sink role pins, isolated work/results and runtime names, a
+  bounded worker around the existing engine lifecycle, label/ID-owned resource
+  cleanup, result generation and `result-verify`. Legacy measurement definitions,
+  convergence, bench and batch behavior remain unchanged.
+- The controller holds a cooperating-user host lock across prerequisites and
+  execution; timeouts, Ctrl-C/SIGTERM, stopped roles, missing rows, cleanup and
+  collection failures have explicit status handling. Partial evidence is retained.
+  A target's abnormal container exit is a container-level crash witness, not
+  diagnosis of a daemon crash inside a still-running container. That unsupported
+  case remains bounded by timeout and inconclusive without evidence.
+- Packages contain a canonical recipe, summary, available raw work artifacts,
+  checksums and explicit missing kinds. Unsafe artifacts and traversal failures
+  are recorded; lost reproduction evidence becomes inconclusive. Verification
+  rejects changed, missing, unlisted, symlink and nonregular artifacts. Streaming
+  copying/hashing avoids loading whole logs into memory.
+- `scripts/recipe_smoke.py --output ABSOLUTE_NEW_DIRECTORY` exercises all nine
+  public CLI operations with allowlisted simulated probes and a fake execution
+  backend. An additional test drives the worker bridge through the actual
+  existing lifecycle with queued fake adapters/observations. These are distinct
+  checks; neither is real runtime or hardware acceptance.
+- The maintained smoke also passed from a fresh detached checkout of `049fbbf`
+  using the existing locked Python environment. All nine CLI operations completed,
+  the independently invoked result verifier passed, and the checkout remained
+  clean. Its retained summary explicitly identifies simulated completion and
+  leaves comparison unassessed.
+- Independent subagent reviews covered runtime isolation, image pinning, existing
+  lifecycle integration, failure/stop/cleanup behavior, package completeness,
+  safe verification and the public walkthrough. Findings about partial
+  collection, lost evidence, FIFO manifests and coverage were fixed and tested.
+  The final focused recipe/documentation suite passed 297 tests. The feature
+  commit's normal locked-environment/idle guard and full Docker-free test gate
+  passed all 2,097 tests.
+- Existing locked Python 3.14 packages were copied into the local worktree; no
+  dependencies were installed. Read-only local image inspection informed the
+  [bounded runtime proposal](milestone-a-runtime-validation.md). It found an
+  existing BIRD image and no sink image, so sink supply/build authorization is
+  explicitly separated from experiment execution.
+- No real image download, source build, benchmark, provisioning, 9950 access,
+  push, publication or remote evidence transfer occurred. Hardware acceptance
+  remains unmet; milestone A is ready for workflow/package feedback, not fully
+  accepted as a qualified performance experiment.
+
+Feedback decision: review the [CLI walkthrough](../recipes.md#run-and-return-one-attempt)
+and a locally generated simulated package, then choose whether to authorize the
+[runtime proposal](milestone-a-runtime-validation.md). Recommended scope is one
+functional 1-peer/100-prefix attempt with a 120-second worker budget and an
+optional separate timeout-path attempt, after the missing sink image and host
+suitability are explicitly resolved. Keep BIRD as the first adapter; no new
+daemon or bug selection is necessary to finish A's runtime acceptance. Milestone
+B remains unstarted pending feedback and an explicitly selected investigation.

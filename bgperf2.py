@@ -5352,6 +5352,20 @@ def print_final_stats(args, target_version, stats):
     print(f"tester timeouts: {stats['tester_timeouts']}")
     print()
 
+def row_failed(row):
+    """Whether a stats row is marked failed, read by the header's column name."""
+    index = [f.strip() for f in stats_header().split(',')].index('failed')
+    return bool(row) and len(row) > index and row[index] == 'FAILED'
+
+def bench_command(args):
+    # `bench` from the command line. A run the engine marks FAILED returned
+    # normally, so the process exited 0 and no script could stop on it: the
+    # 2026-10 validation's A/B loops ran on past two failed runs. Exit 1
+    # instead, apart from 143 (a requested stop). `batch` calls bench() itself
+    # and records a failed cell as a result, so it is unaffected.
+    if row_failed(bench(args)):
+        sys.exit(1)
+
 def stats_header():
     # NOTE: must stay in sync with the row built by create_output_stats();
     # tests/test_stats_contract.py enforces that they are the same length.
@@ -7784,7 +7798,7 @@ def create_args_parser(main=True):
                               help='directory for generated graphs and CSVs; '
                                    'default: {}'.format(DEFAULT_RESULTS_DIR))
     add_gen_conf_args(parser_bench)
-    parser_bench.set_defaults(func=bench)
+    parser_bench.set_defaults(func=bench_command)
 
     parser_config = s.add_parser('config', help='generate config')
     parser_config.add_argument('-o', '--output', default='bgperf.yml', type=str)

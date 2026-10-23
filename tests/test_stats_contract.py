@@ -3,6 +3,8 @@ position only. Nothing in the code enforces that they agree, and when they drift
 the failure is silent: the CSV mislabels its columns and the graphs plot the
 wrong series. These tests are the enforcement.
 '''
+import pytest
+
 import bgperf2
 import summary
 
@@ -129,3 +131,33 @@ def test_the_delivery_age_bound_is_the_trackers_carry_bound():
 
     assert measurements.DELIVERY_WITNESS_MAX_AGE_S == convergence.WITNESS_CARRY_S
     assert _bgperf2.MONITOR_POLL_INTERVAL_S == convergence.DEFAULT_SAMPLE_INTERVAL_S
+
+
+def test_row_failed_reads_the_failed_column(bench_args, bench_stats):
+    ok = bgperf2.create_output_stats(bench_args, 'v1.2.3', dict(bench_stats))
+    failed_stats = dict(bench_stats, fail_msg='FAILED: stuck received count 0')
+    failed = bgperf2.create_output_stats(bench_args, 'v1.2.3', failed_stats, fail=True)
+    assert not bgperf2.row_failed(ok)
+    assert bgperf2.row_failed(failed)
+    assert not bgperf2.row_failed(None)
+
+
+def test_bench_command_exits_1_on_a_failed_run(monkeypatch, bench_args, bench_stats):
+    '''Regression: a FAILED run exited 0, so scripts could not stop on it.'''
+    failed_stats = dict(bench_stats, fail_msg='FAILED: stuck received count 0')
+    failed = bgperf2.create_output_stats(bench_args, 'v1.2.3', failed_stats, fail=True)
+    monkeypatch.setattr(bgperf2, 'bench', lambda args: failed)
+    with pytest.raises(SystemExit) as exit_info:
+        bgperf2.bench_command(bench_args)
+    assert exit_info.value.code == 1
+
+
+def test_bench_command_returns_normally_on_a_converged_run(monkeypatch, bench_args, bench_stats):
+    ok = bgperf2.create_output_stats(bench_args, 'v1.2.3', dict(bench_stats))
+    monkeypatch.setattr(bgperf2, 'bench', lambda args: ok)
+    bgperf2.bench_command(bench_args)
+
+
+def test_the_bench_subcommand_runs_through_bench_command():
+    args = bgperf2.create_args_parser().parse_args(['bench'])
+    assert args.func is bgperf2.bench_command

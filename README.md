@@ -142,6 +142,9 @@ A batch also writes, per test:
 | `<test>.cells/<key>.json` | Each cell's row, the record the CSV and summary are built from |
 | `bgperf_<test>_<metric>.png` | Bars comparing the targets: elapsed, total time, route reception, CPU, memory and more |
 
+`bench` exits 1 when its run is marked failed (as for a setup error), 143 when
+stopped by SIGTERM, and 0 when the run converged. A batch records a failed cell as a result and carries on.
+
 The CSV is the legacy, compact view. The `events.json` and `summary.json`
 documents carry what the CSV cannot, and the
 [measurement dictionary](docs/measurement-dictionary.md) defines every field.

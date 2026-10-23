@@ -1,10 +1,11 @@
 # bgperf2 developer performance testing plan
 
-Created 2026-10-23. Status: planning accepted; implementation not started.
+Created 2026-10-23. Status: phase 0 complete; phase 1 planned.
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
-This plan authorizes documentation only. It starts no builds, downloads,
-benchmarks, provisioning or publication, and changes no host qualification gate.
+The operator authorized phase 0 implementation on 2026-10-23. This work starts
+no daemon builds, benchmarks, provisioning or publication, and changes no host
+qualification gate.
 
 ## Outcome and ownership
 
@@ -49,11 +50,12 @@ rewrite is required for this work.
 Each phase is a separate reviewable milestone. Split code into small commits,
 keep mechanical refactors separate from behavior changes, and record actual
 commit references and validation here when implementation is authorized.
-Command names below describe intended operations; no new CLI spelling is settled.
+Later phases describe intended operations. The shipped phase 0 interface is
+documented in the [recipe contract](../recipes.md).
 
 ### 0. Specify the recipe and result boundary
 
-Status: planned. First implementation milestone.
+Status: complete locally, 2026-10-23. See the validation record below.
 
 - Specify a small versioned recipe envelope around existing workload inputs.
   Export one fully resolved batch cell first; require explicit selection rather
@@ -246,9 +248,10 @@ host purchases are authorized by this document. Public recipe examples must
 contain no private evidence paths or credentials. Artifact export must preserve
 original evidence and explicitly select what can be shared.
 
-Next authorized development unit, when requested: phase 0's minimal recipe/result
-contract and public fixture. Decide exact CLI names, build override trust rules,
-supported first target and resource disclosure during that design. Use the
+Next development unit, when requested: phase 1's newcomer workflow, beginning
+with inspection and prerequisite checks against the existing recipe contract.
+Preparation and execution still need implementation and explicit runtime scope.
+Use the
 [architecture design](architecture-design.md) for background,
 without treating its historical proposed interfaces as current behavior.
 
@@ -257,3 +260,29 @@ engine behavior, measurement definitions or experiments changed. This document
 was moved into the public engine on 2026-10-23; that relocation starts no phase. Future entries
 must name the phase, implementation commits, review, actual validation and any
 deferred checks; phases are not complete merely because their code is committed.
+
+### Phase 0 implementation — 2026-10-23
+
+- `8be6228` mechanically extracts the pure batch cell contract, preserving
+  legacy identities and defaults. Independent review compared moved functions
+  against their source; the normal commit gate passed 1,866 tests.
+- `3878764` adds the Docker-free `recipes.py` export, validate, inspect and
+  result-validate commands, versioned recipe/result contracts and public fixtures.
+  The first supported subset is one explicitly selected synthetic IPv4 cell
+  using BIRD as target and generator and the sink observer. Unsupported fields
+  are refused, including in unselected source tests.
+- Independent code review covered identity preservation, strict validation,
+  canonical hashing, runtime isolation and outcome semantics. Focused contract
+  and documentation checks passed 186 tests. Public recipe validation,
+  inspection and result validation also passed locally without Docker access.
+  The feature commit passed the normal full-suite gate.
+- Source text and hash, raw target, resolved workload and legacy identity remain
+  separate. Role image pins and the full engine revision are declared immutable
+  identities, with no claim that referenced images or revisions exist locally.
+  Resource estimates remain explicitly unknown. Reproduction outcomes are
+  separate from experiment status and performance qualification.
+- Deferred checks: real image resolution, selected image preparation, prerequisite
+  qualification, fresh-checkout runtime smoke, result production and artifact
+  checksum verification belong to phase 1 or later. No real benchmark, daemon
+  build, provisioning, measurement-host access or push occurred. Fixtures declare
+  synthetic image identities and do not represent an executed experiment.

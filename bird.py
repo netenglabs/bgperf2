@@ -521,7 +521,7 @@ class BIRD(Container):
 
     BUILD_VARS = {
         'base_image': 'ubuntu:latest',
-        'packages': 'git autoconf libtool gawk make flex bison libncurses-dev '
+        'packages': 'ca-certificates git autoconf libtool gawk make flex bison libncurses-dev '
                     'libreadline6-dev iproute2',
         'configure_extra': '',
     }
@@ -540,7 +540,7 @@ class BIRD(Container):
 FROM {base_image}
 WORKDIR /root
 RUN apt-get update && apt-get install -qy {packages}
-RUN git config --global http.sslverify false && git clone https://gitlab.nic.cz/labs/bird.git bird && cd bird && git checkout {ref}
+RUN git clone https://gitlab.nic.cz/labs/bird.git bird && cd bird && git checkout {ref}
 RUN cd bird && autoreconf -i && ./configure {configure_extra} && make && make install
 '''.format(**v)
         super(BIRD, cls).build_image(force, tag, nocache=nocache)

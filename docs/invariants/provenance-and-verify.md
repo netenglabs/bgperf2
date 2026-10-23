@@ -37,9 +37,43 @@ is the instrument the timings are read from.
   `tester version`, `monitor version`) and a full `<prefix>.versions.json` manifest beside the
   graphs. Appending at the end is required — `create_batch_graphs()` indexes the row positionally.
 
-Caveat worth knowing: a git ref pins source, not dependencies. RustyBGP gitignores its `Cargo.lock`,
-so its builds resolve dependencies fresh and old refs rot — `340f521` (the 2024-12 commit the 2025
-baseline benched) no longer compiles on any toolchain, which is why it is not offered as a version.
+## Image build provenance limits
+
+BIRD clones `https://gitlab.nic.cz/labs/bird.git` with Git's default TLS
+certificate verification and installs `ca-certificates` explicitly. A certificate
+failure must fail the build; do not disable verification to work around it.
+Existing images need an explicit rebuild to incorporate recipe changes:
+`update bird` for the unversioned image, or `update bird --versions 2.19.2`
+for one release tag (likewise for 3.3.2).
+
+OpenBGPD is repackaged from `openbgpd/openbgpd:<tag>`, not compiled from
+source. `prepare -t openbgp -f -n` forces the wrapper layers to rebuild without
+cache; it does not rebuild `bgpd`. Only the unversioned `latest` build
+pulls its upstream base. Versioned builds reuse a cached upstream image if
+present: `PULL_BASE` assumes release tags are immutable, and `--no-cache`
+does not refresh them. If upstream republishes a release tag, this is a known
+provenance gap requiring an explicit upstream pull and recorded digest. Its recipe only
+clears the upstream entrypoint and sets a shell command. A changed wrapper image
+ID, recipe hash or build date therefore does not prove a changed daemon binary.
+For a rebuild comparison, manually record the upstream image digest, resulting
+image ID, reported version and daemon binary SHA-256. The engine's version
+manifest does not collect all these identities automatically. Upstream build
+dependencies remain outside this recipe's source provenance.
+
+RustyBGP's recipe uses `cargo build --release` against upstream source without
+a tracked `Cargo.lock` or `--locked`. Its selected git ref identifies source,
+while Cargo resolves dependencies at build time. The builder/runtime tags and
+package repositories also move. A rebuild of the same ref can produce a
+different dependency graph or fail to compile; its printed source SHA cannot
+establish binary equivalence. For future builds, manually capture the built image identity and build output.
+The engine does not persist build logs or export the resolved Cargo dependency
+graph; the multi-stage recipe copies only binaries into the runtime image.
+Recovering a historical dependency graph from a printed source SHA is therefore
+unavailable. For example, historical ref `340f521` (2024-12) is no longer
+offered among supported versions after rebuild failures with newer dependencies. The Python dependency lock
+does not lock this container build. Adding a Rust dependency lock or digest-pinned
+container inputs is separate work; historical graphs must remain unknown where
+not recorded.
 
 ## verify — the check the test suite cannot do
 

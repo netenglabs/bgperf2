@@ -3,7 +3,7 @@
 Created 2026-10-23. Status: phase 0 complete; phase 1 in progress.
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
-The operator authorized phase 0 and phase 1a prerequisite implementation on
+The operator authorized phase 0 and phase 1a–b prerequisite/preparation implementation on
 2026-10-23. This work starts
 no daemon builds, benchmarks, provisioning or publication, and changes no host
 qualification gate.
@@ -86,8 +86,9 @@ to introduce the envelope.
 
 ### 1. Deliver the newcomer reproduction workflow
 
-Status: in progress. Phase 1a's offline plan and read-only prerequisite report
-are complete locally; image preparation and recipe execution remain pending.
+Status: in progress. Phase 1a's offline plan/read-only prerequisite report and
+phase 1b's selected-image preparation are complete locally. Recipe execution
+and result production remain pending; real acquisition has not been validated.
 Depends on phase 0; first useful public release milestone.
 
 - Provide export, inspect/plan, prepare and run operations over the same recipe.
@@ -251,11 +252,13 @@ host purchases are authorized by this document. Public recipe examples must
 contain no private evidence paths or credentials. Artifact export must preserve
 original evidence and explicitly select what can be shared.
 
-Next development unit, when requested: phase 1b's selected-image preparation
-workflow, building on the existing plan/check reports. Specify acquisition
-disclosure and immutable identity verification, and test that only the selected
-roles can be prepared. Real downloads, builds and execution still need explicit
-runtime scope. Recipe execution and result production follow separately.
+Next development unit, when requested: phase 1c's isolated, one-cell recipe
+execution and result production through the existing runtime. Preserve selected
+role identities, workload/cell identity and measurement definitions; use fake
+runtime tests for execution and failure paths before real host qualification.
+Add a maintained, explicitly invoked fresh-checkout smoke entry point once that
+workflow exists, keeping real execution separate from the ordinary test gate.
+Real downloads, builds and benchmarks still need explicit runtime scope.
 Use the
 [architecture design](architecture-design.md) for background,
 without treating its historical proposed interfaces as current behavior.
@@ -321,3 +324,44 @@ deferred checks; phases are not complete merely because their code is committed.
   qualification, fresh-checkout execution smoke, result production and artifact
   verification. Phase 1's full acceptance remains unmet. No benchmarks, daemon
   builds, provisioning, measurement-host access or pushes occurred.
+
+### Phase 1b implementation — 2026-10-23
+
+- `35cd64e` mechanically extracts shared runtime prerequisites and strict image
+  inspection from the existing check path. Independent review found no behavior
+  changes; the normal full commit gate passed 1,996 tests.
+- `0f6082f` adds `recipes.py prepare`, documented in the
+  [recipe guide](../recipes.md). Its default is a local acquisition plan.
+  Explicit `--pull` discloses the plan before acquiring only selected missing
+  repository digests. Shared references retain every role and are acquired once;
+  existing exact images are reused. A missing bare image ID blocks acquisition
+  rather than inventing a repository or invoking a build.
+- All selected references are classified before mutation. Permission failures,
+  timeouts, malformed responses and identity mismatches block all pulls. The
+  existing measurement guard runs again before each pull, and the same immutable
+  pin is verified afterward. A later failure retains earlier cache progress and
+  stops pending acquisitions. The guard remains a snapshot, not a held host lock.
+- Pulls use a bounded client process group; timeout, Ctrl-C and foreground
+  SIGTERM clean up owned clients. Docker daemon/cache work may continue, and
+  interruption does not guarantee a final JSON report. Source/build/binary
+  provenance, download sizes and incremental cache requirements stay unknown.
+- Independent code review covered the shared extraction, acquisition ordering,
+  exact identity verification, disclosure, partial cache outcomes and cancellation.
+  The focused contract/documentation suite passed 235 tests; the normal full
+  feature commit gate passed 2,029 tests. Fake-runtime tests exercise acquisition
+  and failure paths without real Docker mutations.
+- Local validation used the maintained export/prepare CLI commands with a
+  temporary synthetic recipe pinned to `0f6082f`'s full revision. The read-only
+  preparation plan reported the three selected repository digests as missing
+  with pull actions, while acquisition and cache changes remained `none`.
+  Checkout, tools and the existing bootstrap/measurement guard passed. No registry
+  download, build, benchmark, provisioning, measurement-host access or push ran.
+- Repeated ad hoc prerequisite/image checks now live in maintained modules and
+  CLI commands. The observed Docker missing-image response (exit 1, `[]` stdout
+  and an exact error naming the image) is retained as a regression case. The
+  temporary checkout/commit orchestration remains development-only; a reusable
+  end-to-end smoke command is deferred to the execution workflow above.
+- Deferred: real registry acquisition and adapter validation, trusted build and
+  binary provenance, resource estimates, complete host/runtime qualification,
+  isolated recipe execution, result/artifact production and the fresh-checkout
+  smoke. Phase 1's full acceptance remains unmet.

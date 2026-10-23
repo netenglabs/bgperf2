@@ -22,8 +22,9 @@ boundaries incrementally while keeping current CLI and output compatibility.
 
 Phase 0 ships a Docker-free [recipe/result contract](recipes.md) and public
 fixtures. Phase 1a adds offline planning and explicit read-only prerequisite
-reports. The next unit is selected-image preparation for the newcomer workflow;
-recipe execution and result production remain unimplemented.
+reports. Phase 1b adds selected-image preparation with explicit digest pulls;
+real acquisition validation remains deferred. The next unit is isolated recipe
+execution and result production through the existing runtime.
 The architecture proposal is supporting material, not a second execution order.
 New policy semantics, IPv6 and protocol/topology expansion remain deferred until
 separately selected. A roadmap entry neither implements a feature nor authorizes

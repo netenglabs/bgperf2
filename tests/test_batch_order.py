@@ -168,11 +168,12 @@ class TestBatchRunsInTheOrderItRecorded:
         config.write_text(yaml.safe_dump({'tests': [a_test(**overrides)]}))
         return str(config)
 
-    def run(self, tmp_path, monkeypatch, args, ran, fail_on=None):
+    def run(self, tmp_path, monkeypatch, args, ran, fail_on=None, fail_after=None):
         def fake_bench(a):
             row = '{0}-{1}n'.format(a.target, a.neighbor_num)
             ran.append(row)
-            if fail_on is not None and row == fail_on:
+            if ((fail_on is not None and row == fail_on)
+                    or (fail_after is not None and len(ran) == fail_after)):
                 raise RuntimeError('interrupted')
             return [row]
 
@@ -193,22 +194,26 @@ class TestBatchRunsInTheOrderItRecorded:
         assert ran != matrix, 'seed 7 permutes this matrix'
         assert (tmp_path / 'ord.csv').read_text().splitlines()[1:] == matrix
 
+    @pytest.mark.parametrize('drawn_seed', [673265558, 7])
     def test_a_drawn_seed_is_stored_with_every_cell_result(
-            self, fake_img_exists, tmp_path, monkeypatch):
+            self, fake_img_exists, tmp_path, monkeypatch, drawn_seed):
         '''The sequence a batch ran in can be rebuilt from its results alone,
         even when the seed was drawn and the batch died part way.'''
         import json
         fake_img_exists(lambda name: True)
+        from types import SimpleNamespace
+        monkeypatch.setattr(bgperf2, 'random', SimpleNamespace(
+            SystemRandom=lambda: SimpleNamespace(getrandbits=lambda bits: drawn_seed)))
         ran = []
         with pytest.raises(RuntimeError, match='interrupted'):
             self.run(tmp_path, monkeypatch, Namespace(
                 batch_config=self.write(tmp_path, order='shuffle'),
-                results_dir=str(tmp_path)), ran, fail_on='frr_c-2n')
+                results_dir=str(tmp_path)), ran, fail_after=3)
         documents = [json.loads(path.read_text())
                      for path in (tmp_path / 'ord.cells').glob('*.json')]
         assert documents, 'at least one cell ran before the interruption'
         seeds = {d['sequence']['seed'] for d in documents}
-        assert len(seeds) == 1 and isinstance(seeds.pop(), int)
+        assert seeds == {drawn_seed}
         assert {d['sequence']['order'] for d in documents} == {'shuffle'}
 
     def test_resume_continues_a_drawn_seed(

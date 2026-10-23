@@ -510,13 +510,16 @@ class SinkFakeReceiver:
 def test_the_export_poll_hands_a_sink_receivers_dates_to_the_recorder():
     import threading
     import bgperf2
-    started = time.monotonic()
+    # Keep fake sink checkpoints strictly inside the run. Rounding the live
+    # origin down to integer nanoseconds can otherwise date them before it.
+    started = time.monotonic() - 1.0
+    sink_at = started + 0.5
     rec = ExportEventRecorder(started, ['bgperf_receiver0'], 100,
                               sample_interval_s=0.01)
     state, failures = {}, {}
     stop = threading.Event()
     thread = bgperf2.controller_export_stats(
-        [SinkFakeReceiver('bgperf_receiver0', started)], rec, state,
+        [SinkFakeReceiver('bgperf_receiver0', sink_at)], rec, state,
         failures, stop, 0.01)
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline and not rec.events:
@@ -527,7 +530,7 @@ def test_the_export_poll_hands_a_sink_receivers_dates_to_the_recorder():
                            'bgperf_receiver0')
     assert 'observation_error' not in state
     assert reached.details['dated_by'] == 'sink_log', reached.details
-    assert reached.monotonic_s == pytest.approx(started)
+    assert reached.monotonic_s == pytest.approx(sink_at, rel=0, abs=1e-6)
 
 
 def test_a_sink_resolution_is_not_printed_as_an_instant():

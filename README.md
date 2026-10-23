@@ -45,16 +45,16 @@ and compares them in a CSV, a summary and graphs.
 
 * Linux with Docker; your user must be in the `docker` group.
 * `sysstat` and `procps` (`bench` shells out to `mpstat` and `free`).
-* Python 3.12 or later. `pip-requirements.txt` pins the versions the test suite
-  passes with (numpy 2.5 needs 3.12); development uses 3.14.
+* Python 3.14 with venv/ensurepip support. `requirements.lock` pins the full
+  runtime and test environment; `pip-requirements.txt` and `test-requirements.txt`
+  are the human-edited sources.
 
 ## <a name="install"></a>Install
 
 ```bash
 git clone https://github.com/netenglabs/bgperf2.git
 cd bgperf2
-python3 -m venv venv
-venv/bin/pip install -r pip-requirements.txt
+python3.14 scripts/bootstrap.py
 venv/bin/python bgperf2.py prepare -t bird -t sink   # the default target, tester and monitor
 venv/bin/python bgperf2.py doctor
 venv/bin/python bgperf2.py verify -t bird
@@ -731,7 +731,7 @@ clean up, `sudo rm -rf /var/tmp/bgperf2`.
 The test suite needs no Docker and no privileges:
 
 ```bash
-venv/bin/pip install -r test-requirements.txt
+python3.14 scripts/bootstrap.py --check
 venv/bin/python -m pytest tests/ -q
 ```
 
@@ -746,3 +746,6 @@ from source as `frr_c`, choosing the version; the old prebuilt `frr` target
 (pinned to 7.5.1), Quagga, and GoBGP as a target and MRT injector have been
 removed. Policy beyond the configurations exercised here, and remote targets,
 are less tested.
+
+The [Python environment guide](docs/python-environment.md) documents the full
+hashed lock, verification and dependency updates.

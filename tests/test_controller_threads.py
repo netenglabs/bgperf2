@@ -209,28 +209,36 @@ def test_a_read_that_overruns_the_interval_still_waits(tmp_path):
     assert min(gaps) > SlowReadTester.READ_S + interval / 2
 
 
-def test_a_finished_generator_is_not_polled_for_the_rest_of_the_run(tmp_path):
+def test_a_finished_generator_is_not_polled_for_the_rest_of_the_run(tmp_path, monkeypatch):
     '''One poll of a BIRD tester is a `docker exec` running a `birdc` per
     configured peer. Polling on until the monitor converges spends that on a
     generator with nothing left to say -- and `birdc` is in
     contention.BGPERF_PROCESSES, so it is the one load `max foreign cpu %`
     cannot report.
     '''
-    before = threading.active_count()
-    bgperf2.controller_stop.clear()
+    import base
+    threads = []
+
+    def tracked_thread(*args, **kwargs):
+        thread = threading.Thread(*args, **kwargs)
+        threads.append(thread)
+        return thread
+
+    monkeypatch.setattr(base, 'Thread', tracked_thread)
+    stop = threading.Event()
     tester = FinishedTester('1', str(tmp_path), {}, 'bgperf/bird')
     q = queue.Queue()
 
     try:
-        tester.offering_stats(q, bgperf2.controller_stop, interval=0.05)
-
-        deadline = time.time() + 5
-        while threading.active_count() > before and time.time() < deadline:
-            time.sleep(0.01)
-        assert threading.active_count() == before, \
+        tester.offering_stats(q, stop, interval=0.05)
+        assert len(threads) == 1
+        threads[0].join(timeout=5)
+        assert not threads[0].is_alive(), \
             'the poll kept asking a generator that had finished'
     finally:
-        bgperf2.controller_stop.set()
+        stop.set()
+        for thread in threads:
+            thread.join(timeout=5)
 
     # The poll that ends the loop still carries the completion evidence: the
     # sample is queued before the loop looks at it.

@@ -69,8 +69,8 @@ from osrg/bgperf with significant changes.
 ## Setup and commands
 
 ```bash
+python3.14 scripts/bootstrap.py
 source venv/bin/activate          # or prefix commands with venv/bin/python
-pip install -r pip-requirements.txt
 
 ./bgperf2.py doctor               # verify docker version + which bgperf/* images exist
 ./bgperf2.py images               # which daemon versions are built, and from which git ref
@@ -96,7 +96,7 @@ image, since the sink became the default monitor (measurement plan 7d, 2026-10-0
 images were built before that refuses the run until `./bgperf2.py prepare -t sink` builds it.
 
 ```bash
-venv/bin/pip install -r test-requirements.txt
+python3.14 scripts/bootstrap.py --check
 venv/bin/python -m pytest tests/ -q        # no Docker needed
 venv/bin/python -m pytest tests/test_convergence.py -q
 ```
@@ -116,8 +116,9 @@ collect them as soon as a test module imports them. Keep new test functions on t
 a pattern with no glob character is a *prefix* match in pytest, so widening this back out to
 `test` would re-admit every `tester_*` name.
 
-The venv is tied to a specific interpreter — a distro Python upgrade orphans it. Recreate with
-`rm -rf venv && python3 -m venv venv && venv/bin/pip install -r pip-requirements.txt`.
+The venv is tied to a specific interpreter — a distro Python upgrade orphans it. Move the old `venv` aside, then run
+`python3.14 scripts/bootstrap.py` to create and verify a fresh locked environment.
+See [the environment guide](docs/python-environment.md).
 
 ## Architecture
 

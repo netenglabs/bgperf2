@@ -125,8 +125,10 @@ See [the environment guide](docs/python-environment.md).
 
 ### Portable recipe contracts
 
-`recipes.py` is the standalone Docker-free contract entry point for export,
-validation and inspection of one selected batch cell. Read `docs/recipes.md`
+`recipes.py` is the standalone contract entry point for export, validation,
+inspection and offline planning of one selected batch cell. Its explicit `check`
+command uses `recipe_preflight.py` for read-only local prerequisite probes; it
+does not initialize the engine runtime or execute a recipe. Read `docs/recipes.md`
 before changing its recipe/result schemas or status meanings. It currently
 supports only the documented synthetic IPv4 BIRD/BIRD/sink subset; recipe
 execution is not implemented. Declared identities are not verified images or
@@ -347,7 +349,7 @@ component, and `bgperf2.py`'s `write_event_artifact()`, which catches for it.
   component: a throttled generator and one blocked writing to an undrained target are the same
   measurement, and three controlled runs of one shape all return it.
 
-**`docs/invariants/host-and-environment.md`** — `contention.py`, `role_cpu.py`, the controller
+**`docs/invariants/host-and-environment.md`** — `recipe_preflight.py`, `contention.py`, `role_cpu.py`, the controller
 threads, and the `-d` warnings.
 
 - **Measure CPU as a delta between two `/proc` samples, never `ps -eo pcpu`**, which fails in both

@@ -1,7 +1,9 @@
 # Portable recipe and result contracts
 
-The phase 0 recipe interface exports, validates and inspects one existing batch
-cell without Docker. It does not prepare images or execute experiments. Existing
+The recipe interface exports, validates, inspects and plans one existing batch
+cell offline. Its explicit `check` command reports observed local prerequisites
+without changing the host or acquiring images. It does not prepare images or
+execute experiments. Existing
 `bench`, `batch`, CSV, event and provenance formats retain their current behavior.
 
 Use the locked Python environment described in [the environment guide](python-environment.md).
@@ -57,6 +59,59 @@ unlocked source, toolchains or base images can reconstruct that binary.
 file must not already exist; export preserves earlier files. All phase 0 commands
 exit 0 for a valid contract and 2 for input, selection, validation or write
 refusal. These are contract-operation exits, not runtime experiment verdicts.
+
+## Plan and check prerequisites
+
+Phase 1a is a partial newcomer workflow. Use the same hashed bootstrap as the
+rest of the engine; there is no separate recipe installer. On an idle development
+host, create the locked environment using `python3.14 scripts/bootstrap.py`, then:
+
+```sh
+venv/bin/python recipes.py plan examples/recipes/synthetic-ipv4.recipe.json
+venv/bin/python recipes.py check recipe.json \
+  --workdir /var/tmp/bgperf-attempt-001 \
+  --results-dir /var/tmp/bgperf-results-001
+```
+
+`plan` validates the recipe and emits an offline prerequisite report. It does not
+probe executables, Git, Docker, the filesystem or the network. `inspect` retains
+its existing contract summary. `check` validates first, then takes a bounded,
+read-only snapshot of Linux/Python, required tools (`docker`, `mpstat`, `free`),
+the exact clean engine revision and the existing hashed Python environment via
+`scripts/bootstrap.py --check`. That bootstrap check retains its idle measurement
+guard; `check` never installs dependencies or repairs the environment.
+
+Only a local Unix-socket Docker endpoint is supported. Remote endpoints are
+refused before Docker or bootstrap is contacted. Accepted endpoint probes use
+an explicit host and an environment isolated from Docker context overrides.
+Only the three selected immutable role identities are inspected. The report
+records the actual image ID, repository digests and available metadata; a missing
+image or identity mismatch is a refusal. A tag alongside an immutable pin cannot
+substitute for the pin. No images are pulled, built, imported, tagged or run.
+
+Both destination paths must be absolute and new, distinct and nonnested, outside
+the engine checkout, with writable and searchable nearest existing disk-backed
+ancestors.
+Resolved paths are checked so symlinks cannot bypass isolation; RAM-backed
+destinations are refused. The command never creates either directory or modifies
+existing files. It records available memory, CPU count and destination capacity
+as observations, without deriving workload resource estimates.
+
+Reports use `bgperf2/prerequisites/v1alpha1`. Each `checks` entry has a `name`,
+`status` (`pass`, `refused` or `unknown`), `reason` and `details`. The top-level
+`status` is `checks_passed` or `refused`; every report states
+`execution: not_implemented` and `comparison: not_assessed`. `plan` exits 0 for
+a valid recipe. `check` exits 2 and emits the JSON refusal report when an observed
+prerequisite fails; satisfied observed checks exit 0. Malformed recipes exit 2
+before any probe.
+
+`checks_passed` describes only the listed observations at that instant. Workload
+resource estimates, foreign CPU qualification, runtime capabilities, hardware
+suitability and source/build reconstruction remain unknown or unassessed. It is
+not a readiness or performance-comparison verdict. Preparation and recipe
+execution remain unimplemented, so phase 1 acceptance has not been reached.
+The public fixture has synthetic image pins and a historical engine revision;
+its successful offline plan does not imply that it can pass a local check.
 
 ## Recipe envelope
 

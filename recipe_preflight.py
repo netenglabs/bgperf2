@@ -136,41 +136,51 @@ def _engine(report, document, env):
         return False
 
 
+def inspect_image(requested, host, env):
+    """Inspect and validate one exact immutable reference; return observed metadata."""
+    text = run_command(['docker', '--host', host, 'image', 'inspect', requested], env=env)
+    return _parse_image(text, requested)
+
+
+def _parse_image(text, requested):
+    """Parse the strict image-inspection response without consulting the host."""
+    images = json.loads(text, object_pairs_hook=recipes._pairs,
+                        parse_constant=recipes._nonfinite)
+    if not isinstance(images, list) or len(images) != 1 or not isinstance(images[0], dict):
+        raise ProbeError('docker image inspect must return exactly one image object')
+    image = images[0]
+    image_id = image.get('Id')
+    if not isinstance(image_id, str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', image_id):
+        raise ProbeError('docker image inspect returned a missing or malformed image ID')
+    digests = image.get('RepoDigests')
+    if digests is not None and (not isinstance(digests, list) or
+                               not all(isinstance(value, str) for value in digests)):
+        raise ProbeError('docker image inspect returned malformed RepoDigests')
+    if requested.startswith('sha256:'):
+        if image_id != requested:
+            raise ProbeError('Local image ID differs from the requested immutable image ID')
+    else:
+        if not isinstance(digests, list) or requested not in digests:
+            raise ProbeError('Requested repository digest is absent from the local image RepoDigests')
+    size, operating_system, architecture = image.get('Size'), image.get('Os'), image.get('Architecture')
+    if (isinstance(size, bool) or not isinstance(size, int) or size < 0 or
+            not isinstance(operating_system, str) or not operating_system or
+            not isinstance(architecture, str) or not architecture):
+        raise ProbeError('docker image inspect returned malformed size or platform metadata')
+    variant = image.get('Variant')
+    if variant is not None and not isinstance(variant, str):
+        raise ProbeError('docker image inspect returned malformed platform variant')
+    return {'image_id': image_id, 'repo_digests': digests,
+            'platform': {'os': operating_system, 'architecture': architecture, 'variant': variant},
+            'local_size_bytes': size, 'download_bytes': None}
+
+
 def _image(report, role, requested, host, env):
     try:
-        text = run_command(['docker', '--host', host, 'image', 'inspect', requested], env=env)
-        images = json.loads(text, object_pairs_hook=recipes._pairs,
-                            parse_constant=recipes._nonfinite)
-        if not isinstance(images, list) or len(images) != 1 or not isinstance(images[0], dict):
-            raise ProbeError('docker image inspect must return exactly one image object')
-        image = images[0]
-        image_id = image.get('Id')
-        if not isinstance(image_id, str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', image_id):
-            raise ProbeError('docker image inspect returned a missing or malformed image ID')
-        digests = image.get('RepoDigests')
-        if digests is not None and (not isinstance(digests, list) or
-                                   not all(isinstance(value, str) for value in digests)):
-            raise ProbeError('docker image inspect returned malformed RepoDigests')
-        if requested.startswith('sha256:'):
-            if image_id != requested:
-                raise ProbeError('Local image ID differs from the requested immutable image ID')
-        else:
-            if not isinstance(digests, list) or requested not in digests:
-                raise ProbeError('Requested repository digest is absent from the local image RepoDigests')
-        size, operating_system, architecture = image.get('Size'), image.get('Os'), image.get('Architecture')
-        if (isinstance(size, bool) or not isinstance(size, int) or size < 0 or
-                not isinstance(operating_system, str) or not operating_system or
-                not isinstance(architecture, str) or not architecture):
-            raise ProbeError('docker image inspect returned malformed size or platform metadata')
-        variant = image.get('Variant')
-        if variant is not None and not isinstance(variant, str):
-            raise ProbeError('docker image inspect returned malformed platform variant')
+        observed = inspect_image(requested, host, env)
         _add(report, 'image.' + role, 'pass',
              'The exact immutable reference is present locally. Build/source provenance is not established.',
-             requested=requested, image_id=image_id,
-             repo_digests=digests,
-             platform={'os': operating_system, 'architecture': architecture, 'variant': variant},
-             local_size_bytes=size, download_bytes=None)
+             requested=requested, **observed)
     except (ProbeError, OSError, ValueError, TypeError) as exc:
         _add(report, 'image.' + role, 'refused',
              f'{exc}. Supply the selected immutable image locally through a separately authorized preparation path.',
@@ -258,9 +268,8 @@ def _destination(report, name, value, mounts):
         return None
 
 
-def check_recipe(document, *, workdir, results_dir):
-    """Take explicit bounded snapshots, without acquiring or creating anything."""
-    report = _report(document, 'check')
+def runtime_prerequisites(report, document):
+    """Append the shared runtime prerequisites in their established order."""
     env = _environment()
     host = env.get('DOCKER_HOST', 'unix:///var/run/docker.sock')
     local = (host.startswith('unix:///') and len(host) > len('unix:///') and
@@ -295,6 +304,13 @@ def check_recipe(document, *, workdir, results_dir):
             _add(report, 'bootstrap', 'refused', f'{exc}. Follow docs/python-environment.md; no installation was attempted.')
     else:
         _add(report, 'bootstrap', 'unknown', 'Not probed because an earlier runtime, tool, engine or local-endpoint prerequisite was refused.')
+    return env, host, bootstrap_ok
+
+
+def check_recipe(document, *, workdir, results_dir):
+    """Take explicit bounded snapshots, without acquiring or creating anything."""
+    report = _report(document, 'check')
+    env, host, bootstrap_ok = runtime_prerequisites(report, document)
     for role, declaration in document['roles'].items():
         if bootstrap_ok:
             _image(report, role, declaration['image'], host, env)

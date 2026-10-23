@@ -78,6 +78,8 @@ def main():
         pins(LOCK.read_text())
     except ValueError as exc:
         parser.error(str(exc))
+    subprocess.run([sys.executable, '-I', str(ROOT / 'scripts/quality_gate.py'),
+                    '--guard-only'], cwd=ROOT, check=True)
     environment = ROOT / 'venv'
     existing = environment.exists()
     if not existing:
@@ -98,6 +100,8 @@ def main():
             '-r', str(LOCK))
     verify()  # Existing environments must match before any test runs.
     if not args.check:
+        subprocess.run(['git', '-C', str(ROOT), 'config', '--local',
+                        'core.hooksPath', '.githooks'], check=True)
         run('-m', 'pytest', 'tests/', '-q')
 
 

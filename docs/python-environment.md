@@ -58,3 +58,31 @@ bootstrap a fresh environment, run the suite, and commit the source and lock
 together. Do not hand-edit hashes or generate a replacement with `pip freeze`.
 Do not commit private index URLs or credentials. Package downloads need network
 access, or a separately supplied cache of the matching wheels.
+
+## Local Git quality gates
+
+The guard requires readable Linux procfs and a reachable local Docker daemon,
+even though the Python suite itself does not use Docker.
+
+Bootstrap enables this checkout's tracked `.githooks/`. `--check` only verifies
+an existing environment. Pre-commit runs this repository's locked Docker-free
+suite and `git diff --check` for staged and unstaged edits. Stage the complete
+reviewed change before committing: tests exercise the working tree.
+
+Pre-push also runs `scripts/sink_go_test.sh` when outgoing `sink/` files change.
+New refs conservatively include the whole sink tree. The pinned toolchain runs
+Go vet and race tests in local Docker; set a writable `GOMODCACHE_DIR` if the
+default cache location is unavailable.
+
+Pre-push requires every non-deletion tip to be the checked-out HEAD, with a clean
+tree and index, including untracked files, so tests cover the pushed code. Whitespace checks cover
+current edits, preserving historical fixture whitespace. Unknown remote objects
+refuse change selection: fetch them explicitly before retrying. Deletion-only
+pushes still run the suite. Only local Unix Docker sockets are used; remote
+Docker contexts are ignored. Hooks do not launch benchmarks or authorize pushes.
+
+Linked worktrees also require their own bootstrapped venv. Install hooks with
+bootstrap in every clone; Git does not enable them on clone.
+Agent commits use the same hooks; no `--no-verify` without operator approval.
+The cross-repository guard contract and validation live in the lab's
+[infrastructure cleanup plan](https://github.com/jopietsch/second-looks-lab/blob/main/docs/infrastructure-cleanup-plan.md#4-local-quality-gate-in-git-hooks).

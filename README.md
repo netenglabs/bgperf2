@@ -16,7 +16,7 @@ rewritten.
 * [Targets and versions](#targets)
 * [Debugging](#debugging)
 * [Roadmap and development plans](docs/roadmap.md)
-* [Portable recipe and result contracts](docs/recipes.md) (export, validate, plan, check and selected image preparation; no execution)
+* [Portable recipe and result contracts](docs/recipes.md) (export, prepare, isolated execution and verified result packages)
 * [How bgperf2 works](docs/how_bgperf_works.md) ·
   [Benchmarking a remote target](docs/benchmark_remote_target.md) ·
   [MRT injection](docs/mrt.md) ·
@@ -93,7 +93,8 @@ The separate `venv/bin/python recipes.py` entry point offers `export`, `validate
 CLI; it never acquires images or starts containers. It supports a small synthetic
 IPv4 recipe contract. `prepare RECIPE` reports a local image acquisition plan;
 only `prepare RECIPE --pull` can acquire missing selected repository digests.
-Recipe execution remains future work. See the [recipe guide and public fixture](docs/recipes.md).
+`run` explicitly executes the selected recipe with a bounded worker and returns
+a local result package; `result-verify` checks its files and recipe binding. See the [recipe guide and public fixture](docs/recipes.md).
 
 ## <a name="first-run"></a>Your first run
 

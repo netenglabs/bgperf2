@@ -26,7 +26,7 @@ def document():
 
 def items(report):
     assert report['schema'] == 'bgperf2/preparation/v1alpha1'
-    assert report['execution'] == 'not_implemented'
+    assert report['execution'] == 'not_requested'
     assert report['comparison'] == 'not_assessed'
     assert report['status'] in {'planned', 'prepared', 'refused'}
     refs = [item['requested'] for item in report['items']]

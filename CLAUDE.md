@@ -131,10 +131,12 @@ command uses `recipe_preflight.py` for read-only local prerequisite probes.
 `recipe_prepare.py` plans selected immutable image acquisition locally; only
 explicit `prepare --pull` may pull missing repository digests after disclosure.
 Both share `recipe_preflight.py` probes and guards without initializing the engine
-runtime or executing a recipe. Read `docs/recipes.md`
+runtime. `recipe_run.py` and `recipe_worker.py` provide explicit bounded recipe
+execution using the existing lifecycle; `recipe_results.py` packages and verifies
+local evidence. Read `docs/recipes.md`
 before changing its recipe/result schemas or status meanings. It currently
 supports only the documented synthetic IPv4 BIRD/BIRD/sink subset; recipe
-execution is not implemented. Declared identities are not verified images or
+execution requires the explicit `run` operation. Declared identities are not verified images or
 host qualification, and experiment status is separate from reproduction outcome.
 
 ### Pure batch cells

@@ -4,7 +4,8 @@ The recipe interface exports, validates, inspects and plans one existing batch
 cell offline. Its explicit `check` command reports observed local prerequisites
 without changing the host or acquiring images. `prepare` reports a local image
 acquisition plan; explicit `prepare --pull` may acquire selected missing
-repository digests. It does not execute experiments. Existing
+repository digests. Explicit `run` executes the selected supported recipe and
+returns a verified local result package. Existing
 `bench`, `batch`, CSV, event and provenance formats retain their current behavior.
 
 Use the locked Python environment described in [the environment guide](python-environment.md).
@@ -31,7 +32,7 @@ The [public example batch](../examples/recipes/synthetic-ipv4.yaml) has two cell
 The [checked-in recipe](../examples/recipes/synthetic-ipv4.recipe.json) selects
 one. Its conspicuous fixture image digests are synthetic: they identify no
 downloadable images and must be replaced with actual immutable image identities
-for a future execution workflow.
+before using `prepare --pull` or `run`.
 The fixture declares the historical planning baseline engine revision. Phase 0
 validates identity syntax and consistency; it does not probe Git objects, image
 existence, registries or artifact availability.
@@ -63,7 +64,7 @@ refusal. These are contract-operation exits, not runtime experiment verdicts.
 
 ## Plan and check prerequisites
 
-Phase 1a is a partial newcomer workflow. Use the same hashed bootstrap as the
+Use this read-only path before explicit execution. Use the same hashed bootstrap as the
 rest of the engine; there is no separate recipe installer. On an idle development
 host, create the locked environment using `python3.14 scripts/bootstrap.py`, then:
 
@@ -100,8 +101,8 @@ as observations, without deriving workload resource estimates.
 
 Reports use `bgperf2/prerequisites/v1alpha1`. Each `checks` entry has a `name`,
 `status` (`pass`, `refused` or `unknown`), `reason` and `details`. The top-level
-`status` is `checks_passed` or `refused`; every report states
-`execution: not_implemented` and `comparison: not_assessed`. `plan` exits 0 for
+`status` is `checks_passed` or `refused`; every prerequisite report states
+`execution: not_requested` and `comparison: not_assessed`. `plan` exits 0 for
 a valid recipe. `check` exits 2 and emits the JSON refusal report when an observed
 prerequisite fails; satisfied observed checks exit 0. Malformed recipes exit 2
 before any probe.
@@ -109,8 +110,8 @@ before any probe.
 `checks_passed` describes only the listed observations at that instant. Workload
 resource estimates, foreign CPU qualification, runtime capabilities, hardware
 suitability and source/build reconstruction remain unknown or unassessed. It is
-not a readiness or performance-comparison verdict. Recipe execution remains
-unimplemented, so phase 1 acceptance has not been reached.
+not a readiness or performance-comparison verdict. Full adapter and hardware acceptance still needs the separately authorized runtime smoke.
+Explicit execution is described below.
 The public fixture has synthetic image pins and a historical engine revision;
 its successful offline plan does not imply that it can pass a local check.
 
@@ -167,11 +168,95 @@ also remain unverified. Digest pinning identifies selected content and does not
 establish publisher trust or prove a reconstructible build.
 
 The CLI exits 0 for `planned` or `prepared`, and 2 for `refused`. Malformed
-recipes are refused before probing or mutation. `execution: not_implemented`
+recipes are refused before probing or mutation. `execution: not_requested`
 and `comparison: not_assessed` remain explicit. Preparation does not start
 containers, change runtime networks or volumes, collect measurements, execute a
 recipe or satisfy full phase 1 acceptance. The public fixture's synthetic image
 pins are examples, not downloadable acquisition targets.
+
+## Run and return one attempt
+
+After the OS prerequisites, locked environment and selected exact images are
+available, use one clean checkout at the recipe's full engine revision. Running
+a recipe executes containers with the current user's Docker authority. Read the
+recipe, trust the selected images and choose an otherwise idle suitable Linux
+host before execution. This initial adapter is synthetic IPv4 BIRD/BIRD/sink.
+The public fixture's fake image pins cannot run.
+
+```sh
+venv/bin/python recipes.py validate recipe.json
+venv/bin/python recipes.py plan recipe.json
+venv/bin/python recipes.py prepare recipe.json
+# Only if acquisition is intended and approved:
+venv/bin/python recipes.py prepare recipe.json --pull
+venv/bin/python recipes.py check recipe.json \
+  --workdir /absolute/disk/work/attempt-001 \
+  --results-dir /absolute/disk/results/attempt-001
+# Explicit experiment execution; no pulls or builds occur here:
+venv/bin/python recipes.py run recipe.json --timeout 300 \
+  --workdir /absolute/disk/work/attempt-001 \
+  --results-dir /absolute/disk/results/attempt-001
+venv/bin/python recipes.py result-verify /absolute/disk/results/attempt-001/result.json
+```
+
+The parent directories must already be suitable writable disk storage; both
+attempt destinations must be new, absolute, distinct, nonnested and outside the
+checkout. A refusal returns an actionable JSON prerequisite report on stdout and
+exit 2 without starting a worker. Choose new paths for every retry; earlier work
+and evidence are retained. Check the command's exit status and `status` rather
+than treating the existence of `result.json` as success.
+
+The controller holds an advisory lock across checks, execution and cleanup for
+cooperating recipe attempts by the same user. The existing active-measurement
+guard still runs. This does not lock out arbitrary Docker users or qualify host
+idleness, resource sufficiency or hardware. Capacity requirements remain unknown.
+The worker runs the existing engine lifecycle with isolated container/network
+names and the selected immutable target, generator and observer images. It does
+not invoke the engine's broad image-preparation or prior-container cleanup paths.
+Only resources bearing this attempt's ownership label are cleaned, by inspected
+IDs. Work directories are preserved, including failed and interrupted work.
+
+`--timeout` is a finite positive wall-clock worker budget, covering setup and
+observation (default 300 seconds). It is separate from the engine's convergence
+rules and from bounded prerequisite/cleanup probes. Expiry stops the worker
+process group and yields `inconclusive` (exit 5). Ctrl-C or SIGTERM during the
+worker yields `interrupted` (130 or 143). Cleanup failures yield `harness_failed`
+(exit 3) with details, retaining evidence. A hard kill, disk failure or power loss
+can prevent packaging or cleanup; there is no automatic retry or recovery claim.
+
+An existing engine stats row determines `completed` (0) or
+`experiment_failed` (4); a missing row is inconclusive and worker exceptions are
+harness failures. A completion witness can decide the `experiment_completed`
+reproduction predicate. A completed run with `target_crash` intent is
+`not_reproduced`; a failed run without a specific supported crash witness remains
+inconclusive. No failed setup or missing measurement becomes a reproduced bug.
+
+The results directory contains `result.json`, `recipe.json`, `SUMMARY.txt` and a
+`work/` snapshot of available configurations, raw artifacts and controller logs.
+Each available file is checksummed; unavailable required artifact kinds and
+collection errors are explicit. Verification checks hashes, refuses unlisted or
+unsafe files, and checks the canonical recipe binding. It does not authenticate a
+publisher or re-evaluate convergence.
+Review the package for local paths and other information before returning it to
+a maintainer. No upload, publication, archive creation or automatic deletion runs.
+
+## Exercise the workflow without Docker
+
+From a fresh public checkout with the locked environment already installed:
+
+```sh
+venv/bin/python scripts/recipe_smoke.py --output /absolute/new/simulated-attempt
+venv/bin/python recipes.py result-verify /absolute/new/simulated-attempt/results/result.json
+```
+
+This maintained smoke entry point exports one cell and walks through validation,
+inspection, planning, checks, selected preparation, execution and verification
+using explicitly simulated prerequisites and a fake runtime. It refuses real
+subprocess and network operations inside the modeled runtime path. Reports and
+a return package remain at the requested new path. Every runtime artifact is
+marked simulated; no performance numbers or hardware qualification are produced.
+The fake smoke is usable on a developer machine and does not establish that the
+real adapter, image publisher or host is qualified.
 
 ## Recipe envelope
 
@@ -218,8 +303,9 @@ is `not_evaluated` and comparison is `not_assessed`. Validate it with
 The envelope references existing event, provenance, sample, configuration and
 log artifacts. It does not replace or reinterpret their contents. Available
 artifacts carry checksums; unavailable evidence carries an explicit reason.
-Phase 0 validates this contract; the current run lifecycle does not automatically
-emit it, and no new benchmark result definition is introduced.
+`run` emits this envelope around existing artifacts; it introduces no new
+benchmark measurement definition. `result-validate` checks declarations only;
+`result-verify` checks the package bytes and bundled recipe identity.
 
 | Field | Meaning |
 |---|---|
@@ -268,5 +354,5 @@ A setup refusal cannot decide reproduction and therefore requires `inconclusive`
 or `not_evaluated`. A harness failure may follow already collected evidence and
 does not automatically erase a supported reproduction outcome.
 
-Future runtime support must define and test mappings to these statuses. The
-phase 0 CLI does not claim that existing benchmark exit codes implement them.
+The recipe controller maps its bounded worker outcome to these statuses. Legacy
+`bench` and `batch` exit semantics remain unchanged.

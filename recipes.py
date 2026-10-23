@@ -3,7 +3,7 @@
 # you may not use this file except in compliance with the License.
 # You may obtain a copy at http://www.apache.org/licenses/LICENSE-2.0
 
-"""Read-only declarative recipe and result contracts; no execution interface.
+"""Declarative recipe/result contracts and explicit preparation/execution CLI.
 
 The first envelope deliberately supports only synthetic IPv4 BIRD workloads,
 with BIRD generators and the sink instrument. It imports no container runtime.
@@ -333,7 +333,7 @@ def inspect_recipe(document):
         'roles': document['roles'], 'inputs': document['inputs'],
         'resources': document['resources'], 'seeds': document['seeds'],
         'completion': document['completion'], 'reproduction': document['reproduction'],
-        'execution': 'not_implemented', 'comparison': 'not_assessed',
+        'execution': 'explicit_run_required', 'comparison': 'not_assessed',
         'identity_limit': 'Image pins are declared inputs; their existence, contents and build provenance have not been verified.',
     }
 
@@ -428,12 +428,15 @@ def main(argv=None):
     export.add_argument('--expected-outcome', choices=EXPECTED_OUTCOMES,
                         default='experiment_completed')
     export.add_argument('-o', '--output')
-    for name in ('validate', 'inspect', 'result-validate', 'plan', 'check', 'prepare'):
+    for name in ('validate', 'inspect', 'result-validate', 'result-verify', 'plan', 'check', 'prepare', 'run'):
         command = commands.add_parser(name)
         command.add_argument('document')
-        if name == 'check':
+        if name in ('check', 'run'):
             command.add_argument('--workdir', required=True)
             command.add_argument('--results-dir', required=True)
+        if name == 'run':
+            command.add_argument('--timeout', type=float, default=300,
+                                 help='whole-attempt runtime deadline in seconds (default: 300)')
         if name == 'prepare':
             command.add_argument('--pull', action='store_true',
                                  help='explicitly acquire missing selected repository digests after disclosure')
@@ -446,10 +449,20 @@ def main(argv=None):
                                      engine_revision=args.engine_revision, roles=roles,
                                      question=args.question, expected_outcome=args.expected_outcome)
             _write_document(document, args.output)
+        elif args.command == 'result-verify':
+            from recipe_results import verify_result_package
+            _write_document(verify_result_package(args.document))
         else:
             document = read_document(args.document)
             if args.command == 'inspect':
                 _write_document(inspect_recipe(document))
+            elif args.command == 'run':
+                validate_recipe(document)
+                from recipe_run import run_recipe
+                result = run_recipe(document, workdir=args.workdir,
+                                    results_dir=args.results_dir, timeout=args.timeout)
+                _write_document(result)
+                return result['exit_code']
             elif args.command in ('plan', 'check', 'prepare'):
                 # Also validate in this module before importing the host layer:
                 # direct script execution names this module __main__, while the
@@ -478,7 +491,7 @@ def main(argv=None):
                 validate_recipe(document)
                 _write_document({'valid': True, 'schema': RECIPE_SCHEMA,
                                  'recipe_sha256': recipe_sha256(document)})
-    except (ContractError, OSError, UnicodeError, RecursionError) as exc:
+    except (ValueError, OSError, UnicodeError, RecursionError) as exc:
         print(f'{args.command}: {exc}', file=sys.stderr)
         return 2
     return 0

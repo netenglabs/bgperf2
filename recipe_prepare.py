@@ -38,7 +38,7 @@ def _report(document, pull):
     report = {
         'schema': PREPARATION_SCHEMA, 'mode': 'prepare',
         'recipe_sha256': recipes.recipe_sha256(document),
-        'status': 'planned', 'execution': 'not_implemented',
+        'status': 'planned', 'execution': 'not_requested',
         'comparison': 'not_assessed', 'pull_requested': pull,
         'acquisition': 'none', 'cache_changes': 'none', 'partial': False,
         'checks': [], 'items': [],

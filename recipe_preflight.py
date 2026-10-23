@@ -97,7 +97,7 @@ def _report(document, mode):
     recipes.validate_recipe(document)
     report = {'schema': PREREQUISITES_SCHEMA, 'mode': mode,
               'recipe_sha256': recipes.recipe_sha256(document),
-              'status': 'checks_passed', 'execution': 'not_implemented',
+              'status': 'checks_passed', 'execution': 'not_requested',
               'comparison': 'not_assessed', 'checks': [],
               'acquisition': 'none',
               'scope': 'Only implemented checks are reported; this is not a ready-to-run qualification.'}

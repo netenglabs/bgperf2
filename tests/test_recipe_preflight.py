@@ -26,7 +26,7 @@ def no_probe(*args, **kwargs):
 
 def checks(report):
     assert report['schema'] == 'bgperf2/prerequisites/v1alpha1'
-    assert report['execution'] == 'not_implemented'
+    assert report['execution'] == 'not_requested'
     assert report['comparison'] == 'not_assessed'
     assert report['status'] in {'checks_passed', 'refused'}
     assert len({item['name'] for item in report['checks']}) == len(report['checks'])

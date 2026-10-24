@@ -1,6 +1,6 @@
 # bgperf2 developer performance testing plan
 
-Created 2026-10-23. Status: phase 0 complete; milestone A implementation ready for feedback; real-runtime acceptance pending.
+Created 2026-10-23. Status: phase 0 complete; milestone A implementation and authorized functional validation complete; ready for feedback.
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
 The operator authorized phase 0, phase 1a–b prerequisites/preparation and complete
@@ -77,7 +77,7 @@ adapter acceptance checks are deferred is not fully accepted.
 
 | Execution milestone | Complete before the feedback handoff | Operator feedback or decision |
 | --- | --- | --- |
-| A. Usable newcomer reproduction workflow — ready for feedback | Finish phase 1: run one supported recipe through the existing runtime with exact role identities, isolated attempts, result/artifact production and verification, actionable failures, public instructions and a maintained fresh-checkout smoke entry point. Include the timeout, interruption, owned-resource cleanup and partial-result handling needed for this workflow, plus the existing completion/reproduction outcomes. Exercise the complete workflow with fake runtimes and review it end to end. | Review the actual CLI walkthrough and returned result package. Present an exact, bounded real-image/qualified-host smoke proposal for authorization. Select the next daemon or concrete bug when that choice affects the following milestone. |
+| A. Usable newcomer reproduction workflow — functionally validated; ready for feedback | Finish phase 1: run one supported recipe through the existing runtime with exact role identities, isolated attempts, result/artifact production and verification, actionable failures, public instructions and a maintained fresh-checkout smoke entry point. Include the timeout, interruption, owned-resource cleanup and partial-result handling needed for this workflow, plus the existing completion/reproduction outcomes. Exercise the complete workflow with fake runtimes and review it end to end. | Review the actual CLI walkthrough and returned result package. Present an exact, bounded real-image/qualified-host smoke proposal for authorization. Select the next daemon or concrete bug when that choice affects the following milestone. |
 | B. Test and diagnose a local fix | Complete phases 2–3 and the existing-workload assertions needed from phase 5: supplied-image/local-source target overrides, recorded build differences, useful crash/memory diagnostics and preserved partial evidence. Deliver one coherent baseline/fix investigation using controlled fixtures and the selected adapter. Keep generator, observer and workload identities fixed. | Review the reproduction/fix report and diagnostic usefulness. Decide any remaining source-build trust, instrumentation or adapter choices that affect real validation. |
 | C. Trustworthy baseline/candidate comparison | Complete phases 4–5: repeated/interleaved comparisons, explicit existing-workload correctness assertions, separate memory/CPU/timing results, missing/failed attempts and confounders, machine-readable output and a useful human report. Include controlled differences, noise and inconclusive examples. | Review comparison outputs and a concrete calibration proposal. Select acceptable effect sizes, measurement budget and any regression policy before calibrated performance verdicts are enabled. |
 | D. Automated regression localization | Complete phase 6 for supported deterministic predicates: bounded revision search, identity-based build caching, resume, skipped/ambiguous revisions and confirmation evidence. Keep performance bisection conditional on milestone C's calibration. | Review the resulting revision boundary and evidence; decide whether to prioritize broader daemon support, calibrated performance bisection or the separately deferred minimization work. |
@@ -128,10 +128,14 @@ to introduce the envelope.
 
 ### 1. Deliver the newcomer reproduction workflow
 
-Status: implementation ready for feedback. Offline prerequisites, selected image
-preparation, isolated execution, result packaging/verification and the maintained
-simulated newcomer smoke are complete locally. Real acquisition and adapter/host
-acceptance remain pending under the [runtime proposal](milestone-a-runtime-validation.md).
+Status: complete for the supported synthetic BIRD/BIRD/sink functional workflow
+and the explicitly authorized concurrent-work validation scope. Offline
+prerequisites, selected preparation, isolated execution, packaging/verification
+and the maintained simulated fresh-checkout smoke are implemented. The real
+functional attempt and early-timeout check passed; see the
+[validation record and limits](milestone-a-runtime-validation.md). Real
+`prepare --pull` acquisition, performance/hardware qualification and broader
+adapter/diagnostic checks remain unassessed.
 Depends on phase 0; first useful public release milestone.
 
 - Provide export, inspect/plan, prepare and run operations over the same recipe.
@@ -295,10 +299,11 @@ host purchases are authorized by this document. Public recipe examples must
 contain no private evidence paths or credentials. Artifact export must preserve
 original evidence and explicitly select what can be shared.
 
-Current handoff: milestone A implementation is ready for feedback; see its
-record below and the [runtime validation proposal](milestone-a-runtime-validation.md).
-Real adapter/host acceptance is pending. Review the workflow and returned package
-before selecting milestone B or authorizing runtime work.
+Current handoff: milestone A implementation and its authorized real functional
+validation are complete. Review the public walkthrough and both returned
+packages under the [validation record](milestone-a-runtime-validation.md). The
+explicit limits do not prevent workflow feedback; select a concrete local-fix
+investigation before starting milestone B. No new runtime scope is implied.
 
 Progress record: 2026-10-23, this plan records the operator's priorities. No
 engine behavior, measurement definitions or experiments changed. This document
@@ -504,3 +509,38 @@ Next handoff: review the corrected package and authorize, if desired, exactly
 one new functional attempt plus the conditional timeout trial, reusing existing
 images with no further downloads or builds. The original stop-on-failure rule
 prevents treating the prior authorization as permission for a benchmark retry.
+
+
+### Fresh end-to-end and early-timeout validation passed — 2026-10-23
+
+The operator separately authorized one fresh functional attempt with a 120-second
+worker budget and, only after success, one 0.01-second early-timeout attempt.
+Both ran exactly once at clean `73fed28`, reusing the existing pinned images with
+no downloads/builds. Ordinary concurrent work and root-backed disk storage
+remained explicitly accepted for functional use; no performance comparison or
+hardware qualification is claimed.
+
+The functional attempt completed, delivered all 100 prefixes under the existing
+completion contract, recorded zero tester errors/timeouts and returned a verified
+26-artifact package without offline repair. All 23 source regular files matched;
+the control socket was retained in work and explicitly recorded as omitted from
+portable evidence. The timeout attempt returned the expected `inconclusive` /
+exit 5 and verified 6-artifact partial package; all 4 source files matched and
+missing observations had explicit reasons. It stopped before generated
+configuration or observed container activity, so live-container timeout cleanup
+remains unqualified. Fake-runtime coverage of that path remains separate.
+
+Independent evidence review passed exact image/engine provenance, raw completion,
+status separation, socket handling and full copy coverage. All 71 baseline
+container identities/states/mount sets and all network IDs were unchanged; no
+worker/mpstat processes remained. New preservation checks verified 120 regular
+files, and all 143 entries in the previous sealed evidence still matched. Exact
+attempt IDs, paths, hashes and limitations are authoritative in the
+[runtime validation record](milestone-a-runtime-validation.md).
+
+Milestone A's implementation and authorized functional validation are complete
+and ready for workflow/package feedback. No further runtime attempts, qualified
+performance trials, registry acquisition, 9950 access, infrastructure changes,
+push or transfer are implied. Milestone B remains unstarted until a specific
+released-target/local-fix investigation is selected. No new approval is needed
+merely to inspect the delivered artifacts or provide feedback.

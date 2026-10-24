@@ -15,7 +15,7 @@ boundaries incrementally while keeping current CLI and output compatibility.
 
 | Document | Status | Purpose |
 | --- | --- | --- |
-| [Developer performance testing plan](plans/performance-testing-development-plan.md) | Milestone A implementation ready for feedback; runtime acceptance pending | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |
+| [Developer performance testing plan](plans/performance-testing-development-plan.md) | Milestone A implementation and authorized functional validation complete; ready for feedback | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |
 | [Architecture design](plans/architecture-design.md) | Supporting proposal; reconciled with shipped foundations | Recipe/result records, lifecycle boundaries, observations and compatibility strategy |
 | [Future testing workloads](plans/future-testing-workloads.md) | Deferred | Preserve policy, IPv6 and other workload ideas without scheduling their implementation |
 | [Policy engine design](plans/policy-testing-engine-design.md) | Deferred | Semantic policy model, conformance, adapter/generator/observer requirements and implementation risks |
@@ -23,11 +23,14 @@ boundaries incrementally while keeping current CLI and output compatibility.
 Phase 0 ships a Docker-free [recipe/result contract](recipes.md) and public
 fixtures. Phase 1a adds offline planning and explicit read-only prerequisite
 reports. Phase 1b adds selected-image preparation with explicit digest pulls;
-real acquisition validation remains deferred. Milestone A now implements isolated
-recipe execution, verified result packages,
-failure/stop/cleanup handling and a maintained simulated newcomer smoke. Real
-adapter and host acceptance remains pending under the
-[runtime validation proposal](plans/milestone-a-runtime-validation.md). Follow the
+real `prepare --pull` acquisition validation remains deferred. Milestone A
+implements isolated recipe execution, verified return packages, failure/stop/cleanup
+handling and a maintained simulated fresh-checkout smoke. Its supported synthetic
+BIRD/BIRD/sink functional attempt and early-timeout check passed on the development
+host under expressly permitted concurrent work. See the
+[validation record and limits](plans/milestone-a-runtime-validation.md); this
+establishes neither performance/hardware qualification nor live-container timeout
+cleanup qualification. Follow the
 plan's [feedback-driven execution policy](plans/performance-testing-development-plan.md#feedback-driven-execution):
 continue through internal commits until a usable milestone or a concrete operator
 decision is ready for review.

@@ -1,11 +1,11 @@
 # Milestone A runtime validation
 
-Prepared 2026-10-23. Status: first authorized functional attempt ran; packaging
-fix passed offline replay; fresh end-to-end and real timeout acceptance pending.
+Prepared 2026-10-23. Status: authorized end-to-end functional workflow and early
+timeout validation passed; performance/hardware qualification remains unassessed.
 This is the bounded validation decision for the
 [developer performance testing plan](performance-testing-development-plan.md).
-The implementation and fake workflow are ready for feedback; real adapter and
-hardware acceptance remain pending. No performance comparison is proposed.
+The supported synthetic BIRD/BIRD/sink workflow is ready for feedback with real
+return packages. No performance comparison or hardware qualification is claimed.
 
 ## Authorization and actual result — 2026-10-23
 
@@ -59,9 +59,10 @@ The original proposal below was executed at engine
   recipe/result still identify execution revision `7b2d502`, never the later
   packager as if it had executed the experiment.
 
-Functional route delivery and owned cleanup passed. The corrected packaging path
-passed offline replay of the real work. Fresh end-to-end recipe execution with
-the correction and real timeout acceptance remain pending. Raw CPU, memory and
+At this first-attempt handoff, functional route delivery and owned cleanup had
+passed, and corrected packaging had passed offline replay. Fresh end-to-end
+execution and the real timeout check remained pending until the separately
+authorized continuation recorded below. Raw CPU, memory and
 timing observations reflect authorized concurrent work and support no performance
 comparison, ranking or host qualification.
 
@@ -88,9 +89,10 @@ No work or evidence was deleted, uploaded, published or copied off-device. The
 local manifest is integrity evidence, not an independent backup or publisher
 authentication. `9950`, provisioning and pushing remained excluded.
 
-## Next runtime decision — no automatic retry
+## Separately authorized retry — executed 2026-10-23
 
-The original stop-on-failure rule remains in force. Proposed new authorization:
+The operator explicitly approved the following bounded continuation. The
+stop-on-failure rule remained in force:
 reuse the exact BIRD and now-existing sink IDs above, with no downloads/builds,
 and run exactly one fresh 120-second functional attempt at the final clean
 socket-fix revision. Permit ordinary concurrent work under the same functional-
@@ -99,7 +101,7 @@ verifies, run one separate 0.01-second timeout attempt. Stop at the first
 unexpected failure, preserve every attempt, and make no automatic retries.
 The same no-9950, no-provisioning, no-push and no-transfer limits apply.
 
-After that explicit authorization, export a new recipe outside the clean source
+Under that explicit authorization, export a new recipe outside the clean source
 checkout using the exact target/generator and observer image IDs recorded above
 and the full current engine revision. Use `/var/tmp/bgperf-recipe-a-retry.json`,
 new `retry-001` work/results names and `timeout-001` only after successful retry.
@@ -131,7 +133,79 @@ venv/bin/python recipes.py result-verify /var/tmp/bgperf-recipe-a-results/timeou
 
 The expected exits are 0 for successful functional completion and 5 for bounded
 timeout; verify both packages, exact images, statuses, evidence and resource
-cleanup. This proposal has not run and grants no new runtime authorization.
+cleanup. These two attempts have now run as recorded below; this completed
+authorization grants no further runtime attempts.
+
+## Fresh functional and early-timeout acceptance — 2026-10-23
+
+Both authorized attempts ran at clean execution revision
+`73fed28a94149f311b5562f1a0c42edd522d7ba7`. No images were downloaded or built;
+target and generator reused the exact BIRD image, and observer reused the exact
+sink image recorded above. The normal active-measurement and resource checks
+passed. Ordinary concurrent work and the explicit root-backed disk exception
+remained accepted for functional-only use.
+
+| Attempt | Worker budget | Experiment outcome | Reproduction outcome | Package verification |
+| --- | --- | --- | --- | --- |
+| `bgperf_recipe_0dfbeb22eb2a47aba5e3173155f68a1b` (`retry-001`) | 120 s maximum | `completed`, exit 0 | `reproduced` for experiment completion | 26 artifacts verified; all 23 source regular files matched |
+| `bgperf_recipe_3de3810e7cdb400097b55a554b9747e3` (`timeout-001`) | 0.01 s | `inconclusive`, exit 5, expected deadline | `inconclusive` | 6 artifacts verified; all 4 source regular files matched |
+
+The fresh functional attempt delivered 100 prefixes at both target-export and
+monitor witnesses, against the existing 99-prefix completion requirement, with
+zero tester errors/timeouts. Observed role image IDs, daemon versions and engine
+provenance matched the exported recipe. The BIRD control socket was retained in
+original work and explicitly omitted from portable file evidence through the
+checksummed omission record. The controller produced its complete return package
+without offline repair or manual status changes.
+
+The real deadline attempt preserved its recipe, prerequisites, controller log
+and runtime outcome. Events, provenance, samples and generated configuration are
+explicitly missing with reasons, never zero-valued substitutes. No configuration
+was generated and no container activity was observed before the early deadline.
+This establishes early worker timeout/status/partial-package behavior; it does
+not qualify cleanup after a timeout while containers are actively running.
+The latter path remains covered by fake-runtime tests, not a real qualification.
+
+Independent review found no blocking issues in raw completion, exact identities,
+status separation, socket omission, full copy coverage or resource preservation.
+Both before/after inventories retained all 71 baseline container identities,
+names, image references, states, mount sets, labels and network sets, with no new
+container IDs and unchanged network IDs. No attempt containers, worker or mpstat
+processes remained. The prior preservation manifest's 143 entries still matched.
+No broad cleanup, further retry, download, build, 9950 access, provisioning, push
+or evidence transfer occurred.
+
+The authorized newcomer workflow and early-timeout validation are complete for
+this supported subset on this host. Ordinary concurrent work excludes timing,
+CPU or memory comparisons. Host qualification, resource estimation, real
+`prepare --pull` acquisition, live-container timeout cleanup and broader adapter
+or diagnostic qualification remain unassessed, not inferred from this smoke.
+No broader runtime validation is required to review the delivered milestone A
+workflow; selecting such work or milestone B is a separate decision.
+
+### Additional preserved evidence
+
+The new evidence is separate from the earlier sealed record:
+
+- `/var/tmp/bgperf-recipe-a-validation-retry-001`: renewed authorization scope,
+  exact commands, host/capacity/image snapshots, before/after inventories,
+  resource/copy audit, acceptance summary and preservation tools.
+- `/var/tmp/bgperf-recipe-a-retry.json`: the new recipe pinned to `73fed28`;
+  both attempts reference canonical recipe SHA-256
+  `37561654bbd556a2c05e139e6d8cfaf905ec58169b3054ffe458c2f372bb3887`.
+- Original work: `/var/tmp/bgperf-recipe-a-work/retry-001` and
+  `/var/tmp/bgperf-recipe-a-work/timeout-001`.
+- Returned packages: `/var/tmp/bgperf-recipe-a-results/retry-001` and
+  `/var/tmp/bgperf-recipe-a-results/timeout-001`.
+
+The new `bgperf-recipe-a-validation-retry-001/SHA256SUMS`, relative to `/var/tmp`,
+verified 120 regular evidence/tool files, excluding the checksum manifest and its
+preservation report. Its SHA-256 is
+`24330b75fd01f7789c8d89c5a828db1d4f6d7913f35a39bc9dd73f3e91651822`.
+The one nonportable socket is explicitly listed in the preservation report.
+The original failed package, offline repair and earlier evidence remain unchanged.
+No evidence was deleted or moved off-device; these local checksums are not an
+independent backup.
 
 ## Original proposal (retained)
 

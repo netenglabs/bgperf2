@@ -110,7 +110,10 @@ before any probe.
 `checks_passed` describes only the listed observations at that instant. Workload
 resource estimates, foreign CPU qualification, runtime capabilities, hardware
 suitability and source/build reconstruction remain unknown or unassessed. It is
-not a readiness or performance-comparison verdict. Full adapter and hardware acceptance still needs the separately authorized runtime smoke.
+not a readiness or performance-comparison verdict. The supported synthetic
+BIRD/BIRD/sink functional workflow and early-timeout path have passed separately
+authorized real checks; see the [validation record and limits](plans/milestone-a-runtime-validation.md).
+Those checks establish neither hardware suitability nor performance comparability.
 Explicit execution is described below.
 The public fixture has synthetic image pins and a historical engine revision;
 its successful offline plan does not imply that it can pass a local check.

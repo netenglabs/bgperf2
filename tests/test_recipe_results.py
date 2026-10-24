@@ -203,3 +203,79 @@ def test_non_directory_work_root_is_refused(tmp_path, recipe):
         write_result_package(recipe, results_dir=tmp_path / 'result', workdir=work,
                              attempt_id='x', status='harness_failed', reason='bad root')
     assert not (tmp_path / 'result').exists()
+
+
+def test_runtime_socket_is_omitted_without_opening_or_contacting_it(tmp_path, recipe, monkeypatch):
+    import socket
+    import recipe_results
+
+    work = tmp_path / 'source'
+    work.mkdir()
+    control = work / 'bird.ctl'
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as endpoint:
+        endpoint.bind(str(control))
+        control.chmod(0)
+        original_open = recipe_results.os.open
+        def refuse_socket_open(path, *args, **kwargs):
+            assert str(path) != control.name, 'runtime endpoint must not be opened'
+            return original_open(path, *args, **kwargs)
+        monkeypatch.setattr(recipe_results.os, 'open', refuse_socket_open)
+        monkeypatch.setattr(socket.socket, 'connect', lambda *a, **k: pytest.fail('socket contacted'))
+        result = package(tmp_path, recipe)
+    assert result['status'] == 'completed'
+    assert result['reproduction']['outcome'] == 'reproduced'
+    assert control.is_socket()  # Original runtime work is retained unchanged.
+    assert not (tmp_path / 'result/work/bird.ctl').exists()
+    omissions = json.loads((tmp_path / 'result/collection-omissions.json').read_text())
+    assert omissions == {'omissions': [{
+        'path': 'work/bird.ctl', 'type': 'unix_socket',
+        'reason': 'Runtime Unix-domain sockets are not portable evidence files; not read or copied.'}]}
+    assert not (tmp_path / 'result/collection-errors.json').exists()
+    reference = next(item for item in result['artifacts'] if item['path'] == 'collection-omissions.json')
+    assert reference['kind'] == 'other'
+    assert reference['availability'] == 'present'
+    assert verify_result_package(tmp_path / 'result/result.json')['valid']
+
+
+def test_socket_omission_does_not_hide_symlink_fifo_or_read_failure(tmp_path, recipe, monkeypatch):
+    import socket
+    import recipe_results
+
+    work = tmp_path / 'source'
+    work.mkdir()
+    control = work / 'bird.ctl'
+    endpoint = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        endpoint.bind(str(control))
+        (work / 'socket-link').symlink_to(control)
+        os.mkfifo(work / 'pipe')
+        (work / 'unreadable.log').write_text('unreadable regular evidence')
+        original_open = recipe_results.os.open
+        def refuse_regular_read(path, *args, **kwargs):
+            if str(path) == 'unreadable.log':
+                raise PermissionError('regular artifact unreadable')
+            return original_open(path, *args, **kwargs)
+        monkeypatch.setattr(recipe_results.os, 'open', refuse_regular_read)
+        result = package(tmp_path, recipe)
+    finally:
+        endpoint.close()
+    assert result['status'] == 'harness_failed'
+    errors = json.loads((tmp_path / 'result/collection-errors.json').read_text())['errors']
+    assert len(errors) == 3
+    assert any('socket-link' in error for error in errors)
+    assert any('pipe' in error for error in errors)
+    assert any('regular artifact unreadable' in error for error in errors)
+    assert len(json.loads((tmp_path / 'result/collection-omissions.json').read_text())['omissions']) == 1
+    assert verify_result_package(tmp_path / 'result/result.json')['valid']
+
+
+def test_verification_still_refuses_socket_inserted_into_package(tmp_path, recipe):
+    import socket
+
+    package(tmp_path, recipe)
+    artifact = tmp_path / 'result/work/target.log'
+    artifact.unlink()
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as endpoint:
+        endpoint.bind(str(artifact))
+        with pytest.raises(recipes.ContractError, match='Unix-domain socket'):
+            verify_result_package(tmp_path / 'result/result.json')

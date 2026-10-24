@@ -24,6 +24,10 @@ def _json(value):
     return json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + '\n'
 
 
+class _RuntimeSocket(ContractError):
+    """A runtime endpoint has no portable file contents to collect."""
+
+
 @contextmanager
 def _regular_file(root, relative):
     """Refuse symlinks at every component, including an artifact's parents."""
@@ -36,6 +40,10 @@ def _regular_file(root, relative):
                             dir_fd=directory)
             os.close(directory)
             directory = child
+        # A BIRD control socket can be mode 000 and cannot be opened as a file.
+        # Inspect its type without following the leaf or contacting its endpoint.
+        if stat.S_ISSOCK(os.stat(parts[-1], dir_fd=directory, follow_symlinks=False).st_mode):
+            raise _RuntimeSocket(f'{relative}: runtime Unix-domain socket')
         fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
                      dir_fd=directory)
         with os.fdopen(fd, 'rb') as stream:
@@ -81,8 +89,9 @@ def write_result_package(recipe, *, results_dir, workdir, attempt_id, status,
     """Snapshot available work, retaining partial evidence on collection errors.
 
     Both roots must be private attempt directories owned by the caller. Existing
-    result files are preserved and included. Symlinks and nonregular work entries
-    are omitted with explicit collection errors, never dereferenced. ``artifacts``
+    result files are preserved and included. Runtime Unix-domain sockets are
+    listed as omissions without reading or copying them. Symlinks and other
+    nonregular work entries are collection errors, never dereferenced. ``artifacts``
     optionally maps relative package paths to a contract artifact kind.
     """
     validate_recipe(recipe)
@@ -105,10 +114,11 @@ def write_result_package(recipe, *, results_dir, workdir, attempt_id, status,
         if kind not in ARTIFACT_KINDS:
             raise ContractError(f'{path}: unknown artifact kind {kind}')
     results.mkdir(parents=True, exist_ok=True)
-    for reserved in ('recipe.json', 'result.json', 'SUMMARY.txt', 'collection-errors.json', 'work'):
+    for reserved in ('recipe.json', 'result.json', 'SUMMARY.txt', 'collection-errors.json',
+                     'collection-omissions.json', 'work'):
         if os.path.lexists(results / reserved):
             raise ContractError(f'{results / reserved}: package output already exists')
-    errors = []
+    errors, omissions = [], []
     (results / 'work').mkdir()
     if work.exists():
         for directory, dirs, files in os.walk(work, followlinks=False,
@@ -126,11 +136,16 @@ def write_result_package(recipe, *, results_dir, workdir, attempt_id, status,
                     target.parent.mkdir(parents=True, exist_ok=True)
                     with _regular_file(work, relative) as source, target.open('xb') as stream:
                         shutil.copyfileobj(source, stream, length=1024 * 1024)
+                except _RuntimeSocket:
+                    omissions.append({'path': 'work/' + relative, 'type': 'unix_socket',
+                                      'reason': 'Runtime Unix-domain sockets are not portable evidence files; not read or copied.'})
                 except (OSError, ContractError) as exc:
                     errors.append(f'{relative}: {exc}')
     else:
         errors.append('work directory unavailable; no work artifacts collected')
     _write(results / 'recipe.json', canonical_json(recipe) + '\n')
+    if omissions:
+        _write(results / 'collection-omissions.json', _json({'omissions': omissions}))
     if errors:
         _write(results / 'collection-errors.json', _json({'errors': errors}))
         status, exit_code = 'harness_failed', 3

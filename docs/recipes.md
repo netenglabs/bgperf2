@@ -234,7 +234,10 @@ inconclusive. No failed setup or missing measurement becomes a reproduced bug.
 The results directory contains `result.json`, `recipe.json`, `SUMMARY.txt` and a
 `work/` snapshot of available configurations, raw artifacts and controller logs.
 Each available file is checksummed; unavailable required artifact kinds and
-collection errors are explicit. Verification checks hashes, refuses unlisted or
+collection errors are explicit. Runtime Unix-domain sockets, such as BIRD control
+sockets, are omitted without opening or contacting them; their paths, types and
+reasons are recorded in checksummed `collection-omissions.json`. Other unsafe or
+unreadable artifacts remain collection failures. Verification checks hashes, refuses unlisted or
 unsafe files, and checks the canonical recipe binding. It does not authenticate a
 publisher or re-evaluate convergence.
 Review the package for local paths and other information before returning it to

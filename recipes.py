@@ -428,18 +428,51 @@ def main(argv=None):
     export.add_argument('--expected-outcome', choices=EXPECTED_OUTCOMES,
                         default='experiment_completed')
     export.add_argument('-o', '--output')
-    for name in ('validate', 'inspect', 'result-validate', 'result-verify', 'plan', 'check', 'prepare', 'run'):
+    for name in ('validate', 'inspect', 'result-validate', 'result-verify', 'plan', 'check',
+                 'prepare', 'run', 'target-image', 'target-validate', 'target-source-plan',
+                 'target-build', 'investigate', 'investigation-verify'):
         command = commands.add_parser(name)
         command.add_argument('document')
         if name in ('check', 'run'):
             command.add_argument('--workdir', required=True)
             command.add_argument('--results-dir', required=True)
+            command.add_argument('--target', help='strict target override/build identity JSON')
         if name == 'run':
             command.add_argument('--timeout', type=float, default=300,
                                  help='whole-attempt runtime deadline in seconds (default: 300)')
+            command.add_argument('--diagnostics', choices=('basic', 'none'), default='basic')
+        if name == 'target-image':
+            command.add_argument('--image', required=True)
+            command.add_argument('--label')
+            command.add_argument('--instrumentation', choices=('unknown', 'optimized', 'debug', 'asan', 'profiling'), default='unknown')
+            command.add_argument('-o', '--output')
+        if name == 'target-validate':
+            command.add_argument('--recipe', help='also verify canonical recipe binding')
+        if name == 'target-source-plan':
+            for flag in ('source', 'revision', 'toolchain-image', 'runtime-image'):
+                command.add_argument('--' + flag, required=True)
+            command.add_argument('--instrumentation', choices=('unknown', 'optimized', 'debug', 'asan', 'profiling'), default='debug')
+            command.add_argument('--cflags', default='-O0 -g')
+            command.add_argument('--configure-flag', action='append', default=[])
+            command.add_argument('--include-dirty', action='store_true')
+            command.add_argument('-o', '--output')
+        if name == 'target-build':
+            command.add_argument('--output-dir', required=True)
+            command.add_argument('--timeout', type=float, default=1200)
+        if name == 'investigate':
+            command.add_argument('--baseline-target', required=True)
+            command.add_argument('--candidate-target', required=True)
+            command.add_argument('--workdir', required=True)
+            command.add_argument('--results-dir', required=True)
+            command.add_argument('--timeout', type=float, default=300)
+            command.add_argument('--diagnostics', choices=('basic', 'none'), default='basic')
         if name == 'prepare':
             command.add_argument('--pull', action='store_true',
                                  help='explicitly acquire missing selected repository digests after disclosure')
+    report = commands.add_parser('investigation-report', help='verify and bundle an existing functional pair')
+    report.add_argument('--baseline', required=True)
+    report.add_argument('--candidate')
+    report.add_argument('--output-dir', required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == 'export':
@@ -452,15 +485,57 @@ def main(argv=None):
         elif args.command == 'result-verify':
             from recipe_results import verify_result_package
             _write_document(verify_result_package(args.document))
+        elif args.command == 'investigation-report':
+            from recipe_investigation import write_investigation_report
+            _write_document(write_investigation_report(baseline=args.baseline,
+                candidate=args.candidate, output_dir=args.output_dir))
+        elif args.command == 'investigation-verify':
+            from recipe_investigation import verify_investigation_report
+            _write_document(verify_investigation_report(args.document))
         else:
             document = read_document(args.document)
             if args.command == 'inspect':
                 _write_document(inspect_recipe(document))
+            elif args.command == 'target-image':
+                from recipe_targets import supplied_target
+                _write_document(supplied_target(document, args.image, label=args.label,
+                    instrumentation=args.instrumentation), args.output)
+            elif args.command == 'target-validate':
+                from recipe_targets import validate_target
+                validate_target(document, read_document(args.recipe) if args.recipe else None)
+                _write_document({'valid': True, 'schema': document['schema']})
+            elif args.command == 'target-source-plan':
+                from recipe_targets import plan_source_build
+                plan = plan_source_build(document, args.source, args.revision,
+                    toolchain_image=args.toolchain_image, runtime_image=args.runtime_image,
+                    instrumentation=args.instrumentation, cflags=args.cflags,
+                    include_dirty=args.include_dirty, configure_flags=args.configure_flag)
+                _write_document(plan, args.output)
+            elif args.command == 'target-build':
+                from recipe_targets import build_target
+                def disclose_build(plan):
+                    print(json.dumps(plan, indent=2, sort_keys=True), file=sys.stderr, flush=True)
+                _write_document(build_target(document, output_dir=args.output_dir,
+                    emit_disclosure=disclose_build, timeout=args.timeout))
+            elif args.command == 'investigate':
+                from recipe_investigation import run_investigation
+                result = run_investigation(document,
+                    baseline_target=read_document(args.baseline_target),
+                    candidate_target=read_document(args.candidate_target),
+                    workdir=args.workdir, results_dir=args.results_dir,
+                    timeout=args.timeout, diagnostics=args.diagnostics)
+                _write_document(result)
+                return result['exit_code']
             elif args.command == 'run':
                 validate_recipe(document)
                 from recipe_run import run_recipe
+                options = {}
+                if args.target:
+                    options['target'] = read_document(args.target)
+                if args.diagnostics != 'basic':
+                    options['diagnostics'] = args.diagnostics
                 result = run_recipe(document, workdir=args.workdir,
-                                    results_dir=args.results_dir, timeout=args.timeout)
+                                    results_dir=args.results_dir, timeout=args.timeout, **options)
                 _write_document(result)
                 return result['exit_code']
             elif args.command in ('plan', 'check', 'prepare'):
@@ -479,9 +554,10 @@ def main(argv=None):
                     report = prepare_recipe(document, pull=args.pull, emit_disclosure=disclose)
                 else:
                     from recipe_preflight import check_recipe, plan_recipe
+                    options = {'target': read_document(args.target)} if args.command == 'check' and args.target else {}
                     report = (plan_recipe(document) if args.command == 'plan' else
                               check_recipe(document, workdir=args.workdir,
-                                           results_dir=args.results_dir))
+                                           results_dir=args.results_dir, **options))
                 _write_document(report)
                 return 2 if report['status'] == 'refused' else 0
             elif args.command == 'result-validate':

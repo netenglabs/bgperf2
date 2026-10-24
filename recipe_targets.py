@@ -314,6 +314,7 @@ def plan_source_build(recipe, source_root, revision, *, toolchain_image, runtime
             'limits': ['Only the explicit source checkout is trusted. Its configure/build code executes inside the selected Docker builder.',
                        'Source planning refuses Git clean/process filter configuration before comparing the work tree.',
                        'Source planning requires a complete nonsparse local Git checkout without hidden index flags; partial-clone/promisor configuration and lazy object acquisition are unsupported.',
+                       'Only the local legacy Docker builder is supported: DOCKER_BUILDKIT=0 and BUILDX_* settings are removed. Unavailable legacy support fails without a Buildx/remote-builder fallback.',
                        'No package installation, Git clone, registry pull or source checkout modification is performed.',
                        'Immutable base images and source hashes do not prove hermetic builds or a reconstructible binary.',
                        'Compiler/linker flags are requested build configuration; trusted source may override them. Build commands remain in build.log.',
@@ -411,6 +412,11 @@ def build_target(plan, *, output_dir, emit_disclosure, timeout=1200, command=Non
     env, host, ready = runtime.runtime_prerequisites(report, plan['recipe'])
     if not ready or report['status'] == 'refused':
         raise recipes.ContractError('Build prerequisites refused: ' + _json(report))
+    # Buildx can route the context to a selected builder independently of a
+    # local --host endpoint. This fixed recipe deliberately uses the local
+    # legacy builder and fails if it is unavailable; it never retries remotely.
+    env = {key: value for key, value in env.items() if not key.startswith('BUILDX_')}
+    env['DOCKER_BUILDKIT'] = '0'
     bases = {role: runtime.inspect_image(plan[role], host, env) for role in ('toolchain_image', 'runtime_image')}
     tag = 'bgperf/bird-local:' + uuid.uuid4().hex
     inspect = ['docker', '--host', host, 'image', 'inspect', tag]

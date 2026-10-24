@@ -68,6 +68,12 @@ class SimulatedHost:
         raise AssertionError(f'Smoke forbids unmodelled command: {argv!r}')
 
     def patch(self, stack):
+        import recipe_diagnostics
+        stack.enter_context(patch.object(recipe_diagnostics, 'host_snapshot', lambda: {
+            'schema': 'bgperf2/host/v1alpha1', 'hostname': 'SIMULATED host',
+            'kernel_release': 'SIMULATED kernel', 'architecture': 'SIMULATED architecture',
+            'boot_id': 'SIMULATED same boot', 'unavailable': {},
+            'scope': 'SIMULATED host identity; no host qualification.'}))
         stack.enter_context(patch.object(preflight, 'run_command', self.command))
         stack.enter_context(patch.object(preflight, 'sys', SimpleNamespace(version_info=(3, 14, 0))))
         stack.enter_context(patch.object(preflight.platform, 'system', lambda: 'Linux'))

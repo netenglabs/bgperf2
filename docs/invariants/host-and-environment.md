@@ -15,7 +15,13 @@ plan disclosure immediately before every explicit pull. It creates no runtime
 containers, networks, volumes or attempt directories. A local acquisition plan
 does not authorize acquisition without `--pull`, or qualify measurement idleness.
 
-**Read this before editing:** `recipe_preflight.py` (read-only prerequisites and shared probes), `recipe_prepare.py` (selected image preparation), `run_lifecycle.py` (run orchestration), `contention.py`, `role_cpu.py`, `bgperf2.py` (`warn_if_machine_is_busy()`, `controller_foreign_cpu()`, `controller_role_cpu()`, `role_cpu_members()`, `warn_if_log_dir_is_in_ram()`, `warn_if_log_dir_is_short_on_space()`, the controller threads)
+Explicit recipe runs additionally use `recipe_run.py`, `recipe_worker.py` and
+`recipe_diagnostics.py` for scoped diagnostics. Their stage records do not
+redefine measurement clocks, optional probes have uncalibrated overhead and
+missing memory remains unknown. The [investigation guide](../investigations.md)
+owns the precise accounting, bounds and partial-evidence meanings.
+
+**Read this before editing:** `recipe_run.py` (scoped recipe controller), `recipe_worker.py` (scoped recipe worker), `recipe_diagnostics.py` (owned diagnostic observations), `recipe_preflight.py` (read-only prerequisites and shared probes), `recipe_prepare.py` (selected image preparation), `run_lifecycle.py` (run orchestration), `contention.py`, `role_cpu.py`, `bgperf2.py` (`warn_if_machine_is_busy()`, `controller_foreign_cpu()`, `controller_role_cpu()`, `role_cpu_members()`, `warn_if_log_dir_is_in_ram()`, `warn_if_log_dir_is_short_on_space()`, the controller threads)
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 

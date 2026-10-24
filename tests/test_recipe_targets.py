@@ -450,3 +450,29 @@ def test_source_fixtures_and_inspection_cannot_inherit_callers_git_context(tmp_p
     assert git(outer, 'rev-parse', 'HEAD') == head
     assert {name: (outer / '.git' / name).read_bytes() for name in before} == before
     assert (outer / 'sentinel').read_text() == 'caller work must remain unchanged'
+
+
+def test_source_build_forces_local_legacy_builder_despite_builder_overrides(recipe, source, tmp_path, build_host, monkeypatch):
+    calls,state,fake_build=build_host
+    document=plan(recipe,source)
+    state['snapshot']=document['source']['snapshot_sha256']
+    original=runtime.runtime_prerequisites
+    def prerequisites(*args,**kwargs):
+        env,host,ready=original(*args,**kwargs)
+        env=dict(env,BUILDX_BUILDER='remote-builder',BUILDX_CONFIG='/remote-config',
+                 BUILDX_METADATA_WARNINGS='true',DOCKER_BUILDKIT='1')
+        return env,host,ready
+    monkeypatch.setattr(runtime,'runtime_prerequisites',prerequisites)
+    observed=[]
+    def build(argv,**kwargs):
+        observed.append((list(map(str,argv)),dict(kwargs['env'])))
+        return fake_build(argv,**kwargs)
+    targets.build_target(document,output_dir=tmp_path/'local-only',
+                         emit_disclosure=lambda _:None,command=build)
+    argv,env=observed[0]
+    assert env['DOCKER_BUILDKIT']=='0'
+    assert not any(key.startswith('BUILDX_') for key in env)
+    assert argv[:4]==['docker','--host','unix:///var/run/docker.sock','build']
+    assert '--pull=false' in argv and '--network=none' in argv
+    assert not any('remote-builder' in argument or argument in ('--builder','--pull','--push') for argument in argv)
+    assert sum(item[0]=='build' for item in calls)==1

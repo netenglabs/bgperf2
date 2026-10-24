@@ -2,7 +2,13 @@
 
 Recording which build produced a result, and the one check the Docker-free test suite cannot make.
 
-**Read this before editing:** `recipe_preflight.py` (exact immutable image inspection), `recipe_prepare.py` (selected digest acquisition), `run_lifecycle.py` (run orchestration), `base.py` (`Container.version_string()`, `collect_provenance()`,
+Target substitutions and trusted local-source builds in `recipe_targets.py`
+keep requested and observed identities distinct, preserve source checkouts and
+do not turn unknown binary/build facts into reconstruction claims. The
+[investigation guide](../investigations.md) owns their versioned contract and
+source/build trust boundary.
+
+**Read this before editing:** `recipe_targets.py` (target/build identity and local source), `recipe_preflight.py` (exact immutable image inspection), `recipe_prepare.py` (selected digest acquisition), `run_lifecycle.py` (run orchestration), `base.py` (`Container.version_string()`, `collect_provenance()`,
 `RECIPE_LABEL_KEY`, `recipe_hash()`, `img_recipe_label()`, `Container.current_recipe_hash()`,
 `Container.override_buildargs()`, `Container.recipe_status()`), `bgperf2.py` (`verify`, `doctor`,
 `images`, `prepare`, `checkable_versions()`), and every module carrying a version command: `bird.py`,

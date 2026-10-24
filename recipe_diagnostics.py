@@ -7,6 +7,7 @@ from pathlib import Path
 import selectors
 import signal
 import subprocess
+import sys
 import time
 
 import recipes
@@ -17,6 +18,54 @@ MAX_BYTES = 64 * 1024
 MAX_CONTAINERS = 128
 COLLECTION_SECONDS = 20
 LIVE_SAMPLE_LIMIT = 128
+
+
+def host_snapshot():
+    """Read minimal host identity before execution, without Docker or subprocesses."""
+    result = {'schema': 'bgperf2/host/v1alpha1', 'hostname': None, 'operating_system': None,
+              'kernel_release': None, 'kernel_version': None, 'architecture': None,
+              'python_version': list(sys.version_info[:3]),
+              'python_implementation': sys.implementation.name,
+              'cpu_count': None, 'cpu_affinity': None, 'cpu_model': None,
+              'boot_id': None, 'unavailable': {},
+              'scope': 'Read-only identity/capacity observations; not host qualification or performance comparability.'}
+    try:
+        identity = os.uname()
+        result.update(hostname=identity.nodename, operating_system=identity.sysname,
+                      kernel_release=identity.release, kernel_version=identity.version,
+                      architecture=identity.machine)
+    except (OSError, AttributeError) as exc:
+        result['unavailable']['uname'] = f'{type(exc).__name__}: {exc}'
+    try:
+        result['cpu_count'] = os.cpu_count()
+        if result['cpu_count'] is None:
+            result['unavailable']['cpu_count'] = 'Logical CPU count unavailable.'
+    except OSError as exc:
+        result['unavailable']['cpu_count'] = str(exc)
+    try:
+        result['cpu_affinity'] = sorted(os.sched_getaffinity(0))
+    except (OSError, AttributeError) as exc:
+        result['unavailable']['cpu_affinity'] = f'{type(exc).__name__}: {exc}'
+    try:
+        with Path('/proc/cpuinfo').open() as source:
+            text = source.read(64 * 1024)
+        for line in text.splitlines():
+            if ':' in line and line.split(':', 1)[0].strip() in ('model name', 'Hardware'):
+                result['cpu_model'] = line.split(':', 1)[1].strip() or None
+                break
+        if result['cpu_model'] is None:
+            result['unavailable']['cpu_model'] = 'No CPU model in the first 64 KiB of /proc/cpuinfo.'
+    except OSError as exc:
+        result['unavailable']['cpu_model'] = str(exc)
+    try:
+        with Path('/proc/sys/kernel/random/boot_id').open() as source:
+            value = source.read(128).strip()
+        if not re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', value):
+            raise ValueError('Malformed boot ID; persistent machine identifiers are not consulted.')
+        result['boot_id'] = value
+    except (OSError, ValueError) as exc:
+        result['unavailable']['boot_id'] = str(exc)
+    return result
 
 
 def write_json(path, document):

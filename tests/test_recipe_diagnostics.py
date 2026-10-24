@@ -384,3 +384,64 @@ def test_early_bird_startup_exit_is_actionable_without_attesting_crash():
     assert 'startup command ended' in result['reason']
     assert result['reproduction']['outcome'] == 'inconclusive'
     assert state['samples'][-1]['daemon_exit_code'] == 127
+
+
+def test_host_snapshot_has_explicit_identity_without_subprocess_or_privileged_ids(monkeypatch):
+    import io
+    import sys
+    monkeypatch.setattr(diagnostics.os, 'uname', lambda: SimpleNamespace(
+        nodename='controlled-host', sysname='Linux', release='fixture-kernel',
+        version='fixture build', machine='x86_64'))
+    monkeypatch.setattr(diagnostics.os, 'cpu_count', lambda: 8)
+    monkeypatch.setattr(diagnostics.os, 'sched_getaffinity', lambda pid: {2, 3})
+    reads = []
+    def read(path, *args, **kwargs):
+        reads.append(str(path))
+        if str(path) == '/proc/cpuinfo':
+            return io.StringIO('model name\t: Controlled CPU\n')
+        if str(path) == '/proc/sys/kernel/random/boot_id':
+            return io.StringIO('11111111-2222-3333-4444-555555555555\n')
+        pytest.fail('unexpected host file: ' + str(path))
+    monkeypatch.setattr(Path, 'open', read)
+    monkeypatch.setattr(diagnostics.subprocess, 'Popen', lambda *a, **k: pytest.fail('subprocess'))
+    result = diagnostics.host_snapshot()
+    assert result['hostname'] == 'controlled-host'
+    assert result['kernel_release'] == 'fixture-kernel'
+    assert result['architecture'] == 'x86_64'
+    assert result['cpu_count'] == 8 and result['cpu_affinity'] == [2, 3]
+    assert result['cpu_model'] == 'Controlled CPU'
+    assert result['boot_id'] == '11111111-2222-3333-4444-555555555555'
+    assert result['python_version'] == list(sys.version_info[:3])
+    assert result['unavailable'] == {}
+    assert set(reads) == {'/proc/cpuinfo', '/proc/sys/kernel/random/boot_id'}
+    assert 'environment' not in result and 'machine_id' not in result
+
+
+def test_host_snapshot_preserves_unknowns_without_substitution(monkeypatch):
+    def unavailable(*args, **kwargs):
+        raise OSError('fixture unavailable')
+    monkeypatch.setattr(diagnostics.os, 'uname', unavailable)
+    monkeypatch.setattr(diagnostics.os, 'cpu_count', lambda: None)
+    monkeypatch.setattr(diagnostics.os, 'sched_getaffinity', unavailable)
+    monkeypatch.setattr(Path, 'open', unavailable)
+    result = diagnostics.host_snapshot()
+    assert all(result[key] is None for key in ('hostname', 'operating_system', 'kernel_release',
+               'kernel_version', 'architecture', 'cpu_count', 'cpu_affinity', 'cpu_model', 'boot_id'))
+    assert set(result['unavailable']) == {'uname', 'cpu_count', 'cpu_affinity', 'cpu_model', 'boot_id'}
+
+
+def test_host_identity_precedes_worker_and_survives_failure(tmp_path, monkeypatch):
+    snapshot = {'schema': 'bgperf2/host/v1alpha1', 'hostname': 'controlled-host',
+                'kernel_release': 'fixture-kernel', 'architecture': 'fixture-arch'}
+    monkeypatch.setattr(diagnostics, 'host_snapshot', lambda: snapshot)
+    class Backend:
+        def execute(self, document, work, attempt, timeout):
+            assert json.loads((work / 'host.json').read_text()) == snapshot
+            (work / 'partial.log').write_text('retained failure')
+            raise OSError('controlled collector failure')
+    result = recipe_run.run_recipe(recipe(), workdir=tmp_path / 'work', results_dir=tmp_path / 'results',
+        backend=Backend(), check=lambda *a, **k: {'status': 'checks_passed'})
+    assert result['status'] == 'harness_failed'
+    assert json.loads((tmp_path / 'results/work/host.json').read_text()) == snapshot
+    host = next(item for item in result['artifacts'] if item['path'] == 'work/host.json')
+    assert host['availability'] == 'present' and host['sha256']

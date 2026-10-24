@@ -8,10 +8,17 @@ repository digests. Explicit `run` executes the selected supported recipe and
 returns a verified local result package. Existing
 `bench`, `batch`, CSV, event and provenance formats retain their current behavior.
 
+For baseline/local-fix target overrides, trusted source builds, bounded diagnostics
+and verified investigation reports, follow the [local-fix guide](investigations.md).
+The original recipe remains frozen while an external target identity selects
+only its target image.
+
 Use the locked Python environment described in [the environment guide](python-environment.md).
 The standalone entry point is `venv/bin/python recipes.py`; importing `recipes`
 or `batch_cells` does not initialize the engine or Docker client. Paths supplied
-to this entry point resolve from the caller's working directory.
+to this entry point resolve from the caller's working directory. Keep generated
+recipe/target/plan JSON outside the engine checkout so its clean-revision check
+remains satisfied; create the separate artifact directory before exporting.
 
 ## Export one cell
 
@@ -47,7 +54,7 @@ venv/bin/python recipes.py export \
   --generator-image sha256:GENERATOR_64_HEX_IMAGE_ID \
   --observer-image sha256:OBSERVER_64_HEX_IMAGE_ID \
   --question 'Does the target complete this synthetic workload?' \
-  --output recipe.json
+  --output /absolute/artifacts/recipe.json
 ```
 
 Replace every uppercase placeholder with a real value. Role images accept a full
@@ -70,7 +77,7 @@ host, create the locked environment using `python3.14 scripts/bootstrap.py`, the
 
 ```sh
 venv/bin/python recipes.py plan examples/recipes/synthetic-ipv4.recipe.json
-venv/bin/python recipes.py check recipe.json \
+venv/bin/python recipes.py check /absolute/artifacts/recipe.json \
   --workdir /var/tmp/bgperf-attempt-001 \
   --results-dir /var/tmp/bgperf-results-001
 ```
@@ -125,8 +132,8 @@ the recipe's selected digest references and the publisher you trust before
 authorizing acquisition:
 
 ```sh
-venv/bin/python recipes.py prepare recipe.json
-venv/bin/python recipes.py prepare recipe.json --pull
+venv/bin/python recipes.py prepare /absolute/artifacts/recipe.json
+venv/bin/python recipes.py prepare /absolute/artifacts/recipe.json --pull
 ```
 
 Unlike the fully offline `plan`, `prepare` probes the local prerequisites and
@@ -187,16 +194,16 @@ host before execution. This initial adapter is synthetic IPv4 BIRD/BIRD/sink.
 The public fixture's fake image pins cannot run.
 
 ```sh
-venv/bin/python recipes.py validate recipe.json
-venv/bin/python recipes.py plan recipe.json
-venv/bin/python recipes.py prepare recipe.json
+venv/bin/python recipes.py validate /absolute/artifacts/recipe.json
+venv/bin/python recipes.py plan /absolute/artifacts/recipe.json
+venv/bin/python recipes.py prepare /absolute/artifacts/recipe.json
 # Only if acquisition is intended and approved:
-venv/bin/python recipes.py prepare recipe.json --pull
-venv/bin/python recipes.py check recipe.json \
+venv/bin/python recipes.py prepare /absolute/artifacts/recipe.json --pull
+venv/bin/python recipes.py check /absolute/artifacts/recipe.json \
   --workdir /absolute/disk/work/attempt-001 \
   --results-dir /absolute/disk/results/attempt-001
 # Explicit experiment execution; no pulls or builds occur here:
-venv/bin/python recipes.py run recipe.json --timeout 300 \
+venv/bin/python recipes.py run /absolute/artifacts/recipe.json --timeout 300 \
   --workdir /absolute/disk/work/attempt-001 \
   --results-dir /absolute/disk/results/attempt-001
 venv/bin/python recipes.py result-verify /absolute/disk/results/attempt-001/result.json
@@ -208,6 +215,11 @@ checkout. A refusal returns an actionable JSON prerequisite report on stdout and
 exit 2 without starting a worker. Choose new paths for every retry; earlier work
 and evidence are retained. Check the command's exit status and `status` rather
 than treating the existence of `result.json` as success.
+
+`run --target TARGET.json` binds a strict external target identity to this
+recipe. Optional `--diagnostics basic` (default) or `none` selects the supported
+diagnostic probes; see the investigation guide for their overhead and accounting.
+Additional artifacts are recorded using the existing result envelope.
 
 The controller holds an advisory lock across checks, execution and cleanup for
 cooperating recipe attempts by the same user. The existing active-measurement
@@ -229,7 +241,9 @@ can prevent packaging or cleanup; there is no automatic retry or recovery claim.
 
 An existing engine stats row determines `completed` (0) or
 `experiment_failed` (4); a missing row is inconclusive and worker exceptions are
-harness failures. A completion witness can decide the `experiment_completed`
+harness failures. Bounded diagnostic collection/cleanup failures report harness
+failure while retaining available evidence and any supported reproduction
+witness. A completion witness can decide the `experiment_completed`
 reproduction predicate. A completed run with `target_crash` intent is
 `not_reproduced`; a failed run without a specific supported crash witness remains
 inconclusive. No failed setup or missing measurement becomes a reproduced bug.

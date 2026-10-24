@@ -214,6 +214,8 @@ def run_recipe(document, *, workdir, results_dir, timeout=300, target=None,
             raise recipes.ContractError('Attempt destinations must not already exist')
         work.mkdir(parents=True, exist_ok=False)
         _write(work / 'prerequisites.json', report)
+        from recipe_diagnostics import host_snapshot
+        _write(work / 'host.json', host_snapshot())
         _write(work / 'target.json', target)
         _write(work / 'target-selection.json', {
             'schema': 'bgperf2/target-selection/v1alpha1',

@@ -17,6 +17,7 @@ rewritten.
 * [Debugging](#debugging)
 * [Roadmap and development plans](docs/roadmap.md)
 * [Portable recipe and result contracts](docs/recipes.md) (export, prepare, isolated execution and verified result packages)
+* [Investigate a local BIRD fix](docs/investigations.md) (target/build identities, diagnostics and baseline/fix reports)
 * [How bgperf2 works](docs/how_bgperf_works.md) ·
   [Benchmarking a remote target](docs/benchmark_remote_target.md) ·
   [MRT injection](docs/mrt.md) ·
@@ -94,7 +95,11 @@ CLI; it never acquires images or starts containers. It supports a small syntheti
 IPv4 recipe contract. `prepare RECIPE` reports a local image acquisition plan;
 only `prepare RECIPE --pull` can acquire missing selected repository digests.
 `run` explicitly executes the selected recipe with a bounded worker and returns
-a local result package; `result-verify` checks its files and recipe binding. See the [recipe guide and public fixture](docs/recipes.md).
+a local result package; `result-verify` checks its files and recipe binding.
+`target-image`, `target-source-plan` and explicit `target-build` supply a target
+override without changing recipe controls. `investigate` records a serial
+baseline/fix pair with diagnostics and a verified human/JSON report. See the
+[recipe guide](docs/recipes.md) and [local-fix walkthrough](docs/investigations.md).
 
 ## <a name="first-run"></a>Your first run
 

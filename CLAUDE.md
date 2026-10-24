@@ -144,6 +144,15 @@ supports only the documented synthetic IPv4 BIRD/BIRD/sink subset; recipe
 execution requires the explicit `run` operation. Declared identities are not verified images or
 host qualification, and experiment status is separate from reproduction outcome.
 
+`recipe_assertions.py` evaluates named observable correctness witnesses against
+verified packages. `recipe_comparison.py` freezes and executes explicit serial
+repeated comparisons through the recipe runner; `recipe_comparison_report.py`
+bundles and independently reconstructs descriptive statistics, confounders and
+prose. Read `docs/comparisons.md` before changing these contracts. Comparison
+planning and reporting are offline, and calibrated regression policy remains
+disabled pending a separately selected calibration. `scripts/comparison_smoke.py`
+exercises the public workflow using strictly simulated runtimes.
+
 ### Pure batch cells
 
 `batch_cells.py` owns the version-preserving YAML loader, target-version

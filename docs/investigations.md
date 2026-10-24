@@ -7,6 +7,11 @@ fixed. The initial supported adapter is synthetic IPv4 BIRD/BIRD/sink. This is
 one functional investigation; statistical performance comparison remains a later
 milestone.
 
+For repeated target comparisons and named observable correctness checks, follow
+the [comparison guide](comparisons.md). The single-pair workflow here preserves
+its functional meaning; repeated descriptive statistics do not enable calibrated
+performance or universal bug-fix verdicts.
+
 Use the existing locked Python 3.14 environment. All paths resolve from the
 caller's directory. Recipe, target and plan JSON files, work, build output and results must be
 explicitly selected outside source checkouts. Create a separate artifact

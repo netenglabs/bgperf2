@@ -221,6 +221,14 @@ recipe. Optional `--diagnostics basic` (default) or `none` selects the supported
 diagnostic probes; see the investigation guide for their overhead and accounting.
 Additional artifacts are recorded using the existing result envelope.
 
+The [comparison guide](comparisons.md) adds separately exported, recipe-bound
+observable assertions and repeated target comparisons. It retains these recipe
+and result envelopes, names exact count agreement separately from convergence,
+and leaves calibrated performance policy disabled. New executions retain
+`work/execution-budget.json` with the finite worker timeout and observed worker
+elapsed interval, excluding final diagnostics and cleanup. Old evidence without
+this record cannot establish deadline-dependent assertion success.
+
 The controller holds an advisory lock across checks, execution and cleanup for
 cooperating recipe attempts by the same user. The existing active-measurement
 guard still runs. This does not lock out arbitrary Docker users or qualify host

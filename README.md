@@ -756,6 +756,12 @@ end-to-end check.
 
 ## Development
 
+Use the [comparison walkthrough](docs/comparisons.md) for explicit observable
+assertions and repeated serial comparisons of two BIRD target selections, with
+portable verified reports. The maintained Docker-free demo includes controlled
+differences, noise and inconclusive evidence. Calibrated regression verdicts
+remain disabled pending separately authorized calibration.
+
 The [public roadmap](docs/roadmap.md) indexes current priorities, detailed plans
 and deferred workload ideas. Engine plans and implementation decisions live in
 this repository. Proposed capabilities are labelled separately from supported

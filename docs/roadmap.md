@@ -15,7 +15,7 @@ boundaries incrementally while keeping current CLI and output compatibility.
 
 | Document | Status | Purpose |
 | --- | --- | --- |
-| [Developer performance testing plan](plans/performance-testing-development-plan.md) | Milestone A functionally validated; milestone B implementation and controlled reports ready for feedback | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |
+| [Developer performance testing plan](plans/performance-testing-development-plan.md) | A and supplied-image B functionally validated; C comparison workflow independently reviewed, calibration deferred | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |
 | [Architecture design](plans/architecture-design.md) | Supporting proposal; reconciled with shipped foundations | Recipe/result records, lifecycle boundaries, observations and compatibility strategy |
 | [Future testing workloads](plans/future-testing-workloads.md) | Deferred | Preserve policy, IPv6 and other workload ideas without scheduling their implementation |
 | [Policy engine design](plans/policy-testing-engine-design.md) | Deferred | Semantic policy model, conformance, adapter/generator/observer requirements and implementation risks |
@@ -41,9 +41,14 @@ controlled smoke supply a complete feedback workflow; real source-build and broa
 diagnostic qualification remain deferred. Its explicitly authorized supplied-image
 BIRD 2.19.2/3.3.2 functional pair passed with basic diagnostics, verified packages
 and independently reviewed cleanup; see the
-[validation record and limits](plans/milestone-b-runtime-validation.md). Statistical
-baseline/candidate comparisons remain milestone C; no calibration policy ships
-with this functional investigation.
+[validation record and limits](plans/milestone-b-runtime-validation.md).
+Baseline/candidate comparison now has a separate descriptive milestone C
+workflow: [named assertions, repeated serial plans and verified reports](comparisons.md)
+retain memory/CPU/timing observations, variation, failures and confounders.
+Controlled examples demonstrate known differences, noise and inconclusive
+evidence. Calibrated regression policy remains disabled pending the separately
+selected [pilot and effect-size decisions](plans/milestone-c-calibration-proposal.md).
+Milestone D bisection remains unstarted.
 
 The architecture proposal is supporting material, not a second execution order.
 New policy semantics, IPv6 and protocol/topology expansion remain deferred until

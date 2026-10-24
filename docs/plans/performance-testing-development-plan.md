@@ -1,6 +1,6 @@
 # bgperf2 developer performance testing plan
 
-Created 2026-10-23. Status: phase 0 complete; milestone A implementation and authorized functional validation complete; ready for feedback.
+Created 2026-10-23. Status: milestone A functionally validated; milestone B implementation and controlled investigation workflow ready for feedback. Real B runtime/source-build qualification remains deferred.
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
 The operator authorized phase 0, phase 1a–b prerequisites/preparation and complete
@@ -78,7 +78,7 @@ adapter acceptance checks are deferred is not fully accepted.
 | Execution milestone | Complete before the feedback handoff | Operator feedback or decision |
 | --- | --- | --- |
 | A. Usable newcomer reproduction workflow — functionally validated; ready for feedback | Finish phase 1: run one supported recipe through the existing runtime with exact role identities, isolated attempts, result/artifact production and verification, actionable failures, public instructions and a maintained fresh-checkout smoke entry point. Include the timeout, interruption, owned-resource cleanup and partial-result handling needed for this workflow, plus the existing completion/reproduction outcomes. Exercise the complete workflow with fake runtimes and review it end to end. | Review the actual CLI walkthrough and returned result package. Present an exact, bounded real-image/qualified-host smoke proposal for authorization. Select the next daemon or concrete bug when that choice affects the following milestone. |
-| B. Test and diagnose a local fix | Complete phases 2–3 and the existing-workload assertions needed from phase 5: supplied-image/local-source target overrides, recorded build differences, useful crash/memory diagnostics and preserved partial evidence. Deliver one coherent baseline/fix investigation using controlled fixtures and the selected adapter. Keep generator, observer and workload identities fixed. | Review the reproduction/fix report and diagnostic usefulness. Decide any remaining source-build trust, instrumentation or adapter choices that affect real validation. |
+| B. Test and diagnose a local fix — implementation ready for feedback | Complete phases 2–3 and the existing-workload assertions needed from phase 5: supplied-image/local-source target overrides, recorded build differences, useful crash/memory diagnostics and preserved partial evidence. Deliver one coherent baseline/fix investigation using controlled fixtures and the selected adapter. Keep generator, observer and workload identities fixed. | Review the reproduction/fix report and diagnostic usefulness. Decide any remaining source-build trust, instrumentation or adapter choices that affect real validation. |
 | C. Trustworthy baseline/candidate comparison | Complete phases 4–5: repeated/interleaved comparisons, explicit existing-workload correctness assertions, separate memory/CPU/timing results, missing/failed attempts and confounders, machine-readable output and a useful human report. Include controlled differences, noise and inconclusive examples. | Review comparison outputs and a concrete calibration proposal. Select acceptable effect sizes, measurement budget and any regression policy before calibrated performance verdicts are enabled. |
 | D. Automated regression localization | Complete phase 6 for supported deterministic predicates: bounded revision search, identity-based build caching, resume, skipped/ambiguous revisions and confirmation evidence. Keep performance bisection conditional on milestone C's calibration. | Review the resulting revision boundary and evidence; decide whether to prioritize broader daemon support, calibrated performance bisection or the separately deferred minimization work. |
 
@@ -166,7 +166,10 @@ actionable diagnostic, not a partially successful benchmark.
 
 ### 2. Make testing local fixes routine
 
-Status: planned. Depends on phase 1.
+Status: implemented locally for BIRD with controlled fixtures. The supplied-image
+and explicit local-source paths, identity records and investigation CLI are
+reviewed and tested. Real source-build/adapter qualification remains deferred to
+the [milestone B proposal](milestone-b-runtime-validation.md). Depends on phase 1.
 
 - Support a target override using a supplied image or an explicitly selected
   source checkout/commit and supported build recipe. Existing image overrides
@@ -187,7 +190,11 @@ real build/adapter qualification is explicitly selected and recorded.
 
 ### 3. Make failures and memory behavior diagnosable
 
-Status: planned. Depends on phases 0–1; can proceed alongside phase 2.
+Status: implemented locally for the supported BIRD recipe workflow. Scoped
+stages, optional diagnostics, host/build identities, memory accounting and
+partial evidence have fake-runtime coverage; real diagnostic qualification
+remains deferred. See the [public guide](../investigations.md) and
+[proposal](milestone-b-runtime-validation.md). Depends on phases 0–1.
 
 - Add bounded lifecycle stages and explicit failure paths for setup, session
   establishment, observation, generator failure, target failure and collection.
@@ -299,11 +306,12 @@ host purchases are authorized by this document. Public recipe examples must
 contain no private evidence paths or credentials. Artifact export must preserve
 original evidence and explicitly select what can be shared.
 
-Current handoff: milestone A implementation and its authorized real functional
-validation are complete. Review the public walkthrough and both returned
-packages under the [validation record](milestone-a-runtime-validation.md). The
-explicit limits do not prevent workflow feedback; select a concrete local-fix
-investigation before starting milestone B. No new runtime scope is implied.
+Current handoff: milestone B's supported BIRD investigation workflow is ready
+for feedback. Review the [public walkthrough](../investigations.md), retained
+controlled reports and [bounded runtime proposal](milestone-b-runtime-validation.md).
+Real source-build/diagnostic qualification is unrun; no new runtime scope is
+implied. Milestone C remains unstarted. Select a real bug/source pair only when
+it is needed for the next validation or investigation.
 
 Progress record: 2026-10-23, this plan records the operator's priorities. No
 engine behavior, measurement definitions or experiments changed. This document
@@ -544,3 +552,101 @@ performance trials, registry acquisition, 9950 access, infrastructure changes,
 push or transfer are implied. Milestone B remains unstarted until a specific
 released-target/local-fix investigation is selected. No new approval is needed
 merely to inspect the delivered artifacts or provide feedback.
+
+
+### Milestone B implementation and controlled investigation handoff — 2026-10-23
+
+The operator authorized the whole milestone B implementation on the existing
+`milestone-a-newcomer` branch, using BIRD and controlled baseline/fix fixtures.
+The instruction explicitly excluded real downloads, builds, benchmarks,
+provisioning, 9950 access and pushing. Previous A runtime approvals were not
+reused. Work continued through reviewed implementation, tests, docs and local
+commits without treating internal substeps as operator handoffs.
+
+- `0c59ec6` adds strict external target/build identity contracts and the explicit
+  trusted-local-source BIRD builder. Base recipes remain unchanged; target-only
+  substitution preserves generator, observer and workload identities. Source
+  commit/HEAD, dirty patch/untracked/snapshot hashes, requested and observed base
+  images, compiler/linker flags and instrumentation are recorded. Supplied-image
+  source/build facts and binary reconstruction remain explicitly unknown.
+- The source planner executes no source/build code, mutates no maintainer tree
+  and refuses Git filters, incomplete/promisor/sparse/hidden-index views and
+  unsupported source entries. Snapshot size is bounded; Git/archive memory and
+  actual build resources are not workload estimates or hard host limits. The
+  fixed build recipe requires existing local bases, uses network-none/pull-false,
+  asserts installed BIRD/birdc, preserves failed work and selects a new tag.
+- `a02be06` adds scoped optional BIRD diagnostics, monotonic control stages,
+  pre-cleanup states/logs/cgroup memory and preserved event/sample material before
+  final graph/provenance failures. Stages do not redefine convergence clocks;
+  optional probes have uncalibrated overhead. Retained legacy graph samples are
+  explicitly distinguished from an all-poll journal. Unsupported/unreadable data
+  stays unknown, and collector failures retain any supported reproduction witness.
+- `c86ada0` connects the public CLI, serial investigation, report-only rebuild,
+  self-contained JSON/Markdown reports, verification and maintained smoke.
+  It also records host identity before the worker and forces the source builder
+  onto the selected local legacy daemon, disabling BuildKit/Buildx routing.
+  Host changes or incomplete observed role identities withhold controlled
+  attribution. No statistical performance comparison or universal fix rule is
+  introduced.
+- Reports verify bundled package bytes and the exact frozen recipe, preserve
+  failed versus never-run attempts, record target/build/instrumentation changes,
+  show crash witnesses/log references and carry explicit memory definitions.
+  Both JSON assessment and rendered prose are reconstructed during verification;
+  modified conclusions, unsafe/unlisted artifacts and differing fixed controls
+  are refused. Malformed optional diagnostics retain their raw artifact plus an
+  inspection reason rather than erasing the report.
+- Independent implementation and final reviews covered all three boundaries.
+  Findings fixed before handoff included Git filters/lazy-fetch and cumulative
+  snapshot size, build routing/install identity, bounded client reaping,
+  stage-failure cleanup, diagnostic path ownership, crash evidence conservatism,
+  edited report prose and malformed optional evidence. The final independent
+  focused review passed 109 tests. The implementation feature's normal locked
+  environment/idle guard and full Docker-free gate passed all 2,213 tests.
+- The first source-contract commit gate exposed a scratch Git fixture inheriting
+  hook Git variables. It changed local Git metadata and created an inert fixture
+  commit; the failed gate did not land an implementation commit. The accidental
+  state was preserved at local recovery ref
+  `recovery/milestone-b-hook-fixture` and `/tmp/bgperf2-b-git-recovery`, then the
+  intended branch, index and effective repository settings were restored without
+  editing worktree source files. The fixture helper now strips every `GIT_*`
+  variable; 39 source tests also passed independently under simulated inherited
+  directory/index/object/config context, with caller HEAD/index/config/work
+  byte-checked unchanged. All subsequent normal gates passed.
+- The maintained `scripts/investigation_smoke.py` passed from a fresh detached
+  checkout of `c86ada0` using the existing locked environment, with no dependency
+  installation. Its inert source and fake Git/build/runtime paths exercise
+  target-image validation, dirty-source planning/build identity, direct override,
+  serial investigation, report-only rebuilding and independent verification.
+  No real BIRD bug or fix is claimed. The checkout stayed clean.
+
+Retained feedback artifacts are under `/tmp/bgperf2-milestone-b-feedback`:
+
+| Controlled case | Report | Independently verified report files | Meaning |
+| --- | --- | --- | --- |
+| `resolved` | `resolved/results/report/REPORT.md` | 34 | Modeled child-daemon crash in baseline, candidate completes; same frozen recipe/instruments, distinct target/build identity |
+| `collector-failure` | `collector-failure/results/report/REPORT.md` | 16 | Baseline harness failure preserves available diagnostics; candidate is explicitly `not_run`, assessment inconclusive |
+| `missing-memory` | `missing-memory/results/report/REPORT.md` | 34 | Same modeled functional outcomes; memory remains null with reasons, never zero or a leak verdict |
+
+The simulation question and host facts are conspicuously labeled. Each case has
+an `investigation.json`, checksum manifest and verified result packages; the
+source/build fixture and direct-override result are retained alongside them.
+The separate stdout summary is
+`/tmp/bgperf2-milestone-b-feedback-summary.json`. These are controlled examples,
+not real measurement evidence or adapter/build qualification.
+
+The [public guide](../investigations.md) owns commands and schema/accounting
+meanings; the [runtime proposal](milestone-b-runtime-validation.md) owns the
+explicit future validation decision. Recommended first real scope is a bounded
+supplied-image functional pair using previously observed images, after exact
+read-only availability checks, with no downloads/builds or performance verdict.
+A real source-fix build requires a selected trusted checkout/commit/patch and
+reviewed preprovisioned local bases before an explicit build approval. Forced
+faults, privileged crash capture and live-container timeout qualification are
+not silently included.
+
+Milestone B implementation and its controlled report workflow are ready for
+operator feedback. Real source-build/diagnostic acceptance remains unmet. No
+real download, build, benchmark, provisioning, 9950 access, push, publication,
+notification or evidence transfer ran. Both existing A preservation manifests
+were rechecked: all 143 and 120 entries remained unchanged.
+Milestone C comparison/calibration and all new workload families remain unstarted.

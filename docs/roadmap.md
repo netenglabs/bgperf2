@@ -15,7 +15,7 @@ boundaries incrementally while keeping current CLI and output compatibility.
 
 | Document | Status | Purpose |
 | --- | --- | --- |
-| [Developer performance testing plan](plans/performance-testing-development-plan.md) | Milestone A implementation and authorized functional validation complete; ready for feedback | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |
+| [Developer performance testing plan](plans/performance-testing-development-plan.md) | Milestone A functionally validated; milestone B implementation and controlled reports ready for feedback | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |
 | [Architecture design](plans/architecture-design.md) | Supporting proposal; reconciled with shipped foundations | Recipe/result records, lifecycle boundaries, observations and compatibility strategy |
 | [Future testing workloads](plans/future-testing-workloads.md) | Deferred | Preserve policy, IPv6 and other workload ideas without scheduling their implementation |
 | [Policy engine design](plans/policy-testing-engine-design.md) | Deferred | Semantic policy model, conformance, adapter/generator/observer requirements and implementation risks |
@@ -34,6 +34,15 @@ cleanup qualification. Follow the
 plan's [feedback-driven execution policy](plans/performance-testing-development-plan.md#feedback-driven-execution):
 continue through internal commits until a usable milestone or a concrete operator
 decision is ready for review.
+Milestone B now adds strict target/build identities, a trusted local-source BIRD
+build path, optional bounded diagnostics, partial evidence and verified
+baseline/fix reports. The [investigation guide](investigations.md) and maintained
+controlled smoke supply a complete feedback workflow; real source-build and
+diagnostic qualification remains unrun under its
+[explicit proposal](plans/milestone-b-runtime-validation.md). Statistical
+baseline/candidate comparisons remain milestone C; no calibration policy ships
+with this functional investigation.
+
 The architecture proposal is supporting material, not a second execution order.
 New policy semantics, IPv6 and protocol/topology expansion remain deferred until
 separately selected. A roadmap entry neither implements a feature nor authorizes

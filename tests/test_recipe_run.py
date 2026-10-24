@@ -159,6 +159,35 @@ def test_worker_supervision_preserves_partial_evidence(tmp_path, monkeypatch, fa
     assert (work / 'runtime.json').is_file()
     assert (work / 'console.log').is_file()
     assert killed and all(value == (3456, signal.SIGKILL) for value in killed)
+    budget = json.loads((work / 'execution-budget.json').read_text())
+    assert budget['scope'] == 'worker' and budget['timeout_seconds'] == 0.01
+    assert budget['elapsed_seconds'] >= 0
+    if failure == 'timeout':
+        assert budget['completed_within_budget'] is False
+    elif failure in ('interrupt', 'term'):
+        assert budget['completed_within_budget'] is None
+
+
+def test_worker_budget_excludes_collection_and_cleanup(tmp_path, monkeypatch):
+    class Process:
+        pid = 34
+        returncode = 0
+        def wait(self, timeout):
+            recipe_run._write(tmp_path / 'runtime.json', {'status': 'completed', 'reason': 'done'})
+        def poll(self):
+            return 0
+    clock = iter([10.0, 12.0])
+    monkeypatch.setattr(recipe_run.time, 'monotonic', lambda: next(clock))
+    monkeypatch.setattr(recipe_run.subprocess, 'Popen', lambda *a, **k: Process())
+    monkeypatch.setattr(recipe_run.os, 'killpg', lambda *a: None)
+    monkeypatch.setattr(recipe_run, '_cleanup', lambda *a: [])
+    import recipe_diagnostics
+    monkeypatch.setattr(recipe_diagnostics, 'stage', lambda *a, **k: None)
+    monkeypatch.setattr(recipe_diagnostics, 'collect_diagnostics', lambda *a, **k: {'errors': []})
+    assert recipe_run.SubprocessBackend().execute(recipe(), tmp_path, 'attempt', 3)['status'] == 'completed'
+    budget = json.loads((tmp_path / 'execution-budget.json').read_text())
+    assert budget == {'schema': 'bgperf2/execution-budget/v1alpha1', 'scope': 'worker',
+                      'timeout_seconds': 3, 'elapsed_seconds': 2, 'completed_within_budget': True}
 
 
 def test_cleanup_discovers_ids_and_rechecks_labels(monkeypatch):

@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 import recipes
@@ -84,20 +85,28 @@ class SubprocessBackend:
         stage(workdir, 'setup')
         outcome = {'status': 'harness_failed', 'reason': 'Worker did not publish a terminal outcome.'}
         process = None
+        worker_start = None
+        worker_elapsed = None
+        within_budget = None
         old = signal.signal(signal.SIGTERM, _stop)
         try:
             with (workdir / 'console.log').open('x') as log:
+                worker_start = time.monotonic()
                 process = subprocess.Popen(
                     [sys.executable, str(ROOT / 'recipe_worker.py'), str(workdir), attempt_id],
                     cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
                 try:
                     process.wait(timeout=timeout)
+                    worker_elapsed = time.monotonic() - worker_start
+                    within_budget = worker_elapsed <= timeout
                     terminal = workdir / 'runtime.json'
                     if terminal.is_file():
                         outcome = json.loads(terminal.read_text())
                     if process.returncode and outcome.get('status') == 'completed':
                         outcome = {'status': 'harness_failed', 'reason': f'Worker exited {process.returncode} after terminal evidence.'}
                 except subprocess.TimeoutExpired:
+                    worker_elapsed = time.monotonic() - worker_start
+                    within_budget = False
                     _kill(process)
                     outcome = {'status': 'inconclusive', 'reason': f'Attempt exceeded its {timeout:g}s wall-clock budget; worker group stopped.'}
         except (KeyboardInterrupt, SystemExit) as exc:
@@ -118,6 +127,19 @@ class SubprocessBackend:
                 except Exception as exc:
                     record_errors.append(f'Stage {name} could not be recorded: {exc}')
             try:
+                # This controller clock records the worker budget only, before
+                # final diagnostics/cleanup. Missing or interrupted evidence
+                # cannot be interpreted as successful deadline completion.
+                try:
+                    if worker_start is not None and worker_elapsed is None:
+                        worker_elapsed = time.monotonic() - worker_start
+                    _write(workdir / 'execution-budget.json', {
+                        'schema': 'bgperf2/execution-budget/v1alpha1',
+                        'scope': 'worker', 'timeout_seconds': timeout,
+                        'elapsed_seconds': worker_elapsed,
+                        'completed_within_budget': within_budget})
+                except Exception as exc:
+                    record_errors.append(f'Worker budget could not be recorded: {exc}')
                 if process is not None:
                     try:
                         os.killpg(process.pid, signal.SIGKILL)

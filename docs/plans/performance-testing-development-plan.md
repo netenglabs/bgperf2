@@ -466,3 +466,41 @@ optional separate timeout-path attempt, after the missing sink image and host
 suitability are explicitly resolved. Keep BIRD as the first adapter; no new
 daemon or bug selection is necessary to finish A's runtime acceptance. Milestone
 B remains unstarted pending feedback and an explicitly selected investigation.
+
+
+### Authorized functional validation and socket collection fix — 2026-10-23
+
+The operator authorized sink-only acquisition/build and functional checks on
+`jpietsch-server` alongside ordinary work. The active-benchmark exclusion remained;
+resource guards passed, and the root-backed disk exception was explicit. This
+superseded the proposal's idle-host requirement only for functional validation.
+
+At `7b2d502`, the sink build and one real experiment completed: the exact pinned
+BIRD target/generator delivered 100 prefixes against the existing 99-prefix
+completion checkpoint, with no tester errors/timeouts, using the newly built
+immutable sink. Owned runtime cleanup passed and unrelated container/network
+identities were preserved. End-to-end packaging failed on the tester Unix
+control socket, returning `harness_failed` with a verifiable partial package.
+The driver stopped; no automatic retry or real timeout trial followed.
+
+`3165af2` records socket endpoints as checksummed omissions without reading them;
+`8e9ed9b` also proves ordinary control-named files remain evidence. Independent
+review and 32 package tests passed; the normal full locked Docker-free gate
+passed 2,101 tests. Offline replay of the corrected packager on the preserved
+work produced a new verified package, matching all 23 original regular files and
+preserving both original work and the original failed package unchanged. It
+retains distinct execution and packaging revisions and is not a fresh run.
+
+The [runtime validation record](milestone-a-runtime-validation.md) owns exact
+engine/image identities, evidence paths, checksum/coverage verification,
+limitations and the bounded new authorization proposal. Fresh end-to-end
+execution with the socket fix and the real timeout trial remain unaccepted.
+CPU/memory/timing observations under concurrent load are unsuitable for
+performance interpretation. No 9950 access, provisioning, push, publication,
+remote evidence transfer or evidence removal occurred. The sink build cache
+and nonrunning intermediate containers remain; no broad cleanup was performed.
+
+Next handoff: review the corrected package and authorize, if desired, exactly
+one new functional attempt plus the conditional timeout trial, reusing existing
+images with no further downloads or builds. The original stop-on-failure rule
+prevents treating the prior authorization as permission for a benchmark retry.

@@ -1,10 +1,143 @@
-# Milestone A runtime validation proposal
+# Milestone A runtime validation
 
-Prepared 2026-10-23. Status: proposed, no runtime authorization granted.
+Prepared 2026-10-23. Status: first authorized functional attempt ran; packaging
+fix passed offline replay; fresh end-to-end and real timeout acceptance pending.
 This is the bounded validation decision for the
 [developer performance testing plan](performance-testing-development-plan.md).
 The implementation and fake workflow are ready for feedback; real adapter and
 hardware acceptance remain pending. No performance comparison is proposed.
+
+## Authorization and actual result — 2026-10-23
+
+The operator explicitly authorized the sink-only download/build and functional
+validation alongside ordinary work on `jpietsch-server`, superseding this
+proposal's idle-development-host requirement for this check. Another active
+benchmark remained excluded; the normal active-measurement guard passed before
+build and execution. The root-backed disk `/var/tmp` exception was accepted for
+this small functional check. Performance comparisons remain unsuitable. This
+permission does not qualify hardware or authorize work on `9950`.
+
+The original proposal below was executed at engine
+`7b2d502d41d8d3e92ddf75bf59779d8c598502ea`:
+
+- The selected sink-only build succeeded, including embedded Go vet and tests.
+  Its immutable image is
+  `sha256:311317014fc98e2cadf46941b4b23dab9dd724281dd50167a0f9187d8ac08f19`,
+  recipe label `7d97ffab584f`, reported source hash `88869d1e0b01`,
+  GoBGP/v4 `v4.9.0` and Go `1.25.14`. The original BIRD image below was reused
+  for target and generator; no BIRD rebuild occurred. Build reconstruction claims
+  remain limited to the saved build inputs/logs and observed identities.
+- Export, validation, offline plan, selected preparation and prerequisite checks
+  passed. One real attempt, `bgperf_recipe_4b9f99b245564518ad735608a1312aa2`,
+  delivered 100 prefixes against the existing engine's required count of 99,
+  with zero tester errors/timeouts. Its worker recorded `completed` and no
+  cleanup errors. Observed role image IDs and versions matched the recipe.
+- The controller returned `harness_failed` (exit 3): packaging attempted to copy
+  BIRD's nonportable tester Unix control socket, owned by UID/GID 65534 with mode
+  0660. The engine completed; end-to-end return-package acceptance failed.
+  The failed package remained readable and passed checksum verification. The
+  driver stopped at this failure: no benchmark retry or real timeout trial ran.
+- Independent review confirmed all 62 original container IDs, names, image
+  references, states, mount sets, labels and network sets were unchanged; network
+  IDs were unchanged. No recipe container/network or worker/mpstat process
+  remained. The legacy sink build left nine nonrunning intermediate containers;
+  they and the selected image/build cache were retained. No broad Docker cleanup
+  or unrelated-container modification was performed.
+- `3165af2` fixes collection by identifying actual Unix socket types before
+  opening them and recording checksummed `collection-omissions.json`. Symlinks,
+  FIFOs and unreadable regular artifacts still fail collection. `8e9ed9b` adds
+  a regression proving a regular file named `bird.ctl` is preserved. Independent
+  review found no blockers; 32 package tests and the normal full 2,101-test
+  Docker-free commit gate passed.
+- The committed fix at full packaging revision
+  `8e9ed9bb68b3e51aa63d4af47cd2ea66452c4f58` was applied offline to the retained
+  work into a separate `repackage-001` result directory. It verified 27 packaged
+  artifacts and all 23 source regular files, with `completed` / `reproduced` for
+  the original completion question. The socket omission is explicit. Original
+  work and the original failed package were byte-checked unchanged. A separate
+  `packaging-tool.json` retains both packaging and execution revisions; the
+  recipe/result still identify execution revision `7b2d502`, never the later
+  packager as if it had executed the experiment.
+
+Functional route delivery and owned cleanup passed. The corrected packaging path
+passed offline replay of the real work. Fresh end-to-end recipe execution with
+the correction and real timeout acceptance remain pending. Raw CPU, memory and
+timing observations reflect authorized concurrent work and support no performance
+comparison, ranking or host qualification.
+
+## Preserved local evidence
+
+Evidence remains on the development host, outside Git:
+
+- `/var/tmp/bgperf-recipe-a-validation`: authorization scope, host/resource
+  snapshots, exact commands/process outcomes, rendered sink Dockerfile, build
+  output, image inspections, before/after inventories, resource audit, offline
+  package verification and preservation tools.
+- `/var/tmp/bgperf-recipe-a-work/success-001`: original runtime work, including
+  the nonportable socket; `/var/tmp/bgperf-recipe-a.json`: original recipe.
+- `/var/tmp/bgperf-recipe-a-results/success-001`: original failed package.
+- `/var/tmp/bgperf-recipe-a-results/repackage-001`: corrected offline package,
+  with the original attempt identity and explicit separate packaging provenance.
+
+`bgperf-recipe-a-validation/SHA256SUMS`, resolved from `/var/tmp`, verifies all
+143 regular evidence/tool files, excluding the manifest and its preservation
+report. The one runtime Unix socket is explicitly omitted from file-byte hashing
+in `preservation-report.json`. The manifest SHA-256 is
+`753109ca63f49ef1db77696e1b14f521f6e95327297df846c099e77c25b63c6c`.
+No work or evidence was deleted, uploaded, published or copied off-device. The
+local manifest is integrity evidence, not an independent backup or publisher
+authentication. `9950`, provisioning and pushing remained excluded.
+
+## Next runtime decision — no automatic retry
+
+The original stop-on-failure rule remains in force. Proposed new authorization:
+reuse the exact BIRD and now-existing sink IDs above, with no downloads/builds,
+and run exactly one fresh 120-second functional attempt at the final clean
+socket-fix revision. Permit ordinary concurrent work under the same functional-
+only limitation and root-backed disk exception. If it completes and its package
+verifies, run one separate 0.01-second timeout attempt. Stop at the first
+unexpected failure, preserve every attempt, and make no automatic retries.
+The same no-9950, no-provisioning, no-push and no-transfer limits apply.
+
+After that explicit authorization, export a new recipe outside the clean source
+checkout using the exact target/generator and observer image IDs recorded above
+and the full current engine revision. Use `/var/tmp/bgperf-recipe-a-retry.json`,
+new `retry-001` work/results names and `timeout-001` only after successful retry.
+These paths do not replace or resume `success-001` or `repackage-001`.
+Then use the commands below from the selected clean checkout:
+
+```sh
+venv/bin/python recipes.py export \
+  --batch examples/recipes/synthetic-ipv4.yaml --test synthetic-ipv4 \
+  --cell f94a3878b2dad49e --engine-revision "$(git -C . rev-parse HEAD)" \
+  --target-image sha256:db0a8e144635b1d4b9f81f24ee78f11383c5b0cbd79f10353edcb8452e9af423 \
+  --generator-image sha256:db0a8e144635b1d4b9f81f24ee78f11383c5b0cbd79f10353edcb8452e9af423 \
+  --observer-image sha256:311317014fc98e2cadf46941b4b23dab9dd724281dd50167a0f9187d8ac08f19 \
+  --question 'Functional-only under concurrent work: does one peer offering 100 prefixes complete?' \
+  --output /var/tmp/bgperf-recipe-a-retry.json
+venv/bin/python recipes.py check /var/tmp/bgperf-recipe-a-retry.json \
+  --workdir /var/tmp/bgperf-recipe-a-work/retry-001 \
+  --results-dir /var/tmp/bgperf-recipe-a-results/retry-001
+venv/bin/python recipes.py run /var/tmp/bgperf-recipe-a-retry.json --timeout 120 \
+  --workdir /var/tmp/bgperf-recipe-a-work/retry-001 \
+  --results-dir /var/tmp/bgperf-recipe-a-results/retry-001
+venv/bin/python recipes.py result-verify /var/tmp/bgperf-recipe-a-results/retry-001/result.json
+# Only after successful completion and verification:
+venv/bin/python recipes.py run /var/tmp/bgperf-recipe-a-retry.json --timeout 0.01 \
+  --workdir /var/tmp/bgperf-recipe-a-work/timeout-001 \
+  --results-dir /var/tmp/bgperf-recipe-a-results/timeout-001
+venv/bin/python recipes.py result-verify /var/tmp/bgperf-recipe-a-results/timeout-001/result.json
+```
+
+The expected exits are 0 for successful functional completion and 5 for bounded
+timeout; verify both packages, exact images, statuses, evidence and resource
+cleanup. This proposal has not run and grants no new runtime authorization.
+
+## Original proposal (retained)
+
+The idle-host wording below records the original proposal. The explicit
+functional-under-load authorization above superseded it only for the attempt
+recorded here; it did not authorize performance comparisons or automatic retries.
 
 ## Decision requested
 

@@ -473,6 +473,37 @@ def main(argv=None):
     report.add_argument('--baseline', required=True)
     report.add_argument('--candidate')
     report.add_argument('--output-dir', required=True)
+    assertion_export = commands.add_parser('assertions-export', help='export explicit supported observable assertions')
+    assertion_export.add_argument('document')
+    assertion_export.add_argument('-o', '--output')
+    assertion_export.add_argument('--capability', action='append',
+        choices=('session_establishment', 'injection_completion', 'observer_route_count',
+                 'experiment_completion', 'observed_role_health'),
+        help='repeat to select an explicit supported subset; default exports all')
+    assertion_check = commands.add_parser('assertions-check', help='evaluate assertions from a verified result package')
+    assertion_check.add_argument('document')
+    assertion_check.add_argument('--result', required=True)
+    comparison_plan = commands.add_parser('comparison-plan', help='freeze a repeated target comparison without runtime probes')
+    comparison_plan.add_argument('document')
+    comparison_plan.add_argument('--baseline-target', required=True)
+    comparison_plan.add_argument('--candidate-target', required=True)
+    comparison_plan.add_argument('--assertions')
+    comparison_plan.add_argument('--repetitions', type=int, required=True)
+    comparison_plan.add_argument('--order', choices=('alternating', 'shuffle'), default='alternating')
+    comparison_plan.add_argument('--seed', type=int)
+    comparison_plan.add_argument('--timeout', type=float, default=300)
+    comparison_plan.add_argument('--diagnostics', choices=('none', 'basic'), default='none')
+    comparison_plan.add_argument('-o', '--output')
+    compare = commands.add_parser('compare', help='explicitly execute a frozen serial comparison plan')
+    compare.add_argument('document')
+    compare.add_argument('--workdir', required=True)
+    compare.add_argument('--results-dir', required=True)
+    comparison_report = commands.add_parser('comparison-report', help='bundle an existing comparison ledger without runtime access')
+    comparison_report.add_argument('document')
+    comparison_report.add_argument('--attempts', required=True)
+    comparison_report.add_argument('--output-dir', required=True)
+    comparison_verify = commands.add_parser('comparison-verify', help='verify bundled comparison evidence and conclusions')
+    comparison_verify.add_argument('document')
     args = parser.parse_args(argv)
     try:
         if args.command == 'export':
@@ -492,10 +523,46 @@ def main(argv=None):
         elif args.command == 'investigation-verify':
             from recipe_investigation import verify_investigation_report
             _write_document(verify_investigation_report(args.document))
+        elif args.command == 'comparison-verify':
+            from recipe_comparison_report import verify_comparison_report
+            _write_document(verify_comparison_report(args.document))
+        elif args.command == 'assertions-check':
+            from recipe_assertions import evaluate_assertions
+            from recipe_results import verify_result_package
+            verify_result_package(args.result)
+            from recipe_investigation import _load
+            bound = _load(Path(args.result).parent, 'recipe.json')
+            result = evaluate_assertions(read_document(args.document), bound, args.result)
+            _write_document(result)
+            return 0 if result.get('outcome') == 'passed' else 4 if result.get('outcome') == 'failed' else 5
         else:
             document = read_document(args.document)
             if args.command == 'inspect':
                 _write_document(inspect_recipe(document))
+            elif args.command == 'assertions-export':
+                from recipe_assertions import default_assertions
+                spec = default_assertions(document)
+                if args.capability:
+                    if len(args.capability) != len(set(args.capability)):
+                        raise ContractError('Duplicate assertion capability selection')
+                    spec['assertions'] = [item for item in spec['assertions'] if item['capability'] in args.capability]
+                _write_document(spec, args.output)
+            elif args.command == 'comparison-plan':
+                from recipe_comparison import make_comparison_plan
+                _write_document(make_comparison_plan(document,
+                    baseline_target=read_document(args.baseline_target),
+                    candidate_target=read_document(args.candidate_target),
+                    repetitions=args.repetitions, order=args.order, seed=args.seed,
+                    timeout=args.timeout, diagnostics=args.diagnostics,
+                    assertions=read_document(args.assertions) if args.assertions else None), args.output)
+            elif args.command == 'compare':
+                from recipe_comparison import run_comparison
+                result = run_comparison(document, workdir=args.workdir, results_dir=args.results_dir)
+                _write_document(result)
+                return result['exit_code']
+            elif args.command == 'comparison-report':
+                from recipe_comparison_report import build_comparison_report
+                _write_document(build_comparison_report(document, read_document(args.attempts), args.output_dir))
             elif args.command == 'target-image':
                 from recipe_targets import supplied_target
                 _write_document(supplied_target(document, args.image, label=args.label,

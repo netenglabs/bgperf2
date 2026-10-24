@@ -279,3 +279,14 @@ def test_verification_still_refuses_socket_inserted_into_package(tmp_path, recip
         endpoint.bind(str(artifact))
         with pytest.raises(recipes.ContractError, match='Unix-domain socket'):
             verify_result_package(tmp_path / 'result/result.json')
+
+
+def test_regular_control_named_file_is_preserved_as_evidence(tmp_path, recipe):
+    work = tmp_path / 'source'
+    work.mkdir()
+    (work / 'bird.ctl').write_text('regular diagnostic data')
+    result = package(tmp_path, recipe)
+    assert result['status'] == 'completed'
+    assert (tmp_path / 'result/work/bird.ctl').read_text() == 'regular diagnostic data'
+    assert not (tmp_path / 'result/collection-omissions.json').exists()
+    assert verify_result_package(tmp_path / 'result/result.json')['valid']

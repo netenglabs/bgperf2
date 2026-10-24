@@ -154,7 +154,7 @@ def run_smoke(output):
         _write(output / 'check.json', reports['check'])
         reports['prepare'] = _command(['prepare', str(recipe_path)])
         _write(output / 'prepare.json', reports['prepare'])
-        stack.enter_context(patch.object(recipe_run, 'SubprocessBackend', lambda: backend))
+        stack.enter_context(patch.object(recipe_run, 'SubprocessBackend', lambda **kwargs: backend))
         manifest = _command(['run', str(recipe_path), '--workdir', str(output / 'work'),
             '--results-dir', str(output / 'results'), '--timeout', '10'])
         if manifest['status'] != 'completed':

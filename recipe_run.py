@@ -70,10 +70,18 @@ def _cleanup(attempt_id, env):
 
 
 class SubprocessBackend:
+    def __init__(self, *, target=None, diagnostics='none'):
+        self.target, self.diagnostics = target, diagnostics
+
     def execute(self, document, workdir, attempt_id, timeout):
         env = preflight._environment()
         env['DOCKER_HOST'] = env.get('DOCKER_HOST', 'unix:///var/run/docker.sock')
         _write(workdir / 'recipe.json', document)
+        if self.target is not None:
+            _write(workdir / 'target.json', self.target)
+        _write(workdir / 'diagnostic-options.json', {'mode': self.diagnostics})
+        from recipe_diagnostics import stage, collect_diagnostics
+        stage(workdir, 'setup')
         outcome = {'status': 'harness_failed', 'reason': 'Worker did not publish a terminal outcome.'}
         process = None
         old = signal.signal(signal.SIGTERM, _stop)
@@ -100,43 +108,89 @@ class SubprocessBackend:
         except (OSError, ValueError) as exc:
             outcome = {'status': 'harness_failed', 'reason': f'Worker launch or collection failed: {exc}'}
         finally:
-            # Complete bounded cleanup despite repeated stop signals. Restore
-            # caller handlers after preserving the terminal outcome below.
+            # Cleanup is mandatory even when a supplemental stage/collector fails.
             previous_int = signal.signal(signal.SIGINT, signal.SIG_IGN)
             signal.signal(signal.SIGTERM, signal.SIG_IGN)
-            stop_errors = []
-            if process is not None:
-                # Reap sampler descendants even after the worker leader exits.
+            record_errors, stop_errors = [], []
+            def record_stage(name, **kwargs):
                 try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                if process.poll() is None:
+                    stage(workdir, name, **kwargs)
+                except Exception as exc:
+                    record_errors.append(f'Stage {name} could not be recorded: {exc}')
+            try:
+                if process is not None:
                     try:
-                        process.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        stop_errors.append('Worker could not be reaped after SIGKILL; inspect host before further execution.')
-            errors = stop_errors + _cleanup(attempt_id, env)
-        outcome['cleanup_errors'] = errors
-        if errors:
-            outcome['status'] = 'harness_failed'
-            outcome['reason'] += ' Owned-resource cleanup failed; inspect cleanup_errors and retain work.'
-            outcome.pop('exit_code', None)
-        try:
-            _write(workdir / 'runtime.json', outcome)
-        finally:
-            signal.signal(signal.SIGTERM, old)
-            signal.signal(signal.SIGINT, previous_int)
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    except OSError as exc:
+                        stop_errors.append(f'Worker group could not be stopped: {exc}')
+                    if process.poll() is None:
+                        try:
+                            process.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            stop_errors.append('Worker could not be reaped after SIGKILL; inspect host before further execution.')
+                record_stage('collection', reason='Worker stopped; collect owned diagnostics before removing resources.')
+                try:
+                    diagnostic = collect_diagnostics(workdir, attempt_id, env, mode=self.diagnostics)
+                except Exception as exc:
+                    from recipe_diagnostics import SCHEMA, memory_record
+                    diagnostic = {'schema': SCHEMA, 'mode': self.diagnostics,
+                                  'status': 'partial', 'errors': [f'{type(exc).__name__}: {exc}'],
+                                  'containers': [], 'missing': ['Collector failed; available work retained.'],
+                                  'memory': {'target': memory_record(reason='Collector failed before final memory observation.')}}
+                    try:
+                        _write(workdir / 'diagnostics.json', diagnostic)
+                    except Exception as write_error:
+                        record_errors.append(f'Diagnostic artifact could not be written: {write_error}')
+                record_stage('cleanup')
+                try:
+                    errors = stop_errors + _cleanup(attempt_id, env)
+                except Exception as exc:
+                    errors = stop_errors + [f'Owned cleanup failed: {exc}']
+                original_status = outcome['status']
+                outcome['cleanup_errors'] = errors
+                if errors:
+                    outcome['status'] = 'harness_failed'
+                    outcome['reason'] += ' Owned-resource cleanup failed; inspect cleanup_errors and retain work.'
+                    outcome.pop('exit_code', None)
+                supplemental_errors = diagnostic.get('errors', []) + record_errors
+                if supplemental_errors:
+                    outcome['experiment_status_before_collection'] = original_status
+                    outcome['diagnostic_errors'] = supplemental_errors
+                    outcome['status'] = 'harness_failed'
+                    outcome['reason'] += ' Diagnostic collection was incomplete; available evidence retained.'
+                    outcome.pop('exit_code', None)
+                record_stage('terminal', status=outcome['status'], reason=outcome['reason'])
+                if record_errors:
+                    outcome['diagnostic_errors'] = diagnostic.get('errors', []) + record_errors
+                    outcome.setdefault('experiment_status_before_collection', original_status)
+                    outcome['status'] = 'harness_failed'
+                    if not supplemental_errors:
+                        outcome['reason'] += ' Stage recording was incomplete; inspect diagnostic_errors.'
+                    outcome.pop('exit_code', None)
+                _write(workdir / 'runtime.json', outcome)
+            finally:
+                signal.signal(signal.SIGTERM, old)
+                signal.signal(signal.SIGINT, previous_int)
+
         return outcome
 
 
-def run_recipe(document, *, workdir, results_dir, timeout=300, backend=None, check=None):
+def run_recipe(document, *, workdir, results_dir, timeout=300, target=None,
+               diagnostics='basic', backend=None, check=None):
     """Run one recipe after prerequisites, preserving every existing destination.
 
     Backend/check injection is library-only for controlled tests; the public CLI
     always uses the real prerequisite checks and bounded existing-engine worker.
     """
     recipes.validate_recipe(document)
+    from recipe_targets import effective_roles, supplied_target, validate_target
+    target = target if target is not None else supplied_target(document, document['roles']['target']['image'])
+    validate_target(target, document)
+    roles = effective_roles(document, target)
+    if diagnostics not in ('basic', 'none'):
+        raise recipes.ContractError('diagnostics must be basic or none')
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
         raise recipes.ContractError('timeout must be a finite positive number of seconds')
     # An owner-only advisory host lock covers checks, execution and cleanup.
@@ -147,7 +201,7 @@ def run_recipe(document, *, workdir, results_dir, timeout=300, backend=None, che
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise recipes.ContractError('Another cooperating recipe attempt holds the host lock') from exc
-        report = (check or preflight.check_recipe)(document, workdir=workdir, results_dir=results_dir)
+        report = (check or preflight.check_recipe)(document, workdir=workdir, results_dir=results_dir, target=target)
         if report['status'] != 'checks_passed':
             # Refused destinations must never be used to publish a report.
             return {'status': 'setup_refused', 'exit_code': 2, 'reason': 'Prerequisites refused; no attempt was started.', 'prerequisites': report}
@@ -160,9 +214,14 @@ def run_recipe(document, *, workdir, results_dir, timeout=300, backend=None, che
             raise recipes.ContractError('Attempt destinations must not already exist')
         work.mkdir(parents=True, exist_ok=False)
         _write(work / 'prerequisites.json', report)
+        _write(work / 'target.json', target)
+        _write(work / 'target-selection.json', {
+            'schema': 'bgperf2/target-selection/v1alpha1',
+            'recipe_sha256': recipes.recipe_sha256(document), 'roles': roles,
+            'diagnostics': diagnostics, 'instrumentation': target['provenance']['instrumentation']})
         attempt = 'bgperf_recipe_' + uuid.uuid4().hex
         try:
-            outcome = (backend or SubprocessBackend()).execute(document, work, attempt, timeout)
+            outcome = (backend or SubprocessBackend(target=target, diagnostics=diagnostics)).execute(document, work, attempt, timeout)
         except Exception as exc:
             outcome = {'status': 'harness_failed', 'reason': f'Runtime backend failed: {exc}'}
             _write(work / 'runtime.json', outcome)

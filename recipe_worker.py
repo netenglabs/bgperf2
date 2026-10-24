@@ -5,12 +5,14 @@ No alternative convergence or measurement rules live here. The parent owns the
 wall-clock budget, worker process group, packaging and labelled Docker cleanup.
 """
 import json
+import csv
 import os
 from pathlib import Path
 import sys
 import types
 import threading
 import time
+import tempfile
 
 from recipe_run import OWNER_LABEL, _write
 import recipes
@@ -56,7 +58,7 @@ class OwnedDocker:
         return self.client.remove_container(observed['Id'], **kwargs)
 
 
-def scoped_adapter(adapter, image, prefix):
+def scoped_adapter(adapter, image, prefix, *, role=None, work=None, capture_exit=False):
     """Preserve adapter behavior, replacing only binary and runtime name."""
     class Selected(adapter):
         @classmethod
@@ -68,12 +70,39 @@ def scoped_adapter(adapter, image, prefix):
             super().__init__(*args, **kwargs)
             self.image = image
             self.name = prefix + '_' + self.name
+
+        def wait_established(self, *args, **kwargs):
+            if work is not None and role == 'observer':
+                from recipe_diagnostics import stage
+                stage(work, 'session_establishment')
+            return super().wait_established(*args, **kwargs)
+
+        def stats(self, *args, **kwargs):
+            if work is not None and role == 'observer':
+                from recipe_diagnostics import stage
+                stage(work, 'observation')
+            return super().stats(*args, **kwargs)
+
+        def get_startup_cmd(self):
+            command = super().get_startup_cmd()
+            if not capture_exit or role != 'target':
+                return command
+            # BIRD's existing -d command stays in the foreground. Capture its
+            # status only after it returns, without moving measurement clocks.
+            return command + ("\nbgperf_bird_exit_status=$?\n"
+                              "printf '{\"exit_code\":%s}\\n' \"$bgperf_bird_exit_status\" > "
+                              + self.guest_dir + "/recipe-bird-exit.json\n"
+                              "exit \"$bgperf_bird_exit_status\"\n")
     return Selected
 
 
-def execute(document, work, attempt, engine):
+def execute(document, work, attempt, engine, *, target=None):
     resolved = document['resolved']
-    roles = document['roles']
+    from recipe_targets import effective_roles
+    from recipe_diagnostics import stage
+    roles = effective_roles(document, target)
+    options = recipes.read_document(work / 'diagnostic-options.json') if (work / 'diagnostic-options.json').is_file() else {'mode': 'none'}
+    stage(work, 'setup')
     parser = engine.create_args_parser()
     argv = ['-b', attempt, '-d', str(work), 'bench', '-t', 'bird',
             '-n', str(resolved['neighbors']), '-p', str(resolved['prefixes_per_peer']),
@@ -85,27 +114,78 @@ def execute(document, work, attempt, engine):
     # Copy the runtime namespace; compatibility wrappers needing shared globals
     # are rebound below so every bench dependency receives this scoped object.
     runtime = types.SimpleNamespace(**vars(engine))
-    runtime.TARGET_CLASSES = {'bird': scoped_adapter(engine.TARGET_CLASSES['bird'], roles['target']['image'], attempt)}
-    runtime.MONITOR_CLASSES = {'sink': scoped_adapter(engine.MONITOR_CLASSES['sink'], roles['observer']['image'], attempt)}
-    runtime.BIRDTester = scoped_adapter(engine.BIRDTester, roles['generator']['image'], attempt)
+    runtime.TARGET_CLASSES = {'bird': scoped_adapter(engine.TARGET_CLASSES['bird'], roles['target']['image'], attempt, role='target', work=work, capture_exit=options.get('mode') == 'basic')}
+    runtime.MONITOR_CLASSES = {'sink': scoped_adapter(engine.MONITOR_CLASSES['sink'], roles['observer']['image'], attempt, role='observer', work=work)}
+    runtime.BIRDTester = scoped_adapter(engine.BIRDTester, roles['generator']['image'], attempt, role='generator', work=work)
     runtime.target_image = lambda *args: roles['target']['image']
     runtime.remove_target_containers = lambda: None
     runtime.remove_old_containers = lambda: None
     runtime.get_ctn_names = lambda: []
     import run_lifecycle
-    runtime.finish_bench = lambda *a, **kw: run_lifecycle.finish_bench(runtime, *a, **kw)
+    finishing = {}
+    def snapshot_rows(filename, header, rows):
+        descriptor, temporary = tempfile.mkstemp(prefix='.' + filename, dir=work)
+        try:
+            with os.fdopen(descriptor, 'w', newline='') as output:
+                writer = csv.writer(output)
+                writer.writerow(header)
+                writer.writerows(rows)
+            os.replace(temporary, work / filename)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    def snapshot_samples():
+        if finishing:
+            columns = ['elapsed_s', 'target_cpu_percent', 'target_memory_bytes',
+                       'monitor_received', 'neighbors_checked',
+                       'host_idle_percent', 'host_memory_free_bytes']
+            snapshot_rows('raw-samples.csv', columns, finishing['samples'])
+            _write(work / 'raw-samples.metadata.json', {
+                'schema': 'bgperf2/retained-samples/v1alpha1', 'columns': columns,
+                'row_count': len(finishing['samples']),
+                'scope': 'Retained legacy bench_stats graph series after existing assurance-window slicing; not every raw observation.',
+                'missing_observations': 'Discarded assurance samples and observations before a finish callback are not reconstructed.'})
+    def finish(*args, **kwargs):
+        # Only retain references here. The lifecycle sets bench_stop before any
+        # snapshot I/O below, preserving its existing measurement boundary.
+        finishing['samples'] = args[2]
+        return run_lifecycle.finish_bench(runtime, *args, **kwargs)
+    runtime.finish_bench = finish
+    original_events = engine.write_event_artifact
+    def write_events(*args, **kwargs):
+        snapshot_samples()
+        _write(work / 'raw-events.json', {'events': [event.to_dict() for event in args[1]],
+                                         'source': 'existing lifecycle events before final collectors'})
+        return original_events(*args, **kwargs)
+    runtime.write_event_artifact = write_events
+    original_provenance = engine.collect_provenance
+    def provenance(*args, **kwargs):
+        snapshot_samples()
+        return original_provenance(*args, **kwargs)
+    runtime.collect_provenance = provenance
+    original_output = engine.create_output_stats
+    def output_stats(*args, **kwargs):
+        row = original_output(*args, **kwargs)
+        snapshot_rows('partial-stats.csv', [value.strip() for value in engine.stats_header().split(',')], [row])
+        return row
+    runtime.create_output_stats = output_stats
+    original_graphs = engine.create_bench_graphs
+    def graphs(*args, **kwargs):
+        snapshot_samples()
+        return original_graphs(*args, **kwargs)
+    runtime.create_bench_graphs = graphs
     runtime.abandon_run = lambda *a, **kw: run_lifecycle.abandon_run(runtime, *a, **kw)
     if engine.dckr.networks(names=[attempt + '-br']):
         raise RuntimeError('Attempt network already exists; refusing reuse')
     engine.capture_tool_revision()
     row = run_lifecycle.bench(runtime, args)
+    stage(work, 'collection', reason='Existing lifecycle returned; preserve the stats row before final diagnostics.')
     # Successful process exit alone is never an experiment completion witness.
     if not row:
         return {'status': 'inconclusive', 'reason': 'Engine returned no stats row.'}
     header = [x.strip() for x in engine.stats_header().split(',')]
     if len(row) != len(header):
         raise RuntimeError('Engine stats row does not match its declared header')
-    import csv
     with (work / 'stats.csv').open('x', newline='') as output:
         writer = csv.writer(output)
         writer.writerow(header)
@@ -153,25 +233,39 @@ def main(argv=None):
     try:
         document = recipes.read_document(work / 'recipe.json')
         recipes.validate_recipe(document)
+        from recipe_targets import effective_roles
+        target = recipes.read_document(work / 'target.json') if (work / 'target.json').is_file() else None
+        roles = effective_roles(document, target)
+        options = recipes.read_document(work / 'diagnostic-options.json') if (work / 'diagnostic-options.json').is_file() else {'mode': 'none'}
+        if options.get('mode') not in ('none', 'basic'):
+            raise ValueError('Unsupported diagnostic mode')
         import docker
         host = os.environ.get('DOCKER_HOST', 'unix:///var/run/docker.sock')
         if not host.startswith('unix:///'):
             raise RuntimeError('Worker requires a local Unix Docker socket')
         client = docker.APIClient(base_url=host, version='auto', timeout=10)
-        owned = OwnedDocker(client, attempt, [v['image'] for v in document['roles'].values()])
+        owned = OwnedDocker(client, attempt, [v['image'] for v in roles.values()])
         settings = types.ModuleType('settings')
         settings.dckr = owned
         sys.modules['settings'] = settings
         import bgperf2 as engine
+        diagnostic_client = docker.APIClient(base_url=host, version='auto', timeout=2) if options['mode'] == 'basic' else None
+        from recipe_diagnostics import live_sample, read_bird_exit
+        live = {'samples': [], 'bird_seen': []}
         def health_watch():
             while True:
                 time.sleep(0.5)
                 failure = scan_health(owned, document['reproduction']['expected_outcome'])
+                if failure is None and diagnostic_client is not None:
+                    failure = live_sample(diagnostic_client, owned, live,
+                                          expected=document['reproduction']['expected_outcome'],
+                                          exit_reader=lambda: read_bird_exit(work, attempt + '/bird/recipe-bird-exit.json'))
+                    _write(work / 'live-diagnostics.json', live)
                 if failure is not None:
                     _write(work / 'runtime.json', failure)
                     os._exit(0)
         threading.Thread(target=health_watch, daemon=True).start()
-        outcome = execute(document, work, attempt, engine)
+        outcome = execute(document, work, attempt, engine, target=target)
     except BaseException as exc:
         outcome = {'status': 'harness_failed', 'reason': f'{type(exc).__name__}: {exc}'}
     _write(work / 'runtime.json', outcome)

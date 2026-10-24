@@ -334,11 +334,15 @@ def runtime_prerequisites(report, document):
     return env, host, bootstrap_ok
 
 
-def check_recipe(document, *, workdir, results_dir):
+def check_recipe(document, *, workdir, results_dir, target=None):
     """Take explicit bounded snapshots, without acquiring or creating anything."""
+    from recipe_targets import effective_roles
+    roles = effective_roles(document, target)
     report = _report(document, 'check')
+    report['roles'] = copy.deepcopy(roles)
+    report['target_override'] = copy.deepcopy(target)
     env, host, bootstrap_ok = runtime_prerequisites(report, document)
-    for role, declaration in document['roles'].items():
+    for role, declaration in roles.items():
         if bootstrap_ok:
             _image(report, role, declaration['image'], host, env)
         else:

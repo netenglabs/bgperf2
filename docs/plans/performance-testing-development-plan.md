@@ -1,6 +1,6 @@
 # bgperf2 developer performance testing plan
 
-Created 2026-10-23. Status: milestone A functionally validated; milestone B implementation and controlled investigation workflow ready for feedback. Real B runtime/source-build qualification remains deferred.
+Created 2026-10-23. Status: milestone A functionally validated; milestone B implementation and supplied-image functional investigation validated with basic diagnostics. Real source-build/fix and broader diagnostic qualification remain deferred. See the [milestone B validation record](milestone-b-runtime-validation.md).
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
 The operator authorized phase 0, phase 1a–b prerequisites/preparation and complete

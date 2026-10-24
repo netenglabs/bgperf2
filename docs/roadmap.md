@@ -37,9 +37,11 @@ decision is ready for review.
 Milestone B now adds strict target/build identities, a trusted local-source BIRD
 build path, optional bounded diagnostics, partial evidence and verified
 baseline/fix reports. The [investigation guide](investigations.md) and maintained
-controlled smoke supply a complete feedback workflow; real source-build and
-diagnostic qualification remains unrun under its
-[explicit proposal](plans/milestone-b-runtime-validation.md). Statistical
+controlled smoke supply a complete feedback workflow; real source-build and broader
+diagnostic qualification remain deferred. Its explicitly authorized supplied-image
+BIRD 2.19.2/3.3.2 functional pair passed with basic diagnostics, verified packages
+and independently reviewed cleanup; see the
+[validation record and limits](plans/milestone-b-runtime-validation.md). Statistical
 baseline/candidate comparisons remain milestone C; no calibration policy ships
 with this functional investigation.
 

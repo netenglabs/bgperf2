@@ -1,9 +1,94 @@
-# Milestone B runtime validation proposal
+# Milestone B runtime validation
 
-Prepared 2026-10-23. Status: proposed only. Milestone B implementation, tests and
-controlled investigation reports grant no runtime authorization. The current
-operator instruction excludes real downloads, builds, benchmarks, provisioning,
-9950 access and pushing.
+Prepared 2026-10-23. Status: supplied-image functional pair passed under explicit
+operator authorization; source-build and broader diagnostic qualification remain
+deferred. The original proposal below grants no further execution authority.
+
+## Authorized functional validation — 2026-10-23
+
+The operator authorized exactly one serial baseline/candidate investigation on
+`jpietsch-server`, reusing the three pinned images below, basic diagnostics and a
+120-second worker budget per attempt. Ordinary concurrent work and the milestone A
+small-run root-backed storage exception were explicitly allowed. Downloads,
+builds, provisioning, remote transfers, retries, automatic repairs, `9950` access
+and pushing remained excluded. This authorization is consumed.
+
+Execution used clean branch `milestone-a-newcomer` at
+`9a9af8ca6569f5daa752d9745f832def61a63fd5`, with its existing locked Python 3.14
+environment. Exact local image availability was verified before setup. The normal
+active-measurement guard passed before execution and after cleanup; no competing
+benchmark was observed. Host kernel was `7.0.0-38-generic`, architecture `x86_64`.
+`/var/tmp` was writable ext4 on root-backed `/dev/sda5`, with about 264 GiB free
+and 56.9 GB available memory at admission, exceeding the 10 GiB/2 GiB smoke floors.
+These are suitability snapshots, not performance or hardware qualification.
+
+| Attempt | Identity | Result |
+| --- | --- | --- |
+| Baseline, observed BIRD 2.19.2 | `bgperf_recipe_3cf00bb3f5e04470a7acbad4d5c787af` | `completed`, exit 0; `reproduced` |
+| Candidate, observed BIRD 3.3.2 | `bgperf_recipe_9ebdc602808c436386f5c1a0f8e5600d` | `completed`, exit 0; `reproduced` |
+
+Both attempts delivered 100 prefixes against the existing 99-prefix completion
+requirement, with zero tester errors/timeouts. Both reference canonical recipe
+SHA-256 `6a9375c18ef18bc61dbb1666cda78c472efade7f26f2505898e23a788a673df0`.
+Only target image and descriptive label differ; the generator remained the pinned
+BIRD 2.19.2 and observer remained the pinned sink. Supplied-image source, build
+flags and instrumentation remain unknown. The report assessment is
+`same_observed_reproduction`, with performance `not_assessed`; this released-version
+substitution establishes no real bug-fix claim.
+
+Both result packages verify (40 artifacts each), and investigation verification
+passes for 84 report files. Each attempt retained five live diagnostic samples,
+none dropped, with observed target BIRD presence. Final diagnostics captured
+owned states, logs and whole-container cgroup v2 peak/ending memory without final
+collection errors. Two optional live generator memory reads timed out in each
+attempt; generator sampled peaks remain null. Daemon RSS remains unmeasured.
+Empty Docker role logs are retained alongside native BIRD/sink logs. These
+supported optional-probe gaps did not produce a setup/harness/inconclusive outcome.
+No memory, CPU or timing comparison is accepted under concurrent work and
+uncalibrated diagnostic overhead.
+
+The overall investigation command took 28.381 seconds. Setup through first
+collection took 11.049/11.033 seconds for baseline/candidate. Total collection
+stage spans were 0.279/0.289 seconds, including final diagnostic probe spans of
+0.094/0.088 seconds; cleanup to terminal took 1.872/1.199 seconds. Worker budgets
+remained 120 seconds each; collection, cleanup and packaging overhead is separate.
+
+Independent review found no blocking issues in raw completion witnesses,
+identities, diagnostics, coverage or cleanup. All 37 original regular files per
+attempt match their packaged copies. Each original tester control socket remains
+in work and is explicitly omitted from portable evidence. All 71 preexisting
+container IDs, names, images, states, labels, mount sets and network memberships
+match afterward; six network identities are unchanged. Docker reordered mount
+lists for 24 containers: the initial positional audit stopped, and a corrected
+set comparison and independent review confirmed preservation. This was an
+evidence-only audit correction, with no runtime retry or repair. No owned worker,
+investigate or mpstat process remained. No broad cleanup or work removal occurred.
+
+### Preserved evidence
+
+All evidence remains local, outside Git:
+
+- `/var/tmp/bgperf-recipe-b-validation`: scope, recipe and target declarations,
+  exact command/process logs, image/host/resource observations, before/after
+  inventories, audit tools, independent review and preservation records.
+- `/var/tmp/bgperf-recipe-b-work-001`: both original work trees and sockets.
+- `/var/tmp/bgperf-recipe-b-results-001`: both return packages and the verified
+  bundled `report/investigation.json` and `report/REPORT.md`.
+
+`bgperf-recipe-b-validation/SHA256SUMS`, relative to `/var/tmp`, verified 302
+regular files. Its SHA-256 is
+`e366e2a9a86173eef8b0ad81aa53d3041da8c818652632f405d37b910f5fd542`.
+The manifest excludes itself and `preservation-report.json`; that report records
+the two retained socket omissions. Both earlier milestone A manifests still
+verify, covering 143 and 120 regular files. These local integrity checks are not
+an independent backup. Nothing was uploaded, deleted or transferred remotely.
+
+The supplied-image adapter, completion, basic-diagnostic availability and packaging
+check is accepted. Real source builds/fixes, crash diagnosis, live-container
+timeouts and calibrated performance/memory-regression qualification remain
+unassessed and require separately selected scope.
+
+## Original proposal (retained; authorization consumed)
 
 ## Recommended first authorization: supplied-image functional pair
 
@@ -127,4 +212,5 @@ Review the returned controlled reports and public commands first. Recommended
 first real check is the supplied-image pair above, requiring no downloads or
 builds. Alternatively, select the real BIRD bug/source pair and reviewed local
 base images so the source plan can be made concrete before any build approval.
-No stage is currently authorized to execute.
+No additional stage is authorized to execute; the supplied-image authorization
+was consumed by the recorded pair above.

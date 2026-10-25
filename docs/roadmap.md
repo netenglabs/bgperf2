@@ -48,6 +48,10 @@ retain memory/CPU/timing observations, variation, failures and confounders.
 Controlled examples demonstrate known differences, noise and inconclusive
 evidence. Calibrated regression policy remains disabled pending the separately
 selected [pilot and effect-size decisions](plans/milestone-c-calibration-proposal.md).
+The first noise pilot stopped at its timing-resolution gate after A/A. A revised
+two-million-prefix experiment and a separate
+[offline observer timing supplement](observer-timing.md) prepare a new discovery
+run with an early per-attempt gate; execution remains separately authorized.
 Milestone D bisection remains unstarted.
 
 The architecture proposal is supporting material, not a second execution order.

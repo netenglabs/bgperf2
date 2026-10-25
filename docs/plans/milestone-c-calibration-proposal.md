@@ -1,6 +1,6 @@
 # Milestone C calibration pilot proposal
 
-Prepared 2026-10-23. Status: renewed 2026-10-25 pilot completed eight A/A attempts; independent timing-resolution gate blocks A/B. Milestone C's implementation and
+Prepared 2026-10-23. Status: prior A/A pilot blocked A/B; revised experiment prepared offline on 2026-10-25, awaiting execution authorization. Milestone C's implementation and
 controlled reports authorize no real performance trial or policy activation.
 The [comparison guide](../comparisons.md) owns command and accounting semantics.
 
@@ -244,3 +244,153 @@ Evidence entry points: `decision.json`, `admission.txt`, `aa-command.json`,
 `/tmp/bgperf2-c-pilot-20261025-schedule/final.txt`. The documentation change is
 reviewed independently and committed locally; locate its commit with
 `git log -- docs/plans/milestone-c-calibration-proposal.md`.
+
+## Revised experiment prepared offline — 2026-10-25
+
+The operator requested preparation of a revised experiment after the resolution
+failure. This section defines that experiment; it starts no worker and schedules
+no follow-up. The earlier runtime authorization is consumed. A new quiet-window
+execution needs explicit authorization, including any renewed root-backed disk
+exception. Existing evidence, reports and the original pilot input are unchanged.
+
+### Resolve delivery, rather than extending bookkeeping
+
+The prior raw samples reach the full table within one controller poll. The
+four-second CSV value includes other lifecycle timing and is not four seconds
+of useful delivery. It cannot be multiplied by a route-count ratio to predict
+a new duration. Extra sleeps, assurance time or repetitions would not improve
+that interval's resolution.
+
+The pinned sink already records finer monotonic count timestamps. The new
+[offline observer supplement](../observer-timing.md) defines a separately named
+**10%-to-90% observer count-crossing window**, with actual adjacent-record
+timestamp brackets. It preserves all legacy measurements and report schemas;
+it changes no sampling cadence, engine convergence rule or container image.
+The supplement verifies the original package and four assertions, records
+source/analysis hashes, and can be independently reconstructed with `--verify`.
+
+Offline inspection of the eight existing A/A packages places their recorded
+10%-to-90% endpoint differences around 0.111–0.150 seconds, with actual bracket
+widths around 0.018–0.020 seconds. All eight fail the new discovery screen. This
+does not overturn the prior gate or establish a version difference. Raw evidence
+and original reports remain immutable; new supplements are a separate analysis
+version. The preparation bundle records exact per-attempt bounds and inputs.
+
+The screen requires a conservative delivery-window lower bound of at least
+one second, bracket width no larger than 5% of that lower bound, and at least
+ten increasing interior count records. These are sampling design requirements,
+not a practical effect size, repetition-power calculation or regression policy.
+Use actual observed gaps; nominal 10 ms coalescing is not an error guarantee.
+Do not use longer setup/runtime or a larger rounded CSV value as a substitute.
+
+### Fixed workload and unchanged budget
+
+Use [comparison-resolution-pilot.yaml](../../examples/recipes/comparison-resolution-pilot.yaml),
+test `comparison-resolution-pilot`, cell **`e340b76986938b1c`**: two peers,
+1,000,000 prefixes per peer, **2,000,000 prefixes total**. This is ten times the
+original route count, retaining the same topology and default daemon controls.
+The first attempt will test suitability; no duration or resource scaling law
+is claimed. Larger Python/Mako/YAML configuration generation and parsing also
+consume the worker's 120 seconds. A timeout is a stop, not permission to extend
+the deadline. If this fixed workload remains unresolved, stop and review it;
+there is no workload ladder or automatic escalation to a larger table.
+
+Retain exactly the image IDs in this document's table, supplied targets with
+`instrumentation unknown`, `diagnostics none`, and identical four-capability
+assertions bound to the new recipe. Freeze two four-round alternating plans:
+eight A/A attempts, then eight A/B attempts only after the independent gate.
+Maximum **16 serial attempts**, each **120 worker seconds**, at most **1,920
+worker seconds**. The first A/A attempt is the screen and counts as attempt 1
+of 16; there are no additional screening/warm-up attempts. Configuration and
+the final clean engine revision must be committed before export/execution.
+
+### Pause before spending the remaining attempts
+
+The current `compare` command cannot pause at the resolution/assertion gate
+between completed attempts. **Do not launch either whole sequence with
+`compare` for this revised procedure.** Drive each frozen sequence entry with
+the existing public `recipes.py run` command, through its normal host lock,
+bounded worker, collection and owned cleanup. This is explicit orchestration
+of existing public commands, not a resume or engine implementation change.
+The preparation bundle provides exact argument arrays for every entry.
+
+Before any worker, inspect both target prerequisites, exact local images,
+host-wide activity, normal active-measurement guards and resource suitability.
+Record revisions, kernel, affinity, mounts, capacity and before inventories.
+Quiet means no competing heavy work or sustained resource pressure; ordinary
+services, light agent sessions and brief status checks are permitted. Nonzero
+utilization or agent presence alone is not a refusal. There is no arbitrary
+04:00 cutoff; observe actual competing work, including scheduled jobs.
+
+Use fresh owner-only persistent work/results roots. Prior memory/storage
+observations do not qualify this larger workload. As conservative operational
+reservations, require at least 48 GiB MemAvailable and 64 GiB disk free before
+each series, and retain a 16 GiB host-memory margin during execution; record
+these as reservations, not measured demand estimates. Recheck actual backing
+mounts and image availability. Missing prerequisites, pressure or uncertain
+host visibility stop without acquisition, repair, waiting or retries.
+
+Initialize a new eight-entry ledger for each series, copied from its frozen
+plan's exact `id`, `index`, `pair` and `role` values. Start every entry with
+`result: null`, `status: not_run` and an explicit reason. After one invocation,
+verify its original package, recipe/target/timeout bindings and unique original
+attempt ID. Record its actual outcome and absolute result path atomically;
+never map a package to two entries. An unexpected nonzero exit, failed or
+inconclusive assertion, invalid package, cleanup issue or unavailable/blocked
+timing screen stops all later entries. Preserve any failed original package
+even if it cannot be included in a portable report.
+
+After **the first A/A attempt**, run the four assertions and observer supplement,
+then build a new partial report with `comparison-report` and verify it. It
+contains one completed attempt and seven explicitly never-run entries;
+incomplete-pair confounders are expected at this checkpoint. An independent
+reviewer must accept correctness, timing brackets, screen and cleanup before
+attempt 2 is allowed. If the first screen fails, stop after one attempt. Do
+not start another worker while the review or analysis is running.
+
+Apply the same per-attempt checks and pause between all subsequent entries.
+Use a new report directory for each checkpoint so verified bundles are never
+overwritten. The public `comparison-report` reconstruction binds all eight
+entries to the original four-round plan; splitting execution does not reset
+pair numbering or change the overall AB, BA, AB, BA order.
+
+After all eight A/A attempts, independent review must accept every package,
+all 32 assertions, every observer-window screen, host/image/order identities
+and owned cleanup before any A/B attempt. No aggregate statistic may hide an
+unresolved individual attempt. A/B uses the same frozen workload/assertions
+and per-attempt checks; a faster candidate whose window is unresolved also
+stops the sequence without a ranking claim. Failed attempts and never-run
+work remain distinct, including all eight A/B entries if the A/A gate blocks.
+
+### Review, preservation and remaining decisions
+
+Keep the whole-second comparison report alongside its separate observer
+supplements. The former continues to state its resolution limit; the latter
+does not silently upgrade legacy CPU/memory sampling or full-convergence
+timing. Unknown source/build instrumentation still withholds controlled deltas.
+No practical effect size has been supplied. Regression policy remains disabled
+and performance not assessed, even when the sampling screen passes.
+
+Retain original work, packages, logs, versions, commands, ledgers, all reports
+and supplements with full path/type/checksum coverage. Independently verify
+owned cleanup and unchanged unrelated resources before documenting completion.
+No evidence deletion or off-device backup claim is included. No downloads,
+builds, provisioning, `9950` access, automatic repair, retries, extra attempts,
+worker-budget extensions or future remote transfers are part of this procedure.
+
+Offline preparation and review records are under
+`/tmp/bgperf2-c-resolution-preparation-20261025`. After the preparation commits,
+export the recipe/targets/assertions and both plans with the exact final clean
+HEAD, outside the source checkout. The bundle's runbook, command manifest and
+hashes identify those inputs; none is execution evidence or host qualification.
+Code and plan reviews, tests and local commits are recorded there. No new
+quiet window has been scheduled by this preparation.
+
+Implementation reference: `589360033f95a93ba0919504626fe6dde30313df`
+adds the offline supplement. Independent code review accepted it after fixing
+manifest-snapshot and output-directory replacement races; 24 focused tests
+and the normal 2,349-test commit gate passed. Independent plan review confirmed
+the new cell, historical bounds, per-entry pause semantics and 16-attempt
+accounting. Final clean export and bundle review are recorded with the exact
+preparation revision in the local bundle rather than using a self-referential
+commit pin in this document.

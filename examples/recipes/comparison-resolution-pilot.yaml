@@ -1,0 +1,10 @@
+# Revised resolution-discovery input; preparation does not authorize execution.
+# Same two-peer topology; ten times the original comparison-pilot route count.
+tests:
+  - name: comparison-resolution-pilot
+    monitor: sink
+    neighbors: [2]
+    prefixes: [1000000]
+    filter_test: [None]
+    targets:
+      - name: bird

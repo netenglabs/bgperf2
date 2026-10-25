@@ -456,3 +456,57 @@ after measurement execution was permanently stopped. Local commit identity and
 independent review disposition are recorded in the schedule evidence, avoiding
 a self-referential commit identifier here. No push, evidence transfer, external
 notification, infrastructure provisioning or new schedule was performed.
+
+
+## Revised 16:00 invocation stopped at frozen-input verification — 2026-10-25 PDT
+
+The user newly authorized one bounded attempt at the revised experiment on
+`jpietsch-server` at 16:00 PDT (23:00 UTC), explicitly allowing one unrelated
+busy core when remaining resources were ample. The intentional root-backed
+persistent-disk exception was renewed for this invocation alone; memory and
+storage suitability requirements remained in force. Initial verification took
+place after the scheduled time. No worker started, and execution is permanently
+stopped without retry, catch-up, follow-up or rescheduling.
+
+The engine branch `milestone-a-newcomer` was clean at the newly authorized pin
+`a4a0c7944463b7bc6081b7a10b2c4c534a238bae`. Verification of
+`/tmp/bgperf2-c-resolution-20261025-1600-preparation/SHA256SUMS` failed for
+`final-bundle-review.txt`: the expected SHA-256 was
+`1b485382a85ea40791116d1a9eba6f89c1356cf9a8b318d9a0a9b6b9fc510945`,
+while the observed SHA-256 was
+`b89eb7450385441ca20213609b4b22e80486200945a12b3d7abcaae36adf8bd4`.
+The coverage document likewise records 2,671 bytes versus 2,597 observed.
+The other 31 checksum entries matched. Exact path/type coverage matched the
+35 declared entries with the two documented self-exclusions; there were no
+extra or missing files. No cause or time of the discrepancy is established.
+The bundle was left unchanged; `prepare.py` was not rerun and no checksum or
+review record was repaired. This integrity failure is the stop reason, not
+CPU activity, the old revision pin, or root-backed storage.
+
+Accounting is **zero of sixteen workers started**: all eight A/A and eight A/B
+entries were never run, with no failed worker attempts. The future runtime root
+`/tmp/bgperf2-c-resolution-pilot-20261025-1600` remained absent. No runtime
+ledgers, packages, assertions, observer supplements or comparison checkpoints
+were created. Host admission, mount/capacity checks, exact image inspections
+and the three target prerequisite checks were not reached and are not claimed
+passed. No automatic approval rejection occurred.
+
+The independent read-only refusal review passed, confirming the mismatch,
+coverage, clean exact pin and absent runtime root. No worker or owned Docker
+resource was created, so no owned cleanup was needed. Unchanged unrelated
+resources cannot be established by before/after inventories because admission
+was not reached; no unrelated resources were altered or cleaned by this job.
+Evidence is retained locally under
+`/tmp/bgperf2-c-resolution-20261025-1600-schedule/verification-refusal/`,
+including the observed preparation inventory, hash and coverage checks,
+operation record, independent review and documentation commit receipt.
+The schedule's `final.txt` records the outcome. Earlier pilot/refusal evidence
+was not used as runtime evidence or modified; no verification claim is made
+about historical bundles not referenced as inputs here.
+
+Documentation changed only after measurement execution stopped permanently.
+Independent documentation review and the local conventional commit are recorded
+in the new refusal evidence. Performance remains `not_assessed`, regression
+policy `disabled`; no new performance observations or qualification claims are
+available. No push, remote evidence transfer, external notification, paid
+provisioning or subsequent schedule was performed.

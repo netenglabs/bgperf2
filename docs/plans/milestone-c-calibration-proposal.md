@@ -1,6 +1,6 @@
 # Milestone C calibration pilot proposal
 
-Prepared 2026-10-23. Status: prior A/A pilot blocked A/B; revised experiment prepared offline on 2026-10-25, awaiting execution authorization. Milestone C's implementation and
+Prepared 2026-10-23. Status: prior A/A pilot blocked A/B; revised experiment authorized once for 2026-10-25 13:00 PDT, refused at host admission with zero attempts. Milestone C's implementation and
 controlled reports authorize no real performance trial or policy activation.
 The [comparison guide](../comparisons.md) owns command and accounting semantics.
 
@@ -394,3 +394,65 @@ the new cell, historical bounds, per-entry pause semantics and 16-attempt
 accounting. Final clean export and bundle review are recorded with the exact
 preparation revision in the local bundle rather than using a self-referential
 commit pin in this document.
+
+
+## Revised scheduled invocation refused at admission — 2026-10-25 13:00 PDT
+
+The user explicitly authorized the prepared revised experiment once on
+`jpietsch-server` at 20:00 UTC, renewing the intentional root-backed persistent
+storage exception for this invocation only. That exception waived no memory or
+storage suitability checks. The scheduled invocation began after the scheduled
+time; no worker started. Measurement execution is permanently stopped for this
+invocation, with no retry, catch-up, reschedule or follow-up authorized.
+
+The clean `milestone-a-newcomer` checkout was pinned to
+`3e8c6176d3c92fd3ed236c26640bb8376dd1d3c2` during admission. Frozen preparation
+coverage and SHA256SUMS verified exactly: 46 path/type entries, 43 checksum
+entries including the coverage document, with the documented self-exclusions.
+Preparation records remain preparation evidence, not runtime observations.
+The future runtime root `/tmp/bgperf2-c-resolution-pilot-01` remained absent.
+
+A single approximately 30-second **host-wide**, automatically approved read-only
+admission sample recorded Python PID `4104145`, parent `4104139`, consuming
+99.93%, 99.93%, 99.93%, 100.01% and 100.00% of one CPU across five consecutive
+approximately five-second intervals. It had exited by the sixth interval.
+This sustained competing CPU work blocks admission under the current
+instruction; ordinary services, sleeping/light agents, the status publisher and
+nonzero CPU alone were not refusal reasons. No second admission sample or wait
+for quiet was performed. Its full command and workload type could not be
+recovered after exit, so no claim identifies it as a particular benchmark,
+build or test. Separately, a host-visible unrelated plan-run process and held
+queue locks were recorded read-only; none was modified or stopped.
+
+The selected `/tmp` ancestor was persistent ext4 on `/dev/sda5`, the root
+filesystem. Observed available memory was about 56 GiB or more and available
+disk about 252 GiB, exceeding the 48 GiB/64 GiB reservations at observation.
+These observations are neither demand estimates nor hardware qualification.
+Kernel, CPU facts, affinity (0–31), mounts, pressure/process deltas and initial
+container/network/volume/lock/schedule inventories are preserved locally.
+Exact image inspections and all three public target prerequisite checks were
+not reached following the admission refusal. They are not claimed passed.
+No runtime series roots, worker packages, assertions, observer supplements or
+portable runtime reports exist for this invocation. All eight A/A and eight
+A/B entries are explicitly never run; **zero of sixteen attempts were spent**.
+There are no failed worker attempts. The first-attempt and A/A acceptance gates
+were never reached. No approval rejection occurred during admission.
+
+Evidence and the renewed exception/decision are under
+`/tmp/bgperf2-c-resolution-20261025-1300-schedule/admission/`, including
+`host-samples.json`, `decision.json`, `competing-identities.json`, both
+`*-never-run.json` accounting records and before inventories. Final independent
+review, path/type/hash coverage, documentation commit receipt and final outcome
+are retained in the schedule directory. The frozen preparation bundle and prior
+pilot/refusal evidence were not edited; no historical runtime result was used
+as admission evidence. Cleanup verification is limited to the fact that this
+invocation created no Docker resources or worker work, plus the recorded final
+inventory comparison; unrelated resources remain owned by their existing jobs.
+
+Performance remains `not_assessed` and regression policy `disabled`. There are
+no new timing/CPU/memory performance measurements, version rankings, controlled
+deltas, leak conclusions or hardware qualification. Documentation changed only
+after measurement execution was permanently stopped. Local commit identity and
+independent review disposition are recorded in the schedule evidence, avoiding
+a self-referential commit identifier here. No push, evidence transfer, external
+notification, infrastructure provisioning or new schedule was performed.

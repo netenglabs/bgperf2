@@ -183,3 +183,8 @@ recipe/target bindings, reconstructed statistics/assertions/confounders and huma
 prose. It refuses unsafe, unlisted, missing or modified artifacts. Checksums
 establish local integrity, not publisher authenticity or proof of execution.
 Keep original work and local evidence. No upload, publication or expiry runs.
+
+For a separate, offline view of the existing sink's finer count timestamps, see
+the [observer delivery timing supplement](observer-timing.md). It retains
+observed crossing bounds and an explicit discovery screen, while leaving this
+comparison report and all legacy timing definitions unchanged.

@@ -510,3 +510,74 @@ in the new refusal evidence. Performance remains `not_assessed`, regression
 policy `disabled`; no new performance observations or qualification claims are
 available. No push, remote evidence transfer, external notification, paid
 provisioning or subsequent schedule was performed.
+
+
+## Primary 03:00 invocation stopped at public prerequisite — 2026-10-26 PDT
+
+The user authorized a primary invocation at 03:00 PDT (10:00 UTC) on
+`jpietsch-server` and exactly one conditional fresh fallback at 04:00 PDT.
+The intentional root-backed persistent-storage exception is explicitly renewed
+for these two bounded invocations only; memory/storage suitability checks remain
+mandatory. This record covers primary03 alone. The existing scheduler controls
+the conditional fallback; this invocation adds no timer or retry and does not
+alter the isolated fallback checkout.
+
+The primary began checks after 10:00 UTC. `milestone-a-newcomer` was clean at
+`ef404a242339004cf8d8e0e3a26f6b5f1790573f`. The new frozen bundle at
+`/tmp/bgperf2-c-resolution-20261026-schedule/03-preparation` passed all 31
+SHA256SUMS entries and exact path/type/size/hash coverage with its documented
+self-exclusions. No frozen input was changed, repaired or resealed; `prepare.py`
+was not rerun. Preparation material is not runtime evidence.
+
+Read-only inspection found all three exact local image IDs requested by the
+operator: baseline/generator `db0a8e144635b1d4b9f81f24ee78f11383c5b0cbd79f10353edcb8452e9af423`,
+candidate `7f60bf1483ccf766c768f0a3d894b52176748a4d76f9d18cc9af8730520b9142`,
+and observer `311317014fc98e2cadf46941b4b23dab9dd724281dd50167a0f9187d8ac08f19`.
+The selected `/tmp` ancestor is persistent non-RAM ext4 on `/dev/sda5[/tmp]`,
+backed by the root filesystem. Observed MemAvailable was 61,897,994,240 bytes
+and disk available 276,173,164,544 bytes, above the conservative 48 GiB/64 GiB
+reservations. These are snapshots, not workload demand estimates or hardware
+qualification. CPU identity, kernel and affinity 0–31 are recorded locally.
+
+The first manifest public `recipes.py check` for baseline returned exit 2.
+Its `bootstrap` check was refused because the existing locked-environment
+active-measurement guard could not run
+`docker --host unix:///var/run/docker.sock ps --format '{{.Names}}'`
+(exit 1). The public check recorded the exact clean engine revision and valid
+new disk-backed destinations, but could not establish its mandatory environment
+and active-measurement guard. The underlying Docker stderr was not exposed by
+that prerequisite report; no more specific cause or automatic approval-review
+rejection is asserted. Direct image inspection succeeding does not satisfy the
+failed public guard. No retry, alternate endpoint, environment repair or bypass
+was attempted. The baseline-control and candidate public prerequisite checks
+were not reached after this stop and are not claimed passed.
+
+Execution is permanently stopped for primary03: **zero of sixteen workers
+started**, zero failed worker attempts, eight A/A and eight A/B entries never
+run. All unused entries retain their exact frozen id/index/pair/role and current
+authorization/stop reasons in the job's separate accounting files. The future
+runtime root `/tmp/bgperf2-c-resolution-pilot-20261026-0300` remains absent;
+no series roots, original packages, assertions, timing supplements or runtime
+comparison reports were created. The first-A/A/full-A/A gates were not reached.
+Host-wide 30-second admission sampling and before/after Docker inventories were
+not completed. No CPU-based refusal was made: one unrelated busy core remains
+permitted when resources are ample, including in the conditional fallback.
+
+Evidence is retained under `/tmp/bgperf2-c-resolution-20261026-schedule/03`:
+`commands/prerequisite-baseline.json`, stdout/stderr, `stop-decision.json`,
+`observations.json`, `aa-never-run.json`, `ab-never-run.json`, independent review
+text/receipts, inventory/checksums, `outcome.json` and `final.txt`. The command
+record preserves arguments, exit and timestamps without dumping host process
+arguments or secrets. No worker or owned Docker resource was created, so no
+owned resource removal was needed. Unchanged unrelated resources cannot be
+established by full inventories because the required guard failed; no unrelated
+resource was stopped or cleaned. Earlier pilot/refusal evidence remains
+unchanged; it supplied no runtime evidence for this invocation.
+
+Documentation was edited only after execution stopped permanently. Independent
+result/cleanup and documentation reviews and the local conventional commit
+identity are retained in the job directory, avoiding a self-referential commit
+hash here. Performance remains `not_assessed`, regression policy `disabled`.
+No performance, version ranking, controlled delta, leak or hardware qualification
+conclusion follows. No download, build, 9950 access, push, remote evidence
+transfer, external notification, paid provisioning or new schedule occurred.

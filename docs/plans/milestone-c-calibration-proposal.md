@@ -761,3 +761,108 @@ commit. Performance remains `not_assessed`, regression policy `disabled`.
 There is no performance ranking, hardware qualification, remote evidence
 transfer, external notification, push, download, build, paid provisioning or
 9950 access.
+
+## Hourly resolution discovery completed — 2026-10-26 14:00 PDT job
+
+The user authorized hourly bounded discovery until one fully verified success,
+with automatic diagnosis/repair of non-load failures between hourly jobs. This
+superseded earlier one-shot/no-repair limits while retaining all correctness,
+timing, worker-budget and independent-review gates. The existing supervisor
+owns scheduling and reconstructs completion; this invocation created no timer
+and did not edit its success marker. Performance remains `not_assessed` and
+regression policy `disabled`; this discovery result selects no effect size,
+regression threshold, version ranking or hardware qualification.
+
+Job `/tmp/bgperf2-c-resolution-hourly-20261026/jobs/20261026T2100Z` used the clean
+existing `milestone-a-newcomer` checkout pinned throughout every worker to
+`57e51b3c2ad09fdb0fcb091e15ae9b8f0f0db298`, its committed two-peer, one-million
+prefixes-per-peer config and existing locked environment. The reviewed lab
+adapter created fresh adjacent `20261026T2100Z-preparation` offline at that
+current HEAD and exclusively created private `runtime/supplements` before
+admission. Preparation exited zero and was sealed only after its independent
+read-only review finished. All three public target prerequisite checks ran
+host-side through normal automatic approval and passed. All supplied immutable
+baseline/generator, candidate and observer image IDs in this proposal were
+confirmed locally; instrumentation remains unknown. No sandbox Docker refusal
+was substituted for a host check.
+
+Before worker 1 the coordinator repaired its CPU-pressure permission logic.
+The retained `pressure_monitor.py`, `control.py` and `accept.py` use host CPU
+counter deltas and CPU PSI every five seconds. Two consecutive intervals with
+host busy at least 75% AND CPU PSI some avg10 at least 20% permanently stop the
+invocation and gracefully interrupt only its owned public recipe controller.
+A memory-margin breach also stops; monitoring errors terminate/wait for that
+controller's collection/cleanup, record the error and block successors.
+Observation gaps over 7.5 seconds reject acceptance. Every retained CPU/PSI and
+memory observation is reviewed after each attempt and rechecked before its
+successor; adequate memory alone cannot establish no material interference.
+Independent review initially found the exception-handling gap; it accepted the
+fix before any worker started.
+
+Replay preserved the prior 13:00 job unchanged. Its r004 baseline's sustained
+roughly 98% busy and 50%+ PSI rejects the old sequence despite ample memory.
+The preceding candidate ends at 94.15% busy and PSI 19.39%, below the fixed
+screen; it is not relabeled as meeting that threshold. A synthetic single-busy-
+core control on 32 logical CPUs passes at 3.125% aggregate busy and zero PSI.
+The initial replay incorrectly expected both old files individually to reject;
+its assertion and corrected expectation are retained without changing the gate.
+This is a coordinator repair, not a host-load repair or a revision of old
+preliminary receipts.
+
+Fresh host admission covered about 30 seconds with 28.23–29.62% aggregate busy,
+CPU PSI declining from 1.99% to 0.09%, no I/O/memory PSI pressure and at least
+55.61 GiB MemAvailable. Fresh pre-A/B admission recorded 21.85–25.19% busy,
+zero CPU PSI and at least 55.86 GiB available. No active BGP measurement or held
+measurement lock was found; the supervisor coordination lock is orchestration
+state. The one running unrelated container and ordinary foreign work were
+retained. The explicitly renewed root-backed persistent ext4 `/dev/sda5`
+exception was checked with fresh findmnt/df observations: disk availability
+was 260,914,405,376 bytes before A/A and 248,299,888,640 before A/B. Both series
+met the 48 GiB available-memory and 64 GiB disk reservations; those floors and
+the 16 GiB running margin are reservations, not measured demand estimates.
+
+Exactly **16 serial attempts completed**: eight A/A then eight A/B, each with
+120 worker seconds and diagnostics `none`. No retry, warm-up or whole-compare
+loop ran. The first A/A attempt was screen 1 of 16; its independent gate passed
+before worker 2. Independent full-A/A acceptance followed eight completed
+attempts and preceded fresh A/B admission. Each attempt verified its original
+package, four assertions, recipe/target/budget binding, unique original attempt
+ID, owned cleanup, observer supplement and supplement reconstruction, and a new
+partial comparison checkpoint before its successor. All 32 A/A and 32 A/B
+assertions pass. Original final reports remain at
+`runtime/reports/aa-after-08/comparison.json` and
+`runtime/reports/ab-after-08/comparison.json`; all 16 timing supplements remain
+at their frozen manifest paths.
+
+All actual observer screens pass independently of verification exit status:
+A/A conservative lower bounds are 1.540092155–2.950087929 seconds, actual bracket
+widths 0.6888–1.6509% of their respective lower bounds, and increasing interior
+counts 137–232. A/B lower bounds are 1.660004570–3.278005236 seconds, widths
+1.4511–1.6005%, and interior counts 65–145. These observer 10%-to-90% windows
+neither upgrade the legacy clock nor establish which component limits delivery.
+Unknown instrumentation and withheld controlled deltas remain limitations.
+
+All 129 A/A and 122 A/B retained worker observations were reviewed. No pair of
+intervals meets the severe CPU/PSI stop screen, and no memory-margin breach
+occurred. Highest A/A CPU PSI was 17.74%; A/B CPU PSI was zero throughout.
+Minimum available memory during workers was 47.8648 GiB A/A and 53.5947 GiB
+A/B, above the running 16 GiB margin. Intermittent CPU peaks alone did not
+establish material pressure under the user-authorized practical standard.
+
+The coordinator initially read worker 7's acceptance inputs before asynchronous
+checkpoint verification finished; ENOENT prevented acceptance. It waited for
+post-processing exit zero and accepted the finished evidence before worker 8.
+The traceback and ordering note are retained; no worker retry or premature
+successor followed. Every package reports no owned cleanup errors, and all
+post-attempt container identity/state, network and volume inventories match the
+initial inventory. Original work, failures, logs, command arrays, ledgers,
+reports, supplements and reviewer text remain local with exact path/type/hash
+coverage, retaining socket entries without opening them.
+
+All worker execution permanently stopped before documentation edits and normal
+local commit hooks. Final independent A/B, cleanup and documentation review
+receipts and the full reviewed local documentation commit are retained in the
+job; `outcome.json` records completion and exact accounting. Failed worker
+attempts: zero; never-run entries: zero. No evidence deletion, remote transfer,
+external notification, push, download, build, paid provisioning or 9950 access
+occurred. This result authorizes no additional worker invocation.

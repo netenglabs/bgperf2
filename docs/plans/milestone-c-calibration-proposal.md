@@ -581,3 +581,59 @@ hash here. Performance remains `not_assessed`, regression policy `disabled`.
 No performance, version ranking, controlled delta, leak or hardware qualification
 conclusion follows. No download, build, 9950 access, push, remote evidence
 transfer, external notification, paid provisioning or new schedule occurred.
+
+## Hourly 18:00 UTC invocation stopped for evidenced load — 2026-10-26
+
+The operator authorized hourly bounded discovery until fully verified success,
+with automatic diagnosis/repair of non-load failures in a separate supervisor
+pass. This supersedes earlier one-shot/no-repair restrictions. Each fresh job
+retains at most sixteen serial 120-second workers, diagnostics none, four
+assertions, first-A/A and full-A/A independent gates, and unchanged observer
+resolution requirements. No new timer was installed by this invocation.
+
+Job `/tmp/bgperf2-c-resolution-hourly-20261026/jobs/20261026T1800Z`
+froze the current clean `milestone-a-newcomer` revision
+`a1b57a761e9dc70c82b2796b07f6a6ab892313e7`. Its adjacent
+`20261026T1800Z-preparation` was generated offline from the reviewed helper,
+independently reviewed read-only, and sealed only after preparation writers and
+the reviewer had finished. It retains exact recipe/target/assertion declarations,
+four-round alternating A/A and A/B plans, sixteen future command arrays and
+path/type/size/hash coverage. Original reviewer text is preserved in the job.
+Older sealed bundles were not changed or reused as execution evidence.
+
+All **three** public target prerequisite checks passed through approved host
+execution, avoiding the diagnosed sandbox Docker-socket denial. The exact
+baseline/generator, candidate and observer image IDs were inspected locally;
+no pull, install or build occurred. Instrumentation stays unknown. Host storage
+was ext4 `/dev/sda5`, intentionally root-backed under the renewed exception,
+with 272,469,716,992 bytes available, above the 64 GiB reservation.
+
+Admission stopped for actual sustained host load, independently reviewable in
+`host-activity-samples.json` and `host-activity-summary.json`: seven host samples
+span 30 seconds, with six interval CPU-busy values **82.06–92.21% across 32
+logical CPUs**. MemAvailable was **36.61–39.57 GiB**, below the mandatory
+48 GiB pre-series reservation. These are operational reservations, not workload
+estimates. This was not isolated one-core activity or an agent/unknown-argv
+refusal. No actual BGP measurement/held measurement lock was identified; the
+hourly supervisor's coordination lock is not a measurement conflict. No
+unrelated work was stopped and no model/code repair was made for load.
+
+Execution stopped permanently before worker 1: **zero attempts started, zero
+failed worker attempts, zero A/A or A/B completions, all sixteen entries never
+run**. New runtime ledgers preserve each frozen id/index/pair/role with null
+result and the explicit stop reason. No result packages, timing supplements or
+runtime comparison checkpoints exist; no assertion or timing gate is claimed
+passed. First-A/A, full-A/A and A/B receipts honestly record not reached.
+Owned cleanup requires no removal because no worker/resource was created;
+before/after local Docker inventories and independent review are retained.
+
+The job retains outcome/stop records, all three host prerequisite commands and
+stdout/stderr, original activity/resource/lock inventories, independent review
+text and receipts, and evidence coverage including non-regular file types.
+Independent cleanup/outcome and documentation reviews and the local conventional
+commit identity are recorded with the job; the outcome carries that commit hash.
+Documentation changed only after permanent worker stop. Performance remains
+`not_assessed`, regression policy `disabled`; no performance or hardware
+qualification conclusion follows. No retry within this job, push, remote
+transfer, external notification, paid provisioning or 9950 access occurred.
+The existing supervisor owns the next hourly attempt and its success decision.

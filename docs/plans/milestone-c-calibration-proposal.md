@@ -637,3 +637,55 @@ Documentation changed only after permanent worker stop. Performance remains
 qualification conclusion follows. No retry within this job, push, remote
 transfer, external notification, paid provisioning or 9950 access occurred.
 The existing supervisor owns the next hourly attempt and its success decision.
+
+
+## Hourly 19:00 UTC invocation stopped for coordinator setup — 2026-10-26
+
+Job `/tmp/bgperf2-c-resolution-hourly-20261026/jobs/20261026T1900Z`
+froze clean `milestone-a-newcomer` revision
+`1f2bbdc38754e1b89777fd141cfee8bcff280408`. Its fresh adjacent preparation
+was generated offline from the reviewed helper, independently reviewed read-only,
+and sealed after all preparation writers/reviewers finished. Exact image IDs,
+unknown instrumentation, two peers times one million prefixes, four assertions,
+four alternating rounds per series, 120-second budgets and diagnostics none
+were retained. All three public prerequisite checks passed on the approved host
+path; no sandbox Docker refusal was repeated.
+
+The renewed intentional root-backed persistent ext4 exception was recorded.
+Free disk was 274,278,866,944 bytes; seven host samples spanning 30 seconds
+showed 54.47–55.70 GiB MemAvailable. Host CPU busy was 28.54–30.00% across
+32 logical CPUs, with no sustained CPU/I/O/memory pressure. Ordinary foreign
+activity and unrelated locks did not alone block this discovery attempt.
+The during-worker sample retained seven resource observations spanning 30
+seconds; it does not attest continuous coverage of the full worker interval.
+
+The first A/A worker completed successfully in 64.0128768030554 seconds.
+Original attempt `bgperf_recipe_9d5f0593656f436bb1509a4dd6bbee8d`, its
+verified package and all four passed assertions are preserved. The coordinator
+omitted creation of `runtime/supplements`, causing the first timing command
+to exit 2 with ENOENT before evaluating sampling. This non-load **setup**
+failure permanently stopped worker execution after one attempt. No worker was
+retried and no second worker started. The supervisor owns a separate repair
+pass and the next hourly attempt; this job claims no complete success.
+
+After permanent worker stop, offline diagnosis created the missing output
+parent and evaluated the same original package at its manifest supplement path.
+Generation and reconstruction both passed: conservative lower 1.789916889 s,
+actual bracket width 0.019958769 s, 145 increasing interior count records.
+These observations satisfy the screen but do not reverse the original setup
+stop or authorize the remaining workers. Both original refusal logs and the
+separate post-stop command logs remain. The new partial report at
+`runtime/reports/aa-after-01/comparison.json` verified successfully and binds
+the original attempt to its frozen entry. The runtime ledgers retain one
+completed A/A worker, seven A/A never-run entries and eight A/B never-run
+entries, with zero failed worker experiments. First-A/A continuation and both
+full-series gates remain blocked by the permanent stop.
+
+Original work, logs, packages, supplements, host inventories and path/type/hash
+coverage, including socket types, remain local. Independent stop/cleanup and
+documentation findings and parent-written receipts are retained with the job;
+its outcome records the reviewed local documentation commit. No source edits
+occurred while a worker was active. Performance remains `not_assessed` and
+regression policy `disabled`. No performance ranking, hardware qualification,
+remote evidence transfer, push, build, download, paid provisioning, 9950 access,
+external notification or new timer occurred.

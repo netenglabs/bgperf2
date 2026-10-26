@@ -817,3 +817,19 @@ regression localization. Selecting a trusted daemon revision range, locally
 available builder/runtime images and qualified host remains a separate live
 validation decision. New daemon builds, downloads, benchmarks, infrastructure,
 remote evidence transfers and performance policy activation were not performed.
+
+Delivery commits are `42420a4` (staged comparisons) and `78a03b5` (deterministic
+bisection, controller budget anchors, maintained walkthrough and updated
+contracts). Both passed independent code review before normal local commits.
+The final engine quality gate passed **2,410 Docker-free tests** in 88.61 seconds;
+the locked environment inventory also matched all 34 packages. Independent final
+focused review passed 68 related tests, including 11 walkthrough tests.
+
+The final standalone walkthrough passed at
+`/tmp/bgperf2-milestone-d-final-feedback`, with summary
+`/tmp/bgperf2-milestone-d-final-feedback-summary.json`. It retained 33 simulated
+workers and 25 fake builds across five histories: assertion and crash boundaries
+confirmed; skipped, ambiguous and unstable cases remained unresolved. All 11
+primary, rebuilt and paused portable reports verified. Modeled workers use
+private output-owned host locks, leaving real host/session guards intact.
+These fixtures supply no daemon measurement or performance conclusion.

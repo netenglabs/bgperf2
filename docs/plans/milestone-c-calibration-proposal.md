@@ -689,3 +689,75 @@ occurred while a worker was active. Performance remains `not_assessed` and
 regression policy `disabled`. No performance ranking, hardware qualification,
 remote evidence transfer, push, build, download, paid provisioning, 9950 access,
 external notification or new timer occurred.
+
+## Hourly 20:00 UTC invocation stopped after A/A for load — 2026-10-26
+
+Job `/tmp/bgperf2-c-resolution-hourly-20261026/jobs/20261026T2000Z`
+froze current clean `milestone-a-newcomer` revision
+`9373bb682dbb20e8d6e0547917ac1050891571c7`. The reviewed lab adapter
+created fresh adjacent preparation and private runtime/supplements before worker
+admission. Its 16 offline commands passed; independent read-only preparation
+review finished before sealing. The exact supplied images, unknown
+instrumentation, two peers times one million prefixes, four assertions, four
+alternating rounds per series, diagnostics none and 120-second worker budgets
+were unchanged. All three public prerequisite checks and all worker commands
+ran on the approved host path. No sandbox socket refusal was repeated.
+
+Initial host admission retained seven samples spanning 30 seconds, with
+79.78–80.84% idle CPU, negligible I/O wait, no sustained pressure and at least
+56.32 GiB MemAvailable. Persistent ext4 `/dev/sda5` had 273,486,962,688 bytes
+free. The renewed intentional root-backed disk exception and 48 GiB memory,
+64 GiB free disk and 16 GiB running memory reservations were recorded as
+operational reservations, not demand estimates.
+
+Eight serial A/A workers completed, with eight unique original attempt IDs,
+32 passed assertions and eight passed observer screens. Lower bounds range
+1.640276902–2.539973499 seconds; actual bracket widths range
+0.019593734–0.031265228 seconds, all below 5% of their respective lower
+bounds; increasing interior counts range 131–212. Each original package and
+new checkpoint report verified. The first independent gate accepted attempt 1
+before attempt 2. The original final A/A report at
+`runtime/reports/aa-after-08/comparison.json` verifies 322 files. These passed
+instrument/correctness checks do not establish an acceptable host gate.
+
+**Independent full A/A gate: blocked for actual sustained CPU pressure.**
+`aa-r004-baseline-host-samples.json` records 18 consecutive five-second
+intervals over approximately 90 seconds: idle 0.98–8.62%, mostly around
+1–2% for the first 80 seconds, with CPU PSI some avg10 34.54–58.13%.
+Cumulative CPU stall grew approximately 42 seconds over the last 85 seconds;
+load exceeded 55 on 32 logical CPUs. The preceding worker's final interval
+already had 5.81% idle and PSI 19.39%. This is material host-wide pressure,
+not one busy core, agent presence, unknown instrumentation or foreign CPU
+alone. No active BGP measurement or held measurement lock was identified.
+Fresh pre-A/B admission later showed recovered capacity, but cannot qualify
+the pressured A/A sequence.
+
+The coordinator preserved five-second resource samples but inspected memory and
+cleanup without adequately examining CPU pressure between workers 7 and 8.
+That omission allowed worker 8 under pressure; preliminary per-attempt accepted
+receipts remain preserved and are superseded by the blocked independent full
+gate. A separate premature receipt read before checkpoint verification finished
+is recorded in `coordinator-ordering-note.txt`; awaiting completion resolved
+that read, with no worker retry or package/assertion/timing failure. Neither
+limitation is hidden by the successful correctness or timing results.
+
+Worker execution is permanently stopped before A/B: **eight attempts started,
+eight A/A completions, zero A/B completions, zero failed worker experiments,
+eight A/B entries never run**. Outcome class is load, with measurement_conflict
+false, material_interference true and isolated_one_busy_core_only false;
+its preserved samples_path points to the actual worker-8 host sample file.
+No retry, load repair or interference with unrelated work occurred. The existing
+supervisor owns the next hourly attempt; no new timer or success marker was
+created by this invocation.
+
+All workers report no owned cleanup errors. Original work, packages, commands,
+stdout/stderr, ledgers, checkpoint reports, supplements, independent reviewer
+text and honest receipts remain local, with path/type/size/hash coverage that
+records sockets without reading them. Container identities/states, networks and
+volumes remain unchanged in retained inventories; final independent cleanup and
+documentation reviews are recorded in the job. Documentation changed only after
+permanent worker stop, and outcome.json records its reviewed local conventional
+commit. Performance remains `not_assessed`, regression policy `disabled`.
+There is no performance ranking, hardware qualification, remote evidence
+transfer, external notification, push, download, build, paid provisioning or
+9950 access.

@@ -504,9 +504,30 @@ def main(argv=None):
     comparison_report.add_argument('--output-dir', required=True)
     comparison_verify = commands.add_parser('comparison-verify', help='verify bundled comparison evidence and conclusions')
     comparison_verify.add_argument('document')
+    session_start = commands.add_parser('comparison-start', help='prepare an explicitly gated comparison session')
+    session_start.add_argument('document')
+    session_start.add_argument('--workdir', required=True)
+    session_start.add_argument('--results-dir', required=True)
+    session_start.add_argument('--observer-window', action='store_true')
+    session_start.add_argument('--pressure-policy', help='explicit operational screen JSON; no default screen')
+    session_start.add_argument('--prior-review', help='accepted final review receipt of prior series')
+    session_step = commands.add_parser('comparison-step', help='run exactly one attempt, synchronously assess, then stop')
+    session_step.add_argument('results_dir')
+    session_review = commands.add_parser('comparison-review', help='record an external review at a waiting checkpoint')
+    session_review.add_argument('results_dir')
+    session_review.add_argument('--reviewer', required=True)
+    session_review.add_argument('--evidence', required=True)
+    session_review.add_argument('--decision', choices=('accepted', 'rejected'), required=True)
     args = parser.parse_args(argv)
     try:
-        if args.command == 'export':
+        if args.command in ('comparison-step', 'comparison-review'):
+            from comparison_session import step_session, record_review
+            result = (step_session(args.results_dir) if args.command == 'comparison-step' else
+                      record_review(args.results_dir, reviewer=args.reviewer,
+                                    evidence=args.evidence, decision=args.decision))
+            _write_document(result)
+            return result['exit_code']
+        elif args.command == 'export':
             roles = {role: {'adapter': adapter, 'image': getattr(args, role + '_image')}
                      for role, adapter in (('target', 'bird'), ('generator', 'bird'), ('observer', 'sink'))}
             document = export_recipe(args.batch, args.test, args.cell,
@@ -555,6 +576,14 @@ def main(argv=None):
                     repetitions=args.repetitions, order=args.order, seed=args.seed,
                     timeout=args.timeout, diagnostics=args.diagnostics,
                     assertions=read_document(args.assertions) if args.assertions else None), args.output)
+            elif args.command == 'comparison-start':
+                from comparison_session import start_session
+                result = start_session(document, workdir=args.workdir, results_dir=args.results_dir,
+                    observer_window=args.observer_window,
+                    pressure=read_document(args.pressure_policy) if args.pressure_policy else None,
+                    prior_review=args.prior_review)
+                _write_document(result)
+                return result['exit_code']
             elif args.command == 'compare':
                 from recipe_comparison import run_comparison
                 result = run_comparison(document, workdir=args.workdir, results_dir=args.results_dir)

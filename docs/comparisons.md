@@ -7,6 +7,11 @@ It does not enable calibrated performance verdicts. Read the
 [measurement dictionary](measurement-dictionary.md) for the existing clocks and
 accounting boundaries; no measurement definition changes here.
 
+For preparation, synchronous assessment, explicit first-attempt and final
+reviews, optional operational pressure screening and a prior-series review
+gate, use [staged comparison execution](comparison-execution.md). The existing
+`compare` command below retains its original semantics.
+
 ## Exercise the complete workflow without Docker
 
 Use the existing locked Python environment in a public checkout:

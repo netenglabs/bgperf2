@@ -153,6 +153,15 @@ planning and reporting are offline, and calibrated regression policy remains
 disabled pending a separately selected calibration. `scripts/comparison_smoke.py`
 exercises the public workflow using strictly simulated runtimes.
 
+`comparison_session.py` and `comparison_pressure.py` own staged serial reviews
+and optional explicit operational pressure screens; read
+`docs/comparison-execution.md` before changing their accounting or stop behavior.
+`recipe_bisection.py` owns bounded deterministic local-source revision searches,
+explicit recovery and portable boundary evidence. Read `docs/bisection.md`
+before changing its predicates, cache identity, journal or confirmation rules.
+Planning and reporting never authorize builds or measurements, and performance
+predicates remain unsupported.
+
 ### Pure batch cells
 
 `batch_cells.py` owns the version-preserving YAML loader, target-version

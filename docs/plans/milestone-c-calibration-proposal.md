@@ -1,7 +1,10 @@
 # Milestone C calibration pilot proposal
 
-Prepared 2026-10-23. Status: prior A/A pilot blocked A/B; revised experiment authorized once for 2026-10-25 13:00 PDT, refused at host admission with zero attempts. Milestone C's implementation and
-controlled reports authorize no real performance trial or policy activation.
+Prepared 2026-10-23; updated 2026-10-26. Status: noise/resolution discovery
+completed in the 2026-10-26 14:00 PDT job: eight A/A then eight A/B attempts,
+all required assertions, timing screens and independent reviews accepted.
+Earlier refusals and failed/stopped jobs remain in the historical record below.
+No performance conclusion or calibrated regression policy is enabled.
 The [comparison guide](../comparisons.md) owns command and accounting semantics.
 
 ## Decision needed before a real pilot

@@ -86,6 +86,7 @@ class SubprocessBackend:
         outcome = {'status': 'harness_failed', 'reason': 'Worker did not publish a terminal outcome.'}
         process = None
         worker_start = None
+        worker_end = None
         worker_elapsed = None
         within_budget = None
         old = signal.signal(signal.SIGTERM, _stop)
@@ -97,7 +98,8 @@ class SubprocessBackend:
                     cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
                 try:
                     process.wait(timeout=timeout)
-                    worker_elapsed = time.monotonic() - worker_start
+                    worker_end = time.monotonic()
+                    worker_elapsed = worker_end - worker_start
                     within_budget = worker_elapsed <= timeout
                     terminal = workdir / 'runtime.json'
                     if terminal.is_file():
@@ -105,7 +107,8 @@ class SubprocessBackend:
                     if process.returncode and outcome.get('status') == 'completed':
                         outcome = {'status': 'harness_failed', 'reason': f'Worker exited {process.returncode} after terminal evidence.'}
                 except subprocess.TimeoutExpired:
-                    worker_elapsed = time.monotonic() - worker_start
+                    worker_end = time.monotonic()
+                    worker_elapsed = worker_end - worker_start
                     within_budget = False
                     _kill(process)
                     outcome = {'status': 'inconclusive', 'reason': f'Attempt exceeded its {timeout:g}s wall-clock budget; worker group stopped.'}
@@ -132,10 +135,12 @@ class SubprocessBackend:
                 # cannot be interpreted as successful deadline completion.
                 try:
                     if worker_start is not None and worker_elapsed is None:
-                        worker_elapsed = time.monotonic() - worker_start
+                        worker_end = time.monotonic()
+                        worker_elapsed = worker_end - worker_start
                     _write(workdir / 'execution-budget.json', {
                         'schema': 'bgperf2/execution-budget/v1alpha1',
                         'scope': 'worker', 'timeout_seconds': timeout,
+                        'started_monotonic_s': worker_start, 'ended_monotonic_s': worker_end,
                         'elapsed_seconds': worker_elapsed,
                         'completed_within_budget': within_budget})
                 except Exception as exc:

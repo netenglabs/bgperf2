@@ -1,6 +1,11 @@
 # bgperf2 developer performance testing plan
 
-Created 2026-10-23. Status: milestones A and supplied-image B functionally validated; milestone C implementation and controlled comparisons independently reviewed. Real source-build/fix, broader diagnostic qualification and performance calibration remain deferred. See the [milestone B validation record](milestone-b-runtime-validation.md) and [comparison guide](../comparisons.md).
+Created 2026-10-23; updated 2026-10-26. Status: milestones A and supplied-image B
+functionally validated; C noise/resolution discovery completed; staged comparison
+safeguards and deterministic milestone D implemented with controlled validation.
+Real source-build/fix and live-bisection qualification, broader diagnostic
+qualification and performance calibration remain deferred. See the
+[comparison guide](../comparisons.md) and [bisection guide](../bisection.md).
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
 The operator authorized phase 0, phase 1a–b prerequisites/preparation and complete
@@ -276,7 +281,10 @@ semantics remain documented and separately tested.
 
 ### 6. Bisect reproducible daemon regressions
 
-Status: planned, later. Depends on phases 2–5 and a trustworthy predicate.
+Status: implemented for the existing observable assertions and captured-target
+crash predicates; controlled Docker-free validation. Live source-build/bisection
+qualification and performance predicates remain deferred. See the
+[bisection contract and walkthrough](../bisection.md).
 
 - Search an explicitly bounded daemon revision range with the same recipe and
   build contract. Start with deterministic crash/correctness outcomes.
@@ -749,3 +757,63 @@ was removed after verification and the checkout remained clean. The earlier
 milestone A/B preservation manifests were rechecked unchanged: 143, 120 and
 302 regular-file entries still match their sealed bytes. No original evidence
 was deleted or transferred.
+
+### Pilot closeout, supported safeguards and deterministic D — 2026-10-26
+
+The operator selected these three next steps after completion of the hourly
+noise/resolution experiment. The accepted run used engine `57e51b3` and was
+recorded in `1cfe6c5`: exactly eight A/A then eight A/B attempts, 120 worker
+seconds each, diagnostics none, 64 passing named assertions, 16 accepted
+observer timing screens and independent first-attempt, A/A, A/B and cleanup
+reviews. The [calibration record](milestone-c-calibration-proposal.md) retains
+the successful run and every earlier refusal/stopped invocation. This is
+noise/resolution discovery, not performance calibration or a version ranking.
+Lab operations own schedule retirement and the verified local preservation
+receipt; raw evidence is not placed in engine Git or transferred remotely.
+
+The [staged comparison interface](../comparison-execution.md) moves private
+coordinator lessons into an optional supported public workflow. It initializes
+supplement directories before execution, serializes collection/assessment,
+verifies package/assertion/budget/cleanup evidence before successors, requires
+explicit hash-bound first/final reviews, and supports a prior accepted series
+as a prerequisite. Optional pressure monitoring uses an explicit operator
+policy rather than requiring zero utilization. Monitoring errors and material
+pressure stop owned execution and block successors. Setup refusals proven to
+precede any attempt remain not-run. Legacy compare and report contracts stay
+unchanged; no automatic repairs or retry scheduler was introduced.
+
+[Deterministic bisection](../bisection.md) implements phase 6 for the existing
+four observable correctness assertions and a captured nonzero target-daemon
+exit. Hash-checked commit objects prove a consecutive first-parent chain;
+fixed source/build controls bind every trial. Build caches use complete plan
+identity, measurements retain unique original IDs, and both boundary sides
+require fresh confirmation. Skipped and ambiguous candidates remain holes in
+an explicitly unresolved range. Fixed trial budgets never extend. Interrupted
+reservations require explicit recovery; incomplete copies and existing failure
+records are retained without re-executing a worker. Portable reports reconstruct
+predicates, search requests, bounds, confirmations and human prose from evidence.
+
+Independent review tightened crash timing to explicit controller worker start/
+end anchors, retained missing/old clocks as ambiguous, made partial-copy and
+failure-before-journal recovery safe, and refused symlinked session paths. An
+additional check refuses a completed crash trial with unexplained target
+absence. The controller adds optional monotonic anchors to existing worker
+budget evidence without changing benchmark clocks or legacy assertion meaning.
+
+The maintained `scripts/bisection_smoke.py` exercises public planning, execution,
+report rebuilding and verification with five strictly simulated histories:
+assertion boundary, captured-crash boundary, skipped revision, ambiguous
+pause/resume and unstable confirmation. Subprocess and network operations are
+guarded throughout. Separate tests read an inert local Git chain without
+changing its checkout. That fixture strips the entire inherited Git environment;
+a trap-variable regression prevents a commit hook from redirecting it into the
+engine checkout. During validation its original missing isolation created an
+unintended local fixture commit; branch/index were restored with a checked
+compare-and-swap, all implementation edits retained, and an audit patch kept
+outside Git. No accidental fixture files remain in the branch.
+
+These are controlled implementation checks, not a real source build or live
+regression localization. Selecting a trusted daemon revision range, locally
+available builder/runtime images and qualified host remains a separate live
+validation decision. New daemon builds, downloads, benchmarks, infrastructure,
+remote evidence transfers and performance policy activation were not performed.

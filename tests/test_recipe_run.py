@@ -187,6 +187,7 @@ def test_worker_budget_excludes_collection_and_cleanup(tmp_path, monkeypatch):
     assert recipe_run.SubprocessBackend().execute(recipe(), tmp_path, 'attempt', 3)['status'] == 'completed'
     budget = json.loads((tmp_path / 'execution-budget.json').read_text())
     assert budget == {'schema': 'bgperf2/execution-budget/v1alpha1', 'scope': 'worker',
+                      'started_monotonic_s': 10, 'ended_monotonic_s': 12,
                       'timeout_seconds': 3, 'elapsed_seconds': 2, 'completed_within_budget': True}
 
 

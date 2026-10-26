@@ -1,6 +1,6 @@
 # bgperf2 roadmap
 
-Updated 2026-10-23. This is the public index of engine development plans.
+Updated 2026-10-26. This is the public index of engine development plans.
 Everything needed to understand, use and contribute to bgperf2 belongs in this
 repository. Other projects can build campaigns and services on its documented
 CLI and versioned artifacts; none is required to use the engine.
@@ -15,7 +15,7 @@ boundaries incrementally while keeping current CLI and output compatibility.
 
 | Document | Status | Purpose |
 | --- | --- | --- |
-| [Developer performance testing plan](plans/performance-testing-development-plan.md) | A and supplied-image B functionally validated; C comparison workflow independently reviewed, calibration deferred | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |
+| [Developer performance testing plan](plans/performance-testing-development-plan.md) | A/B functional validation; C noise/resolution discovery complete; staged comparisons and deterministic D implemented with controlled validation; performance calibration deferred | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |
 | [Architecture design](plans/architecture-design.md) | Supporting proposal; reconciled with shipped foundations | Recipe/result records, lifecycle boundaries, observations and compatibility strategy |
 | [Future testing workloads](plans/future-testing-workloads.md) | Deferred | Preserve policy, IPv6 and other workload ideas without scheduling their implementation |
 | [Policy engine design](plans/policy-testing-engine-design.md) | Deferred | Semantic policy model, conformance, adapter/generator/observer requirements and implementation risks |
@@ -48,11 +48,17 @@ retain memory/CPU/timing observations, variation, failures and confounders.
 Controlled examples demonstrate known differences, noise and inconclusive
 evidence. Calibrated regression policy remains disabled pending the separately
 selected [pilot and effect-size decisions](plans/milestone-c-calibration-proposal.md).
-The first noise pilot stopped at its timing-resolution gate after A/A. A revised
-two-million-prefix experiment and a separate
-[offline observer timing supplement](observer-timing.md) prepare a new discovery
-run with an early per-attempt gate; execution remains separately authorized.
-Milestone D bisection remains unstarted.
+The revised two-million-prefix noise/resolution pilot completed all eight A/A
+and eight A/B attempts with independent gates and
+[observer timing supplements](observer-timing.md). This establishes resolution
+for that selected discovery run and makes no performance conclusion. The
+[staged execution guide](comparison-execution.md) adds synchronous assessments,
+explicit review gates and optional operator-selected pressure monitoring.
+[Milestone D deterministic bisection](bisection.md) now supplies bounded local
+revision search, build caching, explicit recovery, skipped/ambiguous outcomes,
+fresh boundary confirmations and verified portable reports. Controlled histories
+validate the workflow; real source-build/live-bisection qualification and
+performance predicates remain deferred.
 
 The architecture proposal is supporting material, not a second execution order.
 New policy semantics, IPv6 and protocol/topology expansion remain deferred until

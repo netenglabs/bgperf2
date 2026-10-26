@@ -18,6 +18,7 @@ rewritten.
 * [Roadmap and development plans](docs/roadmap.md)
 * [Portable recipe and result contracts](docs/recipes.md) (export, prepare, isolated execution and verified result packages)
 * [Investigate a local BIRD fix](docs/investigations.md) (target/build identities, diagnostics and baseline/fix reports)
+* [Localize a deterministic regression](docs/bisection.md) (bounded revision search, recovery and verified boundary evidence)
 * [How bgperf2 works](docs/how_bgperf_works.md) ·
   [Benchmarking a remote target](docs/benchmark_remote_target.md) ·
   [MRT injection](docs/mrt.md) ·
@@ -761,6 +762,12 @@ assertions and repeated serial comparisons of two BIRD target selections, with
 portable verified reports. The maintained Docker-free demo includes controlled
 differences, noise and inconclusive evidence. Calibrated regression verdicts
 remain disabled pending separately authorized calibration.
+
+Use [staged comparison execution](docs/comparison-execution.md) for serial
+per-attempt checks and explicit review gates. The
+[deterministic bisection guide](docs/bisection.md) covers local revision searches
+with fresh boundary confirmations; its controlled walkthrough needs no Docker
+or quiet measurement window. Live source-build qualification remains deferred.
 
 The [public roadmap](docs/roadmap.md) indexes current priorities, detailed plans
 and deferred workload ideas. Engine plans and implementation decisions live in

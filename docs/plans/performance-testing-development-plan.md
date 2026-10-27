@@ -9,8 +9,10 @@ qualification and performance calibration remain deferred. See the
 [comparison guide](../comparisons.md) and [bisection guide](../bisection.md).
 A [bounded milestone D live-validation proposal](milestone-d-runtime-validation.md)
 now selects a deliberate local count fault, three source builds and five serial
-workers with independent step reviews. Preparation is authorized; execution
-awaits fresh approval. Earlier runtime authorizations are consumed.
+workers with independent step reviews. The approved execution request stopped
+at host admission before any build/worker because unrelated heavy CPU work
+exceeded its light-background-work exception. Live qualification remains pending;
+another attempt needs fresh approval. Earlier runtime authorizations are consumed.
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
 The operator authorized phase 0, phase 1a–b prerequisites/preparation and complete

@@ -61,7 +61,9 @@ explicit review gates and optional operator-selected pressure monitoring.
 revision search, build caching, explicit recovery, skipped/ambiguous outcomes,
 fresh boundary confirmations and verified portable reports. Controlled histories
 validate the workflow. A [bounded live-bisection case](plans/milestone-d-runtime-validation.md)
-is prepared for fresh authorization; live qualification remains pending.
+was approved but stopped at host admission before any build/worker because
+unrelated heavy CPU work exceeded its concurrency exception. Live qualification
+remains pending and another attempt requires fresh authorization.
 Broader source-build qualification and performance predicates remain deferred.
 
 The architecture proposal is supporting material, not a second execution order.

@@ -1,6 +1,8 @@
 # Milestone D bounded live-bisection proposal
 
-Prepared 2026-10-26. **Awaiting new execution authorization.** Prior A/B and
+Prepared 2026-10-26. **Execution approved, then stopped at host admission; no
+build or worker ran.** A new execution attempt requires fresh authorization.
+Prior A/B and
 discovery-run authorizations are consumed. This procedure authorizes nothing by
 itself. Milestone C calibration remains pending; performance policy stays
 `disabled`, performance qualification `not_assessed`, and performance predicates
@@ -200,3 +202,42 @@ Downloads, dependency/image acquisition, extra builds/workers, forced crashes,
 timeout/interruption experiments, privileged capture, new schedules, `9950`
 access, provisioning, pushing/publication, remote evidence transfer and
 performance-policy activation are outside the proposed scope.
+
+## Approved execution stopped at admission — 2026-10-26
+
+The operator approved the concrete procedure with **“go ahead”**. Admission used
+clean engine `6d66b2f60a2a45cb74e0408fef248306309d9d8c` on
+`milestone-a-newcomer`; the frozen recipe, three recomputed source plans,
+session plan bytes, expected first request and selected local image IDs matched.
+The approval is retained separately in `execution-authorization.json`; original
+preparation bindings and inventory remain unchanged.
+
+The first sandboxed inventory could not reach the Docker socket. Its original
+`before-1-inventory.json` and stderr retain that access refusal, which supplies
+no host-load conclusion. The required read-only guard was then run with approved
+host execution and passed. The separate `before-1-host-inventory.json` records
+71 existing containers, only unrelated `second-looks-box` running, the selected
+ext4 `/dev/sda5` mount, 57,352,159,232 bytes MemAvailable and 230,468,829,184 free
+disk bytes. The protective memory/disk floors passed. No image was acquired,
+built, retagged or removed.
+
+Manual process admission found an unrelated classifier invoked with
+`fit_classifier.py --v2 --workers 30` (parent PID 2047001). A read-only delta of
+its process tree's `/proc` CPU ticks over 1.001777569 seconds measured
+**2,997.671% of one core**, about 30 cores, across 33 processes. This is active
+CPU use, not a lifetime `ps %CPU` average. `background-admission.json` retains
+the command, per-process deltas, interval and load average. This exceeds the
+approved **light ordinary background work** exception. The procedure stopped
+permanently before the first public `step --execute`; the unrelated job was
+not interrupted or changed. No broader concurrency exception was inferred.
+
+Accounting is **zero source builds, zero workers, zero trials**. The session has
+no pending reservation; its initialized artifact directories remain empty.
+The first good endpoint, injected fault, cache reuse, fresh confirmations and
+live boundary remain unmeasured. No timeout, build or daemon failure occurred.
+This admission stop is not a bisection result and does not qualify live D.
+Performance policy remains `disabled`, qualification `not_assessed`, and C
+calibration pending. All prior evidence, the preparation root and new admission
+records remain local; no deletion or remote transfer occurred. Another attempt
+must recheck actual host suitability and receive fresh execution approval under
+the recorded stop rule; it must not silently retry this stopped request.

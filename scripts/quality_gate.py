@@ -54,8 +54,16 @@ def guard():
     host = os.environ.get('DOCKER_HOST', 'unix:///var/run/docker.sock')
     if not host.startswith('unix://'):
         raise ValueError('Quality gates require a local unix:// DOCKER_HOST')
-    names = command('docker', '--host', host, 'ps', '--format', '{{.Names}}',
-                    capture=True, env=local_docker_environment()).stdout.splitlines()
+    try:
+        names = command('docker', '--host', host, 'ps', '--format', '{{.Names}}',
+                        capture=True, env=local_docker_environment()).stdout.splitlines()
+    except subprocess.CalledProcessError as exc:
+        diagnostic = (exc.stderr or exc.stdout or 'Docker returned no diagnostic output.').strip()[-2000:]
+        raise ValueError(
+            f'Cannot inspect running containers at {host} (Docker exit {exc.returncode}): '
+            f'{diagnostic}\nCheck that the local daemon is running and accessible from this execution '
+            'context. Sandboxed agents must request approved host execution. '
+            'The active-measurement guard remains required.') from exc
     active = [name for name in names if name.startswith('bgperf_')]
     if active:
         raise ValueError('Active measurement: running containers ' + ', '.join(active))

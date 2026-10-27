@@ -36,8 +36,34 @@ def test_unreadable_probe_refuses(monkeypatch):
     def fail(*a, **kw):
         raise subprocess.CalledProcessError(1, a)
     monkeypatch.setattr(gate, 'command', fail)
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(ValueError, match='Docker returned no diagnostic output'):
         gate.guard()
+
+
+@pytest.mark.parametrize('stderr,stdout,expected', [
+    ('permission denied while trying to connect to /var/run/docker.sock', '', 'permission denied'),
+    ('Cannot connect to the Docker daemon', '', 'Cannot connect'),
+    ('', 'Docker access failure on stdout', 'failure on stdout'),
+    ('x' * 5000 + 'permission denied', '', 'permission denied'),
+])
+def test_docker_failure_keeps_bounded_diagnostic_and_stops_without_retry(monkeypatch, stderr, stdout, expected):
+    monkeypatch.setattr(gate.Path, 'read_text', lambda self: '')
+    monkeypatch.setattr(gate.Path, 'glob', lambda self, pattern: [])
+    monkeypatch.setenv('DOCKER_HOST', 'unix:///var/run/docker.sock')
+    calls = []
+    def fail(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise subprocess.CalledProcessError(1, args, output=stdout, stderr=stderr)
+    monkeypatch.setattr(gate, 'command', fail)
+    with pytest.raises(ValueError) as caught:
+        gate.guard()
+    message = str(caught.value)
+    assert expected in message and 'Docker exit 1' in message
+    assert 'approved host execution' in message and 'guard remains required' in message
+    assert len(message) < 2500
+    assert len(calls) == 1 and calls[0][0] == (
+        'docker', '--host', 'unix:///var/run/docker.sock', 'ps', '--format', '{{.Names}}')
+    assert calls[0][1]['capture'] is True
 
 
 def test_held_batch_lock_refuses_before_docker(monkeypatch):

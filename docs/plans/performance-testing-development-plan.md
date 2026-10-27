@@ -833,3 +833,27 @@ confirmed; skipped, ambiguous and unstable cases remained unresolved. All 11
 primary, rebuilt and paused portable reports verified. Modeled workers use
 private output-owned host locks, leaving real host/session guards intact.
 These fixtures supply no daemon measurement or performance conclusion.
+
+### Codex/Docker prerequisite diagnosis — 2026-10-26
+
+The operator redirected work to the Codex execution blocker. Read-only public
+checks at clean engine `78dd9a2` reproduced the distinction: the sandbox check
+refused at bootstrap, while the same recipe/check passed through approved host
+execution, including all three pinned image inspections. Neither created work
+or result directories. This confirms the approved execution path; it does not
+authorize a measurement or establish CPU idleness.
+
+The remaining engine bug was lost diagnostic output: the quality gate captured
+Docker stderr but rendered only its exit code through bootstrap. It now retains
+the last 2,000 diagnostic characters and explains execution-context access and
+approved host execution. A missing daemon is not mislabeled as a permission
+failure. The guard still refuses on every Docker inspection failure, makes one
+probe with no retry or automatic repair, and remains mandatory.
+
+The focused quality-gate/prerequisite suite passed 39 tests. Direct read-only
+verification of the corrected guard returned exit 1 with the actual socket
+permission-denied message in the sandbox and exit 0 through approved host
+execution. Reports and original stderr remain under
+`/tmp/bgperf2-codex-docker-verification-20261026`. The environment guide records
+the remedy. No BIRD regression was selected, and no build, benchmark, download,
+new schedule or remote transfer ran as part of this fix.

@@ -64,6 +64,17 @@ access, or a separately supplied cache of the matching wheels.
 The guard requires readable Linux procfs and a reachable local Docker daemon,
 even though the Python suite itself does not use Docker.
 
+If Docker inspection fails, the guard retains the last 2,000 characters of its
+diagnostic and stops before installation or tests. A socket permission denial
+can mean the current execution sandbox cannot reach Docker even when host-side
+commands work. For a sandboxed coding agent, request approved host execution
+for the complete Docker-dependent bootstrap/check/hook command, including its
+child processes. Check the reported cause first: an unavailable daemon and a
+permission denial require different remedies. Neither a refusal nor a generic
+nonzero exit establishes host load or a broken Python environment. Keep the
+guard enabled and retain failed check reports; no automatic retry or repair
+is performed.
+
 Bootstrap enables this checkout's tracked `.githooks/`. `--check` only verifies
 an existing environment. Pre-commit runs this repository's locked Docker-free
 suite and `git diff --check` for staged and unstaged edits. Stage the complete

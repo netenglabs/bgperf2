@@ -13,9 +13,10 @@ five serial workers. It retains earlier admission stops, the first-trial load
 monitor limitation, observed contention, cached compilation and independent
 reviews. All runtime authorizations are consumed; no performance policy is enabled.
 The operator selected a 10% observer-window slowdown planning target. The approved
-[controlled repeatability case](milestone-c-repeatability-validation.md) completed
-one optimized build and its first worker, then permanently stopped for outside
-CPU above its selected cap. No pair completed; statistical detection is unvalidated.
+[controlled repeatability cases](milestone-c-repeatability-validation.md) used
+one optimized build: case 01 stopped after its first worker, zero-build case 02
+after its second, both for outside CPU above the selected cap. Case 02's single
+physical pair is unqualified; statistical detection remains unvalidated.
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
 The operator authorized phase 0, phase 1a–b prerequisites/preparation and complete
@@ -250,8 +251,8 @@ crash reproduction without reconstructing the experiment from console output.
 Status: implemented and independently reviewed for the supported synthetic
 recipe. Repeated serial plans, descriptive reports and controlled fixtures are
 documented in the [comparison guide](../comparisons.md). Real noise/resolution
-discovery completed; the controlled repeatability case stopped after its first
-worker. Completed repeatability and calibrated regression policy remain
+discovery completed; both controlled repeatability cases stopped for outside CPU.
+Completed repeatability and calibrated regression policy remain
 pending/disabled. Depends on phases 0–3.
 
 - Run repeated interleaved comparisons of two target builds on the same
@@ -352,7 +353,7 @@ The B supplied-image and packaging-source cases remain accepted in their
 [validation record](milestone-b-runtime-validation.md). C calibration remains
 pending: its [discovery history](milestone-c-calibration-proposal.md) is complete;
 the [controlled repeatability record](milestone-c-repeatability-validation.md)
-records the selected 10% target, first-worker stop and remaining statistical/policy
+records the selected 10% target, both outside-CPU stops and remaining statistical/policy
 decisions. Broader daemon/source/crash validation
 and minimization are separate selections. No further host trial or performance
 policy activation is implied by these completed functional cases.
@@ -1022,3 +1023,22 @@ revision change. Original build/runtime engine `2b15281`, stop record `8446aef`
 and sealed-preservation completion `edd5ce7` remain separately recorded.
 The original case stays permanently stopped. New destinations and separate
 ledgers are selected; no new worker or host/storage exception is authorized yet.
+
+### Milestone C zero-build case 02 stopped after worker 2 — 2026-10-27
+
+The operator's `try again` approved the prepared case at `e4b0ed7`, including its
+renewed root-backed storage exception. Both serial workers completed with all
+four assertions, live placement, package/report and observer screens verified.
+Independent first review accepted continuation after worker 1 (outside CPU 18%
+of one core). Worker 2 then recorded 124.1111%, above the frozen 100% successor
+cap, and independent review rejected all further continuation. The external
+coordinator stop governs; the generic public `ready` state and accepted first
+receipt remain honestly unmodified because no public mid-block rejection command
+exists. No third worker started.
+
+Accounting is zero builds, two completed experiments, zero failed experiments
+and 30 never run. One physical pair is not operationally qualified and supplies
+no repeatability/power/performance conclusion. Cleanup and all unrelated
+resources are unchanged. The [case-02 execution record](milestone-c-repeatability-validation.md#case-02-execution-stopped-after-worker-2--2026-10-27)
+owns detailed bounds, hashes, accounting and local preservation. Case 01 remains
+stopped and untouched; case 02's approval is also consumed. Policy stays disabled.

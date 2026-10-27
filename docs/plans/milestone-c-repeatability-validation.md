@@ -5,8 +5,9 @@ worker 1 for outside CPU activity.** One optimized build and one worker complete
 31 workers remain never run. The approved procedure below is retained as the
 frozen protocol; the [execution record](#approved-execution-stopped-at-first-review--2026-10-27)
 supersedes its preparation handoff. All runtime authorization is consumed.
-The [fresh zero-build case 02](#case-02-prepared-with-existing-optimized-image--2026-10-27)
-is prepared separately and has no execution authorization.
+The separately approved [zero-build case 02](#case-02-execution-stopped-after-worker-2--2026-10-27)
+also stopped permanently for outside CPU, after two completed workers. Its other
+30 workers remain never run and its execution authorization is consumed too.
 The operator selected a **10% slower observer delivery window** as the practical
 calibration target. This means the separately defined
 [10%-to-90% observer count-crossing window](../observer-timing.md), not legacy
@@ -376,3 +377,83 @@ workflow with fresh per-worker gates and separate case-02 ledgers/receipts. Do
 not resume case 01, pool its lone observation into this study or reuse its
 attempt identity/review as a continuation gate. Preserve both case histories.
 Performance policy remains disabled and qualification not assessed.
+
+## Case 02 execution stopped after worker 2 — 2026-10-27
+
+The operator's `try again` approved the concrete zero-build/32-worker case and
+renewed intentional root-backed disk exception under all unchanged gates.
+Runtime engine stayed clean at `e4b0ed715e9bd39b4f8ac08089d4df272636f73c`.
+Independent review verified the equivalent recipe, derived target declarations,
+all original image/source/build provenance, six successful offline commands,
+frozen hashes and exact sequences/budgets. Original build records retained their
+`2b15281` recipe binding; no build, cache result or binary identity was invented.
+The new runner bindings were independently reviewed before any worker. All 32
+preparation files verify in original and new results copies. Case 01's permanent
+stop, unused entries, archive and original evidence remain unchanged.
+
+Public block-1 initialization created separate case-02 ledgers without a worker.
+Earlier admission windows were retained as waiting observations, not failed
+measurements. Worker 1's admission 005 passed six intervals of 0.231–0.356 busy
+CPU equivalents, minimum 57.1677 GiB available memory and a fresh all-UID process
+review showing no competing heavy job. Its unique original attempt is
+`bgperf_recipe_d9ca8ae906654cbba3068a80d6e0aa7e`. It completed within its worker
+budget (58.550864337 of 120 seconds), passed all four assertions and the observer
+screen, and recorded outside CPU of 18% of one core, below the 100% successor cap.
+Independent first review accepted continuation; the actual public accepted
+receipt remains at `block-1/reviews/first.json`.
+
+Worker 2's fresh admission 001 also passed six intervals (0.135–0.255 busy CPU
+equivalents, minimum 57.1156 GiB available memory). Attempt
+`bgperf_recipe_901f2f65efe64fcbbac57a928c9d2a70` completed in 61.359569184 of
+120 worker seconds and passed all four assertions. Both observed exactly
+2,000,000 prefixes with no tester errors/timeouts. Their packages each verify
+39 artifacts; the second portable checkpoint verifies 82 files. Original work
+and packaged hashes match for all 72 work files. Both targets use the same actual
+optimized `8cc3a97c…` image and unchanged local-source provenance. Every owned
+target, monitor and tester container has the exact selected requested/effective
+CPU layout and no capture error; identities are distinct from case 01 and each other.
+
+Observer supplements reconstruct exactly. First span is 1.446376673 seconds,
+conservative bounds [1.429851908, 1.456357256]; second span 1.759498119 seconds,
+bounds [1.737427448, 1.769774644]. Both resolution screens pass. These are
+count-crossing bounds, not statistical confidence intervals or controlled effects.
+
+**Independent continuation decision: REJECT.** Worker 2's raw outside-CPU peak
+was **124.11105445822314% of one logical CPU**, above the frozen 100% cap
+(CSV 124%). Leading contributors were one Python process at 100.0060%, four
+Codex processes at 12.7498% and three herdr processes at 7.9686%; these are not
+the entire total. The passing admission did not qualify this later foreign work.
+The distinct severe-pressure screens both passed: 62/65 observations, maximum
+host busy 11.0451%/14.1338%, CPU PSI zero, minimum available memory
+54.9304/54.6350 GiB and maximum gaps 1.00367/1.00370 seconds. Those operational
+screens do not override the selected outside-CPU successor cap.
+
+The coordinator's `permanent-stop.json` blocks every further live command.
+Independent `external-stop-review.json` binds the exact second attempt/result,
+plan, immutable checkpoint and preserved accepted first-review receipt. The
+generic public session remains `ready` at `next_index 2`: its API has first/final
+review gates but no mid-block external-rejection command. That historical state
+and the accepted first receipt are deliberately unmodified. They neither override
+the external case stop nor authorize worker 3. There is no automatic worker queue.
+
+**Final accounting:** zero new builds, two completed worker experiments, zero
+failed worker experiments, 14 remaining block-1 and all 16 block-2 entries never
+run: **30 never run**. One physical A/A pair completed, but its second observation
+failed the selected operational qualification; there is no qualified pair or
+repeatability, variance, power, 10%-effect detection or performance conclusion.
+Qualification stays `not_assessed`, policy `disabled`. No retry, resume,
+exclusion, extension, workload/threshold change or additional worker occurred.
+
+**Cleanup and evidence:** all 71 pre-existing container identities/states, six
+networks, 495 volumes, 45 image inventory lines and Docker identity match before
+and after both workers. Runtime cleanup errors are empty. Unrelated work and
+resources were never interrupted or cleaned. Original case-02 work and results
+remain under the selected `…repeatability-control-02` roots. Coordinator evidence
+is at `/tmp/bgperf2-c-repeatability-runtime02-20261027`; frozen inputs remain at
+`/tmp/bgperf2-c-repeatability-case02-20261027` and results `preparation`.
+Preservation will copy final coordinator evidence and verify full archive/source
+coverage after the last stop-record writers finish, retaining socket types
+without opening their contents. Originals remain intact; same-device local
+preservation is not independent backup. No push, download, provisioning, 9950
+access or remote evidence transfer occurred. This case's approval is consumed;
+its unrun entries are not a budget available for a new attempt.

@@ -1,6 +1,10 @@
 # Milestone C controlled repeatability validation
 
-Prepared 2026-10-27. **Independently reviewed; execution approval pending.**
+Prepared and executed 2026-10-27. **Approved case permanently stopped after
+worker 1 for outside CPU activity.** One optimized build and one worker completed;
+31 workers remain never run. The approved procedure below is retained as the
+frozen protocol; the [execution record](#approved-execution-stopped-at-first-review--2026-10-27)
+supersedes its preparation handoff. All runtime authorization is consumed.
 The operator selected a **10% slower observer delivery window** as the practical
 calibration target. This means the separately defined
 [10%-to-90% observer count-crossing window](../observer-timing.md), not legacy
@@ -210,6 +214,99 @@ placement or hardware is needed. Do not automatically extend this study.
 Independent review accepted the fixed design, source/build binding helper,
 seed sequences, retained live-placement evidence gate and audit figure. Final
 inputs must be regenerated and verified at the clean documentation commit.
-This preparation itself ran **zero builds and zero workers**. Runtime approval
-is the next operator boundary, required by the developer performance plan's
-bounded execution controls; no skill introduces an additional approval gate.
+Preparation at `2b15281` ran **zero builds and zero workers**. The subsequent
+explicitly approved execution is recorded below. This protocol does not authorize
+a new case, a retry or use of its unrun budget.
+
+## Approved execution stopped at first review — 2026-10-27
+
+The operator approved the exact one-build/32-worker case and renewed intentional
+root-backed persistent storage exception on otherwise-idle `jpietsch-server`.
+Later clarification said there was no reserved quiet window and ordinary work
+was running; it neither relaxed admission nor authorized concurrent heavy work.
+Engine remained clean at `2b15281a97a55f643e0def790505578fd4d72fde` throughout
+the build and worker. No scheduler or automatic benchmark loop was installed.
+
+Read-only admission waited through ongoing and newly started foreign work.
+Build admission 177 finally passed six five-second intervals spanning 30 seconds,
+with 0.255–0.757 logical CPU equivalents busy and at least 56.8297 GiB available
+memory. Fresh all-UID process/resource review and the locked 34-package environment
+check passed. CPU model, all physical/core/sibling identities, governors, kernel,
+Docker identity, immutable images, packet hashes and selected persistent ext4
+storage on `/dev/sda5` were checked. Protective reservations remained operational
+limits, not demand estimates or host qualification. An initial sandbox socket
+refusal and a separately scoped process snapshot remain honestly recorded; only
+host-side checks qualified execution. Heavy jobs were never interrupted.
+
+**Build:** exactly one public `target-build` invocation completed in 21.263
+seconds under its 1,200-second limit, producing immutable image
+`sha256:8cc3a97c01b7dd3aa188fb040067aeb70244fd4382183fb5763cb09d5db12f88`.
+Independent review matched all 481 regular source archive files to the selected
+clean `ff132d4` checkout, the full frozen plan and source/patch/Dockerfile/log/base
+identities. Three setup layers used Docker cache; configure, compilation and
+linking actually ran. Logged CFLAGS were `-O2 -g -pthread -fno-strict-aliasing
+-fno-strict-overflow`, and LDFLAGS `-O2 -g -pthread`. This is optimized code with
+debug symbols; binary SHA remains null and reconstructibility false. Both A/A
+plans then bound the actual image with A1/A2 labels only, retaining all provenance.
+Independent plan and build/cleanup reviews accepted those bindings.
+
+**First worker:** fresh admission 002 passed six intervals of 0.161–0.332 busy
+CPU equivalents with at least 57.1281 GiB available memory. An earlier accepted
+worker admission expired during final process review and was refreshed without
+launching a worker. The first public `comparison-step` completed in 66.293
+seconds; its original worker budget records 60.865264169 of 120 seconds used.
+Original attempt `bgperf_recipe_a8b79b7d4cf947fc8cc9bca648e256c9` passed all four
+assertions: two sessions, two injection witnesses, exact 2,000,000 observer
+prefixes and completed experiment; no tester errors/timeouts. Its package
+verifies 39 artifacts, checkpoint 42 files, and observer supplement reconstructs.
+
+Live per-container evidence confirms the exact requested/effective CPU layouts
+for target, monitor and the one tester container hosting two peer processes,
+with the correct attempt-owned names and no read errors. Thus portable pinning
+has live functional evidence for this worker. The observer window spans
+1.594992592 seconds, with conservative crossing bounds
+[1.570661986, 1.604230381] seconds, width 0.033568395 seconds and 147 increasing
+interior records. Its resolution screen passes; these bounds are not statistical
+confidence intervals or a performance conclusion.
+
+**Independent continuation gate: REJECT.** Outside CPU peaked at
+**173.97100570003434% of one logical CPU**, above the frozen 100% successor cap
+(CSV rounds to 174%). The peak names six Python processes at 105.70%, one Deno
+process at 43.39% and three Codex processes at 9.55%; these are leading contributors,
+not the entire total. The passing prelaunch idle window does not qualify later
+foreign work. The separate severe-pressure screen correctly passes its different
+rule: 65 observations, maximum host busy 21.1122%, CPU PSI zero, minimum available
+memory 53.9451 GiB and maximum observation gap 1.02193 seconds. It cannot override
+the stricter outside-CPU successor gate.
+
+Worker execution stopped permanently before any successor or documentation edit.
+The external permanent-stop marker blocks the coordinator, and the public
+`comparison-review --decision rejected` receipt stops block 1; its exit 5 records
+rejected continuation, not a failed worker experiment. Block 2's prior gate was
+never reached. Accounting is **one completed build, one completed worker, zero
+failed worker experiments, 15 block-1 plus 16 block-2 workers never run**. No pair
+completed; no variance, repeatability, power, 10%-effect detection or version
+ranking is established. Performance stays `not_assessed`, policy `disabled`.
+There is no retry, resume, extension, exclusion or additional build/worker.
+
+**Cleanup and preservation:** all 71 pre-existing container identities/states,
+six networks and 495 volumes match before/after; Docker identity and all 45
+image inventory lines are unchanged during the worker. The build added only its
+approved image/tag. Runtime `cleanup_errors` is empty; all 36 original work files
+match packaged hashes. Original work, evidence, failures and unrelated resources
+remain intact. No broad cleanup, download, provisioning, 9950 access, remote
+transfer or push occurred.
+
+Original work is at
+`/home/jpietsch/bgperf-work/2026-10-c-repeatability-control-01`; results at
+`/home/jpietsch/bgperf-results/2026/2026-10-c-repeatability-control-01`.
+The latter retains `preparation`, `plans` and `block-1`; it will retain the final
+`runtime-evidence` copy after the last writers finish. Original coordinator evidence remains at
+`/tmp/bgperf2-c-repeatability-runtime-20261027`; original preparation and prior
+C/D evidence are unchanged. All 561 preparation file hashes verify in both local
+copies. Final preservation inventories and archive coverage/checksums are pending
+the last writers and will distinguish regular files from retained socket types. This is
+local preservation on the same root-backed device, not independent backup.
+Independent reviews, accounting and the reviewed local documentation commit are
+retained with runtime evidence. No new runtime is implied; a further study needs
+a concrete reviewed case and fresh execution approval.

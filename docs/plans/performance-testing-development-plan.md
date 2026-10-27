@@ -12,9 +12,10 @@ confirms the deliberate local count-fault boundary with three public builds and
 five serial workers. It retains earlier admission stops, the first-trial load
 monitor limitation, observed contention, cached compilation and independent
 reviews. All runtime authorizations are consumed; no performance policy is enabled.
-The operator selected a 10% observer-window slowdown planning target. The next
-[controlled repeatability case](milestone-c-repeatability-validation.md) is
-prepared for separate runtime approval; statistical detection remains unvalidated.
+The operator selected a 10% observer-window slowdown planning target. The approved
+[controlled repeatability case](milestone-c-repeatability-validation.md) completed
+one optimized build and its first worker, then permanently stopped for outside
+CPU above its selected cap. No pair completed; statistical detection is unvalidated.
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
 The operator authorized phase 0, phase 1a–b prerequisites/preparation and complete
@@ -249,8 +250,9 @@ crash reproduction without reconstructing the experiment from console output.
 Status: implemented and independently reviewed for the supported synthetic
 recipe. Repeated serial plans, descriptive reports and controlled fixtures are
 documented in the [comparison guide](../comparisons.md). Real noise/resolution
-discovery completed; controlled repeatability and calibrated regression policy
-remain pending/disabled. Depends on phases 0–3.
+discovery completed; the controlled repeatability case stopped after its first
+worker. Completed repeatability and calibrated regression policy remain
+pending/disabled. Depends on phases 0–3.
 
 - Run repeated interleaved comparisons of two target builds on the same
   qualified host, reusing existing ordering/repetition machinery.
@@ -349,8 +351,8 @@ revision boundary and both fresh confirmations; review its
 The B supplied-image and packaging-source cases remain accepted in their
 [validation record](milestone-b-runtime-validation.md). C calibration remains
 pending: its [discovery history](milestone-c-calibration-proposal.md) is complete;
-the [next controlled case](milestone-c-repeatability-validation.md) records the
-selected 10% target, bounded repeatability budget and remaining statistical/policy
+the [controlled repeatability record](milestone-c-repeatability-validation.md)
+records the selected 10% target, first-worker stop and remaining statistical/policy
 decisions. Broader daemon/source/crash validation
 and minimization are separate selections. No further host trial or performance
 policy activation is implied by these completed functional cases.
@@ -983,3 +985,26 @@ preparation. Sixteen pairs are not a powered sample-size claim, and the selected
 10% target is not a regression cutoff. Estimator, error rates/power, adequate
 sample budget, known-effect controls and held-out validation remain separate
 decisions before performance policy or performance bisection can be enabled.
+
+### Milestone C controlled repeatability stopped at first review — 2026-10-27
+
+The operator approved the prepared case at `2b15281`: one optimized source build
+and up to 32 serial A/A workers, with fresh idle admission and the renewed
+root-backed storage exception. The build completed with actual `-O2 -g`
+compilation/linking, immutable image/source/build bindings and independently
+accepted cleanup. Three setup layers used cache; compilation ran.
+
+The first worker completed and passed all four assertions, source/package/report
+verification and observer resolution. Its live requested/effective target,
+monitor and tester CPU layouts matched the recipe. Outside CPU then blocked
+continuation: the retained peak was 173.9710% of one core, above the frozen 100%
+cap. Independent first review rejected continuation; the public session and
+coordinator are permanently stopped. Accounting is one completed build, one
+completed worker, zero failed worker experiments and 31 never run. No pair
+completed, so there is no repeatability, variance, power or performance finding.
+
+The [execution record](milestone-c-repeatability-validation.md#approved-execution-stopped-at-first-review--2026-10-27)
+owns actual bounds, host/pressure evidence, cleanup, source revisions and local
+preservation paths. All original evidence is retained, unrelated resources are
+unchanged, and policy stays disabled. This case's authorization is consumed;
+a further run needs a concrete reviewed case and fresh execution approval.

@@ -50,10 +50,12 @@ workflow: [named assertions, repeated serial plans and verified reports](compari
 retain memory/CPU/timing observations, variation, failures and confounders.
 Controlled examples demonstrate known differences, noise and inconclusive
 evidence. Calibrated regression policy remains disabled. The operator selected
-a 10% slower observer-window planning target; the next
+a 10% slower observer-window planning target. The bounded
 [controlled repeatability case](plans/milestone-c-repeatability-validation.md)
-prepares one optimized build and 16 A/A pairs, pending new runtime approval.
-Its repetition count is not a validated detection sample size.
+completed one optimized build and its first worker, including live CPU-placement
+checks, then stopped for outside CPU activity above its selected cap. Its other
+31 workers remain never run, no pair completed, and runtime authorization is
+consumed. Calibration and statistical detection remain unvalidated.
 The revised two-million-prefix noise/resolution pilot completed all eight A/A
 and eight A/B attempts with independent gates and
 [observer timing supplements](observer-timing.md). This establishes resolution

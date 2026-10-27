@@ -9,7 +9,7 @@ The [comparison guide](../comparisons.md) owns command and accounting semantics.
 
 The operator has now selected a 10% slower observer-window planning target.
 The [controlled repeatability validation](milestone-c-repeatability-validation.md)
-owns the next bounded case and remaining calibration decisions. The procedure
+owns the later approved case, its first-worker stop and remaining calibration decisions. The procedure
 below is retained discovery history, not a renewed execution authorization.
 
 ## Decision needed before a real pilot

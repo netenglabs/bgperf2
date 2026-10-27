@@ -451,9 +451,17 @@ resources were never interrupted or cleaned. Original case-02 work and results
 remain under the selected `…repeatability-control-02` roots. Coordinator evidence
 is at `/tmp/bgperf2-c-repeatability-runtime02-20261027`; frozen inputs remain at
 `/tmp/bgperf2-c-repeatability-case02-20261027` and results `preparation`.
-Preservation will copy final coordinator evidence and verify full archive/source
-coverage after the last stop-record writers finish, retaining socket types
-without opening their contents. Originals remain intact; same-device local
+After stop-record writers finished, preservation copied all 61 coordinator files
+to results `runtime-evidence` and verified complete 464-entry source inventories:
+395 regular files, 65 directories and four retained socket types without opening
+their contents. Archive `evidence.tar.zst` is 95,887,881 bytes, SHA-256
+`d1b029952f8e26e315b9f6def9864cd917dc0549148cf1b512021370b5f26f94`.
+Independent full readback verified all 462 archive members (the 395 source-file
+payloads, 65 directories and two coverage/checksum metadata files), including
+content, modes and native ownership. `PRESERVATION.json`, `coverage.json` and
+`SHA256SUMS` retain exact hashes/type coverage. The archive captures runtime
+`e4b0ed7` and reviewed stop record `6a0a4d9`; this source-only completion record
+does not rewrite that seal. Originals remain intact; same-device local
 preservation is not independent backup. No push, download, provisioning, 9950
 access or remote evidence transfer occurred. This case's approval is consumed;
 its unrun entries are not a budget available for a new attempt.

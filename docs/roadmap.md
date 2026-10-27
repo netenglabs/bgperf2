@@ -49,8 +49,11 @@ Baseline/candidate comparison now has a separate descriptive milestone C
 workflow: [named assertions, repeated serial plans and verified reports](comparisons.md)
 retain memory/CPU/timing observations, variation, failures and confounders.
 Controlled examples demonstrate known differences, noise and inconclusive
-evidence. Calibrated regression policy remains disabled pending the separately
-selected [pilot and effect-size decisions](plans/milestone-c-calibration-proposal.md).
+evidence. Calibrated regression policy remains disabled. The operator selected
+a 10% slower observer-window planning target; the next
+[controlled repeatability case](plans/milestone-c-repeatability-validation.md)
+prepares one optimized build and 16 A/A pairs, pending new runtime approval.
+Its repetition count is not a validated detection sample size.
 The revised two-million-prefix noise/resolution pilot completed all eight A/A
 and eight A/B attempts with independent gates and
 [observer timing supplements](observer-timing.md). This establishes resolution

@@ -1,11 +1,16 @@
 # Milestone C calibration pilot proposal
 
-Prepared 2026-10-23; updated 2026-10-26. Status: noise/resolution discovery
+Prepared 2026-10-23; updated 2026-10-27. Status: noise/resolution discovery
 completed in the 2026-10-26 14:00 PDT job: eight A/A then eight A/B attempts,
 all required assertions, timing screens and independent reviews accepted.
 Earlier refusals and failed/stopped jobs remain in the historical record below.
 No performance conclusion or calibrated regression policy is enabled.
 The [comparison guide](../comparisons.md) owns command and accounting semantics.
+
+The operator has now selected a 10% slower observer-window planning target.
+The [controlled repeatability validation](milestone-c-repeatability-validation.md)
+owns the next bounded case and remaining calibration decisions. The procedure
+below is retained discovery history, not a renewed execution authorization.
 
 ## Decision needed before a real pilot
 

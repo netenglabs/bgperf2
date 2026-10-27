@@ -1,6 +1,6 @@
 # bgperf2 developer performance testing plan
 
-Created 2026-10-23; updated 2026-10-26. Status: milestones A and supplied-image B
+Created 2026-10-23; updated 2026-10-27. Status: milestones A and supplied-image B
 functionally validated, including B's approved packaging-source functional and
 setup-container interruption checks; C noise/resolution discovery completed; staged comparison
 safeguards and deterministic milestone D implemented, including one bounded live
@@ -12,6 +12,9 @@ confirms the deliberate local count-fault boundary with three public builds and
 five serial workers. It retains earlier admission stops, the first-trial load
 monitor limitation, observed contention, cached compilation and independent
 reviews. All runtime authorizations are consumed; no performance policy is enabled.
+The operator selected a 10% observer-window slowdown planning target. The next
+[controlled repeatability case](milestone-c-repeatability-validation.md) is
+prepared for separate runtime approval; statistical detection remains unvalidated.
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
 The operator authorized phase 0, phase 1a–b prerequisites/preparation and complete
@@ -245,8 +248,9 @@ crash reproduction without reconstructing the experiment from console output.
 
 Status: implemented and independently reviewed for the supported synthetic
 recipe. Repeated serial plans, descriptive reports and controlled fixtures are
-documented in the [comparison guide](../comparisons.md). Real host trials and
-calibrated regression policy remain unrun/disabled. Depends on phases 0–3.
+documented in the [comparison guide](../comparisons.md). Real noise/resolution
+discovery completed; controlled repeatability and calibrated regression policy
+remain pending/disabled. Depends on phases 0–3.
 
 - Run repeated interleaved comparisons of two target builds on the same
   qualified host, reusing existing ordering/repetition machinery.
@@ -344,8 +348,10 @@ revision boundary and both fresh confirmations; review its
 [evidence and limits](milestone-d-runtime-validation.md#approved-waited-execution-completed--2026-10-26).
 The B supplied-image and packaging-source cases remain accepted in their
 [validation record](milestone-b-runtime-validation.md). C calibration remains
-pending: its [proposal](milestone-c-calibration-proposal.md) owns the outstanding
-effect-size, budget and policy decisions. Broader daemon/source/crash validation
+pending: its [discovery history](milestone-c-calibration-proposal.md) is complete;
+the [next controlled case](milestone-c-repeatability-validation.md) records the
+selected 10% target, bounded repeatability budget and remaining statistical/policy
+decisions. Broader daemon/source/crash validation
 and minimization are separate selections. No further host trial or performance
 policy activation is implied by these completed functional cases.
 
@@ -952,3 +958,28 @@ preserves source/build identities, cached-compilation and contention caveats,
 diagnostic nulls, cleanup and local retention coverage. This is a bounded live
 functional qualification, not an upstream bug or performance result. Its runtime
 budget is consumed; C calibration and performance policy remain pending/disabled.
+
+### Milestone C controlled repeatability prepared — 2026-10-27
+
+The operator selected 10% slower observer 10%-to-90% delivery as the practical
+planning target. A read-only audit verified 322 A/A report files and reconstructed
+all eight original supplements: four natural pairs, with apparent same-image
+differences −25.13%, +40.17%, +71.14% and +1.24%. Unknown instrumentation,
+uncontrolled placement and recorded outside CPU work prevent a controlled
+performance conclusion or sample-size calculation. Original report withholding
+and source evidence are unchanged.
+
+Pure CPU layout helpers were extracted in `eca7c2d`; opt-in portable recipe
+pinning followed in `69ac253`, preserving absent-pin identities and forwarding
+canonical placement through the existing worker lifecycle. Independent code
+review accepted both; the feature passed 337 focused tests and its normal
+2,454-test commit gate. Live placement qualification remains pending.
+
+The [controlled repeatability validation](milestone-c-repeatability-validation.md)
+owns the next exact case: one optimized packaging-source build, then two
+separately gated blocks of eight A/A pairs, 32 serial workers maximum. Its new
+idle-host/storage authorization is pending. No builds/workers started during
+preparation. Sixteen pairs are not a powered sample-size claim, and the selected
+10% target is not a regression cutoff. Estimator, error rates/power, adequate
+sample budget, known-effect controls and held-out validation remain separate
+decisions before performance policy or performance bisection can be enabled.

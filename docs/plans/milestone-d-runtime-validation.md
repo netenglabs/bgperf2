@@ -1,7 +1,9 @@
-# Milestone D bounded live-bisection proposal
+# Milestone D bounded live-bisection validation
 
-Prepared 2026-10-26. **Execution approved, then stopped at host admission; no
-build or worker ran.** A new execution attempt requires fresh authorization.
+Prepared and validated 2026-10-26. **The deliberately injected local count-fault
+case confirmed its boundary with three public builds and five workers.** Earlier
+admission-only stops remain recorded below. Execution is finished; its budget
+and authorization are consumed. Any new execution requires fresh authorization.
 Prior A/B and
 discovery-run authorizations are consumed. This procedure authorizes nothing by
 itself. Milestone C calibration remains pending; performance policy stays
@@ -241,3 +243,129 @@ calibration pending. All prior evidence, the preparation root and new admission
 records remain local; no deletion or remote transfer occurred. Another attempt
 must recheck actual host suitability and receive fresh execution approval under
 the recorded stop rule; it must not silently retry this stopped request.
+
+## Approved waited execution completed — 2026-10-26
+
+After a second **“go ahead”**, a new admission sample still found heavy work
+(about 28 cores). That separate admission-only record remains at
+`/tmp/bgperf2-milestone-d-attempt2-20261026`; no build or worker ran in it.
+The operator then explicitly selected **“Wait for heavy jobs to finish”**.
+This authorized waiting and continuation of the same bounded case after fresh
+admission, without widening the concurrency exception or repeating a worker.
+Only foreground read-only monitoring was used; no service or schedule was added.
+
+The actual execution has its own owner-only root:
+`/tmp/bgperf2-milestone-d-waited-20261026`. It uses clean engine
+`43965e6dcab6b25b74754d728554e7433e6bbe75` on `milestone-a-newcomer`, fresh
+recipe/build/search inputs and three new clean source checkouts at the same
+reviewed revisions above. Independent preparation review recomputed all three
+snapshots and verified the frozen hashes, controls and empty initialized session.
+Both earlier roots, their original bindings and refusal records remain intact.
+
+### Actual boundary and accounting
+
+Exactly three public source-build invocations and five serial workers ran.
+No worker was retried, abandoned, recovered or extended. Each source archive's
+481 regular files matched its selected checkout. The good endpoint's new public
+build used Docker's existing cached compilation layer and returned the prior
+packaging-source image with a new tag; it did not establish fresh compilation.
+The bad endpoint and midpoint logs show actual configure/compilation with the
+requested debug compile/link flags, and produced two new image IDs. All builds
+retained local legacy-builder/network-none/pull-false controls and their
+1,200-second client budgets. No old target declaration or measurement was imported.
+
+| Trial | Phase / source index | Original attempt UUID suffix | Count / classification | Worker seconds |
+| --- | --- | --- | --- | --- |
+| 1 | endpoint-good / 0 | `e75b27c9f98f4938bfe5a188a3a8f947` | 100 / good | 12.196126110 |
+| 2 | endpoint-bad / 2 | `dbef8029aac9466e9b6cf85b429ed7ff` | 99 / bad | 11.632815886 |
+| 3 | search / 1 | `86dd3097fa0e4089b91147b114804548` | 100 / good | 11.034060907 |
+| 4 | confirm-good / 1 | `ab763b7e7a96426caeaaa17068a1deb8` | 100 / good | 11.031672814 |
+| 5 | confirm-bad / 2 | `466f22e6b03042e998157566bd25c89a` | 99 / bad | 11.083180260 |
+
+Original attempt names prefix those UUIDs with `bgperf_recipe_`. All five
+experiments completed within their 120-second worker budgets. Good trials passed
+all four assertions; bad trials failed only exact observer count, while session,
+injection and experiment completion passed. Each worker had a distinct identity.
+Independent evidence/cleanup review accepted each gate before the next worker.
+Both confirmations reused only the exact matching build cache: all 36 cache-file
+hashes stayed unchanged, with exactly three cache entries and no further build.
+
+The confirmed adjacent boundary is
+`f6f9adbdf0603b416413126b9c7f5b85c5600bbc` →
+`4bddf6abe71be7459e84b19f1a9cca9751b398db`.
+Public `report`/`verify` and an independent rebuild into `report-final` and
+`report-rebuilt` verified **219 files each**, produced identical JSON conclusions,
+and reconstructed the boundary and both fresh confirmations. Independent final
+report review accepted the results. No pending reservation or unresolved trial
+remains. This validates live deterministic assertion bisection for this expressly
+introduced local fault; it does not discover an upstream BIRD regression.
+
+### Host contention and diagnostic limits
+
+Fresh admission checked the active-measurement guard, source/engine/plan/image
+identities, mount and protective memory/disk floors before each step. Later
+heavy work caused further waiting before the midpoint; no extra trial ran then.
+The early waiting monitor sampled only user-owned processes and missed root-owned
+CPU work. The first worker's retained preflight warning observed about 10.4
+foreign cores, and its measured interval recorded about 8.1. **The first trial
+does not establish an idle or lightly loaded execution**, despite its satisfied
+functional assertions and deadline. Independent review accepted its functional
+witness with this explicit confounder, not a performance qualification.
+
+The local admission monitor was corrected to inspect all readable UIDs and
+cross-check aggregate `/proc/stat` busy CPU ticks, retaining raw counters.
+Independent review accepted it. A linked `--admit && step --execute` check
+subsequently reduced the check-to-launch gap without adding automatic retries.
+Such a check cannot prevent another workload starting afterward. Legacy CSV
+maximum foreign CPU values remain **811%, 142%, 38%, 42%, 163% of one core** for
+trials 1–5 respectively; those columns are rounded observations, not zeros or
+evidence of continuous idleness. Timing/performance attribution is withheld.
+
+Generator BIRD 2.19.2, sink 0.1.0 and target BIRD 2.19.2 identities remained fixed
+apart from the selected source-built target image. Basic diagnostics were
+collected, with empty top-level collection and cleanup errors in all attempts.
+Each worker retained one optional generator live-memory read timeout and null
+memory observation. No per-daemon RSS, continuous health, diagnostic overhead,
+memory regression or crash-path qualification is inferred. Binary hashes remain
+unverified and reconstructibility false under the existing source-build contract.
+
+### Cleanup, preservation and remaining decisions
+
+Initial, between-step and final inventories agree on all **71 pre-existing
+containers, six networks and 495 volumes** and their recorded states/identities.
+Only the selected build images/tags/cache were added; no original image was
+removed. Both confirmation inventories, including images, were identical.
+All owned runtime work stopped before reports, preservation or normal commit
+checks. No unrelated job was interrupted or modified.
+
+All ten original/session-copied packages independently verified 41 artifacts
+each. Preservation audit matched **all 190 original-work regular files** to
+their packaged hashes and parsed **75 CSV files** across original work and
+retained package/report copies. Full source Git history, snapshots, archives,
+patches, build disclosure/logs, input hashes, commands/stdout/stderr, refusal and
+waiting records, original work/packages, journals, diagnostics, inventories,
+reports and independent review receipts remain local. Socket entries are
+inventoried without opening them. Complete local path/type/hash inventories
+cover the retained roots; this is not an independent/off-device backup. No
+original work or image was deleted and no expiry or remote transfer was added.
+
+The owner-only local copy is
+`/home/jpietsch/bgperf-results/2026/2026-10-milestone-d-live-validation/evidence.tar.zst`
+(102,712,615 bytes), SHA-256
+`6e74692caa2a2f1d4cbd1245a7e8d2dae127a724e96f55ba12f5b780102116c4`.
+Streamed readback verified 5,953 members: 4,919 regular files (including three
+preservation metadata files) and 1,034 directories, with all 75 CSVs readable.
+Five socket entries were explicitly omitted without opening them. All 5,955
+source path/type/hash/metadata entries matched before and after archiving.
+The nine-file preservation bundle was copied locally with per-file hash checks,
+directory mode 0700 and file modes 0600. Source roots and the verified temporary
+bundle remain in place. Both destinations are on the same `/dev/sda5` ext4
+device: **local preservation, not an independent or off-device backup**.
+
+Milestone D's bounded live count-assertion search is accepted with these limits.
+Live crash bisection, interrupted-search recovery, skipped/ambiguous source
+histories, pristine-source support and broader adapters remain outside this
+live check; their controlled tests do not turn into live qualifications.
+**Milestone C calibration remains pending, policy `disabled`, qualification
+`not_assessed`; performance predicates remain unsupported.** No further runtime,
+download, provisioning, publication or push is authorized by this completion.

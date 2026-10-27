@@ -3,16 +3,15 @@
 Created 2026-10-23; updated 2026-10-26. Status: milestones A and supplied-image B
 functionally validated, including B's approved packaging-source functional and
 setup-container interruption checks; C noise/resolution discovery completed; staged comparison
-safeguards and deterministic milestone D implemented with controlled validation.
-Pristine-source/source-bug-fix and live-bisection qualification, broader diagnostic
-qualification and performance calibration remain deferred. See the
+safeguards and deterministic milestone D implemented, including one bounded live
+count-fault bisection with fresh confirmations. Pristine-source/source-bug-fix,
+broader live bisection/diagnostics and performance calibration remain deferred. See the
 [comparison guide](../comparisons.md) and [bisection guide](../bisection.md).
-A [bounded milestone D live-validation proposal](milestone-d-runtime-validation.md)
-now selects a deliberate local count fault, three source builds and five serial
-workers with independent step reviews. The approved execution request stopped
-at host admission before any build/worker because unrelated heavy CPU work
-exceeded its light-background-work exception. Live qualification remains pending;
-another attempt needs fresh approval. Earlier runtime authorizations are consumed.
+The [bounded milestone D validation record](milestone-d-runtime-validation.md)
+confirms the deliberate local count-fault boundary with three public builds and
+five serial workers. It retains earlier admission stops, the first-trial load
+monitor limitation, observed contention, cached compilation and independent
+reviews. All runtime authorizations are consumed; no performance policy is enabled.
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
 The operator authorized phase 0, phase 1a–b prerequisites/preparation and complete
@@ -97,7 +96,7 @@ adapter acceptance checks are deferred is not fully accepted.
 | A. Usable newcomer reproduction workflow — functionally validated; ready for feedback | Finish phase 1: run one supported recipe through the existing runtime with exact role identities, isolated attempts, result/artifact production and verification, actionable failures, public instructions and a maintained fresh-checkout smoke entry point. Include the timeout, interruption, owned-resource cleanup and partial-result handling needed for this workflow, plus the existing completion/reproduction outcomes. Exercise the complete workflow with fake runtimes and review it end to end. | Review the actual CLI walkthrough and returned result package. Present an exact, bounded real-image/qualified-host smoke proposal for authorization. Select the next daemon or concrete bug when that choice affects the following milestone. |
 | B. Test and diagnose a local fix — supplied-image functional pair validated | Complete phases 2–3 and the existing-workload assertions needed from phase 5: supplied-image/local-source target overrides, recorded build differences, useful crash/memory diagnostics and preserved partial evidence. Deliver one coherent baseline/fix investigation using controlled fixtures and the selected adapter. Keep generator, observer and workload identities fixed. | Review the reproduction/fix report and diagnostic usefulness. Decide any remaining source-build trust, instrumentation or adapter choices that affect real validation. |
 | C. Trustworthy baseline/candidate comparison — implementation reviewed; calibration deferred | Complete phases 4–5: repeated/interleaved comparisons, explicit existing-workload correctness assertions, separate memory/CPU/timing results, missing/failed attempts and confounders, machine-readable output and a useful human report. Include controlled differences, noise and inconclusive examples. | Review comparison outputs and a concrete calibration proposal. Select acceptable effect sizes, measurement budget and any regression policy before calibrated performance verdicts are enabled. |
-| D. Automated regression localization | Complete phase 6 for supported deterministic predicates: bounded revision search, identity-based build caching, resume, skipped/ambiguous revisions and confirmation evidence. Keep performance bisection conditional on milestone C's calibration. | Review the resulting revision boundary and evidence; decide whether to prioritize broader daemon support, calibrated performance bisection or the separately deferred minimization work. |
+| D. Automated regression localization — bounded live count-fault case validated | Complete phase 6 for supported deterministic predicates: bounded revision search, identity-based build caching, resume, skipped/ambiguous revisions and confirmation evidence. Keep performance bisection conditional on milestone C's calibration. | Review the resulting revision boundary and evidence; decide whether to prioritize broader daemon support, calibrated performance bisection or the separately deferred minimization work. |
 
 Milestone A includes only the lifecycle robustness and assertions necessary for
 a reliable first reproduction workflow. Full diagnostic capture and generalized
@@ -292,8 +291,10 @@ semantics remain documented and separately tested.
 ### 6. Bisect reproducible daemon regressions
 
 Status: implemented for the existing observable assertions and captured-target
-crash predicates; controlled Docker-free validation. Live source-build/bisection
-qualification and performance predicates remain deferred. See the
+crash predicates; controlled Docker-free validation plus the
+[bounded live count-fault search](milestone-d-runtime-validation.md#approved-waited-execution-completed--2026-10-26).
+Broader live source-build/crash/recovery qualification and performance predicates
+remain deferred. See the
 [bisection contract and walkthrough](../bisection.md).
 
 - Search an explicitly bounded daemon revision range with the same recipe and
@@ -338,15 +339,15 @@ host purchases are authorized by this document. Public recipe examples must
 contain no private evidence paths or credentials. Artifact export must preserve
 original evidence and explicitly select what can be shared.
 
-Current handoff: milestone C implementation and controlled reports are ready
-for review, with independent code review complete and local validation recorded
-below. Review the
-[comparison walkthrough](../comparisons.md) and retained controlled reports.
-The supplied-image B pair is accepted in its [validation record](milestone-b-runtime-validation.md).
-Real source-build/fix and performance calibration remain separately selected
-runtime work; the [calibration pilot proposal](milestone-c-calibration-proposal.md)
-states the exact suggested workload/budget and outstanding decisions. No new
-host trials are implied. Milestone D remains unstarted.
+Current handoff: the bounded D live case confirmed its deliberately introduced
+revision boundary and both fresh confirmations; review its
+[evidence and limits](milestone-d-runtime-validation.md#approved-waited-execution-completed--2026-10-26).
+The B supplied-image and packaging-source cases remain accepted in their
+[validation record](milestone-b-runtime-validation.md). C calibration remains
+pending: its [proposal](milestone-c-calibration-proposal.md) owns the outstanding
+effect-size, budget and policy decisions. Broader daemon/source/crash validation
+and minimization are separate selections. No further host trial or performance
+policy activation is implied by these completed functional cases.
 
 Progress record: 2026-10-23, this plan records the operator's priorities. No
 engine behavior, measurement definitions or experiments changed. This document
@@ -937,3 +938,17 @@ generator memory read timeouts stay missing, and interruption reached setup
 containers only; these results imply no routing bug fix, performance conclusion
 or broader fault-path qualification. The bounded authorization is consumed;
 the original A–D milestone objective remains in effect.
+
+### Milestone D bounded live count-fault validation — 2026-10-26
+
+The prepared case at `6d66b2f` and admission stop at `43965e6` were followed by
+the operator's renewed approval and explicit instruction to wait for heavy jobs.
+At runtime engine `43965e6`, three public builds and five distinct serial workers
+confirmed the deliberately introduced `f6f9adbd` → `4bddf6ab` count-fault boundary,
+including fresh workers on both sides. Each step and the two independently
+rebuilt 219-file portable reports passed review. The
+[authoritative execution record](milestone-d-runtime-validation.md#approved-waited-execution-completed--2026-10-26)
+preserves source/build identities, cached-compilation and contention caveats,
+diagnostic nulls, cleanup and local retention coverage. This is a bounded live
+functional qualification, not an upstream bug or performance result. Its runtime
+budget is consumed; C calibration and performance policy remain pending/disabled.

@@ -6,14 +6,16 @@ It supports the existing four observable correctness assertions or a captured
 target-daemon crash. Performance predicates are refused; regression policy
 remains `disabled` and performance qualification `not_assessed`.
 
-This first implementation is validated with controlled, Docker-free histories.
-Live bisection and broader source-build qualification remain deferred; the
+This implementation is validated with controlled, Docker-free histories and one
+[bounded live count-fault case](plans/milestone-d-runtime-validation.md#approved-waited-execution-completed--2026-10-26).
+The deliberately introduced local fault confirmed its boundary with fresh workers;
+its record retains source/build, contention and diagnostic limitations. Broader
+source-build and live crash-bisection qualification remain deferred; the
 [milestone B record](plans/milestone-b-runtime-validation.md) covers one validated
 packaging-patched BIRD source/build case. No selected
 daemon range, source build, download or benchmark is authorized by this guide.
-The [bounded milestone D proposal](plans/milestone-d-runtime-validation.md)
-prepares an explicitly injected local count fault for separate execution
-approval; its expected boundary is not a measured result.
+The completed case consumes its execution authorization and authorizes no new
+build, worker or revision range.
 
 ## Inspect a controlled history
 

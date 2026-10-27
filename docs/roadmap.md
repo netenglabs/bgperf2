@@ -15,7 +15,7 @@ boundaries incrementally while keeping current CLI and output compatibility.
 
 | Document | Status | Purpose |
 | --- | --- | --- |
-| [Developer performance testing plan](plans/performance-testing-development-plan.md) | A/B functional validation; C noise/resolution discovery complete; staged comparisons and deterministic D implemented with controlled validation; performance calibration deferred | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |
+| [Developer performance testing plan](plans/performance-testing-development-plan.md) | A/B functional validation; C noise/resolution discovery complete; bounded D live count-fault bisection passed; performance calibration pending | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |
 | [Architecture design](plans/architecture-design.md) | Supporting proposal; reconciled with shipped foundations | Recipe/result records, lifecycle boundaries, observations and compatibility strategy |
 | [Future testing workloads](plans/future-testing-workloads.md) | Deferred | Preserve policy, IPv6 and other workload ideas without scheduling their implementation |
 | [Policy engine design](plans/policy-testing-engine-design.md) | Deferred | Semantic policy model, conformance, adapter/generator/observer requirements and implementation risks |
@@ -60,11 +60,12 @@ explicit review gates and optional operator-selected pressure monitoring.
 [Milestone D deterministic bisection](bisection.md) now supplies bounded local
 revision search, build caching, explicit recovery, skipped/ambiguous outcomes,
 fresh boundary confirmations and verified portable reports. Controlled histories
-validate the workflow. A [bounded live-bisection case](plans/milestone-d-runtime-validation.md)
-was approved but stopped at host admission before any build/worker because
-unrelated heavy CPU work exceeded its concurrency exception. Live qualification
-remains pending and another attempt requires fresh authorization.
-Broader source-build qualification and performance predicates remain deferred.
+validate the workflow. The [bounded live-bisection case](plans/milestone-d-runtime-validation.md#approved-waited-execution-completed--2026-10-26)
+confirmed a deliberately introduced local count-fault boundary with three public
+builds and five distinct workers, including fresh confirmations. Its record retains
+the earlier admission stops, first-trial contention limitation and cached-build
+qualification. This establishes no upstream bug or performance result. Broader
+source-build/crash-bisection qualification and performance predicates remain deferred.
 
 The architecture proposal is supporting material, not a second execution order.
 New policy semantics, IPv6 and protocol/topology expansion remain deferred until

@@ -11,6 +11,9 @@ Live bisection and broader source-build qualification remain deferred; the
 [milestone B record](plans/milestone-b-runtime-validation.md) covers one validated
 packaging-patched BIRD source/build case. No selected
 daemon range, source build, download or benchmark is authorized by this guide.
+The [bounded milestone D proposal](plans/milestone-d-runtime-validation.md)
+prepares an explicitly injected local count fault for separate execution
+approval; its expected boundary is not a measured result.
 
 ## Inspect a controlled history
 

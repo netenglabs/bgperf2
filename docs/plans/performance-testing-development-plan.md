@@ -7,6 +7,10 @@ safeguards and deterministic milestone D implemented with controlled validation.
 Pristine-source/source-bug-fix and live-bisection qualification, broader diagnostic
 qualification and performance calibration remain deferred. See the
 [comparison guide](../comparisons.md) and [bisection guide](../bisection.md).
+A [bounded milestone D live-validation proposal](milestone-d-runtime-validation.md)
+now selects a deliberate local count fault, three source builds and five serial
+workers with independent step reviews. Preparation is authorized; execution
+awaits fresh approval. Earlier runtime authorizations are consumed.
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
 The operator authorized phase 0, phase 1a–b prerequisites/preparation and complete

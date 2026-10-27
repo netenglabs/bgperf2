@@ -60,8 +60,9 @@ explicit review gates and optional operator-selected pressure monitoring.
 [Milestone D deterministic bisection](bisection.md) now supplies bounded local
 revision search, build caching, explicit recovery, skipped/ambiguous outcomes,
 fresh boundary confirmations and verified portable reports. Controlled histories
-validate the workflow; live-bisection and broader source-build qualification and
-performance predicates remain deferred.
+validate the workflow. A [bounded live-bisection case](plans/milestone-d-runtime-validation.md)
+is prepared for fresh authorization; live qualification remains pending.
+Broader source-build qualification and performance predicates remain deferred.
 
 The architecture proposal is supporting material, not a second execution order.
 New policy semantics, IPv6 and protocol/topology expansion remain deferred until

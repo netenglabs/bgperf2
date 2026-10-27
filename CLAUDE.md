@@ -287,7 +287,7 @@ nowhere at all; `tests/test_docs_index.py` now runs the guard against every modu
 claims.
 
 **`docs/invariants/workload-controls.md`** — `bgperf2.py` argument guards, `check_batch_test()`,
-`bench_output_prefix()`; `base.py`'s `gen_conf()`/`gen_paths()`/`scenario_neighbors()`; `churn.py`;
+`bench_output_prefix()`; `cpu_pinning.py` (pure CPU-list and pinning helpers); `base.py`'s `gen_conf()`/`gen_paths()`/`scenario_neighbors()`; `churn.py`;
 `policy.py`; `bird.py`.
 
 - Session count and table size are one axis. `--prefix-scope total`, `--path-diversity D`,

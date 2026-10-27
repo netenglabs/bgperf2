@@ -5,6 +5,8 @@ worker 1 for outside CPU activity.** One optimized build and one worker complete
 31 workers remain never run. The approved procedure below is retained as the
 frozen protocol; the [execution record](#approved-execution-stopped-at-first-review--2026-10-27)
 supersedes its preparation handoff. All runtime authorization is consumed.
+The [fresh zero-build case 02](#case-02-prepared-with-existing-optimized-image--2026-10-27)
+is prepared separately and has no execution authorization.
 The operator selected a **10% slower observer delivery window** as the practical
 calibration target. This means the separately defined
 [10%-to-90% observer count-crossing window](../observer-timing.md), not legacy
@@ -318,3 +320,59 @@ local preservation on the same root-backed device, not independent backup.
 Independent reviews, accounting and the reviewed local documentation commit are
 retained with runtime evidence. No new runtime is implied; a further study needs
 a concrete reviewed case and fresh execution approval.
+
+## Case 02 prepared with existing optimized image — 2026-10-27
+
+After the operator noted lower load, a read-only six-interval check observed
+0.228–0.390 busy CPU equivalents, at least 56.5219 GiB available memory and
+209.644 GiB free disk, with no active measurement guard conflict. All three
+required immutable images were locally available. This is a current availability
+observation, not a reserved quiet window or execution approval. Case 01 remains
+permanently stopped, its 31 never-run entries and all original evidence unchanged.
+
+Prepare **zero builds and at most 32 serial workers**, two blocks of eight A/A
+pairs, using the verified optimized image
+`sha256:8cc3a97c01b7dd3aa188fb040067aeb70244fd4382183fb5763cb09d5db12f88`.
+The workload, CPU layout, original immutable generator/observer images, four
+assertions, 120-second worker limit, diagnostics none, observer screen, shuffle
+seeds/orders, first/final independent reviews and every per-worker admission,
+pressure, foreign-CPU and permanent-stop rule in the protocol above remain fixed.
+Its total worker-budget sum is 3,840 seconds (64 minutes), with admission,
+review, collection and cleanup additional. Sixteen pairs remain an exploratory
+repeatability budget, not a powered requirement for detecting the selected 10%.
+
+Use new work `/home/jpietsch/bgperf-work/2026-10-c-repeatability-control-02`
+and results `/home/jpietsch/bgperf-results/2026/2026-10-c-repeatability-control-02`.
+They are proposed destinations, not created during preparation. Renew the
+intentional same-device root-backed storage exception only for this new case.
+`9950`, provisioning, acquisition, remote transfer, retries, extensions, warm-ups,
+workload changes, performance-policy activation and interference with other work
+remain outside scope. A passing window now does not waive a fresh window before
+each worker; another outside-CPU breach stops this new case permanently too.
+
+The frozen packet is prepared at
+`/tmp/bgperf2-c-repeatability-case02-20261027/final-inputs` after the clean
+proposal commit. Existing image provenance must not be demoted to unknown or
+represented as a new build. Keep reference copies of the original recipe,
+target, actual build plan/context/log/disclosure/result and preservation record.
+Verify their prior coverage hashes and the sealed case-01 archive first.
+
+For the current engine revision, require the source diff from runtime `2b15281`
+to contain documentation changes only. Export a new recipe that is identical
+to the original after normalizing **only** `engine.revision` and
+`completion.engine_revision`. Create case-specific derived target declarations
+that change **only** the canonical recipe binding and A1/A2 labels; image and
+entire original local-source provenance remain identical. Preserve the old build
+plan's original recipe binding. Record old/new hashes, allowed field changes,
+documentation-only diff and zero new builds in a separate derivation receipt.
+This is reviewed contract-document authoring, not a public rebind command or a
+successful new build/cache result. Refuse any broader recipe/code/provenance change.
+
+Public recipe/assertion export, target validation and both comparison-plan
+commands must pass offline; the actual packet, derivation and new destinations
+receive independent review before execution approval. The packet records that
+approval is absent. After explicit approval, use the existing public staged
+workflow with fresh per-worker gates and separate case-02 ledgers/receipts. Do
+not resume case 01, pool its lone observation into this study or reuse its
+attempt identity/review as a continuation gate. Preserve both case histories.
+Performance policy remains disabled and qualification not assessed.

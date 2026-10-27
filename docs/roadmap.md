@@ -56,6 +56,8 @@ completed one optimized build and its first worker, including live CPU-placement
 checks, then stopped for outside CPU activity above its selected cap. Its other
 31 workers remain never run, no pair completed, and runtime authorization is
 consumed. Calibration and statistical detection remain unvalidated.
+A separate [zero-build case 02](plans/milestone-c-repeatability-validation.md#case-02-prepared-with-existing-optimized-image--2026-10-27)
+reuses that verified image under the same gates and awaits fresh execution approval.
 The revised two-million-prefix noise/resolution pilot completed all eight A/A
 and eight A/B attempts with independent gates and
 [observer timing supplements](observer-timing.md). This establishes resolution

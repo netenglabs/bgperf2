@@ -1008,3 +1008,17 @@ owns actual bounds, host/pressure evidence, cleanup, source revisions and local
 preservation paths. All original evidence is retained, unrelated resources are
 unchanged, and policy stays disabled. This case's authorization is consumed;
 a further run needs a concrete reviewed case and fresh execution approval.
+
+### Milestone C fresh zero-build case 02 prepared — 2026-10-27
+
+After the operator noted lighter load, a read-only 30-second check passed the
+existing CPU/memory/disk limits without authorizing execution. The
+[case-02 proposal](milestone-c-repeatability-validation.md#case-02-prepared-with-existing-optimized-image--2026-10-27)
+reuses the actual optimized image from case 01: zero builds and at most 32 serial
+workers under unchanged admission, pressure, outside-CPU and review/stop gates.
+Derived target declarations preserve the full immutable image/build provenance;
+only labels and the binding to an equivalent recipe at the final documentation
+revision change. Original build/runtime engine `2b15281`, stop record `8446aef`
+and sealed-preservation completion `edd5ce7` remain separately recorded.
+The original case stays permanently stopped. New destinations and separate
+ledgers are selected; no new worker or host/storage exception is authorized yet.

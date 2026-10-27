@@ -109,6 +109,8 @@ def execute(document, work, attempt, engine, *, target=None):
             '--results-dir', str(work / 'artifacts')]
     if resolved['target']['threads'] is not None:
         argv += ['--threads', str(resolved['target']['threads'])]
+    if 'pin' in resolved:
+        argv += ['--pin', resolved['pin']]
     args = parser.parse_args(argv)
     # Copy the runtime namespace; compatibility wrappers needing shared globals
     # are rebound below so every bench dependency receives this scoped object.

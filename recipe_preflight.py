@@ -120,6 +120,10 @@ def _report(document, mode):
 def plan_recipe(document):
     """Describe exact declared inputs without consulting the host or acquiring data."""
     report = _report(document, 'plan')
+    if 'pin' in document['resolved']:
+        _add(report, 'cpu_pinning', 'unknown',
+             'Declared role CPU layout; online CPUs and physical topology are not probed by plan.',
+             requested=document['resolved']['pin'])
     for role, declaration in document['roles'].items():
         _add(report, 'image.' + role, 'unknown',
              'Declared immutable reference; local availability, contents and build provenance are unverified.',
@@ -227,6 +231,29 @@ def _capacity(report):
              cpu_count=count, affinity=affinity, memory_available_bytes=int(match[1]) * 1024)
     except (OSError, ValueError, AttributeError) as exc:
         _add(report, 'host_capacity', 'unknown', f'Capacity snapshot unavailable: {exc}')
+
+
+def _online_cpus():
+    from cpu_pinning import parse_cpu_list
+    return parse_cpu_list(Path('/sys/devices/system/cpu/online').read_text().strip())
+
+
+def _pinning(report, document):
+    """Check explicit logical IDs against sysfs, not controller affinity."""
+    requested = document['resolved'].get('pin')
+    if requested is None:
+        return
+    from cpu_pinning import resolve_pin
+    try:
+        online = _online_cpus()
+        resolve_pin(requested, 0, online)
+        _add(report, 'cpu_pinning', 'pass',
+             'Requested CPU IDs are online in the controller host view. '
+             'SMT/core separation, effective Docker placement and host qualification remain unassessed.',
+             requested=requested, online_cpus=sorted(online))
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
+        _add(report, 'cpu_pinning', 'refused', f'Cannot satisfy the requested CPU layout: {exc}',
+             requested=requested)
 
 
 def _mount_key(path):
@@ -350,6 +377,7 @@ def check_recipe(document, *, workdir, results_dir, target=None):
                  'Not probed: the existing environment and active-measurement guard must pass first.',
                  requested=declaration['image'])
     _capacity(report)
+    _pinning(report, document)
     try:
         mounts = Path('/proc/mounts').read_text()
     except OSError as exc:

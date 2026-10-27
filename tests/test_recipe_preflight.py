@@ -211,8 +211,52 @@ def local_probes(document, monkeypatch):
     return state
 
 
+@pytest.fixture
+def pinned_document(document, tmp_path, monkeypatch):
+    import bgperf2
+    from test_recipes import source, export
+    monkeypatch.setattr(bgperf2, 'host_cpus', lambda: frozenset(range(4)))
+    path, test = source(tmp_path, pin='target=0,monitor=1,testers=2-3')
+    return export(path, test, engine_revision=document['engine']['revision'], roles=document['roles'])
+
+
+def test_pinned_plan_is_declared_without_online_cpu_probe(pinned_document, monkeypatch):
+    monkeypatch.setattr(preflight, '_online_cpus', no_probe)
+    monkeypatch.setattr(preflight, 'run_command', no_probe)
+    entry = checks(preflight.plan_recipe(pinned_document))['cpu_pinning']
+    assert entry['status'] == 'unknown'
+    assert entry['details']['requested'] == pinned_document['resolved']['pin']
+
+
+def test_pinned_check_uses_online_cpus_not_controller_affinity(
+        pinned_document, local_probes, tmp_path, monkeypatch):
+    monkeypatch.setattr(preflight, '_online_cpus', lambda: frozenset(range(4)))
+    monkeypatch.setattr(preflight.os, 'cpu_count', lambda: 4)
+    monkeypatch.setattr(preflight.os, 'sched_getaffinity', lambda pid: {3})
+    report = preflight.check_recipe(pinned_document, workdir=tmp_path / 'work', results_dir=tmp_path / 'results')
+    assert report['status'] == 'checks_passed'
+    assert checks(report)['cpu_pinning']['details']['online_cpus'] == [0, 1, 2, 3]
+    assert not (tmp_path / 'work').exists()
+
+
+@pytest.mark.parametrize('online', [frozenset(range(3)), None])
+def test_missing_or_unreadable_online_cpus_refuse_pinned_execution(
+        pinned_document, local_probes, tmp_path, monkeypatch, online):
+    def observed():
+        if online is None:
+            raise OSError('CPU sysfs unavailable')
+        return online
+    monkeypatch.setattr(preflight, '_online_cpus', observed)
+    report = preflight.check_recipe(pinned_document, workdir=tmp_path / 'work', results_dir=tmp_path / 'results')
+    assert report['status'] == 'refused'
+    assert checks(report)['cpu_pinning']['status'] == 'refused'
+    assert not (tmp_path / 'work').exists()
+    assert not (tmp_path / 'results').exists()
+
+
 def test_observed_checks_inspect_only_selected_pins_without_creating_outputs(
-        document, local_probes, tmp_path):
+        document, local_probes, tmp_path, monkeypatch):
+    monkeypatch.setattr(preflight, '_online_cpus', no_probe)
     before = copy.deepcopy(document)
     marker = tmp_path / 'evidence'
     marker.write_bytes(b'earlier evidence\x00')

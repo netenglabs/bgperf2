@@ -2,7 +2,7 @@
 
 What `bench`/`batch` may be asked to run, and the guards that refuse the rest.
 
-**Read this before editing:** `cpu_pinning.py` (pure CPU lists and role-pinning validation), `recipes.py` (portable source validation), `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `run_lifecycle.py` (run orchestration), `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`), `churn.py`, `policy.py`, `bird.py` (the churn protocol and the reload command)
+**Read this before editing:** `cpu_pinning.py` (pure CPU lists and role-pinning validation), `recipes.py` (portable source validation), `recipe_worker.py` (recipe CPU layout forwarding), `recipe_preflight.py` (online CPU availability), `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `run_lifecycle.py` (run orchestration), `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`), `churn.py`, `policy.py`, `bird.py` (the churn protocol and the reload command)
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 
@@ -481,7 +481,12 @@ release.
 The read-only `recipes.py` interface validates a strict subset of batch YAML
 for portable synthetic IPv4 BIRD/BIRD/sink recipes. It uses `batch_cells.py`
 for shared construction and historical IDs, and rejects unsupported source
-fields before selecting a cell. This is not another benchmark execution entry
-point; prepare/run support is separate work. The authoritative envelope and
+fields before selecting a cell. Optional CPU pinning uses the shared pure
+`cpu_pinning.py` rules; every role is required and the sets must be disjoint.
+The recipe reader bounds CPU ranges before expansion, preserves absent-pin
+identities, and binds a canonical declared layout into the cell and recipe.
+Read-only prerequisites check online IDs; the scoped worker must forward the
+layout into the same lifecycle guards and artifact fields as `bench`.
+The authoritative envelope and
 status contracts live in [the recipe guide](../recipes.md). The existing batch
 and scenario guards above retain their behavior.

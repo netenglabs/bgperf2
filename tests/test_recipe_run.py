@@ -84,14 +84,21 @@ def test_actual_adapter_constructor_pins_all_three_roles(tmp_path):
         assert selected.require_image() == instance.image
 
 
-def test_worker_uses_existing_lifecycle_with_queued_observations(tmp_path, monkeypatch):
+@pytest.mark.parametrize('pin', [None, 'target=0,monitor=1,testers=2-3'])
+def test_worker_uses_existing_lifecycle_with_queued_observations(tmp_path, monkeypatch, pin):
     from test_run_lifecycle import fake_run
+    from test_recipes import source, export
+    import bgperf2
     runtime, args, calls, components = fake_run(tmp_path)
     # The worker selects sink, but adapter fixture observations retain existing
     # queue/convergence behavior. No Docker client is consulted.
     component = runtime.MONITOR_CLASSES['gobgp']
     runtime.MONITOR_CLASSES = {'sink': component}
-    runtime.create_args_parser = lambda: SimpleNamespace(parse_args=lambda argv: args)
+    parser = bgperf2.create_args_parser()
+    def parse(argv):
+        args.__dict__.update(vars(parser.parse_args(argv)))
+        return args
+    runtime.create_args_parser = lambda: SimpleNamespace(parse_args=parse)
     args.monitor = 'sink'
     args.bench_name = 'attempt'
     args.dir = str(tmp_path / 'work')
@@ -112,7 +119,9 @@ def test_worker_uses_existing_lifecycle_with_queued_observations(tmp_path, monke
                 item['who'] = 'attempt_' + item['who']
         return result
     runtime.Queue = queue
-    document = recipe()
+    monkeypatch.setattr(bgperf2, 'host_cpus', lambda: frozenset(range(4)))
+    path, test = source(tmp_path, neighbors=[1], prefixes=[10], **({'pin': pin} if pin else {}))
+    document = export(path, test)
     (tmp_path / 'work').mkdir(exist_ok=True)
     outcome = recipe_worker.execute(document, tmp_path / 'work', 'attempt', runtime)
     assert outcome['status'] == 'completed'
@@ -120,6 +129,13 @@ def test_worker_uses_existing_lifecycle_with_queued_observations(tmp_path, monke
     assert 'remove_old_containers' not in calls
     assert all(item.name.startswith('attempt_') for item in components)
     assert {item.image for item in components} == {item['image'] for item in document['roles'].values()}
+    assert args.pin == pin
+    expected = {'target': '0', 'monitor': '1', 'testers': '2-3'} if pin else {}
+    for item in components:
+        role = 'monitor' if item.name.endswith('monitor') else 'target' if item.name.endswith('target') else 'testers'
+        assert item.cpuset == expected.get(role)
+    event = json.loads(next((tmp_path / 'work/artifacts').glob('*.events.json')).read_text())
+    assert event['run']['pin'] == (expected if pin else None)
 
 
 @pytest.mark.parametrize('failure,status,exit_code', [

@@ -29,6 +29,34 @@ other adapters and workload extensions are refused. These limits keep downloaded
 recipes declarative and prevent unsupported fields from silently changing what
 runs.
 
+An optional test-level `pin` uses the existing `bench` CPU layout syntax:
+
+```yaml
+pin: target=0,monitor=1,testers=2-3
+```
+
+All three roles must be named, nonempty and disjoint. `monitor` and `testers`
+are the CLI names for the recipe's observer and generator. Receivers remain
+unsupported. Portable layouts are limited to 4,096 characters and CPU IDs
+0–4095 with at most four decimal digits per endpoint; oversized ranges are
+refused before expansion. These are declarative parsing bounds, not hardware
+or workload-capacity estimates.
+
+Pinning is opt-in. Omitting it preserves existing recipe bytes and identities.
+When present, its canonical layout is included in `resolved.pin` and the legacy
+cell identity, while the original source text stays intact. Equivalent layouts
+share a cell key; changing the original source spelling still changes the full
+recipe digest. Older engine revisions refuse this source field rather than
+silently ignoring it.
+
+`plan` reports the layout without probing the host. `check` refuses pinned
+recipes when their CPU IDs are offline or the online-CPU snapshot is unreadable;
+it reads host sysfs rather than the controller's affinity. Explicit `run` passes
+the layout to the existing lifecycle, whose container cpuset/readback guards
+apply. This does not establish physical-core/SMT separation, reserve the host,
+pin the controller or kernel work, or qualify performance. Inspect the actual
+host topology before selecting CPU IDs.
+
 Export requires a test name and one cell key. The key is the existing
 `batch --list-cells` key; a recipe never implicitly selects a whole matrix.
 Shuffled definitions must state an integer seed. Source definitions and original

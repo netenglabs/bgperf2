@@ -24,6 +24,7 @@ from batch_cells import (BatchLoader, DEFAULT_CHURN_BURSTS,
                          DEFAULT_POLICY_RELOAD_BLOCKS, DEFAULT_RECEIVERS,
                          batch_cell_id, batch_cell_key, construct_batch_cells,
                          expand_target_versions, resolve_prefix_scope)
+from cpu_pinning import resolve_pin
 
 RECIPE_SCHEMA = 'bgperf2/recipe/v1alpha1'
 RESULT_SCHEMA = 'bgperf2/result/v1alpha1'
@@ -41,7 +42,7 @@ _REVISION = re.compile(r'[0-9a-f]{40}\Z')
 _IMAGE = re.compile(r'(?:sha256:[0-9a-f]{64}|[a-zA-Z0-9][a-zA-Z0-9._:/-]*@sha256:[0-9a-f]{64})\Z')
 _KEY = re.compile(r'[0-9a-f]{16}\Z')
 _TEST_REQUIRED = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
-_TEST_OPTIONAL = ('prefix_scope', 'repetitions', 'order', 'seed', 'monitor')
+_TEST_OPTIONAL = ('prefix_scope', 'repetitions', 'order', 'seed', 'monitor', 'pin')
 _TARGET_KEYS = ('name', 'tester_type', 'version', 'image', 'label', 'threads')
 
 
@@ -150,6 +151,21 @@ _RecipeBatchLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TA
                                   _yaml_mapping)
 
 
+def _recipe_pin(value):
+    """Bound untrusted CPU ranges before using the shared pure CLI rules."""
+    _text(value, 'source.pin')
+    if len(value) > 4096:
+        raise ContractError('source.pin: CPU layout exceeds 4096 characters')
+    # The CLI parser expands ranges. Refuse huge endpoints before allocation,
+    # including Unicode decimal digits and overlong integer spellings.
+    if any(len(number) > 4 or int(number) > 4095 for number in re.findall(r'\d+', value)):
+        raise ContractError('source.pin: recipe CPU IDs must be between 0 and 4095 (at most four digits)')
+    try:
+        return resolve_pin(value, 0, range(4096))
+    except ValueError as exc:
+        raise ContractError(f'source.pin: {exc}') from exc
+
+
 def _source_tests(text):
     """Validate every source test before selecting or expanding any cell."""
     _text(text, 'source.text')
@@ -184,6 +200,8 @@ def _source_tests(text):
         scope = test.get('prefix_scope')
         _choice(scope, (None, 'per-peer', 'total'), f'{where}.prefix_scope')
         _choice(test.get('monitor'), (None, 'sink'), f'{where}.monitor')
+        if 'pin' in test:
+            _recipe_pin(test['pin'])
         repetitions = test.get('repetitions', 1)
         _integer(repetitions, f'{where}.repetitions', 1)
         order = test.get('order', 'matrix')
@@ -234,12 +252,13 @@ def _select(text, test_name, cell_key):
     if selected_test is None:
         raise ContractError(f'selection.test: no source test named {test_name!r}')
     targets = expand_target_versions(selected_test['targets'])
+    pin = _recipe_pin(selected_test['pin']) if 'pin' in selected_test else None
     cells = construct_batch_cells(
         selected_test, targets, repetitions=selected_test.get('repetitions', 1),
         prefix_resolver=resolve_prefix_scope, path_diversity=DEFAULT_PATH_DIVERSITY,
         receivers=DEFAULT_RECEIVERS, churn_prefixes=DEFAULT_CHURN_PREFIXES,
         churn_bursts=DEFAULT_CHURN_BURSTS,
-        policy_reload_blocks=DEFAULT_POLICY_RELOAD_BLOCKS, pin=None, monitor='sink')
+        policy_reload_blocks=DEFAULT_POLICY_RELOAD_BLOCKS, pin=pin, monitor='sink')
     matches = [cell for cell in cells if batch_cell_key(batch_cell_id(test_name, cell)) == cell_key]
     if len(matches) != 1:
         raise ContractError(f'selection.cell_key: expected exactly one source cell matching {cell_key!r}, found {len(matches)}')
@@ -258,6 +277,8 @@ def _select(text, test_name, cell_key):
         'receivers': 0, 'monitor': 'sink', 'repetition': cell['repetition'],
         'ordinal': cell['ordinal'], 'target': resolved_target,
     }
+    if 'pin' in selected_test:
+        resolved['pin'] = cell['pin']
     return selected_test, cell, raw_target, resolved
 
 

@@ -149,8 +149,9 @@ controller's monotonic clock. Each role's members are summed and published as `e
   decision, taken on data gathered for that purpose (`findings.md`), and `tests/test_role_cpu.py`
   fails if `findings.py` starts naming the section.
 
-The controller itself, and the kernel's softirq work for the bridge, belong to no role. Under
-`--pin` they run on the cores the pin leaves free, and this section does not measure them.
+The controller itself, and the kernel's softirq work for the bridge, belong to no role.
+`--pin` does not confine them to cores left free by the role layout: they remain
+unrestricted, and this section does not measure them.
 
 ## The bench directory must not be in RAM
 

@@ -836,7 +836,9 @@ These fixtures supply no daemon measurement or performance conclusion.
 
 ### Codex/Docker prerequisite diagnosis — 2026-10-26
 
-The operator redirected work to the Codex execution blocker. Read-only public
+An assistant-proposed follow-up addressed the Codex execution blocker. The
+operator subsequently clarified that this did not replace the A–D milestone
+objective. Read-only public
 checks at clean engine `78dd9a2` reproduced the distinction: the sandbox check
 refused at bootstrap, while the same recipe/check passed through approved host
 execution, including all three pinned image inspections. Neither created work
@@ -860,8 +862,8 @@ new schedule or remote transfer ran as part of this fix.
 
 ### Focused execution and cleanup bug review — 2026-10-26
 
-The operator selected review and repair of existing execution, error-handling
-and cleanup behavior. Baseline `46f13ba` supplied four confirmed defects,
+An assistant-proposed review, accepted as a follow-up, repaired existing
+execution, error-handling and cleanup behavior. Baseline `46f13ba` supplied four confirmed defects,
 reproduced with fake workers and Docker responses before fixes:
 
 - An inspect, ownership or removal failure abandoned the remaining resources
@@ -893,3 +895,14 @@ The related Docker-free suite passed 114 tests. Independent final review passed
 regression forces the capture-to-handoff race with real threads; captured errors
 survive concurrent completion. Stopping prevents later artifact/terminal writes,
 and a healthy in-flight SDK probe adds no join delay or new failure threshold.
+
+### Milestone B real-source validation resumed — 2026-10-26
+
+The operator selected continuation of milestone B's real-source validation.
+The Codex/Docker interruption and subsequent repairs did not replace the plan.
+Use the bounded [source-build validation procedure](milestone-b-runtime-validation.md#source-build-and-interruption-validation--2026-10-26)
+on the existing branch, with current reviewed engine code `26e5c5c` plus this
+committed procedure. First qualify the real clean-source build and basic
+diagnostic/interrupt/cleanup paths. No upstream bug or fix is selected by this
+functional check; an actual bug-specific source-fix assessment and milestone D
+live revision search remain distinct acceptance work.

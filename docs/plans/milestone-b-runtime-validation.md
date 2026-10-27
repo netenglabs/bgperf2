@@ -214,3 +214,81 @@ builds. Alternatively, select the real BIRD bug/source pair and reviewed local
 base images so the source plan can be made concrete before any build approval.
 No additional stage is authorized to execute; the supplied-image authorization
 was consumed by the recorded pair above.
+
+## Source-build and interruption validation — 2026-10-26
+
+Status: concrete bounded procedure prepared under the operator's instruction
+to resume milestone B. Earlier one-shot supplied-image authorizations remain
+consumed. This new functional check reuses only existing local source/images.
+
+Select clean BIRD 2.19.2 commit
+`1d201ed0360c749dfe3d3b3b079329e7148159cd` at
+`/tmp/bgperf2-milestone-d-live-20261026/source`. This checkout was copied locally
+from the already selected immutable BIRD image, whose retained full Git history
+and clean worktree were inspected; no source was downloaded. It remains
+unchanged. Use `bird-local/v1`, debug instrumentation, `-O0 -g`, no extra
+configure options, and the same existing local image as both builder and
+runtime base:
+`sha256:db0a8e144635b1d4b9f81f24ee78f11383c5b0cbd79f10353edcb8452e9af423`.
+Read-only, network-disabled image inspection confirmed Bash, tar, autoreconf,
+gcc, make, flex, bison, readline/ncurses headers, iproute2 and BIRD 2.19.2.
+The daemon reports local Docker 29.1.3; the actual legacy-builder execution is
+still to be qualified by the explicit build, without a Buildx fallback.
+
+Use one new owner-only evidence root:
+`/tmp/bgperf2-milestone-b-source-20261026`. Deliberately select its persistent
+ext4 root-backed `/dev/sda5` storage as a bounded functional-validation exception,
+not a performance measurement layout. Admission observed 231,865,225,216 disk
+bytes free and 58,435,776,512 bytes MemAvailable. Recheck at least 20 GiB disk
+and 16 GiB available memory before build and each attempt; these are protective
+reservations, not estimates of demand. The active-measurement guard passed;
+the unrelated `second-looks-box` container remains untouched. Ordinary light
+background work is permitted. No performance/hardware qualification is implied.
+
+Freeze the engine at the clean commit containing this procedure. Export public
+cell `synthetic-ipv4/f94a3878b2dad49e`: one peer, 100 prefixes, fixed supplied
+BIRD generator/baseline image above and fixed observer
+`sha256:311317014fc98e2cadf46941b4b23dab9dd724281dd50167a0f9187d8ac08f19`.
+The question is clean-source build/adapter/diagnostic compatibility, with
+`experiment_completed` expected. This is not a selected BIRD bug/fix or a
+performance comparison; both targets are expected to complete.
+
+After independent review of the frozen source/build plan and commands:
+
+1. Execute exactly one public `target-build` with a 1,200-second build-client
+   budget. Keep network disabled and pulls false, use only the selected local
+   daemon and bases, and retain source archive/patch, Dockerfile, disclosure,
+   logs, target identity and new image. Do not build while a measurement runs.
+2. Inspect the resulting image and BIRD version; verify source/build/image
+   bindings. Recheck both public target prerequisites. Run exactly one public
+   serial `investigate` pair: released baseline then source-built candidate,
+   each with 120 worker seconds and basic diagnostics. Verify both original
+   packages and the portable investigation report. Expected assessment is
+   `same_observed_reproduction`; performance remains `not_assessed`.
+3. After accepted pair/cleanup review, run one further source-built recipe with
+   a 120-second worker budget and basic diagnostics. Identify its worker by
+   exact parent/workdir/attempt identity, wait at most 30 seconds for one of
+   its owned containers to run, then send SIGTERM only to that public recipe
+   controller. Expect exit 143, `interrupted` accounting, verified partial
+   package and no owned resources left. This explicitly exercises interruption
+   with live containers. If no owned running container appears within the
+   admission window, stop that controller and record the check as not qualified;
+   never retry or extend it. No daemon crash is deliberately injected.
+
+Execution is serial. Stop at the first unexpected build, setup, runtime,
+verification or cleanup failure; preserve all work without retry, timeout
+extension or automatic repair. Diagnostic and cleanup probe budgets remain the
+documented bounds outside worker time. Verify initial/final container identity/
+state, network and volume inventories, unique attempt IDs, diagnostic presence/
+missing facts, source cleanliness and exact engine pin. Review the interruption
+controller and outcome independently. Original artifacts stay local with a
+complete path/type/hash inventory; sockets are recorded without opening them.
+Run no development/tests/analysis while recipe workers are active. Only read-only
+operational supervision and owned interruption/cleanup are permitted then.
+
+No downloads, additional builds/attempts, forced daemon faults, privileged cores/
+journals, memory-regression verdicts, new timers, provisioning, `9950` access,
+push, remote evidence transfer or deletion are included. A successful check
+qualifies real clean-source building and the exercised basic diagnostic/cleanup
+paths. It does not prove a source bug fixed, qualify all failure diagnostics or
+complete live bisection/performance calibration.

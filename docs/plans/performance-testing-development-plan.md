@@ -906,3 +906,11 @@ committed procedure. First qualify the real clean-source build and basic
 diagnostic/interrupt/cleanup paths. No upstream bug or fix is selected by this
 functional check; an actual bug-specific source-fix assessment and milestone D
 live revision search remain distinct acceptance work.
+
+The pristine release source plan subsequently refused two checked-in BSD
+symlinks under the documented source guard. No build or worker started. A
+separate reviewed local packaging commit `ff132d4` materializes only those
+aliases; its execution is a changed source case awaiting the operator decision
+in the [milestone B record](milestone-b-runtime-validation.md#source-plan-refusal-and-prepared-compatibility-case).
+The original source and the engine guard remain unchanged. This preparation
+does not advance B's runtime acceptance or replace the A–D milestone objective.

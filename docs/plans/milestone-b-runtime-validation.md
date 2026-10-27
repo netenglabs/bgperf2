@@ -1,8 +1,10 @@
 # Milestone B runtime validation
 
 Prepared 2026-10-23. Status: supplied-image functional pair passed under explicit
-operator authorization; source-build and broader diagnostic qualification remain
-deferred. The original proposal below grants no further execution authority.
+operator authorization. The 2026-10-26 real-source check stopped at the source
+guard before any build; a reviewed local packaging variant awaits a case
+decision below. Source-build and broader diagnostic qualification remain
+unmet. The historical proposals do not grant additional execution authority.
 
 ## Authorized functional validation — 2026-10-23
 
@@ -292,3 +294,43 @@ push, remote evidence transfer or deletion are included. A successful check
 qualifies real clean-source building and the exercised basic diagnostic/cleanup
 paths. It does not prove a source bug fixed, qualify all failure diagnostics or
 complete live bisection/performance calibration.
+
+### Source-plan refusal and prepared compatibility case
+
+At clean engine `dd3011b`, offline source planning refused the selected pristine
+release before any build or worker:
+`Source symlinks/submodules are unsupported: sysdep/bsd-netlink/netlink.Y`.
+Inspection identified exactly two tracked BSD aliases: `netlink.Y` and
+`netlink.c`, pointing to `../linux/netlink.Y` and `../linux/netlink.c`. The same
+aliases exist in the locally available 2.13 and 2.0.12 release trees. The
+source guard is operating as documented; no guard was disabled or changed.
+The original BIRD checkout remains clean and unchanged. The refused command,
+stderr and zero-build/zero-worker accounting remain in the evidence root's
+`prerequisite-stop.json` and `source-plan-*` files.
+
+A separate local validation checkout was prepared without downloads at
+`/tmp/bgperf2-milestone-b-source-20261026/source-materialized`. Its local commit
+`ff132d4180f8f56882f0e977cd979992e9eb3b64`, directly based on the selected release,
+replaces only those two aliases with regular files containing the exact target
+Git blob bytes. The original Linux files and every other tracked file remain
+unchanged. Both copied files' sizes and SHA-256 values, the binary Git patch
+and independent preparation review are recorded locally. The review verified
+all other 479 tracked files against their original objects and confirmed Linux
+build selection still uses the unchanged Linux and Unix directories.
+The strict offline source-plan preview now passes without any guard change;
+its normalized snapshot SHA-256 is
+`526022eb0dea09be71b98c60f0582e0ba30a06388baf3692e132b2cd5176d249`.
+The preview retains the original recipe/engine binding and is not an execution
+input; a selected revised case needs fresh, clearly labeled inputs below.
+
+This is a prepared **BIRD 2.19.2 plus local packaging patch** case, not evidence
+that pristine release sources pass the strict builder, that a routing bug is
+fixed, or that BSD behavior is qualified. Original symlink support remains
+unsupported. The patch was reviewed before the local commit was created; no build or
+experiment ran. Because the frozen procedure selected the unmodified release
+and requires stopping on unexpected setup failure without repair, execution of
+this changed source case awaits the operator's decision. If selected, export
+fresh inputs at current clean engine HEAD, review the new source/build plan,
+and retain the same one-build/three-worker maximum, budgets, fixed instruments,
+intentional storage exception and review/stop gates. Never overwrite the
+original refused preparation or treat its failure as a completed check.

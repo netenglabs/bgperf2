@@ -300,12 +300,20 @@ transfer or push occurred.
 Original work is at
 `/home/jpietsch/bgperf-work/2026-10-c-repeatability-control-01`; results at
 `/home/jpietsch/bgperf-results/2026/2026-10-c-repeatability-control-01`.
-The latter retains `preparation`, `plans` and `block-1`; it will retain the final
-`runtime-evidence` copy after the last writers finish. Original coordinator evidence remains at
+The latter retains `preparation`, `plans`, `block-1` and the finalized
+`runtime-evidence` copy. Original coordinator evidence remains at
 `/tmp/bgperf2-c-repeatability-runtime-20261027`; original preparation and prior
 C/D evidence are unchanged. All 561 preparation file hashes verify in both local
-copies. Final preservation inventories and archive coverage/checksums are pending
-the last writers and will distinguish regular files from retained socket types. This is
+copies. After all runtime and stop-record writers finished, local preservation
+verified 956 regular-file payloads and complete 1,120-entry source inventories,
+including 162 directories and two original sockets retained as type metadata
+without opening them. All 242 coordinator files match the preserved copy.
+Archive `evidence.tar.zst` is 57,008,389 bytes, SHA-256
+`4b1f2f6a258e9db1f8aa193b29106eff4105c1b305aa2410cfa03bff8cc84442`.
+`PRESERVATION.json`, `coverage.json` and `SHA256SUMS` record exact coverage,
+metadata and verified archive/source hashes. The archive captures runtime engine
+`2b15281` and reviewed stop-documentation commit `8446aef`; this later source-only
+preservation completion record does not modify that sealed evidence. This is
 local preservation on the same root-backed device, not independent backup.
 Independent reviews, accounting and the reviewed local documentation commit are
 retained with runtime evidence. No new runtime is implied; a further study needs

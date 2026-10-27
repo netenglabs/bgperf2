@@ -56,7 +56,11 @@ def _cleanup(attempt_id, env):
         try:
             identifiers = preflight.run_command(
                 prefix + listing + ['--filter', f'label={OWNER_LABEL}={attempt_id}'], env=env).split()
-            for identifier in identifiers:
+        except (preflight.ProbeError, OSError, ValueError, TypeError, AttributeError) as exc:
+            errors.append(f'{kind} discovery: {exc}')
+            continue
+        for identifier in identifiers:
+            try:
                 observed = json.loads(preflight.run_command(
                     prefix + [kind, 'inspect', identifier], env=env))[0]
                 labels = (observed.get('Config', {}).get('Labels') if kind == 'container'
@@ -65,8 +69,8 @@ def _cleanup(attempt_id, env):
                     raise ValueError(f'{kind} {identifier} ownership changed; retained')
                 command = [kind, 'rm'] + (['-f'] if kind == 'container' else []) + [identifier]
                 preflight.run_command(prefix + command, env=env)
-        except (preflight.ProbeError, OSError, ValueError, KeyError, TypeError, IndexError, AttributeError) as exc:
-            errors.append(f'{kind}: {exc}')
+            except (preflight.ProbeError, OSError, ValueError, KeyError, TypeError, IndexError, AttributeError) as exc:
+                errors.append(f'{kind} {identifier}: {exc}')
     return errors
 
 
@@ -101,11 +105,17 @@ class SubprocessBackend:
                     worker_end = time.monotonic()
                     worker_elapsed = worker_end - worker_start
                     within_budget = worker_elapsed <= timeout
-                    terminal = workdir / 'runtime.json'
-                    if terminal.is_file():
-                        outcome = json.loads(terminal.read_text())
-                    if process.returncode and outcome.get('status') == 'completed':
-                        outcome = {'status': 'harness_failed', 'reason': f'Worker exited {process.returncode} after terminal evidence.'}
+                    if not within_budget:
+                        # wait() can return after its deadline when the parent
+                        # is descheduled; successful exit cannot extend budget.
+                        outcome = {'status': 'inconclusive',
+                                   'reason': f'Observed worker elapsed {worker_elapsed:g}s exceeded its {timeout:g}s wall-clock budget; worker group stopped.'}
+                    else:
+                        terminal = workdir / 'runtime.json'
+                        if terminal.is_file():
+                            outcome = json.loads(terminal.read_text())
+                        if process.returncode and outcome.get('status') == 'completed':
+                            outcome = {'status': 'harness_failed', 'reason': f'Worker exited {process.returncode} after terminal evidence.'}
                 except subprocess.TimeoutExpired:
                     worker_end = time.monotonic()
                     worker_elapsed = worker_end - worker_start

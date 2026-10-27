@@ -297,12 +297,19 @@ def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memor
             try:
                 if not re.fullmatch(r'[0-9a-f]{64}', identifier):
                     raise ValueError('Malformed full container ID; no path or command constructed')
-                inspected = json.loads(probe(['container', 'inspect', identifier])['text'])[0]
-                labels = inspected.get('Config', {}).get('Labels') or {}
+                inspection = json.loads(probe(['container', 'inspect', identifier])['text'])
+                if not isinstance(inspection, list) or len(inspection) != 1 or not isinstance(inspection[0], dict):
+                    raise ValueError('Malformed container inspection; expected one object')
+                inspected = inspection[0]
+                config, state = inspected.get('Config'), inspected.get('State')
+                if not isinstance(config, dict) or not isinstance(state, dict):
+                    raise ValueError('Malformed container configuration or state')
+                labels = config.get('Labels') or {}
+                if not isinstance(labels, dict) or not isinstance(inspected.get('Name'), str):
+                    raise ValueError('Malformed container labels or name')
                 if labels.get('bgperf2.recipe.attempt') != attempt or inspected.get('Id') != identifier:
                     raise ValueError('Diagnostic ownership/ID recheck failed; foreign resource retained')
                 name = inspected.get('Name', '').lstrip('/')
-                state = inspected.get('State', {})
                 filtered = {key: state.get(key) for key in ('Status', 'Running', 'ExitCode', 'OOMKilled', 'Error', 'StartedAt', 'FinishedAt')}
                 item = {'id': identifier, 'name': name, 'role': role_for_name(name),
                         'image_id': inspected.get('Image'), 'state': filtered,

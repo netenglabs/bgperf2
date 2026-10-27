@@ -206,6 +206,53 @@ def test_cleanup_discovers_ids_and_rechecks_labels(monkeypatch):
     assert all('rm' not in command for command in calls)
 
 
+@pytest.mark.parametrize('failure', ['inspect', 'ownership', 'remove'])
+@pytest.mark.parametrize('kind', ['container', 'network'])
+def test_cleanup_continues_with_other_owned_resources_after_one_failure(monkeypatch, failure, kind):
+    removed = []
+    def command(argv, **kwargs):
+        if 'inspect' in argv:
+            identifier = argv[-1]
+            if identifier == 'bad' and failure == 'inspect':
+                raise recipe_run.preflight.ProbeError('container disappeared during inspection')
+            owner = 'foreign' if identifier == 'bad' and failure == 'ownership' else 'attempt'
+            return json.dumps([{'Config': {'Labels': {recipe_run.OWNER_LABEL: owner}},
+                                'Labels': {recipe_run.OWNER_LABEL: owner}}])
+        if 'rm' in argv:
+            if argv[-1] == 'bad' and failure == 'remove':
+                raise recipe_run.preflight.ProbeError('container removal failed')
+            removed.append(argv[-1])
+            return ''
+        listed_kind = 'container' if 'ps' in argv else 'network'
+        return 'bad good' if listed_kind == kind else 'other'
+    monkeypatch.setattr(recipe_run.preflight, 'run_command', command)
+    errors = recipe_run._cleanup('attempt', {})
+    assert errors and len(errors) == 1
+    assert removed == (['good', 'other'] if kind == 'container' else ['other', 'good'])
+
+
+def test_worker_returning_after_observed_budget_is_inconclusive(tmp_path, monkeypatch):
+    class Process:
+        pid = 34
+        returncode = 0
+        def wait(self, timeout):
+            recipe_run._write(tmp_path / 'runtime.json', {'status': 'completed', 'reason': 'done'})
+        def poll(self):
+            return 0
+    clock = iter([10.0, 14.0])
+    monkeypatch.setattr(recipe_run.time, 'monotonic', lambda: next(clock))
+    monkeypatch.setattr(recipe_run.subprocess, 'Popen', lambda *a, **k: Process())
+    monkeypatch.setattr(recipe_run.os, 'killpg', lambda *a: None)
+    monkeypatch.setattr(recipe_run, '_cleanup', lambda *a: [])
+    import recipe_diagnostics
+    monkeypatch.setattr(recipe_diagnostics, 'stage', lambda *a, **k: None)
+    monkeypatch.setattr(recipe_diagnostics, 'collect_diagnostics', lambda *a, **k: {'errors': []})
+    outcome = recipe_run.SubprocessBackend().execute(recipe(), tmp_path, 'attempt', 3)
+    assert outcome['status'] == 'inconclusive'
+    budget = json.loads((tmp_path / 'execution-budget.json').read_text())
+    assert budget['elapsed_seconds'] == 4 and budget['completed_within_budget'] is False
+
+
 def test_cleanup_failure_changes_completed_status(tmp_path, monkeypatch):
     class Process:
         pid = 34

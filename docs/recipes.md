@@ -238,11 +238,17 @@ names and the selected immutable target, generator and observer images. It does
 not invoke the engine's broad image-preparation or prior-container cleanup paths.
 Only resources bearing this attempt's ownership label are cleaned, by inspected
 IDs. Work directories are preserved, including failed and interrupted work.
+If inspection or removal of one resource fails, cleanup records that failure
+and continues checking the remaining owned resources. Foreign or uncertain
+resources are retained; any cleanup error still makes the attempt a harness
+failure.
 
 `--timeout` is a finite positive wall-clock worker budget, covering setup and
 observation (default 300 seconds). It is separate from the engine's convergence
 rules and from bounded prerequisite/cleanup probes. Expiry stops the worker
-process group and yields `inconclusive` (exit 5). Ctrl-C or SIGTERM during the
+process group and yields `inconclusive` (exit 5). A worker observed to finish
+after the selected budget is also inconclusive, even when its process returned
+successfully. Ctrl-C or SIGTERM during the
 worker yields `interrupted` (130 or 143). Cleanup failures yield `harness_failed`
 (exit 3) with details, retaining evidence. A hard kill, disk failure or power loss
 can prevent packaging or cleanup; there is no automatic retry or recovery claim.

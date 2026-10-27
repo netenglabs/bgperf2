@@ -857,3 +857,39 @@ execution. Reports and original stderr remain under
 `/tmp/bgperf2-codex-docker-verification-20261026`. The environment guide records
 the remedy. No BIRD regression was selected, and no build, benchmark, download,
 new schedule or remote transfer ran as part of this fix.
+
+### Focused execution and cleanup bug review — 2026-10-26
+
+The operator selected review and repair of existing execution, error-handling
+and cleanup behavior. Baseline `46f13ba` supplied four confirmed defects,
+reproduced with fake workers and Docker responses before fixes:
+
+- An inspect, ownership or removal failure abandoned the remaining resources
+  of that kind. Cleanup now records each failure and checks every remaining
+  owned container/network once, retaining foreign or uncertain resources.
+- A normal process wait returning after the observed wall-clock budget could
+  still report completed. An exceeded observed budget is now inconclusive,
+  including when the child returned successfully; collection and cleanup
+  remain outside the worker budget.
+- A background health-monitor exception could kill monitoring while the
+  worker reported completed. Monitoring failures now reach the terminal
+  harness-failure outcome rather than being lost in a daemon thread.
+- One malformed container inspection could discard diagnostic state/memory
+  already collected for other containers. The collector now preserves those
+  observations and records a partial collection with the failure.
+
+The initial controller regression tests failed in all four selected cases
+(three cleanup failure kinds plus late completion); container and network
+coverage and related sequencing checks passed after repair. Red/green test
+outputs and review evidence remain under
+`/tmp/bgperf2-execution-bug-review-20261026`. Review scope stops at these four
+defects. No benchmark, daemon build, download, schedule, infrastructure or
+remote evidence transfer is part of this work. Normal Docker-free tests and
+independent review precede the local commit; live Docker/hardware qualification
+remains separate.
+
+The related Docker-free suite passed 114 tests. Independent final review passed
+70 controller/worker/diagnostic tests and accepted all four fixes. The monitor
+regression forces the capture-to-handoff race with real threads; captured errors
+survive concurrent completion. Stopping prevents later artifact/terminal writes,
+and a healthy in-flight SDK probe adds no join delay or new failure threshold.

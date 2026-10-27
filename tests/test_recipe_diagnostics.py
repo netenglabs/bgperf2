@@ -445,3 +445,28 @@ def test_host_identity_precedes_worker_and_survives_failure(tmp_path, monkeypatc
     assert json.loads((tmp_path / 'results/work/host.json').read_text()) == snapshot
     host = next(item for item in result['artifacts'] if item['path'] == 'work/host.json')
     assert host['availability'] == 'present' and host['sha256']
+
+
+@pytest.mark.parametrize('malformed', [None, [], 'not an object', {'State': None}, {'Config': None}])
+def test_later_malformed_inspection_retains_prior_container_observations(tmp_path, malformed):
+    first, second = 'a' * 64, 'b' * 64
+    def command(argv, **kwargs):
+        if 'ps' in argv:
+            value = first + '\n' + second
+        elif 'inspect' in argv:
+            item = {'Id': argv[-1], 'Name': '/attempt_bird_target',
+                    'Config': {'Labels': {recipe_run.OWNER_LABEL: 'attempt'}},
+                    'State': {'Running': True, 'Pid': 123}}
+            if argv[-1] == second:
+                item = dict(item, **malformed) if isinstance(malformed, dict) else malformed
+            value = json.dumps([item])
+        else:
+            value = 'SIMULATED retained log'
+        return {'text': value, 'truncated': False, 'captured_bytes': len(value)}
+    result = diagnostics.collect_diagnostics(tmp_path, 'attempt', {}, command=command,
+        memory_reader=lambda pid: {'ending_bytes': 123})
+    assert result['status'] == 'partial'
+    assert len(result['containers']) == 1 and result['containers'][0]['id'] == first
+    assert result['containers'][0]['memory']['ending_bytes'] == 123
+    assert result['errors'] and second in result['errors'][0]
+    assert json.loads((tmp_path / 'diagnostics.json').read_text()) == result

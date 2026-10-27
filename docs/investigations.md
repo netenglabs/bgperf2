@@ -245,7 +245,11 @@ reasons. Lower memory in a candidate is not a leak diagnosis or calibrated
 regression conclusion.
 
 Collector/cleanup failures retain supported reproduction evidence and available
-work while reporting harness failure. Evidence packaging records unsafe or
+work while reporting harness failure. Background health-monitor failures
+captured before terminal finalization cannot become a successful worker outcome.
+A malformed container inspection
+keeps diagnostic observations already collected for other containers and marks
+the collection partial. Evidence packaging records unsafe or
 unavailable files and socket omissions under the recipe guide. A hard kill,
 power loss or unwritable evidence storage can still prevent final packaging.
 Review paths, logs and local source/patch information before sharing any

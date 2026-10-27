@@ -11,7 +11,6 @@ from pathlib import Path
 import sys
 import types
 import threading
-import time
 import tempfile
 
 from recipe_run import OWNER_LABEL, _write
@@ -230,6 +229,11 @@ def main(argv=None):
     work, attempt = (argv or sys.argv[1:])
     work = Path(work)
     outcome = {'status': 'harness_failed', 'reason': 'Worker failed before runtime initialization.'}
+    monitor_stop = threading.Event()
+    terminal_lock = threading.Lock()
+    monitor_failures = []
+    finalized = False
+    watcher = None
     try:
         document = recipes.read_document(work / 'recipe.json')
         recipes.validate_recipe(document)
@@ -252,23 +256,66 @@ def main(argv=None):
         diagnostic_client = docker.APIClient(base_url=host, version='auto', timeout=2) if options['mode'] == 'basic' else None
         from recipe_diagnostics import live_sample, read_bird_exit
         live = {'samples': [], 'bird_seen': []}
+        def monitor_failure(failure):
+            # One terminal writer at a time. A failure observed before stopping
+            # the monitor wins over a concurrent successful bench return.
+            with terminal_lock:
+                if finalized:
+                    return
+                if not monitor_failures:
+                    monitor_failures.append(failure)
+                monitor_stop.set()
+                try:
+                    _write(work / 'runtime.json', monitor_failures[0])
+                except Exception:
+                    # No terminal witness is preferable to a false success.
+                    os._exit(1)
+                os._exit(0)
         def health_watch():
-            while True:
-                time.sleep(0.5)
-                failure = scan_health(owned, document['reproduction']['expected_outcome'])
-                if failure is None and diagnostic_client is not None:
-                    failure = live_sample(diagnostic_client, owned, live,
-                                          expected=document['reproduction']['expected_outcome'],
-                                          exit_reader=lambda: read_bird_exit(work, attempt + '/bird/recipe-bird-exit.json'))
-                    _write(work / 'live-diagnostics.json', live)
-                if failure is not None:
-                    _write(work / 'runtime.json', failure)
-                    os._exit(0)
-        threading.Thread(target=health_watch, daemon=True).start()
+            try:
+                while not monitor_stop.wait(0.5):
+                    failure = scan_health(owned, document['reproduction']['expected_outcome'])
+                    if monitor_stop.is_set():
+                        return
+                    if failure is None and diagnostic_client is not None:
+                        failure = live_sample(diagnostic_client, owned, live,
+                                              expected=document['reproduction']['expected_outcome'],
+                                              exit_reader=lambda: read_bird_exit(work, attempt + '/bird/recipe-bird-exit.json'))
+                        with terminal_lock:
+                            if finalized:
+                                return
+                            try:
+                                _write(work / 'live-diagnostics.json', live)
+                            except Exception as exc:
+                                # Record before releasing the writer lock: main
+                                # may finish before the failure handoff runs.
+                                failure = {'status': 'harness_failed',
+                                           'reason': f'Worker health monitor failed: {type(exc).__name__}: {exc}'}
+                                monitor_failures.append(failure)
+                                monitor_stop.set()
+                    if failure is not None:
+                        monitor_failure(failure)
+                        return
+            except Exception as exc:
+                monitor_failure({'status': 'harness_failed',
+                                 'reason': f'Worker health monitor failed: {type(exc).__name__}: {exc}'})
+        watcher = threading.Thread(target=health_watch, daemon=True)
+        watcher.start()
         outcome = execute(document, work, attempt, engine, target=target)
     except BaseException as exc:
         outcome = {'status': 'harness_failed', 'reason': f'{type(exc).__name__}: {exc}'}
-    _write(work / 'runtime.json', outcome)
+    finally:
+        with terminal_lock:
+            monitor_stop.set()
+            if monitor_failures:
+                outcome = monitor_failures[0]
+            finalized = True
+            _write(work / 'runtime.json', outcome)
+        if watcher is not None:
+            # Do not extend the worker for a healthy in-flight SDK read. Its
+            # eventual return cannot publish after finalization, and the parent
+            # still stops/reaps the worker process group on its existing budget.
+            watcher.join(timeout=0)
     # Pollers are daemon threads in the existing engine, but outstanding SDK
     # calls and sampler subprocesses are still terminated by the parent group.
     return 0

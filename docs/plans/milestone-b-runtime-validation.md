@@ -1,10 +1,11 @@
 # Milestone B runtime validation
 
 Prepared 2026-10-23. Status: supplied-image functional pair passed under explicit
-operator authorization. The 2026-10-26 real-source check stopped at the source
-guard before any build; a reviewed local packaging variant awaits a case
-decision below. Source-build and broader diagnostic qualification remain
-unmet. The historical proposals do not grant additional execution authority.
+operator authorization. On 2026-10-26 the approved BIRD 2.19.2 plus packaging
+patch source build, functional pair and setup-container SIGTERM/cleanup check
+passed. Pristine-source support and broader crash, target-interruption and
+memory qualification remain unmet. The historical proposals grant no further
+execution authority.
 
 ## Authorized functional validation — 2026-10-23
 
@@ -334,3 +335,118 @@ fresh inputs at current clean engine HEAD, review the new source/build plan,
 and retain the same one-build/three-worker maximum, budgets, fixed instruments,
 intentional storage exception and review/stop gates. Never overwrite the
 original refused preparation or treat its failure as a completed check.
+
+## Approved packaging-source validation completed — 2026-10-26
+
+The operator explicitly selected **“Proceed with the packaging patch”** after
+review of the changed source case. Evidence retains this decision in
+`changed-case-authorization.json`. Execution used clean engine
+`3cf1a0a1b5506e773fe120853886846ce0b995a6` on the existing branch and clean local
+source commit `ff132d4180f8f56882f0e977cd979992e9eb3b64`. Fresh recipe question
+and build inputs explicitly identify BIRD 2.19.2 plus that packaging patch.
+All artifacts remain under `/tmp/bgperf2-milestone-b-source-20261026`; original
+refused preparation, original BIRD checkout and the engine guard are unchanged.
+
+### Build and execution
+
+Exactly one public `target-build` completed with its 1,200-second build-client
+budget, local legacy Docker builder, fixed local builder/runtime image, network
+none and pulls false. The resulting image is
+`sha256:7fae42bfc8b00fc0aab6d1321cc7cb8a29f6a25e965949c6e012d0f1242dd3b8`.
+Independent review checked all 481 regular source archive members against the
+checkout, normalized archive hash `526022eb0dea09be71b98c60f0582e0ba30a06388baf3692e132b2cd5176d249`,
+Dockerfile/log/target/disclosure identities, source-snapshot image label and
+debug `-O0 -g` compile/link flags. The built binary reports BIRD 2.19.2; linked
+libraries resolve. The normal version banner is on stderr; an initial local
+stdout-only expectation was corrected using the retained original streams,
+without repeating the build or a worker. Binary hash remains unverified and
+reconstructibility remains false under the existing contract.
+
+The originally proposed single `investigate` command was not executed: its
+intentional continuation after a baseline `experiment_failed` would conflict
+with this case's stop-on-unexpected-failure rule. A separately reviewed private
+controller used two public `run` commands and public `investigation-report`/
+`investigation-verify` instead, preserving the same recipe, ordering and budgets.
+It checked both targets, froze input hashes, rechecked source/engine cleanliness
+and protective memory/disk floors before each worker, and required original
+package, four bounded assertions, basic diagnostic and cleanup acceptance before
+the candidate. Independent fake-only tests covered thirteen refusal/success
+scenarios and two cancellation paths. This adds no engine behavior or scheduler.
+
+| Attempt | Original identity | Observed result |
+| --- | --- | --- |
+| Released baseline | `bgperf_recipe_00437db0814c4e6d919f28c04fe0d2ec` | Completed, four bounded assertions passed, basic diagnostics collected, cleanup errors empty |
+| Packaging-source candidate | `bgperf_recipe_672a2098b2e04f0399a340e798c97aa1` | Completed, four bounded assertions passed, basic diagnostics collected, cleanup errors empty |
+| Source-selected setup interruption | `bgperf_recipe_bde2773b51af4b25b78d3966ba714176` | Expected SIGTERM/143, interrupted partial package verified, cleanup errors empty |
+
+Exactly three serial worker attempts used 120-second budgets and basic
+diagnostics; no worker was retried or extended. Both completed workers recorded
+satisfied controller budgets. The pair report at
+`pair-results/report/investigation.json` independently verifies 86 files and
+reports `same_observed_reproduction`, with performance `not_assessed`. Both
+original completed packages verify 41 artifacts each, and 76 original-work
+regular files match their packaged hashes. Recorded target/generator BIRD
+versions are 2.19.2 and observer version is sink 0.1.0. Baseline instrumentation
+stays unknown; source candidate instrumentation is explicitly debug.
+
+After that independent pair/cleanup review finished, the parent wrote an exact
+report/target-hash-bound acceptance receipt. Only then did the reviewed
+interruption controller launch worker three. It reverified the portable pair,
+identified its direct worker child by PID/start ticks/parent/workdir/UUID,
+observed owned running observer container
+`b98d3018d279eb106674da188a601ce4fff4b2ee3500641ad12f894ed8b05785` and sent SIGTERM
+only to its public controller. The result is correctly interrupted/143 and
+independently verifies 20 artifacts; 18 original-work regular files match the
+package. Its controller elapsed interval was 4.374173172 seconds, with
+`completed_within_budget` null rather than an invented completion witness.
+
+### Qualification limits, cleanup and retention
+
+The completed pair captured target cgroup lifetime peak, ending and sampled
+memory observations, pre-cleanup role states, target BIRD presence and stage
+records. Per-daemon RSS remains null. Optional generator live-memory reads timed
+out twice in the baseline and once in the candidate; those retained samples
+have null memory and explicit errors, not zero or silently removed samples.
+Top-level final collection errors and cleanup errors were empty. This does not
+qualify continuous sampling, every diagnostic fault path or memory performance.
+
+The third worker reached setup only: generator and observer containers were
+collected/cleaned, but the BIRD target had not started, and no session or
+observation stage was reached. Target memory, events, provenance, samples and
+positive assertions remain explicitly unavailable/unmeasured. This qualifies
+controlled SIGTERM cleanup with live owned **setup containers**, not interruption
+during target operation/routing, timeout termination or crash diagnosis.
+
+Before-build, between-worker and final container identity/state, network and
+volume inventories match exactly: 71 pre-existing containers, six networks and
+495 volumes remained unchanged. The one expected built image was added; no
+original image was removed. Active-measurement guards and protective floors
+passed, sources stayed clean, and all execution stopped permanently before
+documentation or normal commit checks. Independent build, pair, interruption
+and cleanup reviews accepted these explicitly limited results. Reviewers wrote
+no evidence files; parent receipts were sealed after reviewers finished.
+
+Original source/build archives, patches, Git history, work, packages, commands,
+stdout/stderr, ledgers, inventories, acceptance receipts and socket/type/hash
+coverage are retained locally. No original work or image was deleted. No
+download, additional build/attempt, forced daemon fault, privileged capture,
+new timer, remote transfer, provisioned host, `9950` access or push occurred.
+The verified owner-only local archive is
+`/home/jpietsch/bgperf-results/2026/2026-10-milestone-b-source-validation/evidence.tar.zst`
+(21,170,089 bytes), SHA-256
+`5ff3dbfcaef10c41b5bc58b31c1cdc05ac0b1db647d85e13197942e48d130ab6`.
+Full streamed readback verified 1,262 members: 1,087 regular files including
+three preservation metadata files, plus 175 directories. All six restored
+`stats.csv` files parsed; two source sockets are explicitly inventoried and
+omitted without opening them. All 1,261 source path/type/hash/metadata entries
+matched before and after preservation. The source checkout's local Git history
+is included. Verification/scope/inventories and archive checksum remain beside
+the archive. This home destination is on the same ext4 device as `/tmp`:
+**local preservation, not an independent or off-device backup**. Originals
+remain in place with no expiry or removal authorized.
+
+The approved functional source/build/basic-diagnostic/setup-interruption check
+is complete and its authorization consumed. It does not qualify unmodified
+BIRD release sources, establish a routing bug fixed, complete broader target/
+crash/memory validation, validate milestone D live bisection or enable milestone
+C performance policy.

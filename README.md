@@ -767,7 +767,9 @@ Use [staged comparison execution](docs/comparison-execution.md) for serial
 per-attempt checks and explicit review gates. The
 [deterministic bisection guide](docs/bisection.md) covers local revision searches
 with fresh boundary confirmations; its controlled walkthrough needs no Docker
-or quiet measurement window. Live source-build qualification remains deferred.
+or quiet measurement window. Live bisection qualification remains deferred;
+the [milestone B record](docs/plans/milestone-b-runtime-validation.md) describes
+the successfully exercised packaging-patched source-build case and its limits.
 
 The [public roadmap](docs/roadmap.md) indexes current priorities, detailed plans
 and deferred workload ideas. Engine plans and implementation decisions live in

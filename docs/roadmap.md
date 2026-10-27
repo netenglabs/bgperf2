@@ -37,10 +37,13 @@ decision is ready for review.
 Milestone B now adds strict target/build identities, a trusted local-source BIRD
 build path, optional bounded diagnostics, partial evidence and verified
 baseline/fix reports. The [investigation guide](investigations.md) and maintained
-controlled smoke supply a complete feedback workflow; real source-build and broader
+controlled smoke supply a complete feedback workflow; pristine-source and broader
 diagnostic qualification remain deferred. Its explicitly authorized supplied-image
 BIRD 2.19.2/3.3.2 functional pair passed with basic diagnostics, verified packages
-and independently reviewed cleanup; see the
+and independently reviewed cleanup. Its approved BIRD 2.19.2 plus packaging-patch
+source build/functional pair and live setup-container SIGTERM cleanup also
+passed. Pristine-source support and broader target/crash/memory qualification
+remain limited; see the
 [validation record and limits](plans/milestone-b-runtime-validation.md).
 Baseline/candidate comparison now has a separate descriptive milestone C
 workflow: [named assertions, repeated serial plans and verified reports](comparisons.md)
@@ -57,7 +60,7 @@ explicit review gates and optional operator-selected pressure monitoring.
 [Milestone D deterministic bisection](bisection.md) now supplies bounded local
 revision search, build caching, explicit recovery, skipped/ambiguous outcomes,
 fresh boundary confirmations and verified portable reports. Controlled histories
-validate the workflow; real source-build/live-bisection qualification and
+validate the workflow; live-bisection and broader source-build qualification and
 performance predicates remain deferred.
 
 The architecture proposal is supporting material, not a second execution order.

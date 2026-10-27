@@ -7,7 +7,9 @@ target-daemon crash. Performance predicates are refused; regression policy
 remains `disabled` and performance qualification `not_assessed`.
 
 This first implementation is validated with controlled, Docker-free histories.
-Real source-build and live bisection qualification remain deferred. No selected
+Live bisection and broader source-build qualification remain deferred; the
+[milestone B record](plans/milestone-b-runtime-validation.md) covers one validated
+packaging-patched BIRD source/build case. No selected
 daemon range, source build, download or benchmark is authorized by this guide.
 
 ## Inspect a controlled history

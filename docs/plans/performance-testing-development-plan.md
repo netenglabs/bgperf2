@@ -1,9 +1,10 @@
 # bgperf2 developer performance testing plan
 
 Created 2026-10-23; updated 2026-10-26. Status: milestones A and supplied-image B
-functionally validated; C noise/resolution discovery completed; staged comparison
+functionally validated, including B's approved packaging-source functional and
+setup-container interruption checks; C noise/resolution discovery completed; staged comparison
 safeguards and deterministic milestone D implemented with controlled validation.
-Real source-build/fix and live-bisection qualification, broader diagnostic
+Pristine-source/source-bug-fix and live-bisection qualification, broader diagnostic
 qualification and performance calibration remain deferred. See the
 [comparison guide](../comparisons.md) and [bisection guide](../bisection.md).
 Direction: make bgperf2 a reusable performance tester, with portable public
@@ -178,8 +179,9 @@ actionable diagnostic, not a partially successful benchmark.
 
 Status: implemented locally for BIRD with controlled fixtures. The supplied-image
 and explicit local-source paths, identity records and investigation CLI are
-reviewed and tested. The supplied-image pair passed; real source builds and
-broader adapter qualification remain deferred in the
+reviewed and tested. The supplied-image pair and approved BIRD 2.19.2 plus
+packaging-patch real build/functional pair passed. Pristine-source support,
+actual source-bug-fix and broader adapter qualification remain deferred in the
 [milestone B record](milestone-b-runtime-validation.md). Depends on phase 1.
 
 - Support a target override using a supplied image or an explicitly selected
@@ -204,7 +206,9 @@ real build/adapter qualification is explicitly selected and recorded.
 Status: implemented locally for the supported BIRD recipe workflow. Scoped
 stages, optional diagnostics, host/build identities, memory accounting and
 partial evidence have fake-runtime coverage. Basic diagnostics passed in the
-supplied-image functional pair; broader crash/memory diagnostic qualification
+supplied-image and packaging-source functional pairs. The approved SIGTERM check
+also passed with live setup generator/observer containers, before target startup;
+broader target-interruption/crash/memory diagnostic qualification
 remains deferred. See the [public guide](../investigations.md) and
 [validation record](milestone-b-runtime-validation.md). Depends on phases 0–1.
 
@@ -914,3 +918,16 @@ aliases; its execution is a changed source case awaiting the operator decision
 in the [milestone B record](milestone-b-runtime-validation.md#source-plan-refusal-and-prepared-compatibility-case).
 The original source and the engine guard remain unchanged. This preparation
 does not advance B's runtime acceptance or replace the A–D milestone objective.
+
+The operator subsequently approved that changed source case. At clean engine
+`3cf1a0a`, exactly one real build, two completed functional workers and one
+expected setup interruption passed independent review. Both completed workers
+passed all four bounded assertions; every package/report verified and actual
+container/network/volume inventories remained unchanged. The
+[full record and limits](milestone-b-runtime-validation.md#approved-packaging-source-validation-completed--2026-10-26)
+retains the user decision, source/image identities, raw evidence and review
+receipts. Source-builder symlink restrictions remain unchanged. Optional
+generator memory read timeouts stay missing, and interruption reached setup
+containers only; these results imply no routing bug fix, performance conclusion
+or broader fault-path qualification. The bounded authorization is consumed;
+the original A–D milestone objective remains in effect.

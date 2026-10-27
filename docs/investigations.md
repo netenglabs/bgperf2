@@ -103,6 +103,13 @@ filter configuration. Lazy Git fetching and interactive prompts are disabled.
 Source snapshots have a 256 MiB/20,000-file bound. The snapshot identifies the
 captured bytes; this is not a transactional lock on an actively edited checkout.
 
+Pristine BIRD release trees containing BSD symlink aliases do not meet this
+regular-file-only source contract. The approved
+[BIRD 2.19.2 validation](plans/milestone-b-runtime-validation.md#approved-packaging-source-validation-completed--2026-10-26)
+used an explicitly reviewed local packaging commit that materialized the two
+aliases as byte-identical regular files. It validates that adapted case;
+unmodified-release support is not claimed and the guard remains enabled.
+
 The toolchain image must contain Bash, tar, autoreconf, a C compiler, make and all
 BIRD development dependencies. The runtime base must contain Bash, iproute2 and
 all dynamic libraries required by the selected build, including sanitizer or

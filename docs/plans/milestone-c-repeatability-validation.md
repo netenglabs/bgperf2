@@ -8,6 +8,10 @@ supersedes its preparation handoff. All runtime authorization is consumed.
 The separately approved [zero-build case 02](#case-02-execution-stopped-after-worker-2--2026-10-27)
 also stopped permanently for outside CPU, after two completed workers. Its other
 30 workers remain never run and its execution authorization is consumed too.
+The [overnight case 03](#case-03-overnight-preparation-refused--2026-10-28)
+started no workers; the conditional case 04 was skipped. Future preparation
+follows the [offline validation and recovery contract](#offline-controller-validation-and-preparation-recovery--2026-10-28),
+which permits correcting proven prelaunch errors before measurement.
 The operator selected a **10% slower observer delivery window** as the practical
 calibration target. This means the separately defined
 [10%-to-90% observer count-crossing window](../observer-timing.md), not legacy
@@ -465,3 +469,87 @@ does not rewrite that seal. Originals remain intact; same-device local
 preservation is not independent backup. No push, download, provisioning, 9950
 access or remote evidence transfer occurred. This case's approval is consumed;
 its unrun entries are not a budget available for a new attempt.
+
+## Case 03 overnight preparation refused — 2026-10-28
+
+The operator requested one opportunity at 02:00 Pacific and a conditional retry
+at 03:00 on October 28. Both one-time timers fired. At clean engine `bd93e915`,
+case 03 invoked a copied, unchanged, case-independent read-only inventory helper.
+The private schedule had unnecessarily forbidden running *any* unchanged helper;
+independent review enforced that instruction and refused preparation. This was
+an assistant procedure error, not host load, an automatic approval rejection or
+a failed benchmark. Accounting is zero builds, zero workers started and 32 never
+run. The 03:00 opportunity skipped case 04 because that schedule allowed retry
+only after an evidenced load-related stop. Neither timer remains recurring.
+
+Case 03 stays closed and its original evidence immutable; this revised contract
+does not rewrite the historical refusal or revive either scheduled opportunity.
+Cleanup independently verified all 71 pre-existing containers, six networks,
+495 volumes, 45 image inventory lines and Docker identity unchanged. Its local
+archive is `/home/jpietsch/bgperf-results/2026/2026-10-c-repeatability-control-03/evidence.tar.zst`,
+1,274,108 bytes, SHA-256
+`6556d34b298cfe1034c9e6dfa405f459d626af2c77ebc2a7e6065e56a89481d4`.
+Independent full readback verified 63 archive members, 61 source entries and
+30 unchanged copied coordinator files. Originals remain; this is same-disk local
+preservation, not independent backup. The slot outcome and independent review
+are retained at `/tmp/bgperf2-c-overnight-20261028/slot-02`. Performance policy
+remains disabled, qualification not assessed, and C calibration remains pending.
+
+## Offline controller validation and preparation recovery — 2026-10-28
+
+The operator requested validating the controller **before** waiting for an idle
+measurement window. Preparation must finish and receive independent review
+before scheduling or admission. Validate helper hashes, selected engine/input
+bindings, explicit read/write destinations and allowed commands by their actual
+effects. A case-independent helper may be reused byte-for-byte. There is no
+requirement to edit a safe helper merely to change its case label.
+
+If a missing review, wrong configuration, failed read-only probe or another
+correctable preparation error is proven to precede any worker launch, preserve
+the error, correct it and repeat preparation/review. It consumes no measurement
+attempt and does not permanently stop a case. A missing public first/final review
+waits for that review without issuing another public worker command. Changes to
+reviewed code or inputs invalidate the preparation acceptance until revalidated;
+they never permit bypassing provenance or host gates. Once a worker starts, all
+existing measurement failure/cleanup/contention stop rules remain in force.
+An uncertain process launch must block successors until reconciled; a reservation
+alone is not proof that a worker ran. Do not silently retry uncertain work.
+
+Retained validation is at `/tmp/bgperf2-c-controller-validation-20261028` against
+engine `bd93e915`. It includes parameterized controller templates, failure tests,
+fake packages/reports and command logs. Final run
+`runs/20261028T161213804537Z` passed **49 checks in 36.79 seconds**, with identical
+before/after hashes of all helper, test and validation-runner sources. Its
+`outcome.json`, `source-before.json`, `source-after.json` and streams retain
+the exact command and two simulated accepted final-review receipts. A further
+37 existing public-session/observer tests passed in 3.79 seconds. The actual launch template rehearses
+32 serial steps. Separately, the real public staged workflow exercises both
+16-worker blocks, first/final reviews, prior-block acceptance, package/assertion/
+observer/pressure checks and portable report reconstruction with simulated
+workers. The actual external worker verifier accepts the valid fixture and
+rejects a raw foreign-CPU peak of 100.0001% even when the row rounds to 100%.
+All simulation identities and observations are labeled; they are not daemon
+measurements, live timing evidence or host qualification.
+
+Regression coverage includes unchanged read-only inventory reuse; repairable
+prelaunch missing-review/guard errors; six valid five-second CPU intervals and
+refusal of malformed, backward or frozen counters and invalid timing; stale or
+future admission; deadline expiry during the launch guard; helper/input changes
+during that guard; shared-lock exclusion; uncertain process startup; alternate
+runtime commands inserted into a modified packet; review commands addressing a
+foreign session; and stale predecessor receipts. The controller restricts verbs
+to staged start/step/review, rechecks reviewed hashes for every verb, binds
+predecessor acceptance to case/position/original attempt/result/checkpoint hashes,
+and rechecks admission age, frozen inputs and the bound deadline after its guard.
+It refuses optimized Python execution that would remove its safety assertions.
+
+Read-only native guard, resource inventory and public recipe/optimized-target
+prerequisite checks also passed without creating benchmark work/result roots.
+Those observations do not establish quiet conditions and expire as host facts
+change. Only fresh native admission immediately before each authorized worker
+can establish the selected operational conditions. No live worker, build, new
+timer, policy activation, remote transfer or change to old sealed evidence is
+part of this validation. A future live case still needs its fresh case-data
+binding, independent acceptance and explicit runtime authorization; it should
+instantiate the validated templates rather than rewrite controller code during
+the quiet window.

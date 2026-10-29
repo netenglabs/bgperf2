@@ -1,5 +1,10 @@
 # Milestone C controlled repeatability validation
 
+Current status, 2026-10-29: the [queued study and descriptive analysis](#queued-repeatability-study-and-analysis-completed--2026-10-29)
+completed all 32 workers and 16 natural pairs. Calibration remains pending,
+policy disabled and qualification not assessed. Historical protocols and closed
+cases below are retained; the completed job supplies no further worker budget.
+
 Prepared and executed 2026-10-27. **Approved case permanently stopped after
 worker 1 for outside CPU activity.** One optimized build and one worker completed;
 31 workers remain never run. The approved procedure below is retained as the
@@ -80,7 +85,9 @@ image ID; no hypothetical digest is an executable target.
 The opt-in recipe pinning implementation is `69ac253`, following the pure-helper
 extraction `eca7c2d`; independent code review accepted both. Feature validation:
 337 focused checks and the full 2,454-test commit gate passed. Absent-pin recipe
-identities remain unchanged. Live effective placement is still unvalidated.
+identities remain unchanged. Live effective placement was pending at preparation;
+the accepted worker and subsequent full queued study below supply the exercised
+placement evidence without qualifying general host isolation.
 
 ## Host and storage admission
 
@@ -553,3 +560,107 @@ part of this validation. A future live case still needs its fresh case-data
 binding, independent acceptance and explicit runtime authorization; it should
 instantiate the validated templates rather than rewrite controller code during
 the quiet window.
+
+## Queued repeatability study and analysis completed — 2026-10-29
+
+The operator first authorized three October 28 evening opportunities. Case 05
+completed one worker before outside CPU reached 122.3365%, above the fixed 100%
+successor cap; 31 workers remained never run. Cases 06 and 07 started no workers
+after bounded admission refused load and, for case 07, available memory below
+48 GiB. Their independently preserved outcomes remain separate at the original
+`repeatability-control-05/06/07` results roots and
+`/tmp/bgperf2-c-evening-20261028/slot-17/18/19`. No earlier observation is pooled
+with the completed study below.
+
+The operator then explicitly requested an hourly quiet-host queue at minute 10
+with operational deferral until the pending study completed. Lab source
+`9b03d54fc75434982f4d31f98e2cfd76879b3e78` supplies that deployment; the engine
+still used clean `5abe797f3017e0c11117f6667e2e8e7162be9ea4`. The first hourly
+check deferred on load. The next dispatched fresh case
+`20261029T071001Z-a1596317f9` at 00:10 Pacific on October 29 and closed it at
+02:07 after measurement, independent reviews and preservation. The completed
+queue job no longer dispatches. The scheduler belongs to lab operations, not a
+new public engine execution contract.
+
+**Accepted execution:** zero builds, 32 unique completed workers, 16 natural
+A/A pairs, four accepted public first/final reviews, zero failed/interrupted
+workers and zero never-run entries. Both roles used the original actual `8cc3a97c…`
+optimized image and unchanged source/build provenance, four assertions, exact
+2,000,000 counts, diagnostics none, 120-second budgets and fixed placement/seeds.
+All per-worker admission, placement, observer resolution, pressure and cleanup
+checks passed. Original attempts are unique against all earlier cases. The
+metadata-only block-2 lock refusal and independently reviewed prelaunch correction
+remain preserved and consumed no worker. No helper/source change occurred.
+
+Independent final review verified all packages, all 1,152 original-work file
+hashes against their packages, empty cleanup errors and unchanged native Docker
+inventories/identity.
+Original work and coordinator remain at
+`/home/jpietsch/bgperf-work/quiet-repeatability/20261029T071001Z-a1596317f9`;
+results at
+`/home/jpietsch/bgperf-results/2026/quiet-repeatability/20261029T071001Z-a1596317f9`.
+The 4,541,242,862-byte archive SHA-256 is
+`7c0b2db9b32bf4128b5a9efad70559d834774ec31aebdfe38aa38106e4049079`.
+Independent readback verified 16,399 source entries, 13,929 regular payloads,
+16,337 archive members, 64 socket types without bytes and 308 unchanged copied
+coordinator files. Filesystem timestamps match exactly; serialized archive
+timestamps were checked within 1,000 ns rather than claiming nanosecond identity
+through floating-point/PAX serialization. This is same-device local preservation,
+not independent backup. Original roots remain immutable and no remote transfer
+or deletion occurred.
+
+**Offline analysis:** the operator requested the repeatability report and plan
+update. Both final portable reports reverified 642 files each; all 32 original
+packages and observer supplements reconstructed, with separately checked integer
+nanosecond arithmetic. Selected source hashes and the archive SHA were unchanged.
+Independent Decimal arithmetic reproduced all 16 ratios/bounds and overall log
+SD/geometric mean. A separate reviewer accepted calculations, source references,
+both figures and their interpretation.
+
+| Diagnostic | Observed result |
+| --- | --- |
+| Pair A2/A1 window change | −11.39% to +20.94%; all 16 pairs retained |
+| Overall geometric mean change | +0.44% |
+| Block geometric mean changes | +3.21%, −2.25% |
+| Sample SD of paired log ratios | 0.0859475; not a percentage CV |
+| Window point spans | 1.36946–1.81999 seconds |
+| Crossing width / lower duration | 0.82%–2.01%; not statistical confidence bounds |
+| AB/BA counts by block | 5/3, then 2/6 |
+| Geometric second/first changes | −0.99%, then +6.10%; no stable order correction established |
+
+The successful operational cap does not remove the public report's stricter
+confounder: all 32 runs record nonzero foreign CPU, with a maximum reported row
+value of 11%. Both original public reports retain `foreign_cpu_observed` and
+withhold controlled deltas. The derived ratios describe same-image variability
+under admitted development-host conditions, not a version effect or a newly
+qualified performance comparison. Timestamp resolution alone does not explain
+the observed spread. Block and order imbalance prevents interpreting a pooled
+order comparison as a stable causal penalty.
+
+The full report, two readable static figures, exact pair/run CSVs, source/audit
+JSON, analysis/plot/check scripts and independent review are preserved separately
+at `/home/jpietsch/bgperf-results/2026/quiet-repeatability-analysis/20261029T071001Z-a1596317f9`.
+`REPORT.md` SHA-256 is
+`69096378b071baa8a9b7b9709430a4e13196694eae6f67bd98e9372636970ed9`.
+Derived preservation verified 14 entries and 13 regular files;
+`coverage.json` SHA-256 is
+`e41f17a6f0f6285c723c67cf79819d4c3e85572865ec565f28c3af81137ec6b3`
+and `SHA256SUMS` SHA-256 is
+`50b454a2ff8848e2c5d79459b311b65cde90349fd7b48c03c050ae4fdbef3802`.
+No derived file was written into the sealed original study.
+
+**Next design for review, not execution:** retain paired log-window analysis,
+counterbalance each eight-pair block with four AB/four BA orders, prespecify
+block/dependence handling and qualify a real positive control before fresh
+held-out confirmation. The report's illustrative one-sided alpha 0.05 and
+80%/90% power targets are not adopted settings. Known-SD normal sensitivity
+counts are 6/7 pairs at the observed SD, 12/16 at 1.5 times it and 21/28 at
+twice it. These assume independent stationary log pairs and known variance;
+the present two-block study establishes none of those future assumptions. They
+are not validated sample requirements. A draft engineering ceiling of 32 pairs
+per validation condition, four balanced eight-pair blocks, remains subject to
+design review and a separately bounded execution plan; existing job/worker
+limits do not change. No current confidence interval, p-value, achieved power
+or calibrated regression rule is claimed. Performance policy remains disabled,
+qualification not assessed and C calibration pending. No new job, worker,
+positive-control build or performance-policy activation was authorized here.

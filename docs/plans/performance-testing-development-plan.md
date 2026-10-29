@@ -1,8 +1,9 @@
 # bgperf2 developer performance testing plan
 
-Created 2026-10-23; updated 2026-10-27. Status: milestones A and supplied-image B
+Created 2026-10-23; updated 2026-10-29. Status: milestones A and supplied-image B
 functionally validated, including B's approved packaging-source functional and
-setup-container interruption checks; C noise/resolution discovery completed; staged comparison
+setup-container interruption checks; C noise/resolution discovery and admitted
+repeatability study/descriptive analysis completed; staged comparison
 safeguards and deterministic milestone D implemented, including one bounded live
 count-fault bisection with fresh confirmations. Pristine-source/source-bug-fix,
 broader live bisection/diagnostics and performance calibration remain deferred. See the
@@ -17,6 +18,12 @@ The operator selected a 10% observer-window slowdown planning target. The approv
 one optimized build: case 01 stopped after its first worker, zero-build case 02
 after its second, both for outside CPU above the selected cap. Case 02's single
 physical pair is unqualified; statistical detection remains unvalidated.
+The subsequently authorized [queued study and analysis](milestone-c-repeatability-validation.md#queued-repeatability-study-and-analysis-completed--2026-10-29)
+completed 32 workers and 16 same-image pairs. Its pair variation reaches
+−11.39% to +20.94%; overall geometric change +0.44% combines opposite block
+means. Original foreign-CPU confounders and withheld controlled deltas remain.
+The report proposes paired, counterbalanced validation and a draft engineering
+budget; no powered requirement, performance verdict or new runtime is selected.
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
 The operator authorized phase 0, phase 1a–b prerequisites/preparation and complete
@@ -100,7 +107,7 @@ adapter acceptance checks are deferred is not fully accepted.
 | --- | --- | --- |
 | A. Usable newcomer reproduction workflow — functionally validated; ready for feedback | Finish phase 1: run one supported recipe through the existing runtime with exact role identities, isolated attempts, result/artifact production and verification, actionable failures, public instructions and a maintained fresh-checkout smoke entry point. Include the timeout, interruption, owned-resource cleanup and partial-result handling needed for this workflow, plus the existing completion/reproduction outcomes. Exercise the complete workflow with fake runtimes and review it end to end. | Review the actual CLI walkthrough and returned result package. Present an exact, bounded real-image/qualified-host smoke proposal for authorization. Select the next daemon or concrete bug when that choice affects the following milestone. |
 | B. Test and diagnose a local fix — supplied-image functional pair validated | Complete phases 2–3 and the existing-workload assertions needed from phase 5: supplied-image/local-source target overrides, recorded build differences, useful crash/memory diagnostics and preserved partial evidence. Deliver one coherent baseline/fix investigation using controlled fixtures and the selected adapter. Keep generator, observer and workload identities fixed. | Review the reproduction/fix report and diagnostic usefulness. Decide any remaining source-build trust, instrumentation or adapter choices that affect real validation. |
-| C. Trustworthy baseline/candidate comparison — implementation reviewed; calibration deferred | Complete phases 4–5: repeated/interleaved comparisons, explicit existing-workload correctness assertions, separate memory/CPU/timing results, missing/failed attempts and confounders, machine-readable output and a useful human report. Include controlled differences, noise and inconclusive examples. | Review comparison outputs and a concrete calibration proposal. Select acceptable effect sizes, measurement budget and any regression policy before calibrated performance verdicts are enabled. |
+| C. Trustworthy baseline/candidate comparison — implementation and repeatability analysis reviewed; calibration pending | Complete phases 4–5: repeated/interleaved comparisons, explicit existing-workload correctness assertions, separate memory/CPU/timing results, missing/failed attempts and confounders, machine-readable output and a useful human report. Include controlled differences, noise and inconclusive examples. | Review the admitted 16-pair analysis and balanced-validation proposal. Select the estimator, error goals, positive control and justified measurement budget before new execution or calibrated performance verdicts. |
 | D. Automated regression localization — bounded live count-fault case validated | Complete phase 6 for supported deterministic predicates: bounded revision search, identity-based build caching, resume, skipped/ambiguous revisions and confirmation evidence. Keep performance bisection conditional on milestone C's calibration. | Review the resulting revision boundary and evidence; decide whether to prioritize broader daemon support, calibrated performance bisection or the separately deferred minimization work. |
 
 Milestone A includes only the lifecycle robustness and assertions necessary for

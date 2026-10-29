@@ -1,6 +1,6 @@
 # bgperf2 roadmap
 
-Updated 2026-10-26. This is the public index of engine development plans.
+Updated 2026-10-29. This is the public index of engine development plans.
 Everything needed to understand, use and contribute to bgperf2 belongs in this
 repository. Other projects can build campaigns and services on its documented
 CLI and versioned artifacts; none is required to use the engine.
@@ -15,7 +15,7 @@ boundaries incrementally while keeping current CLI and output compatibility.
 
 | Document | Status | Purpose |
 | --- | --- | --- |
-| [Developer performance testing plan](plans/performance-testing-development-plan.md) | A/B functional validation; C noise/resolution discovery complete; bounded D live count-fault bisection passed; performance calibration pending | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |
+| [Developer performance testing plan](plans/performance-testing-development-plan.md) | A/B functional validation; C admitted repeatability study and descriptive analysis complete; bounded D live count-fault bisection passed; performance calibration pending | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |
 | [Architecture design](plans/architecture-design.md) | Supporting proposal; reconciled with shipped foundations | Recipe/result records, lifecycle boundaries, observations and compatibility strategy |
 | [Future testing workloads](plans/future-testing-workloads.md) | Deferred | Preserve policy, IPv6 and other workload ideas without scheduling their implementation |
 | [Policy engine design](plans/policy-testing-engine-design.md) | Deferred | Semantic policy model, conformance, adapter/generator/observer requirements and implementation risks |
@@ -50,16 +50,19 @@ workflow: [named assertions, repeated serial plans and verified reports](compari
 retain memory/CPU/timing observations, variation, failures and confounders.
 Controlled examples demonstrate known differences, noise and inconclusive
 evidence. Calibrated regression policy remains disabled. The operator selected
-a 10% slower observer-window planning target. The bounded
+a 10% slower observer-window planning target. Earlier bounded
 [controlled repeatability case](plans/milestone-c-repeatability-validation.md)
-completed one optimized build and its first worker, including live CPU-placement
-checks, then stopped for outside CPU activity above its selected cap. Its other
-31 workers remain never run, no pair completed, and runtime authorization is
-consumed. Calibration and statistical detection remain unvalidated.
-The separate [zero-build case 02](plans/milestone-c-repeatability-validation.md#case-02-execution-stopped-after-worker-2--2026-10-27)
-reused that image and stopped after its second worker exceeded the same outside-CPU
-cap. Both workers completed correctly; 30 remain never run, and the single physical
-pair is unqualified. Its authorization is consumed; calibration remains pending.
+attempts stopped for outside CPU or admission/preparation limits; their evidence
+remains separate. The subsequently authorized
+[queued study and analysis](plans/milestone-c-repeatability-validation.md#queued-repeatability-study-and-analysis-completed--2026-10-29)
+completed all 32 workers and 16 same-image pairs with four independent public
+review gates and verified preservation. Offline analysis found pair changes
+from −11.39% to +20.94%, block/order differences and nonzero background CPU;
+original controlled deltas remain withheld. The 10% planning target is not a
+single-pair cutoff or a demonstrated detection capability. A balanced validation
+design, known-effect positive control, justified statistical rule/sample budget
+and fresh held-out confirmation remain before calibration or performance policy
+can be enabled. The completed queued job will not rerun.
 The revised two-million-prefix noise/resolution pilot completed all eight A/A
 and eight A/B attempts with independent gates and
 [observer timing supplements](observer-timing.md). This establishes resolution

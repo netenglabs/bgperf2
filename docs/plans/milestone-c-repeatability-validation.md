@@ -4,6 +4,8 @@ Current status, 2026-10-29: the [queued study and descriptive analysis](#queued-
 completed all 32 workers and 16 natural pairs. Calibration remains pending,
 policy disabled and qualification not assessed. Historical protocols and closed
 cases below are retained; the completed job supplies no further worker budget.
+The next [debug-control eligibility case](milestone-c-control-eligibility.md)
+prepares a fresh bounded discovery screen; execution approval remains pending.
 
 Prepared and executed 2026-10-27. **Approved case permanently stopped after
 worker 1 for outside CPU activity.** One optimized build and one worker completed;

@@ -62,7 +62,10 @@ original controlled deltas remain withheld. The 10% planning target is not a
 single-pair cutoff or a demonstrated detection capability. A balanced validation
 design, known-effect positive control, justified statistical rule/sample budget
 and fresh held-out confirmation remain before calibration or performance policy
-can be enabled. The completed queued job will not rerun.
+can be enabled. The next [debug-control eligibility case](plans/milestone-c-control-eligibility.md)
+prepares one same-source unoptimized build and balanced fresh A/A and A/debug
+blocks; its unknown effect needs further qualification. Execution approval is
+pending. The completed queued job will not rerun.
 The revised two-million-prefix noise/resolution pilot completed all eight A/A
 and eight A/B attempts with independent gates and
 [observer timing supplements](observer-timing.md). This establishes resolution

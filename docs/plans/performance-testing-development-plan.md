@@ -24,6 +24,9 @@ completed 32 workers and 16 same-image pairs. Its pair variation reaches
 means. Original foreign-CPU confounders and withheld controlled deltas remain.
 The report proposes paired, counterbalanced validation and a draft engineering
 budget; no powered requirement, performance verdict or new runtime is selected.
+The next [debug-control eligibility case](milestone-c-control-eligibility.md)
+prepares one same-source unoptimized build and balanced fresh A/A and A/debug
+blocks. Its slowdown is unknown; execution approval remains pending.
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
 The operator authorized phase 0, phase 1a–b prerequisites/preparation and complete
@@ -258,9 +261,10 @@ crash reproduction without reconstructing the experiment from console output.
 Status: implemented and independently reviewed for the supported synthetic
 recipe. Repeated serial plans, descriptive reports and controlled fixtures are
 documented in the [comparison guide](../comparisons.md). Real noise/resolution
-discovery completed; both controlled repeatability cases stopped for outside CPU.
-Completed repeatability and calibrated regression policy remain
-pending/disabled. Depends on phases 0–3.
+discovery and the admitted 16-pair repeatability study/descriptive analysis
+completed. Earlier controlled cases retain their outside-CPU stops. The next
+debug-control eligibility case is prepared for review; calibration remains
+pending and regression policy disabled. Depends on phases 0–3.
 
 - Run repeated interleaved comparisons of two target builds on the same
   qualified host, reusing existing ordering/repetition machinery.
@@ -1049,3 +1053,18 @@ no repeatability/power/performance conclusion. Cleanup and all unrelated
 resources are unchanged. The [case-02 execution record](milestone-c-repeatability-validation.md#case-02-execution-stopped-after-worker-2--2026-10-27)
 owns detailed bounds, hashes, accounting and local preservation. Case 01 remains
 stopped and untouched; case 02's approval is also consumed. Policy stays disabled.
+
+### Milestone C debug-control eligibility preparation — 2026-10-29
+
+Starting from `3594dfe`, the next [concrete eligibility case](milestone-c-control-eligibility.md)
+uses the preserved 16-pair analysis to select balanced eight-pair A/A and
+A/debug blocks, with one same-source `-O0 -g` build and at most 32 serial
+120-second workers. Its 5,040-second combined build/worker budget is an
+engineering bound, not a powered requirement. The debug effect is unknown and
+condition remains confounded with block; this screen cannot qualify a known
+10% positive control or enable performance policy. Existing ordinary-report
+confounders, provenance and evidence remain intact. Preparation, candidate-binding
+negative tests and controller rehearsals live separately at
+`/tmp/bgperf2-c-control-eligibility-20261029`. Execution and the fresh intentional
+root-storage exception require explicit operator approval after packet review.
+No new live build, worker or schedule is part of preparation.

@@ -73,9 +73,12 @@ completed sixteen unique workers/eight balanced optimized/debug pairs with zero
 builds, four public reviews and independently verified preservation. Observed
 debug windows were longer in every pair (geometric change +72.23%); background
 load and instrumentation confounders remain, and this is not a known 10% control
-or calibration result. The next [interleaved noise/control case](plans/milestone-c-control-separation.md)
-is preparation only: eight A/A and eight optimized/debug pairs, zero builds,
-32 workers maximum and no execution authorization. Policy remains disabled.
+or calibration result. The approved [interleaved noise/control case](plans/milestone-c-control-separation.md#approved-execution-and-partial-outcome--2026-10-30-utc)
+stopped at its memory-capacity requirement after twelve completed workers/six
+pairs, with twenty workers never run and zero builds. Only one macroblock has
+both conditions; one of its two AD brackets exceeds the local AA envelope,
+and the full screen remains unassessed. Evidence and partial analysis remain
+separate from earlier cases. This case is closed; policy remains disabled.
 The revised two-million-prefix noise/resolution pilot completed all eight A/A
 and eight A/B attempts with independent gates and
 [observer timing supplements](observer-timing.md). This establishes resolution

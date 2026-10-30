@@ -1,9 +1,12 @@
-# Milestone C interleaved noise/control separation — preparation only
+# Milestone C interleaved noise/control separation — partial execution closed
 
 Prepared 2026-10-30 after the [completed background-load diagnostic](milestone-c-control-eligibility-queued.md#diagnostic04-completed-and-analyzed--2026-10-30).
-Status: **reviewable design; no execution authorized**. Source/helper/packet
-validation is recorded below as preparation completes. This is a proposed
-bounded case, not an installed job, runtime result or calibrated policy.
+Status: **operator-approved execution permanently stopped at capacity after
+12 completed workers; evidence sealed and partial analysis independently reviewed**.
+The proposal/preparation sections below retain the frozen design and original
+approval boundary. The [actual execution record](#approved-execution-and-partial-outcome--2026-10-30-utc)
+supersedes preparation-only status, without modifying the preserved
+false-authorization preparation. No further worker is authorized by this record.
 
 ## Question and evidence for the next step
 
@@ -171,3 +174,76 @@ so an expected missing build record cannot be silently omitted. The final
 this engine documentation commit is clean; their exact prepared identities are
 recorded in the separate preparation receipt. No live acceptance or execution
 is implied by source/test success.
+
+## Approved execution and partial outcome — 2026-10-30 UTC
+
+The operator approved this concrete zero-build case with at most 32 workers and its
+intentional persistent `/dev/sda5` ext4 root-backed storage exception. The
+original false-authorization preparation remains unchanged. A separate actual
+runtime coordinator bound the explicit clean engine
+`4e7b0eb163316862008ce886a5a22b5eba115c98`, native baseline, topology,
+helpers and reviewed packet before any worker. Lab execution revision was
+`a5fc4b30470ccd12c1d39e7876a901a35b0c919e`. Actual case SHA-256:
+`c43285cf680379f89c6b4a73f3ec2eae333a4727758dfddae40f058fa066a0ac`.
+
+Sessions 1–3 completed all twelve workers: two AA and four AD pairs, with six
+genuine independent first/final public acceptances and synchronous private
+verification after every worker. Before worker 13, fresh native admission
+recorded available memory **32.967262268066406 GiB**, below the selected 48 GiB.
+That actual post-start capacity failure permanently closed the case. The failed
+receipt was never consumed, no worker 13 or uncertain launch existed, and twenty
+planned workers remain never run. No worker failed or was interrupted; no build,
+retry, replacement or extension occurred. Background CPU remained recorded
+without a CPU-only refusal. There was no elapsed-time start cutoff. An earlier
+expired unconsumed receipt for worker 1 was preserved and renewed without
+consuming a worker or changing freshness semantics.
+
+Session 4 truthfully remains ready at index 0 with four not-run entries and no
+review; sessions 5–8 were never started. Six complete pairs and ten never-run
+pairs remain in the derived ledger. Only macroblock 1 has both its AA and AD
+conditions; macroblocks 2–4 cannot supply the full local screen. Independent
+closeout accepted all twelve original packages, 432 original-work regular-file
+hashes, original-ID uniqueness against 78 prior IDs, assertions/count, placement,
+observer resolution, pressure coverage and native cleanup. All seven baseline/
+final Docker resource identities matched. A shared queue flock serialized the
+entire case through reviews, cleanup and preservation.
+
+The available AA pair changes are +4.65% and +42.31%; four AD changes range
+from +25.31% to +96.52%, with substantial AB/BA differences and recorded
+outside-CPU peaks 14%–1736%. In macroblock 1 the exact local AA envelope is
+`843619517/586466302` (1.438479097815240); one of its two AD lower ratios
+exceeds it and one does not. The global eight-comparison result remains null
+because the design is incomplete. This is confounded observed sample
+separation only. Missing controls were not borrowed from older cases, and
+original public confounders/withheld deltas remain unchanged. Detailed paired
+windows, condition/order/macroblock summaries and exact reconstruction belong
+in the [research case01 analysis](https://github.com/jopietsch/second-looks-lab-research/blob/143f9c48e85b3c9ed6fed39e54a0eb4c8fc522a4/bgp/2026/docs/bgperf2-control-separation-01-analysis.md),
+commit `143f9c48e85b3c9ed6fed39e54a0eb4c8fc522a4`. The public engine
+outcome and limits above are self-contained; the research checkout is not an
+engine runtime dependency. The Docker-free analyzer verified 555 consumed records
+against sealed coverage and reconstructed all twelve supplements. Independent
+raw-sink Decimal60 arithmetic matched all twelve integer windows and 116 numeric
+fields (maximum discrepancy 1.714e-14), including exact local-envelope results.
+All 48 research checks passed; source, report and arithmetic received independent
+review before the research commit. Accepted analysis is preserved separately at
+`/home/jpietsch/bgperf-results/2026/control-separation-analysis/control-separation-01/v1`.
+
+Original results remain immutable at
+`/home/jpietsch/bgperf-results/2026/2026-10-c-control-separation-01`;
+work and actual coordinator originals remain retained. Independent archive
+readback accepted 2,965 source entries, 2,507 regular payloads and 196 runtime
+original-file copies, including complete type/metadata/hash coverage. The
+748,329,195-byte archive SHA-256 is
+`67a6b3500c4b19889604bff02f10af8be8e259df6e0d220408ab2bde8900d156`;
+coverage SHA-256
+`4a74a083ba168330df8864101c1317d7d7bf9dd73b1b98ec708bfbc069ed6dbf`;
+manifest SHA-256
+`22691176ba7e03c4dcc328fd787a49d3be56f388d71fd41da4f03fc170a93537`.
+Later analysis and reviews stay outside the sealed root. This is same-device
+local preservation, not independent backup; no deletion or remote transfer.
+
+This case is closed and must not resume. A future operating profile, including
+retaining or deliberately revising the memory floor, needs a new reviewable
+case and approval. No next execution, known 10% control, inferential rule, powered
+budget, held-out confirmation or performance-policy activation is selected.
+Qualification stays `not_assessed`, calibration pending and policy disabled.

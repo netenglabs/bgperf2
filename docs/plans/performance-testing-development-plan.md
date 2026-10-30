@@ -39,9 +39,12 @@ qualification gate.
 The [background-load diagnostic and independently verified analysis](milestone-c-control-eligibility-queued.md#diagnostic04-completed-and-analyzed--2026-10-30)
 completed sixteen workers/eight optimized-debug pairs, with geometric observed
 window change +72.23%. Confounders remain and policy stays disabled. The next
-[interleaved noise/control case](milestone-c-control-separation.md) is prepared
-for review only: eight fresh A/A and eight optimized/debug pairs, zero builds,
-32 workers maximum. No new execution or calibrated verdict is authorized.
+[interleaved noise/control case](milestone-c-control-separation.md#approved-execution-and-partial-outcome--2026-10-30-utc)
+was approved and permanently stopped at its memory requirement after twelve
+completed workers/six pairs; twenty workers never ran and zero builds occurred.
+Only one of two available local AD brackets exceeds its AA envelope; the full
+eight-comparison screen is unassessed. All originals and partial accounting
+are preserved. No successor execution or calibrated verdict is authorized.
 
 ## Outcome and ownership
 

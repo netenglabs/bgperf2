@@ -36,6 +36,11 @@ milestone A implementation on 2026-10-23. This work starts
 no daemon builds, benchmarks, provisioning or publication, and changes no host
 qualification gate.
 
+The next [fresh queued eligibility screen](milestone-c-control-eligibility-queued.md)
+selects zero builds and sixteen workers: two gated four-pair optimized/debug
+blocks, balanced AB/BA within each block. Prior observations remain design
+context only; policy stays disabled and post-start stops block for review.
+
 ## Outcome and ownership
 
 A daemon maintainer who has never used bgperf2 can take a reproduction recipe,

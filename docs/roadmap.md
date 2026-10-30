@@ -68,6 +68,11 @@ successors. Its three complete optimized/debug pairs had longer observed windows
 the incomplete, confounded screen does not qualify a known 10% control. Nine
 workers remain never run. Calibration and performance policy remain pending/
 disabled. The completed queued job will not rerun.
+The next [fresh queued debug-control screen](plans/milestone-c-control-eligibility-queued.md)
+selects eight new optimized/debug pairs in two balanced four-pair blocks,
+zero builds and sixteen workers maximum. Preparation and review precede
+enrollment in the existing hourly quiet-host queue; no post-start retry is
+authorized. Policy remains disabled.
 The revised two-million-prefix noise/resolution pilot completed all eight A/A
 and eight A/B attempts with independent gates and
 [observer timing supplements](observer-timing.md). This establishes resolution

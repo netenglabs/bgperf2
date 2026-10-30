@@ -1,7 +1,10 @@
 # Milestone C fresh queued debug-control screen
 
 Prepared 2026-10-30 UTC after the closed [eligibility case](milestone-c-control-eligibility.md#execution-and-descriptive-outcome--2026-10-30-utc),
-recorded at `1fc573e`. Status: preparation; no new worker or build started.
+recorded at `1fc573e`. Current status: **diagnostic04 completed and independently
+analyzed**; see the [execution record](#diagnostic04-completed-and-analyzed--2026-10-30).
+The following original design remains historical preparation; explicit later
+operator choices and the actual operating profile are recorded below.
 The operator proposed using the existing hourly queue, freed storage and
 instructed continued work. This selects one fresh bounded measured case;
 zero-worker CPU/capacity admission deferrals may wait for later hourly ticks.
@@ -104,3 +107,73 @@ documentation checks passed78. The first offline public packet export passed
 all six commands without builds/workers; final frozen packet/deployment still
 requires verification after the clean documentation commit. The lab operational
 record retains source/deployment/enrollment identities outside measured roots.
+
+## Diagnostic04 completed and analyzed — 2026-10-30
+
+The operator explicitly chose “Run now and record background load,” accepting
+an exploratory diagnostic without a calibration claim. CPU-only activity was
+recorded rather than used as an admission/successor refusal. Fresh case04 used
+that explicit mode with native isolation, capacity, provenance, correctness,
+placement, observer/pressure monitoring and cleanup protections retained.
+
+| Case | Original workers completed | Never run | Terminal reason |
+| --- | ---: | ---: | --- |
+| queued eligibility02, `20261030T071001Z-9c3c60c7cc` | 2 | 14 | Stale unconsumed admission closed the case under then-frozen instructions; expiry handling was subsequently corrected. Supervisor later lost model capacity before final reporting |
+| fresh eligibility03, `20261030T162645Z-780cc751f3` | 1 | 15 | Operator selected background-load diagnostic mode while worker1 was running; that worker finished before the strict supervisor was paused |
+| diagnostic04, `20261030T163822Z-3f08e524c1` | 16 | 0 | Complete, independently reviewed and preserved |
+
+The two stopped cases remain permanently closed and separately preserved;
+queue accounting was reconciled from actual packages and independent native
+cleanup evidence. No stopped case was resumed or its unused budget reused.
+The stale-receipt rule was corrected: before consumption/reservation/Popen,
+refresh the receipt for the same unstarted worker without closing the case.
+
+Diagnostic04 completed at `d4bee5dac05d1d96512236b05fc076e5e1af394c` with zero
+builds and sixteen unique original workers, eight natural optimized/debug pairs,
+two AB,BA,AB,BA blocks, zero failed/interrupted/replaced/never-run positions,
+four accepted public first/final reviews and independently accepted cleanup.
+Every worker passed exact 2M count, four assertions, requested/effective role
+placement, observer reconstruction/resolution, pressure coverage and budget.
+
+An independent Decimal60 reconstruction from original sink count records and a
+separate engine-backed analysis agreed on all sixteen integer windows, eight
+pair ratios/brackets and grouped summaries. All eight debug windows were longer.
+Geometric paired change was **+72.23%**, range **+60.54% to +83.06%**; sample
+paired-log SD was **0.052018**. Block means were +72.16% and +72.30%; AB/BA
+means +72.83%/+71.63%, with four pairs of each order. The chronological
+second/first summary +0.35% is a balanced identity mixture, not a causal order
+estimate or fitted correction. Individual timestamp-ratio bounds remain above
+zero change; these bounds are not statistical confidence intervals.
+
+Raw per-worker outside CPU maxima were 4–11% of one logical CPU. Actual load
+was modest despite permission to run with background activity. Every worker's
+nonzero outside CPU and the optimized/debug instrumentation difference remain
+confounders; original public controlled deltas remain withheld. There is no
+contemporaneous A/A condition, known 10% effect, powered sample requirement,
+error-rate calibration or held-out confirmation. Prior studies remain design
+context only. Policy remains disabled, qualification not_assessed, calibration
+pending. This result motivates a prepared [interleaved noise/control screen](milestone-c-control-separation.md),
+which remains unapproved and unexecuted.
+
+The authoritative detailed analysis and reproducible script belong to research
+commit `fa25c7d8aad72e4b9c635d26694d46a8245cc715`, paths
+`bgp/2026/docs/bgperf2-diagnostic04-analysis.md` and
+`bgp/2026/scripts/analyze_observer_pairs.py`. Research's 32 Docker-free checks
+passed, including ten arithmetic/bad-evidence tests; independent verification
+checked 112 numerical fields and 130 directly consumed sealed-source records.
+Maximum numerical discrepancy was 1.64e-14. These records are evidence history,
+not an external prerequisite for using the engine.
+
+Original results are under
+`/home/jpietsch/bgperf-results/2026/quiet-debug-eligibility/20261030T163822Z-3f08e524c1`.
+Native independent source/copy/archive verification accepted 5,308 source entries,
+5,278 archive members, 4,506 regular payloads, 214 coordinator copies and 32
+socket type-only records. Archive 1,456,206,107 bytes, SHA-256
+`95781d2695f5afffba10d8910ca8d772521cda2ab11d6658e13a6130f3979ebd`;
+coverage `bbf0d9869b9fb894d953e5b84e9cb63a756cc00072c2c8255843789d12f63666`;
+manifest `ae84c7795e00bb2768c6e01e266c96c3b88a9466b505f305aa0afc39ac571180`.
+The independent final receipt hash is
+`34307463f87441a896ccf2e5c04edb30ad77be9d5a28fb0d535bb57020b2a1bf`.
+Analysis is preserved separately from sealed originals. Same-device local
+preservation is not independent backup. No original removal, remote transfer,
+push, publication or provisioning is authorized by this closeout.

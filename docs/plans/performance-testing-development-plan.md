@@ -36,10 +36,12 @@ milestone A implementation on 2026-10-23. This work starts
 no daemon builds, benchmarks, provisioning or publication, and changes no host
 qualification gate.
 
-The next [fresh queued eligibility screen](milestone-c-control-eligibility-queued.md)
-selects zero builds and sixteen workers: two gated four-pair optimized/debug
-blocks, balanced AB/BA within each block. Prior observations remain design
-context only; policy stays disabled and post-start stops block for review.
+The [background-load diagnostic and independently verified analysis](milestone-c-control-eligibility-queued.md#diagnostic04-completed-and-analyzed--2026-10-30)
+completed sixteen workers/eight optimized-debug pairs, with geometric observed
+window change +72.23%. Confounders remain and policy stays disabled. The next
+[interleaved noise/control case](milestone-c-control-separation.md) is prepared
+for review only: eight fresh A/A and eight optimized/debug pairs, zero builds,
+32 workers maximum. No new execution or calibrated verdict is authorized.
 
 ## Outcome and ownership
 

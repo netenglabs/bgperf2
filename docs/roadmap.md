@@ -1,6 +1,6 @@
 # bgperf2 roadmap
 
-Updated 2026-10-29. This is the public index of engine development plans.
+Updated 2026-10-30. This is the public index of engine development plans.
 Everything needed to understand, use and contribute to bgperf2 belongs in this
 repository. Other projects can build campaigns and services on its documented
 CLI and versioned artifacts; none is required to use the engine.
@@ -68,11 +68,14 @@ successors. Its three complete optimized/debug pairs had longer observed windows
 the incomplete, confounded screen does not qualify a known 10% control. Nine
 workers remain never run. Calibration and performance policy remain pending/
 disabled. The completed queued job will not rerun.
-The next [fresh queued debug-control screen](plans/milestone-c-control-eligibility-queued.md)
-selects eight new optimized/debug pairs in two balanced four-pair blocks,
-zero builds and sixteen workers maximum. Preparation and review precede
-enrollment in the existing hourly quiet-host queue; no post-start retry is
-authorized. Policy remains disabled.
+The subsequent [background-load diagnostic and analysis](plans/milestone-c-control-eligibility-queued.md#diagnostic04-completed-and-analyzed--2026-10-30)
+completed sixteen unique workers/eight balanced optimized/debug pairs with zero
+builds, four public reviews and independently verified preservation. Observed
+debug windows were longer in every pair (geometric change +72.23%); background
+load and instrumentation confounders remain, and this is not a known 10% control
+or calibration result. The next [interleaved noise/control case](plans/milestone-c-control-separation.md)
+is preparation only: eight A/A and eight optimized/debug pairs, zero builds,
+32 workers maximum and no execution authorization. Policy remains disabled.
 The revised two-million-prefix noise/resolution pilot completed all eight A/A
 and eight A/B attempts with independent gates and
 [observer timing supplements](observer-timing.md). This establishes resolution

@@ -79,6 +79,10 @@ pairs, with twenty workers never run and zero builds. Only one macroblock has
 both conditions; one of its two AD brackets exceeds the local AA envelope,
 and the full screen remains unassessed. Evidence and partial analysis remain
 separate from earlier cases. This case is closed; policy remains disabled.
+A [fresh hourly case02 proposal](plans/milestone-c-control-separation-02-hourly.md)
+would reuse the bounded design with quiet-start scheduling through the existing
+minute10 queue. Its preparation is disabled and awaits concrete-case approval;
+no new enrollment or execution is authorized by the proposal.
 The revised two-million-prefix noise/resolution pilot completed all eight A/A
 and eight A/B attempts with independent gates and
 [observer timing supplements](observer-timing.md). This establishes resolution

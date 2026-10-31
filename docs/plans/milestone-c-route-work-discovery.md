@@ -1,0 +1,118 @@
+# Milestone C adjustable route-work control — preparation, not execution
+
+Prepared 2026-10-31 after [case02](milestone-c-control-separation-02-hourly.md).
+The operator requested preparation of a smaller tunable control. No build,
+benchmark, queue enrollment or policy activation is authorized by this document.
+
+## Selected control and question
+
+Use the supported `bird-local/v1` local-source builder with one reviewed
+research source patch adding bounded, local volatile unsigned arithmetic after
+the withdrawal return in BIRD's `bgp_rte_update`, before normal route processing.
+Freeze `BGPERF_CONTROL_ROUNDS` to **0, 16, 64 and 256** in four separate
+`-O2 -g` builds. The zero setting preprocesses the added work out. This adds no
+route mutation, clock, sleep, counter, global state or engine feature. Preserve
+BIRD's notices and licensing. This is an artificial research control, not an
+upstream routing bug or fix.
+
+Added iterations specify work, not elapsed time. None of these doses is a known
+10% slowdown. Target, generator and observer bottlenecks, compiler decisions,
+duplicate NLRI and host activity can make the delivered response nonlinear.
+The hook runs for non-withdrawal NLRI updates, not necessarily exactly once per
+unique route delivered. A compiler-only O1 candidate was considered; it is
+smaller implementation work but lacks an adjustable, ordered work mechanism.
+The chosen patch adds a new source trust boundary that must be reviewed.
+
+Ask whether any fixed dose produces a repeatable observed window increase near
+the selected 10% planning target. Discovery can nominate a dose; fresh data
+must characterize its effect before separate held-out detector confirmation.
+Reconstructing the same sink logs independently checks arithmetic; it does not
+establish an independently known effect or statistical error rate.
+
+## Concrete proposed execution boundary
+
+| Item | Frozen proposal |
+| --- | --- |
+| Base BIRD | Trusted packaging commit `ff132d4180f8f56882f0e977cd979992e9eb3b64`, original snapshot `526022eb0dea09be71b98c60f0582e0ba30a06388baf3692e132b2cd5176d249`; apply reviewed patch only to a fresh isolated local clone |
+| Build identities | Same patched snapshot, `instrumentation=optimized`, `-O2 -g -DBGPERF_CONTROL_ROUNDS=N`, no extra configure options; N is 0/16/64/256 |
+| Build budget | Four public `target-build` invocations, at most 1,200 seconds each, network none/no pulls/no installations; retain actual logs, flags, cache provenance, image identities, unknown binary/reconstructibility fields |
+| Bases/generators | Existing exact image `sha256:db0a8e144635b1d4b9f81f24ee78f11383c5b0cbd79f10353edcb8452e9af423` |
+| Observer | Existing `sha256:311317014fc98e2cadf46941b4b23dab9dd724281dd50167a0f9187d8ac08f19` |
+| Workload | Existing repeatability cell `8d043e8dc2f9f660`, BIRD/BIRD/sink, two peers × one million prefixes; target=0,16, monitor=1-2,17-18, testers=3-14,19-30 |
+| Baseline | Actual newly built zero-dose image in every condition, including same-image AA; historical optimized image is not substituted |
+| Worker budget | At most 64 unique serial workers, 120 seconds each, 32 natural pairs: eight AA and eight at each nonzero dose |
+| Design | Four chronological macroblocks, four condition sessions per macroblock; every session two pairs in AB,BA order |
+| Reviews | Independent actual-build/provenance acceptance before plans bind; each worker synchronous assessment; independent public first/final review after workers 1/4 of every session (32 reviews); accepted previous final review before next session |
+| Total finite budgets | 4,800 build seconds + 7,680 worker seconds = 12,480 seconds (3h28m); admission, review, collection/cleanup and preservation additional |
+
+Condition-session orders are `0,16,64,256`; `64,256,0,16`;
+`256,64,16,0`; `16,0,256,64`. Each condition occupies every session position
+once. The 32-pair budget samples a finite three-dose response and nearby sham
+variation. It is an engineering discovery budget, not a powered requirement or
+a confidence guarantee. Chronological blocks are not independent days.
+
+## Operational execution and preservation
+
+Propose otherwise-idle `jpietsch-server`, with the same quiet-start approach
+accepted for case02: six five-second intervals each at most one busy logical
+core, at least 48 GiB available memory and 64 GiB disk before initial dispatch.
+Keep the native measurement guard, exact local images, topology, provenance,
+effective role placement and finite budgets. Background CPU remains recorded
+without a CPU-only successor refusal after dispatch; no unrelated job is stopped.
+Capacity checks before every build/worker and the existing one-second live
+pressure coverage/thresholds remain. Quiet start does not guarantee a quiet case.
+There is no fixed four-hour window or elapsed-start deadline.
+
+Proposed fresh roots are
+`/home/jpietsch/bgperf-work/route-work-discovery/route-work-discovery-01` and
+`/home/jpietsch/bgperf-results/2026/route-work-discovery/route-work-discovery-01`.
+Renew the intentional persistent `/dev/sda5` ext4 root-storage exception for
+this bounded case only; inspect actual mounts/capacity at execution. `9950`
+remains excluded. Preparation creates neither root. No cron changes or enrollment
+are included. The existing 32-worker hourly adapter is not a 64-worker runner.
+
+The lab exporter emits an explicitly disabled packet, isolated source, four
+real build plans, full design and inspectable public command arrays. Commands
+are a staged manual workflow, not an automatic supervisor. Comparison plans
+are generated only after actual builds return and their identities/artifacts
+are independently accepted; no invented candidate image appears in an executable
+plan. No engine behavior change or new generic execution API is needed.
+
+Execution must hold the shared measurement lock through all steps, reviews,
+cleanup and preservation; do not run development or analysis during measurement.
+The operator/agent must use fresh native admission before every build/worker,
+withhold successors on missing review, and close the whole case on a post-start
+correctness, provenance, capacity, pressure, resolution, placement, timeout or
+cleanup failure. Retain uncertain launches; reconcile them before concluding
+whether they consumed budget. No retry, replacement, warm-up, extra dose,
+adaptive rebuild, automatic fresh case or extension is included.
+
+Preserve every original source/patch/build/plan/command, generated config,
+runtime log, all 64 planned positions and 32 pairs, partial/failed/interrupted/
+never-run outcomes, reviews, native inventory differences and owned cleanup.
+Full local source/copy/archive coverage and independent readback precede any
+analysis; originals remain. Same-device retention is not independent backup.
+No deletion, downloads, push, remote transfer, publication or provisioning.
+
+## Discovery assessment and later decisions
+
+Retain paired `log(W_candidate/W_zero)` using original integer-nanosecond
+10%-to-90% observer windows and timestamp brackets, separately by dose, order
+and macroblock. Preserve individual pairs and confounders; do not pool old cases,
+subtract AA means, exclude extremes or impute missing observations. Timestamp
+bounds are not confidence intervals. The previous eight-comparison AA/AD screen
+is not automatically a calibrated rule for this four-condition design.
+
+The research methodology owns the fixed nomination rule and later characterization
+design. Proposed future per-comparison error goals are one-sided false alarms
+at most 5% and misses at most 20% for a true 10% slowdown, restricted to the
+selected workload/conditions. They are review proposals, not adopted performance
+policy, achieved rates or grounds to derive a confirmation budget from eight AA
+pairs. Discovery, fresh effect characterization and held-out detector confirmation
+are separate phases. Only discovery is proposed here. Policy remains disabled,
+qualification not assessed and calibration pending even if a dose is nominated.
+
+The execution handoff requires the clean source revisions, source/patch hashes,
+actual exported build plans, command arrays, offline checks and independent
+review. Approval must name this four-build/64-worker case and storage exception;
+it does not authorize future characterization or confirmation runs.

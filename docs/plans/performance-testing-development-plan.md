@@ -53,6 +53,10 @@ separation does not calibrate a 10% threshold. Next prepare an independently
 quantified small control, explicit error goals and a justified confirmation
 budget before execution approval. Policy stays disabled; quiet-start scheduling
 does not guarantee quiet conditions throughout a case.
+The [next route-work discovery preparation](milestone-c-route-work-discovery.md)
+selects a reviewed research source patch with fixed 0/16/64/256 work levels,
+four optimized builds and 64 bounded workers. This is a proposed dose-discovery
+case; fresh effect characterization and held-out confirmation remain separate.
 
 ## Outcome and ownership
 

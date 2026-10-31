@@ -86,6 +86,10 @@ geometric AD change was +78.40%, while AA ranged −14.96% to +10.23%.
 The large contrast separates in this sample, but 10% calibration remains
 pending and policy disabled. Next preparation requires a quantified small
 control, error goals and a justified confirmation budget; no new run is authorized.
+The [adjustable route-work discovery proposal](plans/milestone-c-route-work-discovery.md)
+prepares four fixed work levels in optimized BIRD builds, with 32 pairs/64
+workers for discovery only. A nominated dose still needs fresh characterization
+and separate detector confirmation; preparation grants no execution authority.
 The revised two-million-prefix noise/resolution pilot completed all eight A/A
 and eight A/B attempts with independent gates and
 [observer timing supplements](observer-timing.md). This establishes resolution

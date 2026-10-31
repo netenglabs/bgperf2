@@ -99,6 +99,10 @@ nonzero dose was measured; the incomplete screen cannot nominate a control.
 Background CPU was recorded from the first worker; performance policy remains
 disabled and calibration pending. See the same route-work record for this
 separate partial execution.
+Its evidence is now locally preserved with independent full readback. Offline
+arithmetic reconstructed a −10.63% change in its sole complete same-image pair;
+this describes confounded variation and supplies no nonzero-dose or calibrated
+detection result.
 The revised two-million-prefix noise/resolution pilot completed all eight A/A
 and eight A/B attempts with independent gates and
 [observer timing supplements](observer-timing.md). This establishes resolution

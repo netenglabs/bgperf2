@@ -66,6 +66,9 @@ dose was measured. One complete same-image pair cannot establish repeatability
 or nominate a control. The [route-work record](milestone-c-route-work-discovery.md)
 retains this separate partial execution and the prelaunch correction to record
 background CPU. Policy remains disabled and calibration pending.
+Independent full local preservation/readback and offline sink-log reconstruction
+are complete. The sole same-image pair changed −10.63%; n=1 leaves sample log SD
+unknown, and this partial case supplies no nonzero-dose effect or nomination.
 
 ## Outcome and ownership
 

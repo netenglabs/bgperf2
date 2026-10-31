@@ -28,14 +28,29 @@ not assessed and calibration pending. This partial case establishes no dose
 effect, repeatability estimate, known 10% control or detection capability.
 
 Terminal accounting is independently accepted and recorded with no uncertain
-launch. Local preservation awaits administrator authentication to retain
-root-owned Docker-generated logs; the incomplete copy and originals remain.
-No successful archive/readback or offline partial analysis is claimed yet.
+launch. The operator completed administrator-assisted preservation of root-owned
+Docker logs into a fresh local destination; independent full-scope readback
+verified original/source/copy/archive coverage. All 844 entries, including four
+socket types recorded without bytes, remain accounted. The 126,671,920-byte
+archive SHA-256 is
+`5c266ad4443f211c7355194195f6b2b34a917aeebd29a93a7b8c820b3425c0f8`.
+The earlier incomplete copy and all originals remain. This is same-device local
+retention, not independent backup.
 The [lab operations record](https://github.com/jopietsch/second-looks-lab/blob/main/bgp/docs/route-work-discovery.md)
 owns the exact preservation handoff. Permanent lab closeout fix `e322b15`
 distinguishes fully checked public report copies from original observations;
 all six legitimate report copies remain retained and hash-bound. The failed
 first accounting draft is also retained. Policy remains disabled.
+
+Offline reconstruction from original sink count records reproduced both public
+observer supplements: baseline 1.691016376 s and candidate 1.511181429 s for
+the 10–90% delivery window. The same-image ratio is 0.893652746625
+(−10.634725338%), with conservative timestamp-ratio bounds
+[0.879409227661, 0.905647464786]. These bounds describe observation resolution,
+not statistical confidence. With only one complete pair, sample log SD remains
+unknown. Recorded foreign CPU and withheld controlled deltas remain. No nonzero
+dose effect or control nomination can be assessed; this adds no independent
+characterization observations. Research owns the detailed arithmetic and report.
 
 ## Approved execution and capacity stop — 2026-10-31 UTC
 

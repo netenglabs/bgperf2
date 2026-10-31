@@ -86,10 +86,12 @@ geometric AD change was +78.40%, while AA ranged −14.96% to +10.23%.
 The large contrast separates in this sample, but 10% calibration remains
 pending and policy disabled. Next preparation requires a quantified small
 control, error goals and a justified confirmation budget; no new run is authorized.
-The [adjustable route-work discovery proposal](plans/milestone-c-route-work-discovery.md)
-prepares four fixed work levels in optimized BIRD builds, with 32 pairs/64
-workers for discovery only. A nominated dose still needs fresh characterization
-and separate detector confirmation; preparation grants no execution authority.
+The approved [adjustable route-work discovery case](plans/milestone-c-route-work-discovery.md)
+completed all four optimized builds, then stopped before its first worker when
+available memory fell to 38.40 GiB below the selected 48 GiB launch floor. All 64
+worker positions remain never run; no dose effect or nomination is measured.
+The four cached images are retained for a separately reviewed fresh zero-build
+case. This case is closed; policy remains disabled and calibration pending.
 The revised two-million-prefix noise/resolution pilot completed all eight A/A
 and eight A/B attempts with independent gates and
 [observer timing supplements](observer-timing.md). This establishes resolution

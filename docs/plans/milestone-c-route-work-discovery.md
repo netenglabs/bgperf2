@@ -1,4 +1,45 @@
-# Milestone C adjustable route-work control — preparation, not execution
+# Milestone C adjustable route-work control — builds complete, worker phase stopped
+
+## Approved execution and capacity stop — 2026-10-31 UTC
+
+The operator approved the exact four-build/64-worker case and its same-local-disk
+exception. At clean engine `2f44ea183270be7c85fcb8cfbb50b26ad3af2720`,
+all four public optimized source builds completed with actual configure,
+compilation and linking, then passed independent provenance/artifact review.
+The four fixed 0/16/64/256 images share patched snapshot
+`9bf08d835d9d5abd74111bbaacf89dcfe556cbf34473c2095dcc2cbf2f32081a`.
+Binary identity remains unverified and reconstructibility false. All 16 public
+comparison plans were bound to the accepted actual images before any worker.
+
+After 19 zero-build quiet-start deferrals, build 0 launched at 18:23:18 UTC.
+The first worker's later capacity admission recorded only 38.3977 GiB available
+memory, below the frozen 48 GiB launch requirement; 153.13 GiB disk was sufficient.
+The post-start capacity rule permanently stopped the case at 20:30:52 UTC.
+**Zero workers started; all 64 planned positions/32 pairs remain never run.**
+Session 1 is honestly initialized at index 0 with four not-run entries; the
+other 15 sessions never initialized. No retries, replacements or budget reset.
+
+All 71 existing containers, six networks and 495 volumes remained unchanged;
+image inventory gained exactly the four accepted target images/tags. Independent
+terminal accounting found no uncertain launch or unaccounted result. The queued
+terminal lock handoff retained ownership through permanent closeout, preservation
+and full readback; the lock was then released without altering the shared lock
+file. No performance observations or dose nomination exist from this case.
+Calibration remains pending and policy disabled. The images can support a
+separately reviewed fresh zero-build case; none is authorized here.
+
+The authoritative [local execution report](/home/jpietsch/bgperf-results/2026/route-work-discovery-preservation/route-work-discovery-01/data/closeout/REPORT.md)
+and all original source/build/command/admission/review records are retained.
+Local archive: 19,209,287 bytes; SHA-256
+`18d6c9f3d6005479f276f1bbf9e62ea7924e6a3c6ccb4fb6c80b3d2c642dfd3e`.
+Coverage SHA-256:
+`345251d32975a9d0b7216f60b8cfa9ffddc77463d716dd8d9885eec14f565655`.
+This is same-device local retention, not independent backup. Original disabled
+preparations remain unchanged. Execution helper source and 38 offline boundary
+tests were independently accepted before the first build; no development or
+tests ran during the active case.
+
+## Original reviewed proposal (retained historical scope)
 
 Prepared 2026-10-31 after [case02](milestone-c-control-separation-02-hourly.md).
 The operator requested preparation of a smaller tunable control. No build,

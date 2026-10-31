@@ -1,4 +1,37 @@
-# Milestone C fresh hourly control-separation case 02 — preparation only
+# Milestone C hourly control-separation case 02 — completed
+
+## Completed execution and analysis — 2026-10-31 UTC
+
+Following operator approval and reviewed enrollment, actual case
+`20261031T111001Z-db6a28e20c` completed all 32 unique workers and sixteen
+pairs (eight AA, eight AD), with sixteen accepted public first/final reviews,
+zero failed/interrupted/never-run/retried workers and zero builds. It ran from
+11:10:31 to 12:48:30 UTC at runtime engine revision
+`a9e1fb45fc13c4dc13fb2745656c0d80a1c2241a`. The queue job is terminal;
+this record authorizes no successor execution.
+
+The [research analysis](https://github.com/jopietsch/second-looks-lab-research/blob/research/bgperf2-c-diagnostic04/bgp/2026/docs/bgperf2-control-separation-02-analysis.md)
+finds AD geometric observer-window change +78.40%, with all eight AD lower
+timestamp-ratio bounds exceeding their contemporaneous local AA envelopes.
+AA paired changes range from −14.96% to +10.23%. This demonstrates observed
+separation for a large contrast, not reliable detection of a 10% regression.
+Quiet-start scheduling completed operationally; background activity and build
+instrumentation remain confounders. No causal quiet-host or error-rate claim.
+Calibration remains pending and performance policy disabled. The next
+preparation is a justified small-control calibration design with explicit
+false-positive/missed-regression goals and a fixed confirmation budget.
+Research source/report commit: `c4f49d0` (local; publication is separate).
+
+Original sealed results remain under
+`/home/jpietsch/bgperf-results/2026/quiet-control-separation/20261031T111001Z-db6a28e20c`.
+Archive SHA-256:
+`0755a0a42e498eba5677f7a1595a50c4ad6493c771a1713c63fc978c659d4ce3`.
+Independent final preservation receipt SHA-256:
+`9da1d0c43cd8ee4419298fdf93a177761a1529989b87ce4560ce91cb13360ba6`.
+Source, runtime copies, archive and full accounting are retained locally;
+same-device retention is not an independent backup.
+
+## Original preparation (retained historical proposal)
 
 2026-10-30 UTC. **Reviewable proposal; no new execution or enrollment authorized.**
 The operator asked whether the existing hourly scheduled work can wait for a

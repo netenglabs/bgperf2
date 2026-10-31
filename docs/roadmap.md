@@ -79,10 +79,13 @@ pairs, with twenty workers never run and zero builds. Only one macroblock has
 both conditions; one of its two AD brackets exceeds the local AA envelope,
 and the full screen remains unassessed. Evidence and partial analysis remain
 separate from earlier cases. This case is closed; policy remains disabled.
-A [fresh hourly case02 proposal](plans/milestone-c-control-separation-02-hourly.md)
-would reuse the bounded design with quiet-start scheduling through the existing
-minute10 queue. Its preparation is disabled and awaits concrete-case approval;
-no new enrollment or execution is authorized by the proposal.
+The approved [hourly case02](plans/milestone-c-control-separation-02-hourly.md)
+completed 32 workers/sixteen pairs and sixteen accepted public reviews with
+zero builds. All eight AD brackets exceeded their local AA envelopes;
+geometric AD change was +78.40%, while AA ranged −14.96% to +10.23%.
+The large contrast separates in this sample, but 10% calibration remains
+pending and policy disabled. Next preparation requires a quantified small
+control, error goals and a justified confirmation budget; no new run is authorized.
 The revised two-million-prefix noise/resolution pilot completed all eight A/A
 and eight A/B attempts with independent gates and
 [observer timing supplements](observer-timing.md). This establishes resolution

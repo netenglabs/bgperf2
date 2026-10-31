@@ -45,10 +45,14 @@ completed workers/six pairs; twenty workers never ran and zero builds occurred.
 Only one of two available local AD brackets exceeds its AA envelope; the full
 eight-comparison screen is unassessed. All originals and partial accounting
 are preserved. No successor execution or calibrated verdict is authorized.
-The [fresh hourly case02 proposal](milestone-c-control-separation-02-hourly.md)
-prepares the same bounded interleaved design for the existing scheduler, which
-can defer unsuitable starts without consuming workers. It awaits approval;
-quiet-start scheduling does not guarantee quiet conditions throughout a case.
+The approved [hourly case02](milestone-c-control-separation-02-hourly.md)
+completed all 32 workers/sixteen pairs with zero builds and sixteen accepted
+public reviews. All eight AD brackets exceeded their local AA envelopes
+(AD geometric change +78.40%; AA range −14.96% to +10.23%). This large-control
+separation does not calibrate a 10% threshold. Next prepare an independently
+quantified small control, explicit error goals and a justified confirmation
+budget before execution approval. Policy stays disabled; quiet-start scheduling
+does not guarantee quiet conditions throughout a case.
 
 ## Outcome and ownership
 

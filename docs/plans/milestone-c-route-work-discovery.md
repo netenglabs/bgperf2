@@ -1,5 +1,42 @@
 # Milestone C adjustable route-work control — builds complete, worker phase stopped
 
+## Fresh zero-build case 02 — partial execution, 2026-10-31 UTC
+
+The operator subsequently approved a fresh 64-worker case using the four cached
+images, with zero new builds. The same clean engine `2f44ea1` executed two
+zero-dose workers successfully; worker 3 was interrupted by the selected live
+dual CPU/PSI pressure screen. Terminal positions are **2 completed, 1 interrupted
+and 61 never run**. No nonzero dose ran and no successor or retry was launched.
+There is one complete same-image pair, one incomplete pair and 30 unrun pairs;
+the fixed complete-case nomination screen cannot be assessed.
+
+Before the first timing run, an inherited CPU-only quiet-start restriction was
+corrected to the operator's standing instruction to run and record background
+load. All 20 earlier rejected admissions and the old preparation/source packet
+remain preserved. The revised preparation was independently accepted, with
+63 synthetic boundary tests. Public plans, images, worker budget, 48 GiB launch
+memory floor, 64 GiB disk floor and live pressure rule remained unchanged.
+Execution source was frozen before timing began.
+
+The actual interruption recorded host busy 99.1883% and CPU PSI some avg10
+27.56% over the required two intervals. Memory remained above the separate
+16 GiB live floor (44.7901 GiB at the trigger). Recording ordinary background
+CPU did not disable this selected sustained-pressure stop. Both completed
+packages and the interrupted original independently verify; only the actual
+first public review was accepted. Policy remains disabled, qualification
+not assessed and calibration pending. This partial case establishes no dose
+effect, repeatability estimate, known 10% control or detection capability.
+
+Terminal accounting is independently accepted and recorded with no uncertain
+launch. Local preservation awaits administrator authentication to retain
+root-owned Docker-generated logs; the incomplete copy and originals remain.
+No successful archive/readback or offline partial analysis is claimed yet.
+The [lab operations record](https://github.com/jopietsch/second-looks-lab/blob/main/bgp/docs/route-work-discovery.md)
+owns the exact preservation handoff. Permanent lab closeout fix `e322b15`
+distinguishes fully checked public report copies from original observations;
+all six legitimate report copies remain retained and hash-bound. The failed
+first accounting draft is also retained. Policy remains disabled.
+
 ## Approved execution and capacity stop — 2026-10-31 UTC
 
 The operator approved the exact four-build/64-worker case and its same-local-disk

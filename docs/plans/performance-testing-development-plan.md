@@ -59,6 +59,13 @@ worker admission because available memory fell to 38.40 GiB below 48 GiB. All 64
 worker positions remain never run; no control-dose effect is measured. The
 images and full evidence are retained for a separately reviewed fresh zero-build
 case. No successor run is authorized; policy remains disabled.
+The subsequently approved fresh zero-build route-work case 02 completed two
+zero-dose workers, then its third worker was interrupted by the selected live
+dual CPU/PSI pressure screen. All 61 remaining positions never ran; no nonzero
+dose was measured. One complete same-image pair cannot establish repeatability
+or nominate a control. The [route-work record](milestone-c-route-work-discovery.md)
+retains this separate partial execution and the prelaunch correction to record
+background CPU. Policy remains disabled and calibration pending.
 
 ## Outcome and ownership
 

@@ -92,6 +92,13 @@ available memory fell to 38.40 GiB below the selected 48 GiB launch floor. All 6
 worker positions remain never run; no dose effect or nomination is measured.
 The four cached images are retained for a separately reviewed fresh zero-build
 case. This case is closed; policy remains disabled and calibration pending.
+The subsequently approved fresh zero-build route-work case 02 completed two
+zero-dose workers before its third worker was interrupted by the selected
+sustained CPU/PSI pressure screen. The remaining 61 positions never ran. No
+nonzero dose was measured; the incomplete screen cannot nominate a control.
+Background CPU was recorded from the first worker; performance policy remains
+disabled and calibration pending. See the same route-work record for this
+separate partial execution.
 The revised two-million-prefix noise/resolution pilot completed all eight A/A
 and eight A/B attempts with independent gates and
 [observer timing supplements](observer-timing.md). This establishes resolution

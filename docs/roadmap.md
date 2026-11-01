@@ -1,6 +1,6 @@
 # bgperf2 roadmap
 
-Updated 2026-10-30. This is the public index of engine development plans.
+Updated 2026-10-31. This is the public index of engine development plans.
 Everything needed to understand, use and contribute to bgperf2 belongs in this
 repository. Other projects can build campaigns and services on its documented
 CLI and versioned artifacts; none is required to use the engine.
@@ -13,9 +13,18 @@ batch/scenario inputs, repetitions, ordering, measurement artifacts, provenance,
 the hashed Python bootstrap and quality gates. Add contracts and testable
 boundaries incrementally while keeping current CLI and output compatibility.
 
+The operator selected descriptive comparisons as the delivered performance
+workflow and deferred formal reliable-10%-slowdown calibration. It is not a
+release blocker. Performance policy remains disabled and performance bisection
+deferred; deterministic correctness bisection remains available. Further work
+should address concrete maintainer reproduction/fix/usability needs. A future
+calibration effort requires one bounded, separately approved campaign with
+predeclared success/stop criteria on a host with predictable capacity. See the
+[authoritative decision](plans/performance-testing-development-plan.md#operator-decision-descriptive-comparisons-first--2026-10-31).
+
 | Document | Status | Purpose |
 | --- | --- | --- |
-| [Developer performance testing plan](plans/performance-testing-development-plan.md) | A/B functional validation; C admitted repeatability study and descriptive analysis complete; bounded D live count-fault bisection passed; performance calibration pending | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |
+| [Developer performance testing plan](plans/performance-testing-development-plan.md) | A/B functionally validated; C descriptive workflow delivered, calibrated detection deferred; bounded deterministic D live validation passed | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |
 | [Architecture design](plans/architecture-design.md) | Supporting proposal; reconciled with shipped foundations | Recipe/result records, lifecycle boundaries, observations and compatibility strategy |
 | [Future testing workloads](plans/future-testing-workloads.md) | Deferred | Preserve policy, IPv6 and other workload ideas without scheduling their implementation |
 | [Policy engine design](plans/policy-testing-engine-design.md) | Deferred | Semantic policy model, conformance, adapter/generator/observer requirements and implementation risks |

@@ -1,5 +1,16 @@
 # Milestone C adjustable route-work control — builds complete, worker phase stopped
 
+## Current disposition — calibration deferred
+
+After reviewing the preserved partial analysis, the operator deferred formal
+10% calibration as a development priority. Descriptive comparisons remain the
+delivered workflow, with performance policy disabled. No further dose-discovery
+case is active or authorized; retained images and never-run positions remain
+evidence, not execution authority. The
+[development-plan decision](performance-testing-development-plan.md#operator-decision-descriptive-comparisons-first--2026-10-31)
+owns the future bounded-campaign conditions. All execution and analysis records
+below remain unchanged as history; no calibration acceptance is implied.
+
 ## Fresh zero-build case 02 — partial execution, 2026-10-31 UTC
 
 The operator subsequently approved a fresh 64-worker case using the four cached

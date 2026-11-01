@@ -1,6 +1,6 @@
 # bgperf2 developer performance testing plan
 
-Created 2026-10-23; updated 2026-10-29. Status: milestones A and supplied-image B
+Created 2026-10-23; updated 2026-10-31. Status: milestones A and supplied-image B
 functionally validated, including B's approved packaging-source functional and
 setup-container interruption checks; C noise/resolution discovery and admitted
 repeatability study/descriptive analysis completed; staged comparison
@@ -8,6 +8,44 @@ safeguards and deterministic milestone D implemented, including one bounded live
 count-fault bisection with fresh confirmations. Pristine-source/source-bug-fix,
 broader live bisection/diagnostics and performance calibration remain deferred. See the
 [comparison guide](../comparisons.md) and [bisection guide](../bisection.md).
+
+## Operator decision: descriptive comparisons first — 2026-10-31
+
+The operator accepted deferring formal reliable-10%-slowdown calibration after
+the [preserved route-work partial case](milestone-c-route-work-discovery.md)
+(analysis recorded at engine `e553df6`). The supported descriptive comparison
+workflow is delivered; calibrated regression detection remains unvalidated and
+is a deferred extension, not a release blocker for that workflow. This decision
+does not satisfy the deferred calibration acceptance criteria or establish a
+minimum detectable effect. Performance policy remains disabled and performance
+bisection remains deferred. Correctness/crash predicates keep their existing
+supported deterministic bisection behavior.
+
+Stop extending the calibration campaign on the busy development workstation.
+Retain every completed/partial case, original result, control image, analysis
+and limitation. No new calibration case, retry, queue enrollment or execution
+follows from the retained images or unused positions. Historical next-calibration
+instructions below describe the earlier sequence; this decision supersedes them
+as the current development priority.
+
+Prioritize usefulness of the existing reproduction, local-fix investigation,
+descriptive comparison and deterministic correctness-bisection workflows. Select
+the next concrete maintainer problem or usability improvement within those
+interfaces; broader adapters, new workloads and minimization remain separate
+scope choices. Calibration need not block that development or its feedback.
+
+Revisit calibration only as one separately approved, bounded campaign on a host
+with predictable available capacity. Before execution, freeze the workload,
+operating conditions, modest-effect control/characterization procedure, detector,
+error goals, justified sample budget, resource/time budget and success/stop
+criteria. Fresh characterization and held-out confirmation remain distinct.
+The campaign succeeds only if the predeclared criteria are met; exhausting its
+budget or obtaining incomplete/inconclusive evidence ends it with calibration
+still deferred, without automatic extensions or another attempt. Neither this
+decision nor scheduling at an idle hour qualifies a host or enables policy.
+
+## Preserved validation history
+
 The [bounded milestone D validation record](milestone-d-runtime-validation.md)
 confirms the deliberate local count-fault boundary with three public builds and
 five serial workers. It retains earlier admission stops, the first-trial load
@@ -146,7 +184,7 @@ adapter acceptance checks are deferred is not fully accepted.
 | --- | --- | --- |
 | A. Usable newcomer reproduction workflow — functionally validated; ready for feedback | Finish phase 1: run one supported recipe through the existing runtime with exact role identities, isolated attempts, result/artifact production and verification, actionable failures, public instructions and a maintained fresh-checkout smoke entry point. Include the timeout, interruption, owned-resource cleanup and partial-result handling needed for this workflow, plus the existing completion/reproduction outcomes. Exercise the complete workflow with fake runtimes and review it end to end. | Review the actual CLI walkthrough and returned result package. Present an exact, bounded real-image/qualified-host smoke proposal for authorization. Select the next daemon or concrete bug when that choice affects the following milestone. |
 | B. Test and diagnose a local fix — supplied-image functional pair validated | Complete phases 2–3 and the existing-workload assertions needed from phase 5: supplied-image/local-source target overrides, recorded build differences, useful crash/memory diagnostics and preserved partial evidence. Deliver one coherent baseline/fix investigation using controlled fixtures and the selected adapter. Keep generator, observer and workload identities fixed. | Review the reproduction/fix report and diagnostic usefulness. Decide any remaining source-build trust, instrumentation or adapter choices that affect real validation. |
-| C. Trustworthy baseline/candidate comparison — implementation and repeatability analysis reviewed; calibration pending | Complete phases 4–5: repeated/interleaved comparisons, explicit existing-workload correctness assertions, separate memory/CPU/timing results, missing/failed attempts and confounders, machine-readable output and a useful human report. Include controlled differences, noise and inconclusive examples. | Review the admitted 16-pair analysis and balanced-validation proposal. Select the estimator, error goals, positive control and justified measurement budget before new execution or calibrated performance verdicts. |
+| C. Descriptive baseline/candidate comparison — delivered; calibrated detection deferred | Complete phases 4–5 for the supported descriptive workflow: repeated/interleaved plans, named correctness assertions, separate memory/CPU/timing observations, variation, missing/failed attempts, confounders and readable/verifiable reports. Preserve calibration limits. | Review practical usefulness and maintainer feedback. Reliable 10% detection is an optional later campaign under the operator decision above, not a release blocker; its acceptance remains unmet and policy disabled. |
 | D. Automated regression localization — bounded live count-fault case validated | Complete phase 6 for supported deterministic predicates: bounded revision search, identity-based build caching, resume, skipped/ambiguous revisions and confirmation evidence. Keep performance bisection conditional on milestone C's calibration. | Review the resulting revision boundary and evidence; decide whether to prioritize broader daemon support, calibrated performance bisection or the separately deferred minimization work. |
 
 Milestone A includes only the lifecycle robustness and assertions necessary for
@@ -300,7 +338,9 @@ documented in the [comparison guide](../comparisons.md). Real noise/resolution
 discovery and the admitted 16-pair repeatability study/descriptive analysis
 completed. Earlier controlled cases retain their outside-CPU stops. The subsequent
 debug-control screen permanently stopped after 23 workers, retaining its partial
-descriptive evidence; calibration remains pending and regression policy disabled.
+descriptive evidence. The supported descriptive workflow is delivered; formal
+10% calibration is deferred under the operator decision above and regression
+policy remains disabled.
 Depends on phases 0–3.
 
 - Run repeated interleaved comparisons of two target builds on the same

@@ -7,6 +7,13 @@ It does not enable calibrated performance verdicts. Read the
 [measurement dictionary](measurement-dictionary.md) for the existing clocks and
 accounting boundaries; no measurement definition changes here.
 
+This descriptive workflow is delivered for the supported recipe. Formal reliable
+10% regression detection is deferred and is not a release blocker; automated
+performance verdicts remain disabled. See the
+[development decision](plans/performance-testing-development-plan.md#operator-decision-descriptive-comparisons-first--2026-10-31)
+for the conditions of any later calibration campaign. Recorded differences,
+including large ones, do not establish a general detection guarantee.
+
 For preparation, synchronous assessment, explicit first-attempt and final
 reviews, optional operational pressure screening and a prior-series review
 gate, use [staged comparison execution](comparison-execution.md). The existing

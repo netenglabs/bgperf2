@@ -134,9 +134,8 @@ ENV GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOMAXPROCS=2 GOFLAGS="-mod=readonl
 COPY sink-source.tar module-cache.tar /bgperf-inputs/
 RUN test ! -e /bgperf-work-{case_id} && test ! -e "$GOMODCACHE" && mkdir -p /bgperf-work-{case_id} "$GOMODCACHE/cache/download" && tar -xf /bgperf-inputs/sink-source.tar -C /bgperf-work-{case_id} && tar -xf /bgperf-inputs/module-cache.tar -C "$GOMODCACHE/cache/download" && cd /bgperf-work-{case_id} && go mod download && go mod verify && go vet ./... && go test -count=1 ./... && CGO_ENABLED=0 go build -trimpath -ldflags '-X main.sourceHash={source_sha[:12]}' -o /bgperf-sink .
 FROM {RUNTIME}
+LABEL org.bgperf2.validation.case="{case_id}" org.bgperf2.validation.source-sha256="{source_sha}"
 COPY --from=build /bgperf-sink /usr/local/bin/bgperf-sink
-LABEL org.bgperf2.validation.source-sha256="{source_sha}"
-LABEL org.bgperf2.validation.case="{case_id}"
 '''.encode()
 
 

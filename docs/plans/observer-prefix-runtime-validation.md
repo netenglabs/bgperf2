@@ -219,3 +219,14 @@ case/decision resolving admission, with new destinations and appropriate pins;
 do not silently reuse this packet or its unused positions. Real sink build and
 capture compatibility remain unassessed. Policy stays disabled and calibration
 deferred.
+
+## Fresh-case preparation compatibility correction
+
+Review while preparing a separately selected hourly case found a legacy-builder
+label-order gap: retained runtime-stage COPY/metadata containers could precede
+the case label and fail strict owned-inventory checks. Future preparation now
+sets the case/source labels as the first runtime-stage metadata instruction,
+before copying the binary. The builder stage already labels first. A regression
+test covers both stages. This changes only newly generated contexts; the closed
+case01 packet and all original evidence remain unchanged. The correction has
+no real-build or runtime qualification of its own.

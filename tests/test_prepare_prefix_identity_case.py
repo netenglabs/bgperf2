@@ -58,6 +58,16 @@ def test_source_archive_matches_the_existing_sink_identity():
     assert case.sha(case.source_archive())[:12] == sink.sink_source_hash()
 
 
+def test_retained_legacy_build_stages_are_labeled_before_other_instructions():
+    text=case.dockerfile('a'*64,'fixed-case').decode()
+    stages=text.split('FROM ')[1:]
+    assert len(stages)==2
+    for stage in stages:
+        instructions=stage.splitlines()[1:]
+        assert instructions[0].startswith('LABEL org.bgperf2.validation.case="fixed-case"')
+    assert 'source-sha256="'+'a'*64+'"' in stages[1].splitlines()[1]
+
+
 @pytest.mark.parametrize('name', ['context/Dockerfile', 'commands.json', 'CASE.md', 'case.json'])
 def test_hash_valid_packet_edits_do_not_widen_selected_case(packet, name):
     _, output, _ = packet

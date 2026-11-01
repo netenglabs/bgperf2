@@ -1,6 +1,9 @@
 # Real BIRD maintainer validation: neutral release transition
 
-Prepared 2026-11-01 UTC. Execution **pending approval**. This is the next concrete
+Prepared 2026-11-01 UTC. The operator approved execution; the single admission
+attempt **stopped before any build or worker** because other development tests
+were running. This case is closed under its stop rules; see the execution record
+below. This is the next concrete
 case after checkout-preparation completion at `883f72e`, within the
 [developer performance testing plan](performance-testing-development-plan.md).
 It is a functional source/build/handoff check; performance policy stays disabled
@@ -241,6 +244,41 @@ passed; the broader focused/documentation check passed 94 tests. The existing
 locked environment matches all 34 packages. These checks are Docker-free and
 provide no new real build/worker qualification. Native commit gates and the
 final frozen packet are recorded in the completion checkpoint below.
+
+### Approved execution stopped at admission — 2026-11-01 UTC
+
+The operator approved the frozen case at engine
+`45c914a021807400d3ad3baa44895966a48e1a6b`, including the explicit root-backed
+storage exception, source/image trust limits and admission/stop conditions.
+The checkout was clean on `milestone-a-newcomer` before the single admission.
+
+The engine's active-measurement guard passed and Docker listed only the
+unrelated `second-looks-box` container. The same host process snapshot showed
+multiple actual Python pytest processes in that container, including four-worker
+NBA suites and a facts-regeneration test. The plan's requirement that other
+development not run during the attempt was therefore unmet. No CPU threshold
+was measured or inferred; the refusal is concurrent development, not a claimed
+performance-capacity measurement. Available memory was 36,337,996 KiB and free
+disk 152,249,479,168 bytes, both above their selected floors; ext4 `/dev/sda5`
+was confirmed. These passing observations do not override the failed condition.
+
+The case stopped before creating any build/work/results/search root. Accounting
+is **zero attempted builds, zero workers, two builds and three workers never
+run**, with zero failed worker experiments. Source/image/environment rechecks
+and full Docker network/volume inventories were not completed after the host
+refusal. No worker result, successful build, fix or performance finding exists.
+Other workloads and containers were left untouched. There was no admission
+retry, wait service, acquisition, deletion, evidence transfer, push or publication.
+
+The append-only local admission record is
+`/tmp/bgperf2-real-bird-validation-20261101/execution01/REPORT.md`, with
+`admission.json`, independent `review.md` and local preservation readback.
+The original frozen `case01` and prior evidence remain at their original paths;
+its original pending-approval metadata remains historical preparation evidence.
+This execution record governs the approved case's terminal refusal. Unused
+build/worker positions do not authorize a retry. A subsequent execution needs
+explicit new operator scope resolving host admission, with fresh paths/pins
+where required. Performance policy stays disabled and calibration deferred.
 
 ### Local completion checkpoint
 

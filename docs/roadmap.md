@@ -38,8 +38,11 @@ workload boundaries remain; no command in the handoff executes automatically.
 The next [real BIRD maintainer validation case](plans/real-bird-maintainer-validation.md)
 selects an adjacent upstream release transition, explicit alias-only packaging,
 two source builds and three functional workers. Its verified preparation uses
-actual local BIRD source; execution requires one separate approval. Both targets
-are expected to pass, so no upstream bug/fix or bisection boundary is claimed.
+actual local BIRD source. The operator approved it, but its single host admission
+stopped for concurrent development tests before any build or worker. The case
+is closed without automatic retry; both targets' functional outcomes remain
+unassessed. Both are expected to pass, so no upstream bug/fix or bisection
+boundary is claimed.
 
 | Document | Status | Purpose |
 | --- | --- | --- |

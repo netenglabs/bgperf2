@@ -203,7 +203,7 @@ No real daemon build/worker, download, evidence deletion/remote transfer, push
 or publication occurred. Original measurement evidence remains unchanged;
 formal 10% calibration stays deferred and performance policy disabled.
 
-## Real BIRD maintainer validation case — prepared, execution pending
+## Real BIRD maintainer validation case — approved, stopped at admission
 
 The follow-on goal starts at `883f72e` and selects actual local upstream BIRD
 history rather than another inert fixture. The
@@ -231,6 +231,18 @@ evidence inventory, retained real-BIRD rehearsal and final clean-revision
 packet/readback procedure. Final location-bound receipts live outside engine
 Git; they establish preparation only. Real build/worker compatibility and current
 host admission remain execution-time uncertainties.
+
+The operator subsequently approved the frozen case at `45c914a`. Its single
+admission observed unrelated development pytest suites on the same host, failing
+the selected requirement that other development not run during the attempt.
+The case stopped before its first build or worker: **zero builds, zero workers;
+two builds and three workers never run**. The measurement guard and memory/disk
+floors passed, but they do not waive that condition. No automatic wait/retry or
+use of the unused positions follows. The
+[authoritative stopped-execution record](real-bird-maintainer-validation.md#approved-execution-stopped-at-admission--2026-11-01-utc)
+retains approval, observations, accounting and local preservation. Actual
+build/worker compatibility remains unassessed; policy is disabled and calibration
+deferred.
 
 ## Preserved validation history
 

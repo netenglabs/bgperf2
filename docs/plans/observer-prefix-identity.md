@@ -56,6 +56,11 @@ remain separately approved validation work.
 
 ## Remaining validation
 
+Implementation is complete at `e7798ad` with the final 2,692-test gate and
+independent review. The next selected goal prepares the
+[real-BIRD runtime case](observer-prefix-runtime-validation.md) with one offline
+sink build and one functional worker, requiring separate execution approval.
+
 The [public contract](../observer-prefixes.md) supplies exact selection and
 evaluation commands. The implementation milestone is complete when final gates
 and the reviewed local commit are retained. A future execution case must pin

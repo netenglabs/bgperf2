@@ -96,3 +96,5 @@ formal 10% calibration deferred.
 Implementation and offline validation are tracked in the
 [milestone plan](plans/observer-prefix-identity.md). Real image/build/worker
 compatibility is separate validation and has not been established by unit tests.
+The [bounded runtime case](plans/observer-prefix-runtime-validation.md) prepares
+that next validation without starting a build or worker.

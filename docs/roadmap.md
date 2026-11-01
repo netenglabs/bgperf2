@@ -7,11 +7,12 @@ CLI and versioned artifacts; none is required to use the engine.
 
 ## Current direction
 
-The next selected correctness milestone is
-[received IPv4 prefix identity](plans/observer-prefix-identity.md): an opt-in,
-bounded final snapshot and assertion that can distinguish equal counts with
-different prefixes. Source-bug selection is deferred. This implementation work
-authorizes no new image build or benchmark execution.
+Received IPv4 prefix identity is implemented at `e7798ad`: an opt-in bounded
+final snapshot and assertion distinguish equal counts with different prefixes
+in offline tests. The next selected goal prepares its
+[real-BIRD runtime validation](plans/observer-prefix-runtime-validation.md),
+with a frozen offline sink-build plan and one worker pending separate approval.
+Source-bug selection remains deferred; preparation authorizes no execution.
 
 Make bgperf2 a performance tester that daemon developers can use to reproduce
 problems, test their own fixes and investigate regressions. Reuse existing

@@ -46,6 +46,16 @@ documents this maintained workflow. Validation: 54 focused bisection tests and
 the standalone five-case simulated walkthrough passed; these establish no new
 live adapter or performance qualification.
 
+Next follow-through after status command `6564c3a`: investigation report creation
+and verification now reject reusing one original attempt ID for both sides.
+Previously, supplying the same package twice, copying it, or reusing its ID in
+a different payload could produce a verified functional pair. Five regression
+cases reproduced acceptance before the fix. The guard reads verified bundled
+result identities and rejects duplicates without changing the report schema;
+separate same-image runs and unavailable attempts retain their existing meaning.
+Validation: six identity cases plus existing investigation/report/walkthrough
+tests passed (44 total). No daemon build, worker or calibration was involved.
+
 Revisit calibration only as one separately approved, bounded campaign on a host
 with predictable available capacity. Before execution, freeze the workload,
 operating conditions, modest-effect control/characterization procedure, detector,

@@ -184,6 +184,14 @@ withhold that outcome. Changing the canonical recipe, requested generator or
 observer, or their observed image IDs, refuses the pair. Different target
 instrumentation/build inputs are recorded, with performance unassessed.
 
+Each available side must come from a distinct original attempt ID in its result
+manifest. Separate runs of the same image are valid; supplying one package twice
+or copying it to a second directory does not provide a second observation.
+Report creation refuses reused identities before creating its destination,
+and verification independently checks the bundled originals. Supply the original
+package from each separately executed attempt. This check does not authenticate
+execution; the existing declared-identity limits still apply.
+
 Rebuild a report from existing evidence without runtime access:
 
 ```sh

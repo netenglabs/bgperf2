@@ -208,6 +208,14 @@ def _assessment(attempts, recipe):
                             'reason': 'One functional baseline/fix pair supplies no calibrated timing, CPU or memory regression verdict.'}}
 
 
+def _distinct_originals(results):
+    """Two report slots must not count one verified original observation twice."""
+    identities = [result['attempt']['id'] for result in results if result is not None]
+    if len(identities) != len(set(identities)):
+        raise recipes.ContractError('Baseline and candidate require distinct original attempt IDs; '
+                                    'copying a result package does not create a second observation')
+
+
 def _memory(attempt):
     diagnostics = attempt.get('diagnostics') or {}
     value = diagnostics.get('value') or {}
@@ -303,10 +311,11 @@ def write_investigation_report(*, baseline, candidate=None, output_dir,
     output = Path(output_dir)
     if not output.is_absolute() or os.path.lexists(output):
         raise recipes.ContractError('Choose an absolute new investigation report directory')
-    attempts, sources, recipe = {}, {}, None
+    attempts, sources, recipe, originals = {}, {}, None, []
     for label, path, missing in (('baseline', baseline, baseline_missing), ('candidate', candidate, candidate_missing)):
         attempt, bound, result = _read_attempt(path, label, missing)
         attempts[label] = attempt
+        originals.append(result)
         if bound is not None:
             if recipe is not None and recipes.recipe_sha256(bound) != recipes.recipe_sha256(recipe):
                 raise recipes.ContractError('Baseline and candidate must use the exact same frozen recipe')
@@ -316,6 +325,7 @@ def write_investigation_report(*, baseline, candidate=None, output_dir,
             target = output.resolve()
             if target == root or root in target.parents or target in root.parents:
                 raise recipes.ContractError('Report and source package destinations must be nonnested')
+    _distinct_originals(originals)
     assessment = _assessment(attempts, recipe)
     differences = _differences(attempts['baseline'], attempts['candidate']) if len(sources) == 2 else []
     report = {'schema': SCHEMA,
@@ -386,7 +396,7 @@ def verify_investigation_report(path):
             if relative != 'checksums.json' and relative not in listed:
                 raise recipes.ContractError(f'{relative}: unlisted investigation artifact')
     # Reconstruct semantics from the verified bundled packages, never trust edited prose.
-    attempts, recipe = {}, None
+    attempts, recipe, originals = {}, None, []
     for label, item in document['attempts'].items():
         if not isinstance(item, dict):
             raise recipes.ContractError('Malformed investigation attempt')
@@ -395,8 +405,9 @@ def verify_investigation_report(path):
         expected = f'{label}/result.json'
         if present and item.get('package') != expected:
             raise recipes.ContractError('Invalid bundled result package path')
-        actual, bound, _ = _read_attempt(root / expected if present else None, label,
+        actual, bound, result = _read_attempt(root / expected if present else None, label,
                                        {'status': item.get('status'), 'reason': item.get('reason')} if not present else None)
+        originals.append(result)
         if actual != item:
             raise recipes.ContractError(f'{label}: report disagrees with its bundled package')
         attempts[label] = actual
@@ -404,6 +415,7 @@ def verify_investigation_report(path):
             if recipe is not None and recipes.recipe_sha256(bound) != recipes.recipe_sha256(recipe):
                 raise recipes.ContractError('Bundled recipes differ')
             recipe = bound
+    _distinct_originals(originals)
     if document.get('frozen_recipe') != recipe or document.get('recipe_sha256') != (recipes.recipe_sha256(recipe) if recipe else None):
         raise recipes.ContractError('Investigation frozen recipe binding differs')
     if document.get('assessment') != _assessment(attempts, recipe):

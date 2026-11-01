@@ -241,3 +241,25 @@ passed; the broader focused/documentation check passed 94 tests. The existing
 locked environment matches all 34 packages. These checks are Docker-free and
 provide no new real build/worker qualification. Native commit gates and the
 final frozen packet are recorded in the completion checkpoint below.
+
+### Local completion checkpoint
+
+Implementation commit `12bf6a0` completed the source adaptation, selected-scope
+verifier, negative tests and execution-case documentation. Independent review
+accepted all changes and the retained real-BIRD rehearsal. The native pre-commit
+gate passed **2,655 tests in 208.02 seconds**, including the sixteen new tests;
+the locked 34-package environment and whitespace checks also passed. Its
+initial sandbox-only environment check refused Docker socket access; the normal
+approved host-side read-only check passed without changing the environment or
+bypassing the measurement guard.
+
+The early `rehearsal01` packet remains retained at its original `883f72e` pin.
+It must not be executed from the final engine revision. Regenerate the selected
+`case01` once at this clean documentation checkpoint, then run the complete case
+verifier and independent final readback. The final external receipts are
+`case01/verification.json`, `review-final.md` and `completion.json` under
+`/tmp/bgperf2-real-bird-validation-20261101`; they record the actual final engine
+pin, source mapping, recipe digest, packet hashes and review result without
+creating a self-referential engine commit. They are local preparation evidence,
+not execution authorization. The frozen final packet and independent review
+must both be present and valid before requesting the single execution approval.

@@ -225,6 +225,13 @@ trust and host admission/stop rules. No build, worker, acquisition, schedule,
 infrastructure, evidence deletion/transfer, push or publication is authorized
 by preparation. Performance policy stays disabled and 10% calibration deferred.
 
+Implementation checkpoint `12bf6a0` passed independent review and the native
+2,655-test gate. The case plan records the unchanged original source, prior
+evidence inventory, retained real-BIRD rehearsal and final clean-revision
+packet/readback procedure. Final location-bound receipts live outside engine
+Git; they establish preparation only. Real build/worker compatibility and current
+host admission remain execution-time uncertainties.
+
 ## Preserved validation history
 
 The [bounded milestone D validation record](milestone-d-runtime-validation.md)

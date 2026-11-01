@@ -1,4 +1,10 @@
-# Real BIRD prefix-identity validation — prepared execution case
+# Real BIRD prefix-identity validation — approved attempt stopped at admission
+
+The operator approved the frozen case at engine
+`9bcfe1da1063f5d89a8cd258750ffabb163e542d`, including the functional root-storage
+exception. Its single admission stopped before any build, probe container or
+worker because other development tests were running. This case is closed;
+unused positions authorize no retry. The preparation below remains historical.
 
 Selected 2026-11-01 after implementation commit
 `e7798ad1e2f91d7c7197dfc79bf7295cfb55bd3d`. This goal prepares one independently
@@ -180,3 +186,36 @@ returned-image/exit/version binding and bound-recipe substitution. The focused
 plus documentation gate passed 95 tests. No build/probe/worker ran. Actual native
 gate, final commit, frozen-packet hashes and independent readback are recorded
 under `/tmp/bgperf2-prefix-runtime-20261101/`, outside the source checkout.
+
+## Approved attempt: admission refusal — 2026-11-01
+
+The checkout was clean on `milestone-a-newcomer` at the frozen `9bcfe1d` pin.
+All eleven selected read-only admission commands exited zero: packet, native
+measurement guard, locked environment, exact image inspection, mount, disk,
+memory, process snapshot and Docker container/network/volume inventories.
+The process snapshot nevertheless records seven actual Python pytest processes,
+including parallel suites in other worktrees. This violates the separately
+required absence of other development/build/test work. A passing BGP guard
+does not override that condition. Other processes and resources were untouched.
+
+Available memory was 37,319,225,344 bytes and disk 147,083,284,480 bytes, both
+above selected floors. Root-backed ext4 `/dev/sda5` was confirmed. The six-interval
+CPU screen was not run after the process refusal: no CPU threshold, host quietness
+or quiet-throughout claim is inferred. Passing capacity is not admission success.
+
+Accounting is **zero attempted builds, zero version-probe containers and zero
+workers**, with one of each never run and no failed worker experiment.
+`execution01` remains absent; there is no built sink, bound runtime recipe,
+worker package or new runtime-compatibility result. The approval is consumed.
+No waiting loop, admission retry, hourly enrollment, acquisition, pruning,
+remote transfer, push or publication occurred. Prior packet metadata remains
+historical prepared-only evidence; the terminal admission record governs it.
+
+Original command receipts, process/capacity witnesses, terminal inventories,
+independent review and preservation readback are under
+`/tmp/bgperf2-prefix-runtime-20261101/admission01/` and its parent. Preserve them
+and all prior evidence. A further execution needs a separately selected fresh
+case/decision resolving admission, with new destinations and appropriate pins;
+do not silently reuse this packet or its unused positions. Real sink build and
+capture compatibility remain unassessed. Policy stays disabled and calibration
+deferred.

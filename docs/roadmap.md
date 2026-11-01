@@ -9,10 +9,12 @@ CLI and versioned artifacts; none is required to use the engine.
 
 Received IPv4 prefix identity is implemented at `e7798ad`: an opt-in bounded
 final snapshot and assertion distinguish equal counts with different prefixes
-in offline tests. The next selected goal prepares its
-[real-BIRD runtime validation](plans/observer-prefix-runtime-validation.md),
-with a frozen offline sink-build plan and one worker pending separate approval.
-Source-bug selection remains deferred; preparation authorizes no execution.
+in offline tests. Its [real-BIRD runtime case](plans/observer-prefix-runtime-validation.md)
+was prepared at `9bcfe1d` and approved, then stopped at admission because other
+development tests were running. Zero builds, probes or workers ran; runtime
+compatibility remains unassessed. That finite approval is consumed. A fresh
+case/decision is required before another attempt; source-bug selection remains
+deferred.
 
 Make bgperf2 a performance tester that daemon developers can use to reproduce
 problems, test their own fixes and investigate regressions. Reuse existing

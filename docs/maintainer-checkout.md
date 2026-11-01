@@ -10,6 +10,12 @@ code, builds, Docker probes and workers remain separate operations. Image
 availability, host suitability and execution authorization remain unassessed.
 Performance policy stays disabled and calibration deferred.
 
+For a concrete real-source example awaiting execution approval, see the
+[neutral BIRD release-transition case](plans/real-bird-maintainer-validation.md).
+It explicitly adapts the two BSD aliases into a separately identified packaging
+history and then uses this unchanged preparation/handoff workflow. It alleges
+no upstream bug and does not enable general symlink support.
+
 ## Select the question and source history
 
 Freeze a recipe using the [recipe guide](recipes.md) and select full source

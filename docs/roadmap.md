@@ -35,6 +35,12 @@ paths. Its maintained inert-Git example exercises real local preparation while
 leaving all build/worker/image/host readiness unassessed. Existing source and
 workload boundaries remain; no command in the handoff executes automatically.
 
+The next [real BIRD maintainer validation case](plans/real-bird-maintainer-validation.md)
+selects an adjacent upstream release transition, explicit alias-only packaging,
+two source builds and three functional workers. Its verified preparation uses
+actual local BIRD source; execution requires one separate approval. Both targets
+are expected to pass, so no upstream bug/fix or bisection boundary is claimed.
+
 | Document | Status | Purpose |
 | --- | --- | --- |
 | [Developer performance testing plan](plans/performance-testing-development-plan.md) | A/B functionally validated; C descriptive workflow delivered, calibrated detection deferred; bounded deterministic D live validation passed | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |

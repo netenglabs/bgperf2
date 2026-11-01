@@ -203,6 +203,28 @@ No real daemon build/worker, download, evidence deletion/remote transfer, push
 or publication occurred. Original measurement evidence remains unchanged;
 formal 10% calibration stays deferred and performance policy disabled.
 
+## Real BIRD maintainer validation case — prepared, execution pending
+
+The follow-on goal starts at `883f72e` and selects actual local upstream BIRD
+history rather than another inert fixture. The
+[authoritative case plan](real-bird-maintainer-validation.md) freezes the
+pre-2.19.2 → 2.19.2 neutral functional question, same recipe/generator/sink,
+explicit alias-only derived source mapping, exact local images, source/build
+plans, selected public commands, evidence roots, expected outcomes and recovery.
+The supported regular-file guard remains unchanged. Packaging preparation
+authenticates raw upstream/derived objects and preserves the original source;
+this does not authenticate publisher trust or claim pristine-source support.
+
+The proposed execution is two 1,200-second builds and three serial 120-second
+workers (2,760 budget seconds), with independent baseline/final reviews and no
+retry. The generic handoff retains an unexecuted search plan; bisection and
+comparisons are excluded from this neutral case. Both revisions should pass;
+no real bug/fix or introduced routing fault is asserted. Approval must include
+the explicit functional-only root-storage exception, existing local image/source
+trust and host admission/stop rules. No build, worker, acquisition, schedule,
+infrastructure, evidence deletion/transfer, push or publication is authorized
+by preparation. Performance policy stays disabled and 10% calibration deferred.
+
 ## Preserved validation history
 
 The [bounded milestone D validation record](milestone-d-runtime-validation.md)

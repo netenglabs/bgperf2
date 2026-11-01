@@ -11,6 +11,12 @@ broader live bisection/diagnostics and performance calibration remain deferred. 
 
 ## Operator decision: descriptive comparisons first — 2026-10-31
 
+The operator's next selected implementation goal on 2026-11-01 is
+[received IPv4 prefix identity](observer-prefix-identity.md), strengthening the
+existing synthetic correctness witnesses beyond count agreement. Upstream BIRD
+test selection is deferred. The bounded opt-in final snapshot is distinct from
+route attributes, convergence-time identity, calibration and broader workloads.
+
 The operator accepted deferring formal reliable-10%-slowdown calibration after
 the [preserved route-work partial case](milestone-c-route-work-discovery.md)
 (analysis recorded at engine `e553df6`). The supported descriptive comparison

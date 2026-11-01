@@ -22,7 +22,7 @@ import (
 	"time"
 )
 
-const sinkVersion = "0.1.0"
+const sinkVersion = "0.2.0"
 
 // sourceHash is set at build time from the files compiled (see sink.py). An
 // image built some other way says so rather than reporting nothing.
@@ -61,6 +61,7 @@ func main() {
 		coalesce     = flag.Duration("coalesce", 10*time.Millisecond, "at most one count line per interval")
 		heartbeat    = flag.Duration("heartbeat", time.Second, "write a heartbeat after this long with nothing written")
 		logPath      = flag.String("log", "", "the event log to append to")
+		snapshotPath = flag.String("snapshot-socket", "", "optional local Unix socket for bounded accepted-prefix snapshots")
 		version      = flag.Bool("version", false, "print the version and exit")
 	)
 	flag.Parse()
@@ -103,6 +104,7 @@ func main() {
 		fail("-log is required")
 	}
 	cfg.holdTime = uint16(*holdTime)
+	cfg.snapshotSocket = *snapshotPath
 	cfg.connectRetry, cfg.coalesce, cfg.heartbeat = *connectRetry, *coalesce, *heartbeat
 	if cfg.hostname, err = os.Hostname(); err != nil {
 		cfg.hostname = "bgperf-sink"
@@ -113,6 +115,14 @@ func main() {
 		fail("%v", err)
 	}
 	s := &sink{cfg: cfg, log: newEventLog(f, monotonicNS)}
+	if cfg.snapshotSocket != "" {
+		ln, err := listenSnapshots(cfg.snapshotSocket)
+		if err != nil {
+			fail("snapshot socket: %v", err)
+		}
+		defer ln.Close()
+		go s.serveSnapshots(ln)
+	}
 	s.log.Line('V', logFormat, versionString())
 	s.log.Line('B', time.Now().UnixNano())
 

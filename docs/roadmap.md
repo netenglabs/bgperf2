@@ -7,6 +7,12 @@ CLI and versioned artifacts; none is required to use the engine.
 
 ## Current direction
 
+The next selected correctness milestone is
+[received IPv4 prefix identity](plans/observer-prefix-identity.md): an opt-in,
+bounded final snapshot and assertion that can distinguish equal counts with
+different prefixes. Source-bug selection is deferred. This implementation work
+authorizes no new image build or benchmark execution.
+
 Make bgperf2 a performance tester that daemon developers can use to reproduce
 problems, test their own fixes and investigate regressions. Reuse existing
 batch/scenario inputs, repetitions, ordering, measurement artifacts, provenance,

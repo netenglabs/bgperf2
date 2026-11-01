@@ -85,7 +85,8 @@ def test_actual_adapter_constructor_pins_all_three_roles(tmp_path):
 
 
 @pytest.mark.parametrize('pin', [None, 'target=0,monitor=1,testers=2-3'])
-def test_worker_uses_existing_lifecycle_with_queued_observations(tmp_path, monkeypatch, pin):
+@pytest.mark.parametrize('capture_prefixes', [False, True])
+def test_worker_uses_existing_lifecycle_with_queued_observations(tmp_path, monkeypatch, pin, capture_prefixes):
     from test_run_lifecycle import fake_run
     from test_recipes import source, export
     import bgperf2
@@ -93,6 +94,14 @@ def test_worker_uses_existing_lifecycle_with_queued_observations(tmp_path, monke
     # The worker selects sink, but adapter fixture observations retain existing
     # queue/convergence behavior. No Docker client is consulted.
     component = runtime.MONITOR_CLASSES['gobgp']
+    if capture_prefixes:
+        class CapturingMonitor(component):
+            guest_dir = '/root/config'
+            def __init__(self, host_dir, conf):
+                super().__init__(host_dir, conf)
+                self.host_dir = host_dir
+                Path(host_dir).mkdir(parents=True, exist_ok=True)
+        component = CapturingMonitor
     runtime.MONITOR_CLASSES = {'sink': component}
     parser = bgperf2.create_args_parser()
     def parse(argv):
@@ -123,6 +132,17 @@ def test_worker_uses_existing_lifecycle_with_queued_observations(tmp_path, monke
     path, test = source(tmp_path, neighbors=[1], prefixes=[10], **({'pin': pin} if pin else {}))
     document = export(path, test)
     (tmp_path / 'work').mkdir(exist_ok=True)
+    import recipe_prefixes
+    captures = []
+    def capture(path, document):
+        # The legacy lifecycle must finish and emit its events before capture.
+        assert list((tmp_path / 'work/artifacts').glob('*.events.json'))
+        captures.append(path)
+        return {'fixture': 'post-measurement capture'}
+    monkeypatch.setattr(recipe_prefixes, 'capture', capture)
+    if capture_prefixes:
+        (tmp_path / 'work/diagnostic-options.json').write_text(json.dumps({
+            'mode': 'none', 'observer_prefixes': True}))
     outcome = recipe_worker.execute(document, tmp_path / 'work', 'attempt', runtime)
     assert outcome['status'] == 'completed'
     assert 'remove_target_containers' not in calls
@@ -130,6 +150,8 @@ def test_worker_uses_existing_lifecycle_with_queued_observations(tmp_path, monke
     assert all(item.name.startswith('attempt_') for item in components)
     assert {item.image for item in components} == {item['image'] for item in document['roles'].values()}
     assert args.pin == pin
+    assert captures == ([tmp_path/'work/attempt/monitor/prefixes.sock'] if capture_prefixes else [])
+    assert (tmp_path/'work/observer-prefixes.json').exists() == capture_prefixes
     expected = {'target': '0', 'monitor': '1', 'testers': '2-3'} if pin else {}
     for item in components:
         role = 'monitor' if item.name.endswith('monitor') else 'target' if item.name.endswith('target') else 'testers'

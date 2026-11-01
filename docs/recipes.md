@@ -252,6 +252,12 @@ recipe. Optional `--diagnostics basic` (default) or `none` selects the supported
 diagnostic probes; see the investigation guide for their overhead and accounting.
 Additional artifacts are recorded using the existing result envelope.
 
+Optional standalone `run --observer-prefixes` captures a bounded final accepted
+IPv4 prefix set after measurement. It requires a supporting sink image and
+explicitly selected `observer_prefix_identity` assertions; defaults stay unchanged.
+See [received-prefix identity](observer-prefixes.md) for commands, limits and
+the distinction from convergence-time count or attribute correctness.
+
 The [comparison guide](comparisons.md) adds separately exported, recipe-bound
 observable assertions and repeated target comparisons. It retains these recipe
 and result envelopes, names exact count agreement separately from convergence,

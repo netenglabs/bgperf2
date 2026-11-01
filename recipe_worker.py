@@ -57,7 +57,8 @@ class OwnedDocker:
         return self.client.remove_container(observed['Id'], **kwargs)
 
 
-def scoped_adapter(adapter, image, prefix, *, role=None, work=None, capture_exit=False):
+def scoped_adapter(adapter, image, prefix, *, role=None, work=None, capture_exit=False,
+                   capture_prefixes=False):
     """Preserve adapter behavior, replacing only binary and runtime name."""
     class Selected(adapter):
         @classmethod
@@ -69,6 +70,13 @@ def scoped_adapter(adapter, image, prefix, *, role=None, work=None, capture_exit
             super().__init__(*args, **kwargs)
             self.image = image
             self.name = prefix + '_' + self.name
+            if capture_prefixes and role == 'observer':
+                from recipe_prefixes import SOCKET_NAME
+                # The container may create its socket as root. Restrict the
+                # operator-owned bind directory, allowing the socket itself to
+                # be writable by the unprivileged host client across UID maps.
+                os.chmod(self.host_dir, 0o700)
+                self.prefix_snapshot_socket = self.guest_dir + '/' + SOCKET_NAME
 
         def wait_established(self, *args, **kwargs):
             if work is not None and role == 'observer':
@@ -116,7 +124,8 @@ def execute(document, work, attempt, engine, *, target=None):
     # are rebound below so every bench dependency receives this scoped object.
     runtime = types.SimpleNamespace(**vars(engine))
     runtime.TARGET_CLASSES = {'bird': scoped_adapter(engine.TARGET_CLASSES['bird'], roles['target']['image'], attempt, role='target', work=work, capture_exit=options.get('mode') == 'basic')}
-    runtime.MONITOR_CLASSES = {'sink': scoped_adapter(engine.MONITOR_CLASSES['sink'], roles['observer']['image'], attempt, role='observer', work=work)}
+    runtime.MONITOR_CLASSES = {'sink': scoped_adapter(engine.MONITOR_CLASSES['sink'], roles['observer']['image'], attempt, role='observer', work=work,
+        capture_prefixes=options.get('observer_prefixes', False))}
     runtime.BIRDTester = scoped_adapter(engine.BIRDTester, roles['generator']['image'], attempt, role='generator', work=work)
     runtime.target_image = lambda *args: roles['target']['image']
     runtime.remove_target_containers = lambda: None
@@ -180,6 +189,10 @@ def execute(document, work, attempt, engine, *, target=None):
         raise RuntimeError('Attempt network already exists; refusing reuse')
     engine.capture_tool_revision()
     row = run_lifecycle.bench(runtime, args)
+    if options.get('observer_prefixes', False):
+        from recipe_prefixes import capture, SOCKET_NAME
+        _write(work / 'observer-prefixes.json',
+               capture(work / attempt / 'monitor' / SOCKET_NAME, document))
     stage(work, 'collection', reason='Existing lifecycle returned; preserve the stats row before final diagnostics.')
     # Successful process exit alone is never an experiment completion witness.
     if not row:

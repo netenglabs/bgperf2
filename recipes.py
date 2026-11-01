@@ -462,6 +462,8 @@ def main(argv=None):
             command.add_argument('--timeout', type=float, default=300,
                                  help='whole-attempt runtime deadline in seconds (default: 300)')
             command.add_argument('--diagnostics', choices=('basic', 'none'), default='basic')
+            command.add_argument('--observer-prefixes', action='store_true',
+                                 help='capture a bounded accepted IPv4 prefix snapshot after measurement (requires supporting sink image)')
         if name == 'target-image':
             command.add_argument('--image', required=True)
             command.add_argument('--label')
@@ -502,8 +504,8 @@ def main(argv=None):
     assertion_export.add_argument('-o', '--output')
     assertion_export.add_argument('--capability', action='append',
         choices=('session_establishment', 'injection_completion', 'observer_route_count',
-                 'experiment_completion', 'observed_role_health'),
-        help='repeat to select an explicit supported subset; default exports all')
+                 'experiment_completion', 'observed_role_health', 'observer_prefix_identity'),
+        help='repeat to select capabilities; default exports the five count/session/health assertions')
     assertion_check = commands.add_parser('assertions-check', help='evaluate assertions from a verified result package')
     assertion_check.add_argument('document')
     assertion_check.add_argument('--result', required=True)
@@ -589,7 +591,8 @@ def main(argv=None):
                 _write_document(inspect_recipe(document))
             elif args.command == 'assertions-export':
                 from recipe_assertions import default_assertions
-                spec = default_assertions(document)
+                spec = default_assertions(document,
+                    include_prefixes=bool(args.capability and 'observer_prefix_identity' in args.capability))
                 if args.capability:
                     if len(args.capability) != len(set(args.capability)):
                         raise ContractError('Duplicate assertion capability selection')
@@ -657,6 +660,8 @@ def main(argv=None):
                     options['target'] = read_document(args.target)
                 if args.diagnostics != 'basic':
                     options['diagnostics'] = args.diagnostics
+                if args.observer_prefixes:
+                    options['observer_prefixes'] = True
                 result = run_recipe(document, workdir=args.workdir,
                                     results_dir=args.results_dir, timeout=args.timeout, **options)
                 _write_document(result)

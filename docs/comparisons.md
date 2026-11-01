@@ -144,8 +144,15 @@ hashes, deadline scope and reasons. Overall outcomes are `passed`, `failed` or
 
 Exact observer count is deliberately separate from the existing convergence
 threshold: an engine-completed attempt may fail exact count agreement. It proves
-no route identities or attributes. Unsupported route/attribute, policy, recovery,
+no route identities or attributes. Unsupported attribute, policy, recovery,
 IPv6 and action predicates are refused instead of reduced to counts or sleeps.
+
+An explicitly selected [received-prefix identity assertion](observer-prefixes.md)
+can instead inspect a complete final snapshot from standalone
+`run --observer-prefixes`. It is separate from the five defaults and from the
+convergence-time count. Comparison execution does not enable snapshot capture;
+packages without it leave this assertion unmeasured. Attribute predicates remain
+unsupported.
 
 ## Inspect and rebuild the report
 

@@ -18,26 +18,31 @@ OUTCOME_SCHEMA = 'bgperf2/assertion-outcome/v1alpha1'
 MAX_JSON_BYTES = 8 * 1024 * 1024
 
 
-def _definitions(recipe):
+def _definitions(recipe, include_prefixes=False):
     resolved = recipe['resolved']
     sessions = resolved['neighbors']
     total = sessions * resolved['prefixes_per_peer']
-    return [
+    definitions = [
         ('sessions.ready', 'session_establishment', sessions, 'recorded_worker_budget'),
         ('injection.complete', 'injection_completion', sessions, 'recorded_worker_budget'),
         ('observer.count', 'observer_route_count', total, 'recorded_worker_budget'),
         ('experiment.complete', 'experiment_completion', 'completed', 'recorded_worker_budget'),
         ('roles.healthy', 'observed_role_health', ['generator', 'observer', 'target'], 'pre_cleanup_snapshot'),
     ]
+    if include_prefixes:
+        definitions.append(('observer.prefixes', 'observer_prefix_identity',
+            {'first': '100.0.0.0/32', 'count': total, 'layout': 'contiguous_ipv4_host_routes'},
+            'post_measurement_snapshot'))
+    return definitions
 
 
-def default_assertions(recipe):
+def default_assertions(recipe, *, include_prefixes=False):
     """Export expectations separately, bound to the unchanged recipe v1 digest."""
     recipes.validate_recipe(recipe)
     return {'schema': SCHEMA, 'recipe_sha256': recipes.recipe_sha256(recipe),
             'assertions': [{'name': name, 'capability': capability, 'expected': expected,
                             'deadline': {'kind': deadline}}
-                           for name, capability, expected, deadline in _definitions(recipe)]}
+                           for name, capability, expected, deadline in _definitions(recipe, include_prefixes)]}
 
 
 def validate_assertions(spec, recipe):
@@ -49,13 +54,13 @@ def validate_assertions(spec, recipe):
     items = spec['assertions']
     if not isinstance(items, list) or not items:
         raise recipes.ContractError('assertions: expected a nonempty assertion list')
-    supported = {item['capability']: item for item in default_assertions(recipe)['assertions']}
+    supported = {item['capability']: item for item in default_assertions(recipe, include_prefixes=True)['assertions']}
     seen = set()
     for item in items:
         recipes._keys(item, ('name', 'capability', 'expected', 'deadline'), where='assertion')
         capability = item['capability']
         if not isinstance(capability, str) or capability not in supported:
-            raise recipes.ContractError('assertion: unsupported capability; route/attribute, timeout, policy and recovery oracles are not available')
+            raise recipes.ContractError('assertion: unsupported capability; attribute, timeout, policy and recovery oracles are not available')
         if capability in seen:
             raise recipes.ContractError('assertion: duplicate capability')
         seen.add(capability)
@@ -226,6 +231,30 @@ def evaluate_assertions(spec, recipe, result_path):
                               reason='Existing engine runtime outcome; separate from exact route-count agreement.')
             else:
                 answer['reason'] = runtime_reason or 'No decisive existing engine completion outcome was recorded.'
+        elif capability == 'observer_prefix_identity':
+            from recipe_prefixes import inspect, MAX_PREFIXES
+            path = 'work/observer-prefixes.json'
+            selection_path = 'work/observer-prefix-selection.json'
+            capture, capture_reason = _load(root, path, references)
+            selection, selection_reason = _load(root, selection_path, references)
+            answer['evidence'] = witnesses(path, selection_path, raw_path)
+            try:
+                if capture is None or selection is None:
+                    raise ValueError(capture_reason or selection_reason)
+                recipes._same(selection, {'recipe_sha256': recipes.recipe_sha256(recipe),
+                    'enabled': True, 'phase': 'post_measurement', 'max_prefixes': MAX_PREFIXES},
+                    'observer prefix capture selection')
+                observed = inspect(capture, recipe)
+                if not events or capture['requested_ns'] < max(event.monotonic_s for event in events) * 1e9:
+                    raise ValueError('No consistent post-measurement lifecycle interval was recorded')
+                origin = next(event.monotonic_s for event in events if event.kind == EventKind.BENCH_CLOCK_STARTED)
+                if budget is None or capture['completed_ns'] > (origin + budget['elapsed_seconds']) * 1e9:
+                    raise ValueError('Prefix capture exceeds recorded worker interval')
+                answer.update(observed=observed,
+                    status='failed' if observed['missing_count'] or observed['unexpected_count'] else 'passed',
+                    reason='Complete accepted IPv4 prefix set at one post-measurement snapshot; attributes and convergence-time identity are unmeasured.')
+            except (ValueError, TypeError, KeyError, AttributeError, OverflowError) as exc:
+                answer['reason'] = f'Prefix identity unmeasured: {exc}'
         else:
             answer['evidence'] = witnesses('work/diagnostics.json')
             containers = diagnostic.get('containers') if diagnostic else None
@@ -248,18 +277,21 @@ def evaluate_assertions(spec, recipe, result_path):
                                   reason='Owned container states at final pre-cleanup collection; continuous and daemon-process health are unmeasured.')
             if answer['status'] == 'unmeasured':
                 answer['reason'] = diagnostic_reason or 'Complete final container health snapshots were not recorded.'
-        if assertion['deadline']['kind'] == 'recorded_worker_budget':
+        if assertion['deadline']['kind'] in ('recorded_worker_budget', 'post_measurement_snapshot'):
             answer['evidence'] += witnesses('work/execution-budget.json')
             if answer['status'] == 'passed' and not budget_satisfied:
                 answer.update(status='unmeasured', reason=budget_reason)
         answers.append(answer)
     statuses = {item['status'] for item in answers}
     outcome = 'failed' if 'failed' in statuses else 'inconclusive' if 'unmeasured' in statuses else 'passed'
+    limits = ['Count agreement does not establish route or attribute correctness.',
+              'Container health snapshots do not establish continuous daemon health.',
+              'BIRD tester timeouts, policy, recovery, IPv6 and new actions are unsupported.']
+    if any(item['capability'] == 'observer_prefix_identity' for item in spec['assertions']):
+        limits.append('Optional prefix identity covers one post-measurement snapshot, not attributes or continuous correctness.')
     return {'schema': OUTCOME_SCHEMA, 'recipe_sha256': recipes.recipe_sha256(recipe),
             'outcome': outcome, 'assertions': answers,
             'worker_deadline': {'timeout_seconds': budget.get('timeout_seconds') if budget else None,
                                 'elapsed_seconds': budget.get('elapsed_seconds') if budget else None,
                                 'satisfied': budget_satisfied if budget else None, 'reason': budget_reason},
-            'limits': ['Count agreement does not establish route or attribute correctness.',
-                       'Container health snapshots do not establish continuous daemon health.',
-                       'BIRD tester timeouts, policy, recovery, IPv6 and new actions are unsupported.']}
+            'limits': limits}

@@ -181,6 +181,7 @@ def effective_roles(recipe, target=None):
 def _git(root, *args):
     env = runtime._environment()
     env['GIT_NO_LAZY_FETCH'] = '1'
+    env['GIT_NO_REPLACE_OBJECTS'] = '1'
     env['GIT_TERMINAL_PROMPT'] = '0'
     command = ['git', '-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', '-C', str(root), *map(str, args)]
     try:

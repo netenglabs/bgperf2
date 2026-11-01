@@ -62,6 +62,11 @@ portable report formats are unchanged.
 
 ## Freeze a revision chain
 
+For an existing local history, [source-range preparation](source-range.md) creates
+the isolated checkouts and plans in one explicitly selected new directory. Its
+verified output feeds the [maintainer handoff](maintainer-handoff.md). The manual
+per-revision planning interface below remains available.
+
 Use the [local-source build guide](investigations.md) to prepare a build-plan
 JSON for every revision in the selected chain, oldest first. Each source plan
 must identify an explicitly selected clean existing checkout whose HEAD equals

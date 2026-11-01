@@ -28,6 +28,13 @@ interrupted-work recovery and a confirmed correctness boundary. Its public CLI
 evidence verifies after relocation. It runs offline with explicitly simulated
 source/build/runtime boundaries; it supplies no additional live qualification.
 
+[Maintainer checkout preparation](maintainer-checkout.md) now prepares an explicit
+local first-parent range into independent checkouts and plans, verifies selected
+object identities, and freezes a baseline/fix handoff with actual future artifact
+paths. Its maintained inert-Git example exercises real local preparation while
+leaving all build/worker/image/host readiness unassessed. Existing source and
+workload boundaries remain; no command in the handoff executes automatically.
+
 | Document | Status | Purpose |
 | --- | --- | --- |
 | [Developer performance testing plan](plans/performance-testing-development-plan.md) | A/B functionally validated; C descriptive workflow delivered, calibrated detection deferred; bounded deterministic D live validation passed | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |

@@ -395,10 +395,12 @@ def test_source_git_disables_lazy_fetch_and_terminal_prompts(tmp_path, monkeypat
         observed.append(kwargs['env'])
         return type('Reply',(),{'returncode':0,'stdout':b'local-only','stderr':b''})()
     monkeypatch.setenv('GIT_NO_LAZY_FETCH','0')
+    monkeypatch.setenv('GIT_NO_REPLACE_OBJECTS','0')
     monkeypatch.setenv('GIT_TERMINAL_PROMPT','1')
     monkeypatch.setattr(targets.subprocess,'run',run)
     assert targets._git(tmp_path,'config','--name-only','--list')==b'local-only'
     assert observed[0]['GIT_NO_LAZY_FETCH']=='1'
+    assert observed[0]['GIT_NO_REPLACE_OBJECTS']=='1'
     assert observed[0]['GIT_TERMINAL_PROMPT']=='0'
 
 

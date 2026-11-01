@@ -105,6 +105,8 @@ views, partial/promisor clones and configured Git filters, including inherited
 filter configuration. Lazy Git fetching and interactive prompts are disabled.
 Source snapshots have a 256 MiB/20,000-file bound. The snapshot identifies the
 captured bytes; this is not a transactional lock on an actively edited checkout.
+Git replacement objects cannot redefine the selected original commit. A changed
+work tree still needs explicit dirty inclusion and retains its patch identity.
 
 Pristine BIRD release trees containing BSD symlink aliases do not meet this
 regular-file-only source contract. The approved

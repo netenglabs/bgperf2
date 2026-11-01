@@ -162,6 +162,14 @@ before changing its predicates, cache identity, journal or confirmation rules.
 Planning and reporting never authorize builds or measurements, and performance
 predicates remain unsupported.
 
+`recipe_source_range.py` prepares explicit local first-parent histories into
+owned checkouts and frozen plans; read `docs/source-range.md` before changing
+its Git isolation, object checks or preparation verifier. `recipe_handoff.py`
+binds those plans to an unexecuted maintainer command graph; read
+`docs/maintainer-handoff.md` before changing its destination, budget or argv
+contracts. `docs/maintainer-checkout.md` is the real-local-Git preparation entry
+point; its maintained example runs no daemon source or workload.
+
 ### Pure batch cells
 
 `batch_cells.py` owns the version-preserving YAML loader, target-version

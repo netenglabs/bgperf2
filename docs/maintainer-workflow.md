@@ -6,6 +6,11 @@ It exercises the public recipe and bisection CLIs with one shared
 `target_crash` recipe and one nine-revision simulated history. The same bad tip
 appears in reproduction, the local-change investigation and the search.
 
+For your own selected source and revisions, start with
+[maintainer checkout preparation](maintainer-checkout.md). It uses real local
+Git to prepare clean historical checkouts and a verified handoff; the walkthrough
+below demonstrates the later execution/evidence stages with simulated runtimes.
+
 Use the existing [locked Python environment](python-environment.md) on a
 development host where no measurement is active. Choose an absolute output
 directory that does not exist and is outside the engine checkout:

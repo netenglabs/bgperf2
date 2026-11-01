@@ -142,6 +142,7 @@ def _environment():
                'DOCKER_CONTEXT', 'DOCKER_CONFIG', 'DOCKER_TLS',
                'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH')}
     env['GIT_OPTIONAL_LOCKS'] = '0'  # status must never refresh the index.
+    env['GIT_NO_REPLACE_OBJECTS'] = '1'  # the requested revision means its original objects.
     return env
 
 
@@ -153,6 +154,10 @@ def _engine(report, document, env):
         revision = run_command([*git, 'rev-parse', '--verify', 'HEAD^{commit}'], env=env).strip()
         if not re.fullmatch(r'[0-9a-f]{40}', revision):
             raise ProbeError('Git returned an invalid full HEAD revision')
+        entries = run_command([*git, 'ls-files', '-v', '-z'], env=env).split('\0')
+        if any(entry and entry[:1] != 'H' for entry in entries):
+            raise ProbeError('Engine index has hidden or unsupported entries; use a full checkout '
+                             'without assume-unchanged or skip-worktree flags')
         dirty = run_command([*git, 'status', '--porcelain',
                              '--untracked-files=all', '--ignore-submodules=none'], env=env)
         if revision != document['engine']['revision']:

@@ -52,6 +52,8 @@ class SimulatedHost:
                '-C', str(preflight.ROOT)]
         if argv == [*git, 'rev-parse', '--verify', 'HEAD^{commit}']:
             return self.document['engine']['revision'] + '\n'
+        if argv == [*git, 'ls-files', '-v', '-z']:
+            return 'H SIMULATED-engine.py\0'
         if argv == [*git, 'status', '--porcelain', '--untracked-files=all',
                     '--ignore-submodules=none']:
             return ''

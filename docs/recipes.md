@@ -117,6 +117,9 @@ read-only snapshot of Linux/Python, required tools (`docker`, `mpstat`, `free`),
 the exact clean engine revision and the existing hashed Python environment via
 `scripts/bootstrap.py --check`. That bootstrap check retains its idle measurement
 guard; `check` never installs dependencies or repairs the environment.
+Engine inspection requires visible tracked index entries rather than
+assume-unchanged/skip-worktree views, and Git replacement objects cannot redefine
+the pinned revision. Hidden modifications cannot be qualified as clean source.
 
 Only a local Unix-socket Docker endpoint is supported. Remote endpoints are
 refused before Docker or bootstrap is contacted. Accepted endpoint probes use

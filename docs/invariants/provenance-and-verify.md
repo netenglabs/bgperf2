@@ -8,7 +8,7 @@ do not turn unknown binary/build facts into reconstruction claims. The
 [investigation guide](../investigations.md) owns their versioned contract and
 source/build trust boundary.
 
-**Read this before editing:** `recipe_targets.py` (target/build identity and local source), `recipe_preflight.py` (exact immutable image inspection), `recipe_prepare.py` (selected digest acquisition), `run_lifecycle.py` (run orchestration), `base.py` (`Container.version_string()`, `collect_provenance()`,
+**Read this before editing:** `recipe_targets.py` (target/build identity and local source), `recipe_source_range.py` (isolated local history and object integrity), `recipe_handoff.py` (frozen source/command bindings), `recipe_preflight.py` (exact immutable image inspection), `recipe_prepare.py` (selected digest acquisition), `run_lifecycle.py` (run orchestration), `base.py` (`Container.version_string()`, `collect_provenance()`,
 `RECIPE_LABEL_KEY`, `recipe_hash()`, `img_recipe_label()`, `Container.current_recipe_hash()`,
 `Container.override_buildargs()`, `Container.recipe_status()`), `bgperf2.py` (`verify`, `doctor`,
 `images`, `prepare`, `checkable_versions()`), and every module carrying a version command: `bird.py`,
@@ -44,6 +44,20 @@ is the instrument the timings are read from.
   graphs. Appending at the end is required — `create_batch_graphs()` indexes the row positionally.
 
 ## Image build provenance limits
+
+Pinned source objects retain their original identity: Git replacement refs cannot
+substitute another object for a declared commit. Engine prerequisite inspection
+also rejects index flags that can conceal modified files from ordinary status.
+The [local revision preparation contract](../source-range.md) validates selected
+commit/tree/blob contents and owned worktree metadata before considering a
+range prepared. Original checkout preservation, local-only copying and explicit
+source limits remain separate from source trust or runtime qualification.
+
+The [maintainer handoff](../maintainer-handoff.md) binds plans and future command
+arguments without predicting built images or executing those commands. A
+checksummed but changed runbook must fail semantic reconstruction. Frozen
+declarations cannot qualify local availability, an execution host, a binary
+rebuild or performance detection.
 
 Recipe preparation reuses only exact local immutable identities and pulls only
 the selected missing `repository@sha256:...` references with explicit `--pull`.

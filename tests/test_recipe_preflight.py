@@ -149,6 +149,8 @@ def test_remote_endpoint_refused_before_docker_or_bootstrap(document, monkeypatc
         assert not any('bootstrap.py' in str(arg) for arg in argv)
         if 'rev-parse' in argv:
             return document['engine']['revision'] + '\n'
+        if 'ls-files' in argv:
+            return 'H SIMULATED-engine.py\0'
         if 'status' in argv:
             return ''
         raise preflight.ProbeError('unsupported fake probe')
@@ -182,6 +184,8 @@ def local_probes(document, monkeypatch):
                '-C', str(preflight.ROOT)]
         if argv == [*git, 'rev-parse', '--verify', 'HEAD^{commit}']:
             return document['engine']['revision'] + '\n'
+        if argv == [*git, 'ls-files', '-v', '-z']:
+            return 'H SIMULATED-engine.py\0'
         if argv == [*git, 'status', '--porcelain',
                     '--untracked-files=all', '--ignore-submodules=none']:
             return state['dirty']

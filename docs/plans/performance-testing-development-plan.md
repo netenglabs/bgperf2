@@ -129,6 +129,49 @@ inspection. Status/recovery use the session lock and refuse active writers.
 Calibration remains deferred, performance policy disabled, and no real build,
 worker, download, evidence deletion/remote transfer, push or publication occurred.
 
+## Maintainer checkout preparation and handoff goal — in progress 2026-11-01 UTC
+
+The operator requested a larger follow-on goal after `df8b1d5`. Turn the
+supported workflow into a practical preparation path for an explicitly selected
+local maintainer checkout, while retaining the existing source/build contracts
+and deferred calibration. Complete the whole batch before the next feedback
+handoff; commits remain internal checkpoints.
+
+Acceptance includes preparing the entire bounded first-parent good→bad range
+into isolated clean checkouts and frozen build/bisection plans without changing
+the original repository, running hooks, fetching remote objects or executing source.
+Verify that preparation independently and freeze a maintainer handoff for
+explicit baseline/candidate plans, destinations, budgets and dependency-ordered
+public commands. Future targets must be referenced by their returned target
+artifact paths, not invented images. Preparation, verification and handoff do
+not execute the listed build/worker commands or qualify host/image availability.
+
+Exercise actual local Git with inert BIRD-style source, including original
+HEAD/refs/index/config and dirty/untracked-byte preservation, hooks/filter/network
+refusal, range completeness, source/plan tampering, partial preparation retention
+and handoff semantic verification. Keep the fully simulated execution walkthrough
+as a separate maintained example. Existing regular-file source limits remain;
+this goal does not silently materialize pristine BIRD symlink aliases.
+
+The audit reproduced three source-identity failures: assume-unchanged and
+skip-worktree flags could conceal modified engine files, and replacement refs
+could substitute another tree while naming the original source commit. The
+fixes now reject hidden engine index flags and read raw objects without replacement
+refs. Source-range preparation verifies commit, tree and blob bytes against their
+object IDs, uses an independent local clone and rejects redirected Git metadata.
+Verified handoff freezes build/investigation commands and protects the original
+source even when both selected build plans use prepared copies.
+
+Independent review accepted the implementation and reproduced adversarial
+verification failures. Focused checks passed: 54 source-range tests, 44 handoff
+tests and 89 final checkout-demo, source-identity and documentation checks.
+Both retained public-CLI demonstrations passed with four prepared revisions,
+verified artifacts, unchanged original source and no requested execution:
+`/tmp/bgperf2-maintainer-checkout-ready-assertions-20261101` and
+`/tmp/bgperf2-maintainer-checkout-ready-crash-20261101`.
+Required full checks, commits and consolidated readiness reporting remain.
+No real daemon build/worker, download, push or publication is authorized here.
+
 ## Preserved validation history
 
 The [bounded milestone D validation record](milestone-d-runtime-validation.md)

@@ -303,13 +303,13 @@ def test_recovery_preserves_failure_written_before_journal(tmp_path, monkeypatch
     plan = fixture_plan(tmp_path)
     session = tmp_path / 'session'; bisect.initialize(plan, session)
     _, _, build, run = fake_backends(tmp_path, plan, skips=(0,))
-    real_write = bisect.write
-    def interrupted_write(path, value):
-        if Path(path).parent.name == 'trials':
+    real_publish = bisect._publish_record
+    def interrupted_publish(path, relative, value):
+        if relative.startswith('trials/'):
             raise OSError('SIMULATED interrupted before journal write')
-        return real_write(path, value)
+        return real_publish(path, relative, value)
     with monkeypatch.context() as changes:
-        changes.setattr(bisect, 'write', interrupted_write)
+        changes.setattr(bisect, '_publish_record', interrupted_publish)
         with pytest.raises(OSError): bisect.step(session, build=build, run=run)
     original = (session / 'failures/t0001.json').read_bytes()
     record = bisect.recover(session, reason='Operator requests recovery; retain original build failure')

@@ -19,6 +19,10 @@ build, worker or revision range.
 
 ## Inspect a controlled history
 
+For the complete reproduction-to-investigation-to-bisection story, start with
+the [maintainer walkthrough](maintainer-workflow.md). The focused bisection
+examples below retain their separate edge cases.
+
 ```sh
 venv/bin/python scripts/bisection_smoke.py --output /absolute/new/bisection-demo
 venv/bin/python recipe_bisection.py status /absolute/new/bisection-demo/assertions/session
@@ -159,6 +163,21 @@ the verified original is copied again. A journal entry completed before its
 reservation marker was removed is reconciled without rerunning a worker.
 An ambiguous measured trial pauses `run`; an explicit subsequent invocation
 can search other untested revisions. It never silently retries that revision.
+
+An existing failure also takes precedence when `recover --result` supplies a
+different package: recovery journals the original classification/reason and
+leaves that supplied package unused. It cannot turn an attested failed build
+into a good trial.
+
+New reservation, failure and journal records are staged under
+`failures/unpublished/`, flushed, then published with an atomic create-only link.
+Interrupted staging cannot leave partial JSON in the authoritative trial journal.
+Available staging fragments remain retained and included in portable reports;
+they are not additional trials. If publication completed before bookkeeping
+stopped, recovery reconciles that existing record without another worker.
+This covers process interruption; it establishes no general power-loss guarantee.
+An already malformed final journal remains refused for manual inspection; this
+change does not repair or rewrite old evidence.
 
 ## Review the boundary
 

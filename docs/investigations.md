@@ -1,5 +1,8 @@
 # Test and diagnose a BIRD fix
 
+For a connected reproduction, local-fix investigation and revision-search
+walkthrough, start with the [maintainer workflow](maintainer-workflow.md).
+
 Use one immutable [recipe](recipes.md), with separate target/build identity
 records for the baseline and candidate. The recipe's workload, generator,
 observer, engine revision, completion contract and reproduction question stay
@@ -192,6 +195,20 @@ and verification independently checks the bundled originals. Supply the original
 package from each separately executed attempt. This check does not authenticate
 execution; the existing declared-identity limits still apply.
 
+If the investigation controller raises after a worker has already published a
+valid result package, the report retains that exact selected package unchanged.
+Its original experiment status and reproduction outcome remain visible. A
+separate `controller-stop.json` records the failing side, harness failure or
+interruption, outer exit code and reason. This file is checksummed and bound by
+the report's optional `controller_stop` reference. Any such controller stop
+keeps the functional pair assessment `inconclusive`, including when both worker
+packages completed. It never starts a successor or retries an attempt.
+
+An incomplete, changed or differently bound package is not treated as verified
+evidence. The original partial artifacts stay at their selected result path;
+the report names the retained path and verification problem while marking that
+side unavailable. Reports without a controller stop keep their existing format.
+
 Rebuild a report from existing evidence without runtime access:
 
 ```sh
@@ -201,7 +218,24 @@ venv/bin/python recipes.py investigation-report \
   --output-dir /absolute/new/report
 ```
 
-`investigation-report` and `investigation-verify` need no Docker. Verification
+To rebuild an existing complete or partial investigation, preserve its recorded
+stop and unavailable-attempt meanings directly:
+
+```sh
+venv/bin/python recipes.py investigation-rebuild \
+  /absolute/results/investigation-001/report/investigation.json \
+  --output-dir /absolute/new/rebuilt-report
+```
+
+`investigation-rebuild` verifies the source report before creating a fresh,
+nonnested destination. It copies available verified packages and preserves exact
+missing statuses/reasons and controller-stop evidence, even when neither side
+produced a package. It needs no runtime access. The raw `investigation-report`
+command continues to accept separately supplied packages; an omitted candidate
+alone does not establish why that attempt is unavailable. Use the existing
+report when its recorded failure, interruption or never-run reason must survive.
+
+`investigation-report`, `investigation-rebuild` and `investigation-verify` need no Docker. Verification
 checks every bundled package, artifact bytes and recipe/build binding, then
 reconstructs the JSON assessment and human report from those records. Changed,
 missing, unlisted or unsafe files are refused. Checksums do not authenticate the

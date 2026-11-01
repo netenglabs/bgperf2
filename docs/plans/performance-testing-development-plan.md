@@ -1,6 +1,6 @@
 # bgperf2 developer performance testing plan
 
-Created 2026-10-23; updated 2026-10-31. Status: milestones A and supplied-image B
+Created 2026-10-23; updated 2026-11-01 UTC. Status: milestones A and supplied-image B
 functionally validated, including B's approved packaging-source functional and
 setup-container interruption checks; C noise/resolution discovery and admitted
 repeatability study/descriptive analysis completed; staged comparison
@@ -65,6 +65,32 @@ The campaign succeeds only if the predeclared criteria are met; exhausting its
 budget or obtaining incomplete/inconclusive evidence ends it with calibration
 still deferred, without automatic extensions or another attempt. Neither this
 decision nor scheduling at an idle hour qualifies a host or enables policy.
+
+## Active maintainer-workflow readiness goal — 2026-11-01 UTC
+
+The operator requested a larger outcome-based batch instead of a handoff after
+each small change. Starting from engine `90ec94e`, complete the supported
+reproduction → local-fix investigation → deterministic correctness-bisection
+workflow, with coherent maintained offline examples and verified interruption
+recovery. Commits are internal checkpoints. Existing measurement evidence and
+calibration deferral remain unchanged.
+
+Acceptance requires one clearly simulated canonical recipe and source history
+across reproduction, candidate investigation and bisection; distinct original
+attempts; public CLI package/report verification; recovery of an interrupted
+original without another worker; preserved controller/failure evidence and
+missing statuses; a readable entry point and result index; independent review,
+meaningful regression tests and required clean commits. All subprocess/network
+boundaries in the walkthrough must remain explicitly simulated. Real builds,
+benchmark workers, downloads, remote transfer, deletion, pushes and publication
+are outside this goal. Report material limits rather than implying broader live
+or performance qualification.
+
+Audit found two bisection recovery defects (partial journal publication and
+failure recovery overridden by a supplied result) and investigation defects
+(retained package omitted after controller failure; incomplete report rebuilding
+losing missing statuses/reasons). Implementation and a coherent walkthrough are
+in progress; final validation and readiness conclusions will be recorded here.
 
 ## Preserved validation history
 

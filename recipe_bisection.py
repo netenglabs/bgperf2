@@ -53,6 +53,21 @@ def write(path, document):
         stream.write(json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + '\n')
 
 
+def _publish_record(session, relative, document):
+    """Publish control evidence atomically, retaining incomplete staging bytes."""
+    recipes._artifact_path(relative, 'session record')
+    destination = safe(session / relative)
+    staging = safe(session / 'failures/unpublished')
+    staging.mkdir(mode=0o700, exist_ok=True)
+    temporary = safe(staging / (destination.name + '-' + uuid.uuid4().hex))
+    write(temporary, document)
+    with temporary.open('rb') as stream:
+        os.fsync(stream.fileno())
+    # An exclusive hard link publishes complete bytes without replacing evidence.
+    os.link(temporary, destination, follow_symlinks=False)
+    temporary.unlink()
+
+
 def safe(path):
     path = Path(path)
     if not path.is_absolute() or '..' in path.parts or any(p.is_symlink() for p in (path, *path.parents)):
@@ -502,7 +517,7 @@ def append_result(path, plan, records, selected, result_path):
     recipes._same(copied, observed, 'preserved trial package')
     record = {'request': selected, 'classification': observed['classification'], 'reason': observed['reason'],
               'result': relative, 'failure': None, 'observed': observed}
-    write(path / f'trials/t{selected["trial"]:04d}.json', record)
+    _publish_record(path, f'trials/t{selected["trial"]:04d}.json', record)
     (path / 'pending.json').unlink()
     return record
 
@@ -516,10 +531,10 @@ def append_failure(path, selected, classification_value, reason):
     if (path / relative).exists():
         recipes._same(load(path / relative), failure, 'existing immutable failure')
     else:
-        write(path / relative, failure)
+        _publish_record(path, relative, failure)
     record = {'request': selected, 'classification': classification_value, 'reason': reason,
               'result': None, 'failure': relative, 'observed': None}
-    write(path / f'trials/t{selected["trial"]:04d}.json', record)
+    _publish_record(path, f'trials/t{selected["trial"]:04d}.json', record)
     (path / 'pending.json').unlink()
     return record
 
@@ -531,7 +546,7 @@ def record_result(session, result_path):
         if selected['state'] != 'trial_required':
             raise recipes.ContractError('No trial is currently required')
         if pending_request(path, plan, records) is None:
-            write(path / 'pending.json', selected)
+            _publish_record(path, 'pending.json', selected)
         return append_result(path, plan, records, selected, safe(result_path))
 
 
@@ -542,13 +557,13 @@ def recover(session, *, result_path=None, reason=None):
             return {'state': 'reservation_reconciled', 'next': request(plan, records)}
         selected = request(plan, records)
         recipes._same(load(path / 'pending.json'), selected, 'pending recovery request')
-        if result_path is not None:
-            return append_result(path, plan, records, selected, safe(result_path))
         failure = path / f'failures/t{selected["trial"]:04d}.json'
         if failure.exists():
             original = load(failure)
             recipes._keys(original, ('classification', 'reason'))
             return append_failure(path, selected, original['classification'], original['reason'])
+        if result_path is not None:
+            return append_result(path, plan, records, selected, safe(result_path))
         return append_failure(path, selected, 'ambiguous', reason)
 
 
@@ -561,7 +576,7 @@ def step(session, *, build=None, run=None):
         selected = request(plan, records)
         if selected['state'] != 'trial_required':
             return selected
-        write(path / 'pending.json', selected)
+        _publish_record(path, 'pending.json', selected)
         candidate = plan['candidates'][selected['index']]
         key = digest(candidate['build_plan'])
         cache = path / 'cache' / key

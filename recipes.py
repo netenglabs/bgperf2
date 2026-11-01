@@ -494,6 +494,9 @@ def main(argv=None):
     report.add_argument('--baseline', required=True)
     report.add_argument('--candidate')
     report.add_argument('--output-dir', required=True)
+    rebuild = commands.add_parser('investigation-rebuild', help='verify and rebuild an existing functional investigation report')
+    rebuild.add_argument('document')
+    rebuild.add_argument('--output-dir', required=True)
     assertion_export = commands.add_parser('assertions-export', help='export explicit supported observable assertions')
     assertion_export.add_argument('document')
     assertion_export.add_argument('-o', '--output')
@@ -562,6 +565,9 @@ def main(argv=None):
             from recipe_investigation import write_investigation_report
             _write_document(write_investigation_report(baseline=args.baseline,
                 candidate=args.candidate, output_dir=args.output_dir))
+        elif args.command == 'investigation-rebuild':
+            from recipe_investigation import rebuild_investigation_report
+            _write_document(rebuild_investigation_report(args.document, output_dir=args.output_dir))
         elif args.command == 'investigation-verify':
             from recipe_investigation import verify_investigation_report
             _write_document(verify_investigation_report(args.document))

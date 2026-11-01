@@ -1,6 +1,6 @@
 # bgperf2 roadmap
 
-Updated 2026-10-31. This is the public index of engine development plans.
+Updated 2026-11-01 UTC. This is the public index of engine development plans.
 Everything needed to understand, use and contribute to bgperf2 belongs in this
 repository. Other projects can build campaigns and services on its documented
 CLI and versioned artifacts; none is required to use the engine.
@@ -21,6 +21,12 @@ should address concrete maintainer reproduction/fix/usability needs. A future
 calibration effort requires one bounded, separately approved campaign with
 predeclared success/stop criteria on a host with predictable capacity. See the
 [authoritative decision](plans/performance-testing-development-plan.md#operator-decision-descriptive-comparisons-first--2026-10-31).
+
+The [maintained maintainer walkthrough](maintainer-workflow.md) connects one
+simulated crash recipe and source history through reproduction, a local rollback,
+interrupted-work recovery and a confirmed correctness boundary. Its public CLI
+evidence verifies after relocation. It runs offline with explicitly simulated
+source/build/runtime boundaries; it supplies no additional live qualification.
 
 | Document | Status | Purpose |
 | --- | --- | --- |

@@ -12,6 +12,7 @@ import recipes
 from recipe_results import _regular_file, _regular_bytes, verify_result_package
 
 SCHEMA = 'bgperf2/investigation/v1alpha1'
+CONTROLLER_STOP_SCHEMA = 'bgperf2/investigation-controller-stop/v1alpha1'
 SCOPE = 'A functional baseline/fix investigation with declared and observed identities; no performance comparison is assessed.'
 ROOT = Path(__file__).parent
 
@@ -33,6 +34,46 @@ def _load(root, relative):
         raise recipes.ContractError(f'{relative}: JSON evidence exceeds the 8 MiB inspection bound')
     return json.loads(data.decode('utf-8'), object_pairs_hook=recipes._pairs,
                       parse_constant=recipes._nonfinite)
+
+
+def _validate_controller_stop(record):
+    recipes._keys(record, ('schema', 'attempt', 'status', 'exit_code', 'reason'), where='controller stop')
+    if record['schema'] != CONTROLLER_STOP_SCHEMA:
+        raise recipes.ContractError('Unsupported investigation controller stop schema')
+    recipes._choice(record['attempt'], ('baseline', 'candidate'), 'controller stop attempt')
+    recipes._choice(record['status'], ('harness_failed', 'interrupted'), 'controller stop status')
+    recipes._text(record['reason'], 'controller stop reason')
+    allowed = (3,) if record['status'] == 'harness_failed' else (130, 143)
+    if type(record['exit_code']) is not int or record['exit_code'] not in allowed:
+        raise recipes.ContractError('Controller stop status and exit code disagree')
+    return record
+
+
+def _read_controller_stop(root, document):
+    if 'controller_stop' not in document:
+        return None
+    reference = document['controller_stop']
+    recipes._keys(reference, ('path', 'sha256'), where='controller stop reference')
+    if reference['path'] != 'controller-stop.json':
+        raise recipes.ContractError('Unsupported controller stop evidence path')
+    recipes._match(reference['sha256'], recipes._HEX64, 'controller stop checksum', 'a SHA-256 digest')
+    if hashlib.sha256(_regular_bytes(root, reference['path'])).hexdigest() != reference['sha256']:
+        raise recipes.ContractError('Controller stop evidence checksum mismatch')
+    return _validate_controller_stop(_load(root, reference['path']))
+
+
+def _controller_context(record, attempts):
+    if record is None:
+        return
+    stopped = attempts[record['attempt']]
+    if stopped['availability'] == 'missing' and (stopped['status'] != record['status'] or stopped['reason'] != record['reason']):
+        raise recipes.ContractError('Unavailable attempt disagrees with its controller stop')
+    if record['attempt'] == 'baseline':
+        candidate = attempts['candidate']
+        if candidate['availability'] != 'missing' or candidate['status'] != 'not_run':
+            raise recipes.ContractError('A baseline controller stop cannot have a candidate execution')
+    elif attempts['baseline']['availability'] != 'present' or attempts['baseline']['status'] not in ('completed', 'experiment_failed'):
+        raise recipes.ContractError('A candidate controller stop requires an available completed baseline operation')
 
 
 def _new_roots(workdir, results_dir):
@@ -172,7 +213,7 @@ def _host_changes(attempts):
             if left.get(key) is not None and right.get(key) is not None and left[key] != right[key]]
 
 
-def _assessment(attempts, recipe):
+def _assessment(attempts, recipe, controller_stop=None):
     baseline, candidate = attempts['baseline'], attempts['candidate']
     available = all(item['availability'] == 'present' for item in attempts.values())
     reasons = []
@@ -194,6 +235,11 @@ def _assessment(attempts, recipe):
         reasons.append('Host identity changed (' + ', '.join(changed_host) + '); no controlled target-change attribution is supported.')
     if available and stopped:
         reasons.append('Failed harness, interruption or inconclusive evidence prevents a functional pair verdict.')
+    if controller_stop is not None:
+        usable = False
+        reasons.append(f"Investigation controller stopped during {controller_stop['attempt']} "
+                       f"({controller_stop['status']}, exit {controller_stop['exit_code']}); "
+                       'no functional pair verdict is supported.')
     if usable:
         outcomes = (baseline['reproduction']['outcome'], candidate['reproduction']['outcome'])
         outcome = ('baseline_reproduced_candidate_not_reproduced' if outcomes == ('reproduced', 'not_reproduced')
@@ -226,7 +272,7 @@ def _memory(attempt):
     return target
 
 
-def _render(report):
+def _render(report, controller_stop=None):
     predicate = report['assessment']['predicate'] or {}
     lines = ['# Baseline/fix investigation', '', report['scope'], '',
              'Question: ' + predicate.get('question', 'No executed recipe evidence is available.'), '',
@@ -298,6 +344,13 @@ def _render(report):
                 lines.append('  Unavailable artifact kinds: ' + ', '.join(missing) + '.')
         else:
             lines.append('  ' + attempt['reason'])
+    if controller_stop is not None:
+        lines += ['', '## Controller stop', '',
+                  f"The investigation controller stopped during **{controller_stop['attempt']}**: "
+                  f"`{controller_stop['status']}` (exit {controller_stop['exit_code']}).", '',
+                  controller_stop['reason'], '',
+                  'Available verified worker packages retain their original experiment status and reproduction evidence.',
+                  '[Controller stop evidence](controller-stop.json) is separate from the immutable worker results.']
     lines += ['', '## Interpretation limits', '', *report['assessment']['reasons'],
               report['assessment']['performance']['reason'],
               'A lower memory observation is not a leak diagnosis. Different instrumentation/build inputs are recorded, never normalized away.',
@@ -306,11 +359,14 @@ def _render(report):
 
 
 def write_investigation_report(*, baseline, candidate=None, output_dir,
-                               baseline_missing=None, candidate_missing=None):
+                               baseline_missing=None, candidate_missing=None,
+                               controller_stop=None):
     """Verify and snapshot supplied packages into a portable new report directory."""
     output = Path(output_dir)
     if not output.is_absolute() or os.path.lexists(output):
         raise recipes.ContractError('Choose an absolute new investigation report directory')
+    if controller_stop is not None:
+        _validate_controller_stop(controller_stop)
     attempts, sources, recipe, originals = {}, {}, None, []
     for label, path, missing in (('baseline', baseline, baseline_missing), ('candidate', candidate, candidate_missing)):
         attempt, bound, result = _read_attempt(path, label, missing)
@@ -326,19 +382,25 @@ def write_investigation_report(*, baseline, candidate=None, output_dir,
             if target == root or root in target.parents or target in root.parents:
                 raise recipes.ContractError('Report and source package destinations must be nonnested')
     _distinct_originals(originals)
-    assessment = _assessment(attempts, recipe)
+    _controller_context(controller_stop, attempts)
+    assessment = _assessment(attempts, recipe, controller_stop)
     differences = _differences(attempts['baseline'], attempts['candidate']) if len(sources) == 2 else []
     report = {'schema': SCHEMA,
               'scope': SCOPE,
               'recipe_sha256': recipes.recipe_sha256(recipe) if recipe is not None else None,
               'frozen_recipe': recipe, 'attempts': attempts, 'differences': differences,
               'assessment': assessment}
+    if controller_stop is not None:
+        report['controller_stop'] = {'path': 'controller-stop.json',
+                                    'sha256': hashlib.sha256(_json(controller_stop).encode('utf-8')).hexdigest()}
     output.mkdir(parents=True, mode=0o700)
     for label, (path, result) in sources.items():
         _copy_package(path, result, output / label)
+    if controller_stop is not None:
+        _write(output / 'controller-stop.json', controller_stop)
     _write(output / 'investigation.json', report)
     with (output / 'REPORT.md').open('x', encoding='utf-8') as stream:
-        stream.write(_render(report))
+        stream.write(_render(report, controller_stop))
     references = []
     for path in sorted(output.rglob('*')):
         if path.is_file():
@@ -359,7 +421,8 @@ def verify_investigation_report(path):
     if path.name != 'investigation.json':
         raise recipes.ContractError('Select the bundled investigation.json manifest')
     document = _load(root, path.name)
-    recipes._keys(document, ('schema', 'scope', 'recipe_sha256', 'frozen_recipe', 'attempts', 'differences', 'assessment'))
+    recipes._keys(document, ('schema', 'scope', 'recipe_sha256', 'frozen_recipe', 'attempts', 'differences', 'assessment'),
+                  optional=('controller_stop',))
     recipes._keys(document['attempts'], ('baseline', 'candidate'), where='attempts')
     if document.get('schema') != SCHEMA or set(document.get('attempts', {})) != {'baseline', 'candidate'}:
         raise recipes.ContractError('Unsupported investigation report')
@@ -385,6 +448,11 @@ def verify_investigation_report(path):
             raise recipes.ContractError(f'{relative}: investigation checksum mismatch')
     if not {'investigation.json', 'REPORT.md'} <= listed:
         raise recipes.ContractError('Investigation report and prose must be checksummed')
+    controller_stop = _read_controller_stop(root, document)
+    if controller_stop is not None and 'controller-stop.json' not in listed:
+        raise recipes.ContractError('Controller stop evidence must be checksummed')
+    if controller_stop is None and 'controller-stop.json' in listed:
+        raise recipes.ContractError('Controller stop evidence lacks its report binding')
     def fail_walk(exc):
         raise recipes.ContractError(f'Investigation traversal failed: {exc}')
     for directory, dirs, files in os.walk(root, followlinks=False, onerror=fail_walk):
@@ -416,17 +484,50 @@ def verify_investigation_report(path):
                 raise recipes.ContractError('Bundled recipes differ')
             recipe = bound
     _distinct_originals(originals)
+    _controller_context(controller_stop, attempts)
     if document.get('frozen_recipe') != recipe or document.get('recipe_sha256') != (recipes.recipe_sha256(recipe) if recipe else None):
         raise recipes.ContractError('Investigation frozen recipe binding differs')
-    if document.get('assessment') != _assessment(attempts, recipe):
+    if document.get('assessment') != _assessment(attempts, recipe, controller_stop):
         raise recipes.ContractError('Investigation assessment disagrees with evidence')
     differences = _differences(attempts['baseline'], attempts['candidate']) if all(x['availability'] == 'present' for x in attempts.values()) else []
     if document.get('differences') != differences:
         raise recipes.ContractError('Investigation differences disagree with evidence')
-    if _regular_bytes(root, 'REPORT.md').decode('utf-8') != _render(document):
+    if _regular_bytes(root, 'REPORT.md').decode('utf-8') != _render(document, controller_stop):
         raise recipes.ContractError('Human report disagrees with the verified investigation evidence')
     return {'valid': True, 'schema': SCHEMA, 'files_verified': len(listed),
             'outcome': document['assessment']['outcome']}
+
+
+def rebuild_investigation_report(path, *, output_dir):
+    """Verify an existing report, then preserve its evidence and stop meanings."""
+    path = Path(path)
+    verify_investigation_report(path)
+    root, output = path.parent.resolve(), Path(output_dir)
+    target = output.resolve()
+    if target == root or root in target.parents or target in root.parents:
+        raise recipes.ContractError('Rebuilt report and original report must be nonnested')
+    document = _load(path.parent, path.name)
+    inputs = {}
+    for label in ('baseline', 'candidate'):
+        attempt = document['attempts'][label]
+        inputs[label] = path.parent / label / 'result.json' if attempt['availability'] == 'present' else None
+        inputs[label + '_missing'] = ({'status': attempt['status'], 'reason': attempt['reason']}
+                                      if attempt['availability'] == 'missing' else None)
+    return write_investigation_report(**inputs, output_dir=output,
+                                     controller_stop=_read_controller_stop(path.parent, document))
+
+
+def _recover_package(path, label, recipe, target):
+    """Only the selected exact package can survive an outer controller error."""
+    if not os.path.lexists(path):
+        return None, None
+    try:
+        attempt, bound, _ = _read_attempt(path, label, None)
+        if recipes.recipe_sha256(bound) != recipes.recipe_sha256(recipe) or attempt['target'] != target:
+            raise recipes.ContractError('Existing package differs from the selected recipe or target')
+    except Exception as exc:
+        return None, f'Existing selected package retained at {path}, but unavailable for reporting: {type(exc).__name__}: {exc}'
+    return path, None
 
 
 def run_investigation(recipe, *, baseline_target, candidate_target, workdir, results_dir,
@@ -457,6 +558,7 @@ def run_investigation(recipe, *, baseline_target, candidate_target, workdir, res
     paths = {'baseline': None, 'candidate': None}
     missing = {'baseline': None, 'candidate': {'status': 'not_run', 'reason': 'Candidate has not run.'}}
     stop_exit = 0
+    controller_stop = None
     for label, target in (('baseline', baseline_target), ('candidate', candidate_target)):
         try:
             result = execute(recipe, workdir=work / label, results_dir=results / label,
@@ -483,11 +585,17 @@ def run_investigation(recipe, *, baseline_target, candidate_target, workdir, res
                          else 130 if interrupted else 3)
             missing[label] = {'status': 'interrupted' if interrupted else 'harness_failed',
                               'reason': f'{type(exc).__name__}: {exc}; available work is retained.'}
+            paths[label], unavailable = _recover_package(results / label / 'result.json', label, recipe, target)
+            if unavailable is not None:
+                missing[label]['reason'] += ' ' + unavailable
+            controller_stop = {'schema': CONTROLLER_STOP_SCHEMA, 'attempt': label,
+                               'status': missing[label]['status'], 'exit_code': stop_exit,
+                               'reason': missing[label]['reason']}
             if label == 'baseline':
                 missing['candidate'] = {'status': 'not_run', 'reason': 'Baseline operation stopped before candidate execution.'}
             break
     report = write_investigation_report(baseline=paths['baseline'], candidate=paths['candidate'],
                                        output_dir=results / 'report', baseline_missing=missing['baseline'],
-                                       candidate_missing=missing['candidate'])
+                                       candidate_missing=missing['candidate'], controller_stop=controller_stop)
     return {'schema': SCHEMA, 'status': 'recorded', 'exit_code': stop_exit,
             'report': str(results / 'report/investigation.json'), 'assessment': report['assessment']}

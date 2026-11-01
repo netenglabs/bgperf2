@@ -226,6 +226,9 @@ def _run_smoke(output):
             stack.enter_context(patch.object(recipe_run, 'SubprocessBackend', lambda **kwargs: runtime))
             _command(arguments)
             _command(['init', plan_path, '--session', session])
+            initial_status = _command(['status', session, '--json'])
+            if initial_status['trials_recorded'] or runtime.builds or runtime.attempts:
+                raise RuntimeError('Status of a new session started simulated runtime work')
             preview = _command(['run', session])
             if preview['phase'] != 'endpoint-good' or runtime.builds or runtime.attempts:
                 raise RuntimeError('Planning without --execute started simulated runtime work')
@@ -243,6 +246,13 @@ def _run_smoke(output):
             for destination in (case / 'report', case / 'report-rebuilt'):
                 _command(['report', session, '--output', destination])
                 _command(['verify', destination / 'bisection.json'])
+            attempts_before_status = len(runtime.attempts)
+            progress = _command(['status', session, '--json'])
+            if (progress['conclusion'] != conclusion or
+                    progress['trials_recorded'] != attempts_before_status + len([
+                        trial for trial in progress['trials'] if trial['experiment_status'] is None]) or
+                    len(runtime.attempts) != attempts_before_status):
+                raise RuntimeError('Verified status changed the search or lost trial accounting')
         expected = 'confirmed' if scenario in ('assertions', 'target-crash') else 'unresolved'
         if conclusion['state'] != expected:
             raise RuntimeError(f'{scenario}: expected {expected}, observed {conclusion}')
@@ -251,14 +261,14 @@ def _run_smoke(output):
             raise RuntimeError('Offline report reconstruction changed the conclusion or witnesses')
         if primary['performance'] != {'qualification': 'not_assessed', 'policy': 'disabled'}:
             raise RuntimeError('A simulated bisection enabled performance policy')
-        cases[scenario] = {'predicate': predicate, 'conclusion': conclusion,
+        cases[scenario] = {'predicate': predicate, 'conclusion': conclusion, 'status': progress,
                           'report': str(case / 'report/bisection.json'),
                           'report_rebuilt': str(case / 'report-rebuilt/bisection.json'),
                           'paused_report': paused_report, 'pause': pause, 'builds': runtime.builds,
                           'attempts': runtime.attempts, 'probe_commands': host.calls,
                           'source_commands': chain.calls}
     summary = {'simulation': True, 'status': 'passed', 'cases': cases,
-               'operations': ['export', 'plan', 'init', 'run', 'report', 'verify'],
+               'operations': ['export', 'plan', 'init', 'status', 'run', 'report', 'verify'],
                'scope': 'Controlled local fixtures only; no real source, build, daemon or performance verdict.'}
     _write(output / 'smoke.json', summary)
     return summary

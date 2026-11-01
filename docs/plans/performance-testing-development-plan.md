@@ -34,6 +34,18 @@ the next concrete maintainer problem or usability improvement within those
 interfaces; broader adapters, new workloads and minimization remain separate
 scope choices. Calibration need not block that development or its feedback.
 
+First follow-through after decision `c1ddb80`: add offline
+`recipe_bisection.py status SESSION` with readable progress and optional JSON.
+It verifies existing evidence, shows trial/reservation budget and outcome
+counts, failed assertion names, evidence paths and supported boundary state.
+It starts no work and leaves pending reservations intact, distinguishing an
+unrecorded trial from a marker awaiting bookkeeping reconciliation. Existing
+search rules and portable report formats remain unchanged. The
+[bisection guide](../bisection.md#inspect-progress-without-starting-another-trial)
+documents this maintained workflow. Validation: 54 focused bisection tests and
+the standalone five-case simulated walkthrough passed; these establish no new
+live adapter or performance qualification.
+
 Revisit calibration only as one separately approved, bounded campaign on a host
 with predictable available capacity. Before execution, freeze the workload,
 operating conditions, modest-effect control/characterization procedure, detector,

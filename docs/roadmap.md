@@ -127,6 +127,9 @@ builds and five distinct workers, including fresh confirmations. Its record reta
 the earlier admission stops, first-trial contention limitation and cached-build
 qualification. This establishes no upstream bug or performance result. Broader
 source-build/crash-bisection qualification and performance predicates remain deferred.
+The offline `recipe_bisection.py status` view now verifies and summarizes search
+progress, trial budget, failed checks, evidence paths, pending recovery and
+supported boundary conclusions without starting a build or worker.
 
 The architecture proposal is supporting material, not a second execution order.
 New policy semantics, IPv6 and protocol/topology expansion remain deferred until

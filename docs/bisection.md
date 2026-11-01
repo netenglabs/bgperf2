@@ -21,6 +21,7 @@ build, worker or revision range.
 
 ```sh
 venv/bin/python scripts/bisection_smoke.py --output /absolute/new/bisection-demo
+venv/bin/python recipe_bisection.py status /absolute/new/bisection-demo/assertions/session
 ```
 
 All source identities, builds, daemon outcomes and observations in that demo are
@@ -28,6 +29,32 @@ explicitly simulated. It exercises the real search, package verification,
 confirmation and portable-report contracts without invoking Docker or building
 source. Normal tests also inspect an inert local Git history through the public
 planner and verify that its checkout is unchanged.
+
+## Inspect progress without starting another trial
+
+```sh
+venv/bin/python recipe_bisection.py status /absolute/new/search-session
+venv/bin/python recipe_bisection.py status /absolute/new/search-session --json
+```
+
+The readable status shows the search state, recorded/reserved/remaining trial
+budget, good/bad/skipped/ambiguous counts, trial reasons, failed assertion names
+and evidence paths relative to the session. A completed search shows its last
+observed good and first observed bad revisions and any unresolved range. An
+available next trial is explicitly marked **not started**. JSON retains the same
+verified information for tools.
+
+Status takes the session's coordination lock and verifies its immutable plan,
+journal and available packages. It invokes no Git, Docker, build or worker,
+and refuses inspection while another command holds the session lock rather
+than reading a partially written trial.
+It creates no report and never removes or reconciles a pending reservation. A
+reserved trial without a recorded outcome requires recovery; a stale marker
+for an already recorded trial is identified separately and also left intact.
+Follow the recovery instructions below. Changed evidence or an inconsistent
+reservation is refused. Status exit 0 means inspection succeeded, not that a
+boundary was found or a regression fixed. Existing JSON `next` output and
+portable report formats are unchanged.
 
 ## Freeze a revision chain
 

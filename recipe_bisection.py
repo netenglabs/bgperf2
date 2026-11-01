@@ -1,7 +1,7 @@
 # Copyright (C) 2026 bgperf2 contributors. Apache-2.0.
 """Bounded deterministic BIRD regression searches; performance predicates refused.
 
-Planning, next, record, report and verification are offline. Only step/run with
+Planning, status, next, record, report and verification are offline. Only step/run with
 --execute may build trusted local source and run an existing bounded recipe.
 """
 import argparse
@@ -400,6 +400,85 @@ def next_trial(session):
         return request(plan, records)
 
 
+def session_status(session):
+    """Inspect verified progress without reconciling a reservation or running work."""
+    with locked(session) as path:
+        plan, records = history(path)
+        conclusion = request(plan, records)
+        pending, already_recorded = None, False
+        if os.path.lexists(path / 'pending.json'):
+            pending = load(path / 'pending.json')
+            already_recorded = bool(records and recipes.canonical_json(pending) ==
+                                    recipes.canonical_json(records[-1]['request']))
+            if not already_recorded:
+                if conclusion['state'] != 'trial_required':
+                    raise recipes.ContractError('Pending reservation has no matching trial request')
+                recipes._same(pending, conclusion, 'pending status request')
+            conclusion = {'state': 'recovery_required', 'reason': (
+                'Reserved trial is already recorded; explicit recover reconciles its marker without another worker.'
+                if already_recorded else
+                'Reserved trial has no recorded outcome; recover its original evidence or explicitly abandon it. No retry.')}
+        trials = []
+        for record in records:
+            observed = record['observed'] or {}
+            selected = {key: record['request'][key] for key in ('trial', 'index', 'phase', 'revision')}
+            trials.append({**selected, 'classification': record['classification'],
+                'reason': record['reason'], 'experiment_status': observed.get('result_status'),
+                'failed_assertions': [item['name'] for item in observed.get('assertions', {}).get('assertions', [])
+                                      if item['status'] == 'failed'],
+                'evidence': record['result'] or record['failure']})
+        reserved = int(pending is not None and not already_recorded)
+        return {'session': str(path), 'predicate': plan['predicate'],
+                'question': plan['recipe']['reproduction']['question'],
+                'trials_recorded': len(records), 'max_trials': plan['max_trials'],
+                'trials_reserved': reserved,
+                'trials_remaining': plan['max_trials'] - len(records) - reserved,
+                'counts': {kind: sum(r['classification'] == kind for r in records)
+                           for kind in ('good', 'bad', 'skipped', 'ambiguous')},
+                'conclusion': conclusion, 'pending': pending,
+                'pending_already_recorded': already_recorded, 'trials': trials,
+                'performance': dict(POLICY)}
+
+
+def render_status(status):
+    # Keep local source/build error text from injecting terminal control sequences.
+    def text(value):
+        return ''.join(c if c.isprintable() else repr(c)[1:-1] for c in str(value))
+
+    conclusion = status['conclusion']
+    lines = ['Bisection session: ' + text(status['session']),
+             'Question: ' + text(status['question']),
+             'Predicate: ' + status['predicate'], 'State: ' + conclusion['state'],
+             f'Trials: {status["trials_recorded"]}/{status["max_trials"]} recorded; '
+             f'{status["trials_reserved"]} reserved; {status["trials_remaining"]} unreserved.',
+             'Outcomes: ' + ', '.join(f'{kind}={count}' for kind, count in status['counts'].items())]
+    if conclusion.get('reason'):
+        lines.append(text(conclusion['reason']))
+    if conclusion['state'] == 'trial_required':
+        lines.append(f'Next trial: {conclusion["trial"]} ({conclusion["phase"]}), '
+                     f'{conclusion["revision"]} — not started.')
+    if status['pending'] is not None:
+        pending = status['pending']
+        lines.append(f'Reserved trial: {pending["trial"]} ({pending["phase"]}), {pending["revision"]}.')
+    for key, label in (('last_observed_good', 'Last observed good'),
+                       ('first_observed_bad', 'First observed bad')):
+        if key in conclusion:
+            lines.append(label + ': ' + conclusion[key])
+    if 'possible_first_bad' in conclusion:
+        lines.append('Possible first-bad revisions: ' + ', '.join(conclusion['possible_first_bad']))
+    if status['trials']:
+        lines += ['', 'Recorded trials:']
+        for trial in status['trials']:
+            lines.append(f'  {trial["trial"]}: {trial["revision"]} ({trial["phase"]}) '
+                         f'{trial["classification"]}; experiment={trial["experiment_status"] or "not measured"}')
+            lines.append('    ' + text(trial['reason']))
+            if trial['failed_assertions']:
+                lines.append('    Failed assertions: ' + ', '.join(map(text, trial['failed_assertions'])))
+            lines.append('    Evidence: ' + text(trial['evidence']))
+    lines += ['', 'Performance: not_assessed. Regression policy: disabled.']
+    return '\n'.join(lines)
+
+
 def append_result(path, plan, records, selected, result_path):
     observed = classification(plan, selected['index'], result_path)
     if observed['source_attempt_id'] in {r['observed']['source_attempt_id'] for r in records if r['observed']}:
@@ -641,8 +720,10 @@ def main(argv=None):
     create.add_argument('--output', required=True)
     start = commands.add_parser('init')
     start.add_argument('plan'); start.add_argument('--session', required=True)
-    for name in ('next', 'step', 'run', 'record', 'recover', 'report'):
+    for name in ('status', 'next', 'step', 'run', 'record', 'recover', 'report'):
         command = commands.add_parser(name); command.add_argument('session')
+        if name == 'status':
+            command.add_argument('--json', action='store_true', help='emit verified progress as JSON instead of readable text')
         if name in ('step', 'run'):
             command.add_argument('--execute', action='store_true', help='explicitly authorize the selected local build and bounded recipe run')
         if name == 'record': command.add_argument('--result', required=True)
@@ -664,6 +745,11 @@ def main(argv=None):
                                max_trials=args.max_trials, worker_timeout=args.worker_timeout, build_timeout=args.build_timeout)
             write(safe(args.output), result)
         elif args.command == 'init': result = initialize(load(safe(args.plan)), args.session)
+        elif args.command == 'status':
+            result = session_status(args.session)
+            if not args.json:
+                print(render_status(result))
+                return 0
         elif args.command == 'next': result = next_trial(args.session)
         elif args.command in ('step', 'run'):
             result = (step(args.session) if args.command == 'step' else run_search(args.session)) if args.execute else next_trial(args.session)

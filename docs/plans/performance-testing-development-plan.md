@@ -66,7 +66,7 @@ budget or obtaining incomplete/inconclusive evidence ends it with calibration
 still deferred, without automatic extensions or another attempt. Neither this
 decision nor scheduling at an idle hour qualifies a host or enables policy.
 
-## Active maintainer-workflow readiness goal — 2026-11-01 UTC
+## Maintainer-workflow readiness goal — completed 2026-11-01 UTC
 
 The operator requested a larger outcome-based batch instead of a handoff after
 each small change. Starting from engine `90ec94e`, complete the supported
@@ -86,11 +86,48 @@ benchmark workers, downloads, remote transfer, deletion, pushes and publication
 are outside this goal. Report material limits rather than implying broader live
 or performance qualification.
 
-Audit found two bisection recovery defects (partial journal publication and
-failure recovery overridden by a supplied result) and investigation defects
-(retained package omitted after controller failure; incomplete report rebuilding
-losing missing statuses/reasons). Implementation and a coherent walkthrough are
-in progress; final validation and readiness conclusions will be recorded here.
+Delivered at engine `36687f4`: the
+[maintainer workflow](../maintainer-workflow.md) and maintained
+`scripts/maintainer_smoke.py` connect reproduction, an explicit local rollback,
+stopped investigation rebuilding, interrupted bisection recovery and fresh
+boundary confirmations. The README and roadmap link this usable entry point.
+
+The batch fixes both audited bisection defects: critical control records publish
+atomically without replacing existing evidence, and an existing failure retains
+priority during recovery. It also fixes both investigation defects: valid
+original worker packages survive outer controller failure with a separate
+checksummed stop record that withholds a pair verdict, and public offline
+`investigation-rebuild` retains packages, missing statuses/reasons and controller
+stops, including reports with no available baseline package.
+
+| Readiness check | Verified outcome |
+| --- | --- |
+| One coherent modeled problem | Same canonical crash recipe and nine-revision source history across all stages; candidate is explicitly a rollback. |
+| Original-observation integrity | All 11 original attempt IDs distinct; search and confirmations use fresh observations. |
+| Interrupted recovery | Two recorded plus one reserved trial becomes three recorded with no pending marker; recovered source ID and original manifest SHA unchanged, with no additional build or worker. |
+| Portable evidence | Independent offline verification of reproduction, resolved investigation, stopped/inconclusive investigation, pending report and confirmed boundary; all 14 recorded verification receipts valid. |
+| Usable result | All 13 human-index links resolve; public command arguments, exits, stdout and stderr remain retained. |
+| Regression validation | 152 focused checks and the standalone walkthrough passed; required full repository gate passed all 2,526 tests. |
+| Review | Independent review accepted implementation, compatibility, retained-demo evidence and documented scope. |
+
+Retained local review output:
+`/tmp/bgperf2-maintainer-readiness-20261101/REPORT.md`. Canonical recipe SHA-256:
+`6a9bbcadedf3202db9f0b95218a415dbc4a50ded0ea70de56434ac72d4af4c2c`.
+The public walkthrough reproduces the demonstration into a separately selected
+fresh output directory; this local path is not a prerequisite.
+
+Readiness is limited to the supported offline synthetic IPv4 BIRD workflow.
+It qualifies no new live source build, daemon, real bug/fix, hardware or timing
+detector. Worker packages and controller stops retain separate meanings;
+controller records/checksums do not authenticate execution. Invalid partial
+packages remain at their original work/results locations rather than being
+bundled as valid observations. Reports without controller stops retain their
+prior structure; new stopped reports add an optional stop reference and artifact.
+Bisection publication covers process interruption, not a general power-loss
+guarantee; previously malformed final journals remain refused for manual
+inspection. Status/recovery use the session lock and refuse active writers.
+Calibration remains deferred, performance policy disabled, and no real build,
+worker, download, evidence deletion/remote transfer, push or publication occurred.
 
 ## Preserved validation history
 

@@ -2,12 +2,83 @@
 
 Prepared 2026-11-01 UTC. The operator approved execution; the single admission
 attempt **stopped before any build or worker** because other development tests
-were running. This case is closed under its stop rules; see the execution record
-below. This is the next concrete
+were running. That manual case remains closed. The separately approved fresh
+hourly case subsequently completed its functional work, with independent
+supplemental acceptance after a lab closeout defect; see the records below.
+This is the next concrete
 case after checkout-preparation completion at `883f72e`, within the
 [developer performance testing plan](performance-testing-development-plan.md).
 It is a functional source/build/handoff check; performance policy stays disabled
 and formal reliable-10% calibration remains deferred.
+
+## Fresh hourly case: functional validation — 2026-11-01 UTC
+
+The operator selected the existing hourly quiet-host system for a fresh case
+with the same bounded source/build/workload question. It did not resume or
+consume unused positions from the manual refusal. Execution engine was
+`f07ce88203ec768d18a20fae2e810a3cbd4fe285`; lab/deployment source was `4d3d2ae`.
+Run `20261101T091001Z-e1d5cba621` dispatched once at 09:10:32–09:15:03 UTC.
+
+The new recipe SHA-256 is
+`523588455791c75130b8d22aca7d81d861beecd53d967338a5be74a4ba2d9ccb`.
+The actual upstream→derived packaging map is:
+
+| Role | Upstream revision | Derived revision |
+| --- | --- | --- |
+| Baseline, pre-2.19.2 | `62d6c38c2ddfbd74119641c7da251b6b7578c7e7` | `83d3b64f4c5eb24f6c2ec6e4c129a0da31a8ea3e` |
+| Candidate, 2.19.2 | `1d201ed0360c749dfe3d3b3b079329e7148159cd` | `5d872dbd5d42bd198e0615873304c0997b7ca731` |
+
+Both source archives reconstruct the selected upstream trees with only the
+two explicit BSD alias materializations. All thirteen selected public commands
+exited zero. Both build commands succeeded with the fixed local images and
+requested `-O2 -g` compile/link flags; baseline compilation actually ran, while
+candidate compilation/install used Docker cache. Two successful build commands
+therefore do not establish two newly performed full compilations or reproducible
+binaries. The original source checkout remains unchanged and source symlink
+guards remain enabled.
+
+All three distinct original workers completed within their 120-second budgets:
+the initial baseline reproduction, then a fresh serial baseline/candidate pair.
+Each established the selected session, completed injection, observed exactly
+100 routes and passed all four assertions. Tester errors/timeouts were zero.
+Controller worker elapsed times were 11.6321, 12.0855 and 12.0831 seconds; these
+include setup/observation and are not a target performance ranking. Baseline
+review acceptance preceded candidate build. Original and rebuilt investigation
+reports verify, and the before/baseline/final/terminal recorded Docker container,
+network and volume inventories agree. There were no retries, failed workers,
+interrupted workers or never-run worker positions.
+
+The final model review accepted the functional evidence. The lab adapter then
+rejected three citations to its own authorized frozen config, packet manifest
+and copied adapter, leaving the original controller outcome `blocked`. Lab
+follow-up `db901dd` fixes that citation boundary using exact file hashes, not a
+blanket directory allowance. It supplies separately reviewed supplemental
+acceptance and status reconciliation without editing the original blocked
+result, original reviews, deployed code or measurement packages. No build or
+worker reran during closeout. Queue scheduling and closure mechanics belong to
+the lab; they add no engine interface or measurement-definition change.
+
+The independent offline audit and accepted closeout are retained under
+`/tmp/bgperf2-real-bird-closeout-20261101/`; the original packet remains
+`/tmp/bgperf2-real-bird-hourly-20261101/case02/`. Complete measured local
+preservation is at
+`/home/jpietsch/bgperf-results/2026/real-bird-maintainer-closeout/20261101T091001Z-e1d5cba621/`.
+Its copy and readable archive cover 3,179 regular files, 877 directories and
+three socket metadata records. Source/archive UID/GID/mode/timestamps remain
+original; only copied-file ownership is explicitly normalized to the operator.
+All originals remain. This same-device local archive is not independent backup.
+
+Acceptance is **bounded functional compatibility** for this neutral, explicitly
+packaged source transition and fixed BIRD/BIRD/sink workload. Initial quiet
+admission and pre-stage checks passed, but rounded CSV foreign CPU maxima were
+114%, 7% and 114% of one core. They prohibit a quiet-throughout or controlled
+performance claim. Polling leaves injection boundaries unresolved; exact count
+does not establish route identity/attribute correctness. Optional memory
+timeouts, unsampled extremes, daemon RSS and binary reproducibility remain
+unknown. No upstream bug/fix, pristine-source, hardware, crash-bisection or
+general regression-detection qualification follows. Formal 10% calibration
+stays deferred and performance policy disabled. This finite runtime authority
+is consumed and authorizes no new execution.
 
 ## Question and source selection
 

@@ -203,7 +203,7 @@ No real daemon build/worker, download, evidence deletion/remote transfer, push
 or publication occurred. Original measurement evidence remains unchanged;
 formal 10% calibration stays deferred and performance policy disabled.
 
-## Real BIRD maintainer validation case — approved, stopped at admission
+## Real BIRD maintainer validation — hourly functional case passed
 
 The follow-on goal starts at `883f72e` and selects actual local upstream BIRD
 history rather than another inert fixture. The
@@ -241,8 +241,25 @@ floors passed, but they do not waive that condition. No automatic wait/retry or
 use of the unused positions follows. The
 [authoritative stopped-execution record](real-bird-maintainer-validation.md#approved-execution-stopped-at-admission--2026-11-01-utc)
 retains approval, observations, accounting and local preservation. Actual
-build/worker compatibility remains unassessed; policy is disabled and calibration
-deferred.
+build/worker compatibility remained unassessed by that manual attempt; policy
+stays disabled and calibration deferred.
+
+The operator then selected a fresh hourly case rather than resuming the manual
+refusal. At execution engine `f07ce88` and lab `4d3d2ae`, run
+`20261101T091001Z-e1d5cba621` completed two successful build commands and three
+distinct functional workers, with all twelve assertions, exact 100-route counts,
+original/rebuilt report verification and matching recorded cleanup inventories.
+Baseline compilation ran; candidate compilation reused cache. The final reviewer
+accepted the evidence, but a lab citation-scope check blocked controller closeout
+because it rejected its own frozen deployment inputs. Lab follow-up `db901dd`
+fixes exact-file citation validation and supplies independent supplemental
+closeout, measured preservation and status-only reconciliation. Original blocked
+records, measured artifacts and consumed budgets remain intact; no work reran.
+The [complete validation record](real-bird-maintainer-validation.md#fresh-hourly-case-functional-validation--2026-11-01-utc)
+retains source identities, local archive and acceptance limits. Foreign CPU was
+recorded during workers, so this qualifies bounded functional compatibility only;
+pristine-source support, actual bug/fix coverage, performance calibration and
+broader live bisection/diagnostics remain deferred.
 
 ## Preserved validation history
 

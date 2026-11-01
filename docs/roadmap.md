@@ -35,14 +35,18 @@ paths. Its maintained inert-Git example exercises real local preparation while
 leaving all build/worker/image/host readiness unassessed. Existing source and
 workload boundaries remain; no command in the handoff executes automatically.
 
-The next [real BIRD maintainer validation case](plans/real-bird-maintainer-validation.md)
-selects an adjacent upstream release transition, explicit alias-only packaging,
-two source builds and three functional workers. Its verified preparation uses
-actual local BIRD source. The operator approved it, but its single host admission
-stopped for concurrent development tests before any build or worker. The case
-is closed without automatic retry; both targets' functional outcomes remain
-unassessed. Both are expected to pass, so no upstream bug/fix or bisection
-boundary is claimed.
+The [real BIRD maintainer validation](plans/real-bird-maintainer-validation.md#fresh-hourly-case-functional-validation--2026-11-01-utc)
+now covers an adjacent upstream release transition with explicit alias-only
+packaging, two successful build commands and three completed functional workers.
+The manual admission refusal remains separate. A fresh approved hourly case
+passed all twelve assertions, source/package/report checks and recorded cleanup;
+candidate compilation reused cache. A lab citation-scope defect blocked original
+controller closeout after its final reviewer accepted the evidence. Independent
+offline acceptance and measured local preservation support a separate resolution,
+retaining that blocked record without rerunning work. Recorded foreign CPU
+prevents a quiet-throughout/performance claim. This is bounded functional
+compatibility for the adapted source, with no upstream bug/fix, pristine-source
+or bisection-boundary qualification.
 
 | Document | Status | Purpose |
 | --- | --- | --- |

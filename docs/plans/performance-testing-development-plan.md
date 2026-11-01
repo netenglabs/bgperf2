@@ -129,7 +129,7 @@ inspection. Status/recovery use the session lock and refuse active writers.
 Calibration remains deferred, performance policy disabled, and no real build,
 worker, download, evidence deletion/remote transfer, push or publication occurred.
 
-## Maintainer checkout preparation and handoff goal — in progress 2026-11-01 UTC
+## Maintainer checkout preparation and handoff goal — completed 2026-11-01 UTC
 
 The operator requested a larger follow-on goal after `df8b1d5`. Turn the
 supported workflow into a practical preparation path for an explicitly selected
@@ -169,8 +169,39 @@ Both retained public-CLI demonstrations passed with four prepared revisions,
 verified artifacts, unchanged original source and no requested execution:
 `/tmp/bgperf2-maintainer-checkout-ready-assertions-20261101` and
 `/tmp/bgperf2-maintainer-checkout-ready-crash-20261101`.
-Required full checks, commits and consolidated readiness reporting remain.
-No real daemon build/worker, download, push or publication is authorized here.
+
+Delivered at engine `a8ca2b3`. The
+[maintainer checkout guide](../maintainer-checkout.md) joins
+[isolated source-range preparation](../source-range.md), explicit dirty-fix
+planning and the [verified handoff](../maintainer-handoff.md). The README,
+roadmap and existing investigation/bisection guides point to that entry path.
+
+| Readiness check | Verified outcome |
+| --- | --- |
+| Historical preparation | Both assertion and crash demonstrations prepare all four consecutive revisions through the public CLI, using an independent local clone and isolated clean checkouts. |
+| Original checkout preservation | Before/after HEAD, refs, index, configuration and dirty/untracked bytes agree; independent review recomputed the original signatures and confirmed no hook execution. |
+| Source identity | Raw commit/tree/blob hashes are checked; hidden engine index flags, replacement objects, redirected Git metadata and corrupted object storage are refused. |
+| Reviewable execution case | Each handoff retains 19 unexecuted dependency-ordered steps, selected plans, exact budgets, future target paths and unknown image IDs; build/work/results/session destinations remain absent. |
+| Retained evidence | Independent verification accepts both range and handoff artifacts in each demonstration; all seven human-index links per demonstration resolve. |
+| Required validation | The native repository gate passed all 2,639 tests. Its first attempt exposed a missed legacy command mock (27 failures, 2,612 passes); the corrected preparation fixture passed all 31 focused tests before the complete successful rerun. |
+| Independent review | Implementation, adversarial verification cases, final retained artifacts and the incremental fixture correction accepted with no outstanding findings. |
+
+The two retained local demonstration directories above each contain `REPORT.md`,
+public command transcripts, original checkout signatures and verification
+receipts. `scripts/checkout_workflow_smoke.py` recreates either example into a
+fresh selected output directory; those local paths are not prerequisites.
+
+Readiness covers actual local Git preparation with inert fixtures, plus the
+separate previously completed simulated execution/recovery walkthrough. It
+establishes no real BIRD build, daemon bug/fix, image availability, host
+suitability or execution authorization. The original source must have its own
+supported `.git` directory; prepared checkout administration and handoff paths
+remain location-bound. Existing regular-file limits continue to refuse symlink
+aliases/submodules. Object hashes detect inconsistent content, not source trust
+or signed provenance. The handoff is inspectable metadata, not an executor.
+No real daemon build/worker, download, evidence deletion/remote transfer, push
+or publication occurred. Original measurement evidence remains unchanged;
+formal 10% calibration stays deferred and performance policy disabled.
 
 ## Preserved validation history
 

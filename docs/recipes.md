@@ -1,5 +1,9 @@
 # Portable recipe and result contracts
 
+The optional [shared artifact transport](artifact-storage.md) stores bulk files
+once and keeps result/report readers checksum-aware. It retains the existing
+result envelope; use explicit export when returning a standalone package.
+
 The recipe interface exports, validates, inspects and plans one existing batch
 cell offline. Its explicit `check` command reports observed local prerequisites
 without changing the host or acquiring images. `prepare` reports a local image

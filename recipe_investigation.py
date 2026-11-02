@@ -186,6 +186,15 @@ def _read_attempt(path, label, missing):
 
 def _copy_package(path, result, destination):
     root = Path(path).parent
+    from artifact_store import configured_store, capture_tree, StorageError
+    try:
+        store = configured_store()
+        if store:
+            capture_tree(root.absolute(), destination.absolute(), store)
+            verify_result_package(destination / 'result.json')
+            return
+    except StorageError as exc:
+        raise recipes.ContractError(str(exc)) from exc
     destination.mkdir(mode=0o700)
     names = [Path(path).name] + [item['path'] for item in result['artifacts'] if item['availability'] == 'present']
     for name in names:

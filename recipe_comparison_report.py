@@ -461,8 +461,8 @@ def verify_comparison_report(path):
             if entry['result']:
                 package = _load(Path(entry['result']).parent, 'result.json')
                 prefix = f"attempts/{entry['id']}/"
-                supported.add(prefix + 'result.json')
-                supported.update(prefix + artifact['path'] for artifact in package['artifacts'] if artifact['availability'] == 'present')
+                from recipe_results import package_inventory
+                supported.update(prefix + name for name in package_inventory(Path(entry['result']).parent, package))
         if listed != supported:
             raise recipes.ContractError('Unlisted content outside supported comparison evidence')
     except (KeyError, TypeError, ValueError, UnicodeError) as exc:

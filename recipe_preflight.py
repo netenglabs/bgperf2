@@ -366,6 +366,29 @@ def runtime_prerequisites(report, document):
     return env, host, bootstrap_ok
 
 
+def _store_destination(report, mounts):
+    from artifact_store import configured_store
+    try:
+        store = configured_store()
+        if store is None:
+            return
+        ancestor = store.root
+        while not os.path.lexists(ancestor):
+            ancestor = ancestor.parent
+        if not ancestor.is_dir() or not os.access(ancestor, os.W_OK | os.X_OK):
+            raise ProbeError('Store ancestor must be a writable searchable directory')
+        fs_type = filesystem_type(_mount_key(ancestor), mounts)
+        if fs_type is None or is_memory_backed(_mount_key(ancestor), mounts):
+            raise ProbeError('Artifact store requires identified disk-backed storage')
+        stats = os.statvfs(ancestor)
+        _add(report, 'destinations.artifact_store', 'pass',
+             'Explicit persistent store; no directories created and no capacity qualification.',
+             path=str(store.root), existing_ancestor=str(ancestor), filesystem_type=fs_type,
+             available_bytes=stats.f_bavail * stats.f_frsize)
+    except (OSError, ValueError, TypeError) as exc:
+        _add(report, 'destinations.artifact_store', 'refused', str(exc))
+
+
 def check_recipe(document, *, workdir, results_dir, target=None):
     """Take explicit bounded snapshots, without acquiring or creating anything."""
     from recipe_targets import effective_roles
@@ -373,6 +396,12 @@ def check_recipe(document, *, workdir, results_dir, target=None):
     report = _report(document, 'check')
     report['roles'] = copy.deepcopy(roles)
     report['target_override'] = copy.deepcopy(target)
+    from artifact_store import validate_destinations, StorageError
+    try:
+        validate_destinations(workdir, results_dir)
+    except StorageError as exc:
+        _add(report, 'destinations.artifact_store', 'refused', str(exc))
+        return report
     env, host, bootstrap_ok = runtime_prerequisites(report, document)
     for role, declaration in roles.items():
         if bootstrap_ok:
@@ -388,6 +417,7 @@ def check_recipe(document, *, workdir, results_dir, target=None):
     except OSError as exc:
         _add(report, 'destinations', 'refused', f'Cannot read filesystem mounts: {exc}')
     else:
+        _store_destination(report, mounts)
         work = _destination(report, 'workdir', workdir, mounts)
         results = _destination(report, 'results_dir', results_dir, mounts)
         if work is not None and results is not None:

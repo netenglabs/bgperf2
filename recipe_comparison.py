@@ -107,6 +107,11 @@ def run_comparison(plan, *, workdir, results_dir, run=None, check=None):
     Injection is library-only for deterministic tests and maintained simulations.
     """
     validate_comparison_plan(plan)
+    from artifact_store import validate_destinations, StorageError
+    try:
+        validate_destinations(workdir, results_dir)
+    except StorageError as exc:
+        raise recipes.ContractError(str(exc)) from exc
     work, results = _destinations(workdir, results_dir)
     from recipe_preflight import check_recipe
     precheck = check or check_recipe

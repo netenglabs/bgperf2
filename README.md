@@ -140,6 +140,10 @@ Try `-n1 -p1` first if anything looks wrong; see [Debugging](#debugging).
 
 ## <a name="outputs"></a>What a run writes
 
+Recipe workflows can use [shared artifact storage](docs/artifact-storage.md) to
+compress and deduplicate bulk evidence automatically. Comparisons reference the
+same objects; independent expanded packages are produced on explicit export.
+
 Everything generated goes under `results/` (gitignored), or `--results-dir`.
 Every file of a run is named from one stem built from what the run was —
 target, version, tester, prefixes, peers, and any filter, workload control,

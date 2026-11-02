@@ -226,6 +226,11 @@ def run_recipe(document, *, workdir, results_dir, timeout=300, target=None,
     always uses the real prerequisite checks and bounded existing-engine worker.
     """
     recipes.validate_recipe(document)
+    from artifact_store import validate_destinations, StorageError
+    try:
+        store = validate_destinations(workdir, results_dir)
+    except StorageError as exc:
+        raise recipes.ContractError(str(exc)) from exc
     from recipe_prefixes import validate_selection
     validate_selection(document, observer_prefixes)
     from recipe_targets import effective_roles, supplied_target, validate_target
@@ -276,12 +281,28 @@ def run_recipe(document, *, workdir, results_dir, timeout=300, target=None,
             outcome = {'status': 'harness_failed', 'reason': f'Runtime backend failed: {exc}'}
             _write(work / 'runtime.json', outcome)
         from recipe_results import write_result_package, verify_result_package
+        if store:
+            from artifact_samples import maybe_convert
+            maybe_convert(work, held_fds=(descriptor,))
         manifest = write_result_package(document, results_dir=results, workdir=work, attempt_id=attempt,
                                     status=outcome['status'], reason=outcome['reason'],
                                     exit_code=outcome.get('exit_code'), reproduction=outcome.get('reproduction'))
+        if store:
+            from artifact_store import sync_tree
+            try:
+                sync_tree(results)
+            except (OSError, StorageError) as exc:
+                raise recipes.ContractError(f'Result durability unverified; retain work and inspect result.json: {exc}') from exc
         verification = verify_result_package(results / 'result.json')
         if not verification['valid']:
             raise recipes.ContractError('Result verification failed; preserve attempt and inspect result.json')
+        if store and outcome.get('cleanup_errors') == [] and not (results / 'collection-errors.json').exists():
+            from artifact_store import reclaim, StorageError
+            try:
+                reclaim(work, results, prefix='work/')
+            except (OSError, StorageError) as exc:
+                # Storage reclamation cannot rewrite an observed experiment outcome.
+                print(f'Bulk work retained where reclamation could not verify it: {exc}', file=sys.stderr)
         return manifest
     finally:
         os.close(descriptor)

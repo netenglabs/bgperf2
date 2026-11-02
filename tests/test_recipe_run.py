@@ -10,6 +10,36 @@ import recipe_run
 import recipe_worker
 
 
+@pytest.mark.parametrize('status', ['completed', 'experiment_failed', 'interrupted', 'harness_failed'])
+def test_stored_attempt_reclaims_only_verified_bulk_after_backend_returns(tmp_path, monkeypatch, status):
+    monkeypatch.setenv('BGPERF_ARTIFACT_STORE', str(tmp_path / 'store'))
+    class Backend:
+        def execute(self, document, work, attempt, timeout):
+            (work / 'peer.log').write_bytes(b'evidence\n' * 150000)
+            (work / 'runtime.json').write_text(json.dumps({'status': status}))
+            return {'status': status, 'reason': 'SIMULATED stopped backend', 'cleanup_errors': []}
+    result = recipe_run.run_recipe(recipe(), workdir=tmp_path / 'work', results_dir=tmp_path / 'results',
+                                   backend=Backend(), check=lambda *a, **k: {'status': 'checks_passed'})
+    assert result['status'] == status
+    assert not (tmp_path / 'work/peer.log').exists()
+    assert (tmp_path / 'work/runtime.json').is_file()
+    from recipe_results import verify_result_package
+    assert verify_result_package(tmp_path / 'results/result.json')['valid']
+    assert len(list((tmp_path / 'store').glob('reclamation-*.jsonl'))) == 1
+
+
+@pytest.mark.parametrize('cleanup', [['writer alive'], None])
+def test_cleanup_errors_keep_bulk_work_even_after_sealed_storage(tmp_path, monkeypatch, cleanup):
+    monkeypatch.setenv('BGPERF_ARTIFACT_STORE', str(tmp_path / 'store'))
+    class Backend:
+        def execute(self, document, work, attempt, timeout):
+            (work / 'peer.log').write_bytes(b'evidence\n' * 150000)
+            return {'status': 'harness_failed', 'reason': 'SIMULATED cleanup failure', 'cleanup_errors': cleanup}
+    recipe_run.run_recipe(recipe(), workdir=tmp_path / 'work', results_dir=tmp_path / 'results',
+                          backend=Backend(), check=lambda *a, **k: {'status': 'checks_passed'})
+    assert (tmp_path / 'work/peer.log').is_file()
+
+
 def recipe():
     return recipes.read_document(Path(__file__).parents[1] / 'examples/recipes/synthetic-ipv4.recipe.json')
 

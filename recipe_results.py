@@ -32,6 +32,17 @@ class _RuntimeSocket(ContractError):
 def _regular_file(root, relative):
     """Refuse symlinks at every component, including an artifact's parents."""
     _artifact_path(relative, 'artifact path')
+    if not os.path.lexists(Path(root) / relative):
+        from artifact_store import reference, StorageError
+        try:
+            stored = reference(Path(root).absolute(), relative)
+            if stored:
+                store, ref = stored
+                with store.open(ref) as stream:
+                    yield stream
+                return
+        except (OSError, StorageError) as exc:
+            raise ContractError(f'{relative}: unavailable stored artifact: {exc}') from exc
     directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         parts = Path(relative).parts
@@ -75,7 +86,7 @@ def _kind(relative):
         return 'events'
     if name.endswith('.versions.json') or ('provenance' in name and name.endswith('.json')):
         return 'provenance'
-    if name.endswith(('.csv', '.stats')):
+    if name.endswith(('.csv', '.stats', '.parquet')):
         return 'samples'
     if name.endswith(('.yaml', '.yml', '.conf', '.cfg')):
         return 'configuration'
@@ -84,8 +95,8 @@ def _kind(relative):
     return 'other'
 
 
-def write_result_package(recipe, *, results_dir, workdir, attempt_id, status,
-                         reason, exit_code=None, reproduction=None, artifacts=None):
+def _write_result_package(recipe, *, results_dir, workdir, attempt_id, status,
+                          reason, exit_code=None, reproduction=None, artifacts=None, store=None):
     """Snapshot available work, retaining partial evidence on collection errors.
 
     Both roots must be private attempt directories owned by the caller. Existing
@@ -94,6 +105,7 @@ def write_result_package(recipe, *, results_dir, workdir, attempt_id, status,
     nonregular work entries are collection errors, never dereferenced. ``artifacts``
     optionally maps relative package paths to a contract artifact kind.
     """
+    from artifact_store import StorageError
     validate_recipe(recipe)
     if status not in RESULT_EXIT_CODES:
         raise ContractError(f'unknown result status: {status}')
@@ -114,11 +126,11 @@ def write_result_package(recipe, *, results_dir, workdir, attempt_id, status,
         if kind not in ARTIFACT_KINDS:
             raise ContractError(f'{path}: unknown artifact kind {kind}')
     results.mkdir(parents=True, exist_ok=True)
-    for reserved in ('recipe.json', 'result.json', 'SUMMARY.txt', 'collection-errors.json',
+    for reserved in ('recipe.json', 'result.json', 'SUMMARY.txt', 'collection-errors.json', '.artifact-store.json',
                      'collection-omissions.json', 'work'):
         if os.path.lexists(results / reserved):
             raise ContractError(f'{results / reserved}: package output already exists')
-    errors, omissions = [], []
+    errors, omissions, stored_files = [], [], {}
     (results / 'work').mkdir()
     if work.exists():
         for directory, dirs, files in os.walk(work, followlinks=False,
@@ -132,17 +144,24 @@ def write_result_package(recipe, *, results_dir, workdir, attempt_id, status,
             for name in sorted(files):
                 relative = (base / name).relative_to(work).as_posix()
                 try:
-                    target = results / 'work' / relative
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    with _regular_file(work, relative) as source, target.open('xb') as stream:
-                        shutil.copyfileobj(source, stream, length=1024 * 1024)
+                    from artifact_store import large_artifact
+                    with _regular_file(work, relative) as source:
+                        if store and large_artifact(relative, os.fstat(source.fileno()).st_size):
+                            stored_files['work/' + relative] = store._put(source)
+                        else:
+                            target = results / 'work' / relative
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            with target.open('xb') as stream:
+                                shutil.copyfileobj(source, stream, length=1024 * 1024)
                 except _RuntimeSocket:
                     omissions.append({'path': 'work/' + relative, 'type': 'unix_socket',
                                       'reason': 'Runtime Unix-domain sockets are not portable evidence files; not read or copied.'})
-                except (OSError, ContractError) as exc:
+                except (OSError, ContractError, StorageError) as exc:
                     errors.append(f'{relative}: {exc}')
     else:
         errors.append('work directory unavailable; no work artifacts collected')
+    if store:
+        store._catalog(results.absolute(), stored_files)
     _write(results / 'recipe.json', canonical_json(recipe) + '\n')
     if omissions:
         _write(results / 'collection-omissions.json', _json({'omissions': omissions}))
@@ -192,10 +211,16 @@ def write_result_package(recipe, *, results_dir, workdir, attempt_id, status,
                 raise ContractError('symlink directory in result package')
         for name in sorted(files):
             relative = (base / name).relative_to(results).as_posix()
+            if relative == '.artifact-store.json':
+                continue  # transport metadata; original artifact hashes remain authoritative
             digest = _digest_file(results, relative)
             references.append({'kind': overrides.get(relative, _kind(relative)),
                                'path': relative, 'sha256': digest,
                                'availability': 'present', 'reason': None})
+    for relative, ref in sorted(stored_files.items()):
+        references.append({'kind': overrides.get(relative, _kind(relative)),
+                           'path': relative, 'sha256': ref['sha256'],
+                           'availability': 'present', 'reason': None})
     kinds = {item['kind'] for item in references}
     for kind in ARTIFACT_KINDS[:-1]:
         if kind not in kinds:
@@ -213,6 +238,35 @@ def write_result_package(recipe, *, results_dir, workdir, attempt_id, status,
     return manifest
 
 
+def write_result_package(recipe, **kwargs):
+    from contextlib import nullcontext
+    from artifact_store import validate_destinations, StorageError
+    try:
+        store = validate_destinations(kwargs['results_dir'], kwargs['workdir'])
+        with store.locked() if store else nullcontext():
+            return _write_result_package(recipe, store=store, **kwargs)
+    except StorageError as exc:
+        raise ContractError(str(exc)) from exc
+
+
+def package_inventory(root, document):
+    """Physical transport inventory after the logical result has been verified."""
+    from artifact_store import load_catalog, CATALOG
+    root = Path(root)
+    catalog = load_catalog(root.absolute())
+    names = {'result.json'}
+    if catalog:
+        names.add(CATALOG)
+    for artifact in document['artifacts']:
+        if artifact['availability'] != 'present':
+            continue
+        name = artifact['path']
+        if catalog and name in catalog['files'] and not os.path.lexists(root / name):
+            continue
+        names.add(name)
+    return names
+
+
 def verify_result_package(manifest_path):
     """Verify declarations, actual file bytes and the bundled recipe binding."""
     manifest_path = Path(manifest_path)
@@ -227,6 +281,11 @@ def verify_result_package(manifest_path):
     except (UnicodeError, ValueError) as exc:
         raise ContractError(f'manifest: invalid JSON: {exc}') from exc
     validate_result(document)
+    from artifact_store import load_catalog, StorageError, CATALOG
+    try:
+        catalog = load_catalog(root.absolute())
+    except StorageError as exc:
+        raise ContractError(str(exc)) from exc
     verified = 0
     listed = set()
     for artifact in document['artifacts']:
@@ -250,12 +309,14 @@ def verify_result_package(manifest_path):
                 raise ContractError('symlink directory in result package')
         for name in files:
             relative = (base / name).relative_to(root).as_posix()
-            if relative == manifest_path.name:
+            if relative == manifest_path.name or (relative == CATALOG and catalog is not None):
                 continue
             if relative not in listed:
                 raise ContractError(f'{relative}: unlisted artifact in result package')
             with _regular_file(root, relative):
                 pass
+    if catalog and set(catalog['files']) - listed:
+        raise ContractError('Unlisted stored artifact in result package')
     if 'recipe.json' not in listed:
         raise ContractError('package must include a checksummed recipe.json')
     try:

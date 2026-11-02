@@ -18,6 +18,31 @@ from recipe_targets import supplied_target, effective_roles
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_repeated_reports_reference_one_object_and_export_without_store(tmp_path, plan, monkeypatch):
+    from artifact_store import export_tree, Store
+    entries = attempts(tmp_path / 'sources', plan)
+    raw = b'unchanged generator config\n' * 60000
+    for entry in entries:
+        path = Path(entry['result'])
+        (path.parent / 'work/peer.conf').write_bytes(raw)
+        document = json.loads(path.read_text())
+        document['artifacts'].append({'kind': 'configuration', 'path': 'work/peer.conf',
+                                      'sha256': hashlib.sha256(raw).hexdigest(),
+                                      'availability': 'present', 'reason': None})
+        path.write_text(json.dumps(document))
+    monkeypatch.setenv('BGPERF_ARTIFACT_STORE', str(tmp_path / 'store'))
+    for index in range(3):
+        output = tmp_path / 'reports' / f'report-{index}'
+        build_comparison_report(plan, entries, output)
+        assert verify_comparison_report(output / 'comparison.json')['valid']
+        assert not list(output.glob('attempts/*/work/peer.conf'))
+    assert len(list((tmp_path / 'store/objects').glob('*/*.zst'))) == 1
+    export_tree(tmp_path / 'reports', tmp_path / 'portable')
+    (tmp_path / 'store').rename(tmp_path / 'absent-store')
+    for index in range(3):
+        assert verify_comparison_report(tmp_path / 'portable' / f'report-{index}' / 'comparison.json')['valid']
+
+
 @pytest.fixture
 def plan():
     recipe = recipes.read_document(ROOT / 'examples/recipes/synthetic-ipv4.recipe.json')

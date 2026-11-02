@@ -24,6 +24,25 @@ def no_probe(*args, **kwargs):
     raise AssertionError('unexpected prerequisite probe')
 
 
+def test_nested_storage_binding_refused_before_runtime_probes(document, tmp_path, monkeypatch):
+    monkeypatch.setenv('BGPERF_ARTIFACT_STORE', str(tmp_path / 'work/store'))
+    monkeypatch.setattr(preflight, 'runtime_prerequisites', no_probe)
+    report = preflight.check_recipe(document, workdir=tmp_path / 'work', results_dir=tmp_path / 'results')
+    assert report['status'] == 'refused'
+    assert 'nonnested' in report['checks'][-1]['reason']
+    assert not list(tmp_path.iterdir())
+
+
+def test_store_location_refuses_ram_and_does_not_create_directories(tmp_path, monkeypatch):
+    monkeypatch.setenv('BGPERF_ARTIFACT_STORE', str(tmp_path / 'new-store'))
+    monkeypatch.setattr(preflight, 'filesystem_type', lambda *a: 'tmpfs')
+    monkeypatch.setattr(preflight, 'is_memory_backed', lambda *a: True)
+    report = {'checks': [], 'status': 'checks_passed'}
+    preflight._store_destination(report, 'unused')
+    assert report['checks'][0]['status'] == 'refused'
+    assert not list(tmp_path.iterdir())
+
+
 def checks(report):
     assert report['schema'] == 'bgperf2/prerequisites/v1alpha1'
     assert report['execution'] == 'not_requested'

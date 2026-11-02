@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
 """Local Git gate. No benchmark execution and no remote Docker access."""
 import os
+import importlib.util
 from pathlib import Path
 import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 LOCK_NAMES = {'batch-driver.lock', '.block.lock', '.spot-boot.lock', '.bgperf-measurement.lock'}
+
+_spec = importlib.util.spec_from_file_location('bgperf_dev_checks', ROOT / 'scripts/dev_checks.py')
+_checks = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_checks)
+
+
+def checked(profile, *args, env=None, python=None, bindings=()):
+    return _checks.check(ROOT, profile, args, env=env, python=python, bindings=bindings)
 
 
 def command(*args, capture=False, cwd=ROOT, env=None):
@@ -92,9 +101,9 @@ def push_ranges(stream):
 
 def main():
     if len(sys.argv) < 2:
-        raise ValueError('Usage: quality_gate.py pre-commit|pre-push|--guard-only')
+        raise ValueError('Usage: quality_gate.py validate|pre-commit|pre-push|--guard-only')
     mode = sys.argv[1]
-    if mode not in ('pre-commit', 'pre-push', '--guard-only'):
+    if mode not in ('validate', 'pre-commit', 'pre-push', '--guard-only'):
         raise ValueError('Unknown gate ' + mode)
     guard()
     if mode == '--guard-only':
@@ -115,7 +124,7 @@ def main():
     command(python, '-I', ROOT / 'scripts/bootstrap.py', '--check')
     pure_env = os.environ.copy()
     pure_env.pop('BGPERF_ENGINE_ROOT', None)
-    command(python, '-m', 'pytest', '-q', env=pure_env)
+    checked('python-pure', python, '-m', 'pytest', '-q', env=pure_env, python=python)
     if mode == 'pre-push' and (ROOT / 'bgp/scripts/batch_driver.py').is_file():
         binding = os.environ.get('BGPERF_ENGINE_ROOT', '')
         engine = Path(binding)
@@ -138,7 +147,8 @@ def main():
     if mode == 'pre-push' and (ROOT / 'sink').is_dir():
         if any(git('diff', '--name-only', base, tip, '--', 'sink/') for base, tip in ranges):
             guard()
-            command(ROOT / 'scripts/sink_go_test.sh', env=local_docker_environment())
+            checked('sink-go-vet-race', ROOT / 'scripts/sink_go_test.sh',
+                    env=local_docker_environment(), python=python)
 
 
 if __name__ == '__main__':

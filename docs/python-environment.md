@@ -61,6 +61,10 @@ access, or a separately supplied cache of the matching wheels.
 
 ## Local Git quality gates
 
+[Bounded local review and validation receipts](local-delivery-checks.md) supplies
+the prepare/review/validate workflow. Hooks reuse successful exact-state checks
+for at most 24 hours; guard, environment and push-safety checks remain fresh.
+
 The guard requires readable Linux procfs and a reachable local Docker daemon,
 even though the Python suite itself does not use Docker.
 

@@ -1,4 +1,5 @@
 venv/
+/.dev-checks/
 __pycache__/
 *.pyc
 

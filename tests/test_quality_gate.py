@@ -13,6 +13,13 @@ gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
 
+@pytest.fixture(autouse=True)
+def uncached_gate_commands(monkeypatch):
+    # These tests isolate guard/selection behavior; receipts have real-Git tests.
+    monkeypatch.setattr(gate, 'checked', lambda profile, *args, env=None, **kw:
+                        gate.command(*args, env=env))
+
+
 def test_running_measurement_refuses(monkeypatch):
     monkeypatch.setattr(gate.Path, 'read_text', lambda self: '')
     monkeypatch.setattr(gate.Path, 'glob', lambda self, pattern: [])

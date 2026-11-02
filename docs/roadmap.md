@@ -59,6 +59,7 @@ or bisection-boundary qualification.
 
 | Document | Status | Purpose |
 | --- | --- | --- |
+| [Bounded local delivery checks](plans/local-delivery-checks.md) | Implemented; local validation in progress | One local review contract and exact-state validation receipts in existing hooks |
 | [Shared artifact storage](plans/artifact-storage.md) | Implemented and locally validated; deployment pending | Deduplicated evidence objects, reference packages, automatic verified work reclamation and optional Parquet export |
 | [Developer performance testing plan](plans/performance-testing-development-plan.md) | A/B functionally validated; C descriptive workflow delivered, calibrated detection deferred; bounded deterministic D live validation passed | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |
 | [Architecture design](plans/architecture-design.md) | Supporting proposal; reconciled with shipped foundations | Recipe/result records, lifecycle boundaries, observations and compatibility strategy |

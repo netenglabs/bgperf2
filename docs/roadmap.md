@@ -1,11 +1,17 @@
 # bgperf2 roadmap
 
-Updated 2026-11-01 UTC. This is the public index of engine development plans.
+Updated 2026-11-02 UTC. This is the public index of engine development plans.
 Everything needed to understand, use and contribute to bgperf2 belongs in this
 repository. Other projects can build campaigns and services on its documented
 CLI and versioned artifacts; none is required to use the engine.
 
 ## Current direction
+
+The [upstream BIRD correctness screen](plans/upstream-bird-correctness-screening.md)
+records four documented historical fixes and their supported-workload gaps.
+The pending-export statistics fix is plausibly reachable through existing
+monitoring, but its trigger overlap and baseline/fixed difference remain
+unverified. No upstream reproducer or execution-ready case is claimed.
 
 Received IPv4 prefix identity is implemented at `e7798ad`: an opt-in bounded
 final snapshot and assertion distinguish equal counts with different prefixes
@@ -13,8 +19,8 @@ in offline tests. Its [real-BIRD runtime case](plans/observer-prefix-runtime-val
 was prepared at `9bcfe1d` and approved, then stopped at admission because other
 development tests were running. Zero builds, probes or workers ran; runtime
 compatibility remains unassessed. That finite approval is consumed. A fresh
-case/decision is required before another attempt; source-bug selection remains
-deferred.
+case/decision is required before another attempt. The resumed upstream source-bug
+screen above is separate from prefix-identity runtime qualification.
 
 Make bgperf2 a performance tester that daemon developers can use to reproduce
 problems, test their own fixes and investigate regressions. Reuse existing

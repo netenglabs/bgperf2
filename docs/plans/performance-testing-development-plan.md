@@ -14,7 +14,10 @@ broader live bisection/diagnostics and performance calibration remain deferred. 
 The operator's next selected implementation goal on 2026-11-01 is
 [received IPv4 prefix identity](observer-prefix-identity.md), strengthening the
 existing synthetic correctness witnesses beyond count agreement. Upstream BIRD
-test selection is deferred. The bounded opt-in final snapshot is distinct from
+test selection was deferred at that decision; the
+[resumed correctness screen](upstream-bird-correctness-screening.md) now records
+four investigated fixes without claiming an execution-ready reproducer.
+The bounded opt-in final snapshot is distinct from
 route attributes, convergence-time identity, calibration and broader workloads.
 
 The operator accepted deferring formal reliable-10%-slowdown calibration after

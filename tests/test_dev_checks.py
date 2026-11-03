@@ -299,3 +299,14 @@ def test_nested_suite_preserves_callers_index_binding(tmp_path):
                             cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
     assert caller_index.read_bytes() == b'caller index must remain untouched'
+
+
+def test_public_snapshot_cli_is_readable_by_offline_consumers(repo):
+    root, git = repo
+    before = git('rev-parse', 'HEAD')
+    output = subprocess.check_output([sys.executable, '-I', str(ROOT / 'scripts/dev_checks.py'),
+                                      '--repo', str(root), '--snapshot'], text=True)
+    document = json.loads(output)
+    assert document['schema'] == 'bgperf2/local-source/v1'
+    assert document['snapshot'] == checks.snapshot(root)
+    assert git('rev-parse', 'HEAD') == before and git('status', '--porcelain') == b''

@@ -234,14 +234,19 @@ def check(root, profile, argv, *, env=None, python=None, bindings=(), timeout=12
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo', type=Path, required=True)
-    parser.add_argument('--profile', required=True)
+    parser.add_argument('--profile')
+    parser.add_argument('--snapshot', action='store_true', help='Print the current source identity without running a check')
     parser.add_argument('--python', type=Path)
     parser.add_argument('--binding', type=Path, action='append', default=[])
     parser.add_argument('--timeout', type=float, default=1200)
     parser.add_argument('command', nargs=argparse.REMAINDER)
     args = parser.parse_args()
+    if args.snapshot:
+        normal_index(args.repo)
+        print(json.dumps({'schema': 'bgperf2/local-source/v1', 'snapshot': snapshot(args.repo)}, sort_keys=True))
+        return
     argv = args.command[1:] if args.command[:1] == ['--'] else args.command
-    if not argv or args.timeout <= 0:
+    if not args.profile or not argv or args.timeout <= 0:
         parser.error('a command and positive timeout are required')
     check(args.repo, args.profile, argv, python=args.python, bindings=args.binding, timeout=args.timeout)
 

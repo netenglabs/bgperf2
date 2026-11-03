@@ -97,5 +97,14 @@ with the checker; otherwise its checks run without reuse. Integration and pure
 lab tests retain distinct profiles and interpreters. No engine binding is
 required for ordinary lab tests.
 
-Cross-repository delivery, worktree/bootstrap preparation and historical data
-migration are deferred; see the [implementation plan](plans/local-delivery-checks.md).
+Consumers can read the exact local source identity without running a check:
+
+```sh
+venv/bin/python -I scripts/dev_checks.py --repo /absolute/checkout --snapshot
+```
+
+The `bgperf2/local-source/v1` response contains `snapshot` with the same source
+identity used by receipts. It initializes no runtime and publishes no receipt.
+Consumers own delivery journals, worktree setup and deployment; none is required
+for this engine workflow. Historical data migration remains separate. See the
+[implementation plan](plans/local-delivery-checks.md).

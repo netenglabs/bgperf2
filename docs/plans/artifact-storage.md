@@ -4,8 +4,10 @@ Selected by the operator on 2026-11-01 after local evidence cleanup showed that
 successive report packages repeatedly copied the same tester logs and configs.
 This is storage work; it authorizes no experiments, source builds or transfers.
 
-Implementation branch: `feature/artifact-storage`. Commits and pushes are
-operator-authorized; production deployment remains pending.
+Implementation branch: `feature/artifact-storage`. The storage core is published
+in `6b56a29`, with test binding isolation in `9a9bf34`. Initial consumer
+deployment was activated and verified on 2026-11-03 UTC (2026-11-02 Pacific).
+Consumers retain ownership of their deployment and worker pins.
 
 ## Scope and ownership
 
@@ -40,11 +42,27 @@ Historical attempts and frozen controller pins remain unchanged.
 - [x] Lab public-CLI capture/reclamation and stored-report accounting tested.
 - [x] Final full engine/lab suites and implementation review recorded.
 - [x] Operator authorization to commit and push both implementations.
-- [ ] New production engine/consumer pins and timer activation.
+- [x] New local production engine/consumer pins and timer activation.
 
-The last item is deployment, not a reason to claim that frozen running jobs
-already consume this implementation. No benchmarks are required to validate
-these pure storage changes; existing runtime qualification remains unchanged.
+Activation covers explicitly configured new local workflows. Frozen running
+jobs retain their original pins. No benchmarks are required to validate these
+pure storage changes; existing runtime qualification remains unchanged.
+
+## Initial deployment — 2026-11-03 UTC
+
+The consumer installed dedicated clean release checkouts at engine `6eb876d`
+and lab `5757f9a`, a persistent separate PyArrow 26.0.0 environment, storage
+defaults and a pinned launcher. The idle-host maintenance timer is enabled;
+its first apply run completed successfully with zero evidence expired. Installed
+configuration hashes and the exact bindings are recorded by the consumer's
+deployment journal, outside tracked source.
+
+The maintained simulated smoke verified two independent attempts and three
+checkpoints sharing two bulk objects, matching-work reclamation, an independently
+verified portable export, and exported Parquet tables preserving nulls. No real
+benchmark, historical evidence migration or remote evidence transfer was run.
+Later source publication (`376ca38` and consumer `bf682b4`) supplies the generic
+setup/delivery tools; it does not silently move those deployed worker pins.
 
 ## Local validation — 2026-11-01 Pacific
 

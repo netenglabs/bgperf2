@@ -1,11 +1,17 @@
 # bgperf2 roadmap
 
-Updated 2026-11-01 UTC. This is the public index of engine development plans.
+Updated 2026-11-03 UTC. This is the public index of engine development plans.
 Everything needed to understand, use and contribute to bgperf2 belongs in this
 repository. Other projects can build campaigns and services on its documented
 CLI and versioned artifacts; none is required to use the engine.
 
 ## Current direction
+
+The [upstream BIRD correctness screen](plans/upstream-bird-correctness-screening.md)
+records four documented historical fixes and their supported-workload gaps.
+The pending-export statistics fix is plausibly reachable through existing
+monitoring, but its trigger overlap and baseline/fixed difference remain
+unverified. No upstream reproducer or execution-ready case is claimed.
 
 Received IPv4 prefix identity is implemented at `e7798ad`: an opt-in bounded
 final snapshot and assertion distinguish equal counts with different prefixes
@@ -13,8 +19,8 @@ in offline tests. Its [real-BIRD runtime case](plans/observer-prefix-runtime-val
 was prepared at `9bcfe1d` and approved, then stopped at admission because other
 development tests were running. Zero builds, probes or workers ran; runtime
 compatibility remains unassessed. That finite approval is consumed. A fresh
-case/decision is required before another attempt; source-bug selection remains
-deferred.
+case/decision is required before another attempt. The resumed upstream source-bug
+screen above is separate from prefix-identity runtime qualification.
 
 Make bgperf2 a performance tester that daemon developers can use to reproduce
 problems, test their own fixes and investigate regressions. Reuse existing
@@ -59,12 +65,19 @@ or bisection-boundary qualification.
 
 | Document | Status | Purpose |
 | --- | --- | --- |
-| [Bounded local delivery checks](plans/local-delivery-checks.md) | Implemented; local validation in progress | One local review contract and exact-state validation receipts in existing hooks |
-| [Shared artifact storage](plans/artifact-storage.md) | Implemented and locally validated; deployment pending | Deduplicated evidence objects, reference packages, automatic verified work reclamation and optional Parquet export |
+| [Bounded local delivery checks](plans/local-delivery-checks.md) | Implemented, reviewed and published | One local review contract and exact-state validation receipts in existing hooks |
+| [Shared artifact storage](plans/artifact-storage.md) | Implemented and published; initial consumer deployment active | Deduplicated evidence objects, reference packages, automatic verified work reclamation and optional Parquet export |
 | [Developer performance testing plan](plans/performance-testing-development-plan.md) | A/B functionally validated; C descriptive workflow delivered, calibrated detection deferred; bounded deterministic D live validation passed | Delivery sequence and acceptance for recipes, local builds, diagnostics, comparisons, assertions and bisection; later minimization |
 | [Architecture design](plans/architecture-design.md) | Supporting proposal; reconciled with shipped foundations | Recipe/result records, lifecycle boundaries, observations and compatibility strategy |
 | [Future testing workloads](plans/future-testing-workloads.md) | Deferred | Preserve policy, IPv6 and other workload ideas without scheduling their implementation |
 | [Policy engine design](plans/policy-testing-engine-design.md) | Deferred | Semantic policy model, conformance, adapter/generator/observer requirements and implementation risks |
+
+Storage and delivery changes are published through engine `376ca38` and the
+consumer lab's `bf682b4`. The initial local storage deployment has verified
+Parquet conversion, shared-object collection, portable export and idle-host
+maintenance. Deployment applies to explicitly configured new workflows;
+historical frozen jobs retain their pins. This is storage/workflow validation,
+not a new benchmark or measurement-host qualification.
 
 Phase 0 ships a Docker-free [recipe/result contract](recipes.md) and public
 fixtures. Phase 1a adds offline planning and explicit read-only prerequisite

@@ -1,13 +1,15 @@
 # Bounded local review and validation reuse
 
 Selected 2026-11-01 after a commit/push expanded into repeated broad reviews and
-full-suite runs. Status: implemented and locally validated; not yet committed.
+full-suite runs. Status: implemented, reviewed, validated and published in
+engine `6eb876d`, with the public source snapshot interface in `376ca38`.
 This plan authorizes tooling changes, not benchmarks, deployment or publication.
 
 Scope is one reusable local review runner and conservative success receipts in
-existing quality gates. Cross-repository delivery, worktree preparation and
-legacy evidence migration remain separate future work. The lab consumes the
-engine's standalone checker through an explicit binding, without copying it.
+existing quality gates. Cross-repository delivery and worktree preparation are
+delivered in consumer lab `bf682b4`; legacy evidence migration remains separate.
+The lab consumes the engine's standalone checker through an explicit binding,
+without copying it. Neither the lab nor its deployment is required by the engine.
 
 Decisions:
 
@@ -68,8 +70,8 @@ Remaining nonblocking limits: Git injects PATH/editor variables into hooks, so a
 manual validation may miss even before HEAD changes; identical hook retries can
 reuse their own receipt. The check deadline is 20 minutes, and arbitrary source
 aliases can be unreadable. No claim of universal cache hits or external system
-fingerprinting is made. Cross-repository delivery and worktree setup remain
-deferred rather than being added during commit/push.
+fingerprinting is made. Consumer delivery and worktree setup were completed in
+the separately selected lab follow-on; their implementation stays with the lab.
 
 No real model/network request is required to validate the runner protocol.
 Maintained fake backends exercise the contract deterministically. An actual

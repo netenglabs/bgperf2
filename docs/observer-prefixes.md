@@ -37,10 +37,14 @@ new capability rather than treating it as count agreement. Old packages without
 the new evidence evaluate identity as `unmeasured`, leaving the overall assertion
 outcome inconclusive unless another selected assertion fails.
 
-Capture currently belongs only to standalone `run`. Comparison, investigation
-and bisection plans do not enable it. Selecting this assertion for their packages
-without snapshot evidence yields unmeasured, not an inferred pass. No action,
-policy, IPv6 or broader workload support is added.
+Capture is selected by standalone `run --observer-prefixes` or
+[`investigate --observer-prefixes`](investigations.md#optional-received-prefix-correctness),
+which forwards it symmetrically to both functional attempts. The latter also
+evaluates all six named assertions in a separate report view. Report-only
+`investigation-report --observer-prefixes` evaluates existing packages without
+starting capture; missing evidence remains unmeasured. Repeated comparison and
+bisection plans do not enable capture. No action, policy, IPv6 or broader
+workload support is added.
 
 ## Snapshot and evidence boundaries
 

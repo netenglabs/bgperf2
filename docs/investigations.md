@@ -10,6 +10,72 @@ fixed. The initial supported adapter is synthetic IPv4 BIRD/BIRD/sink. This is
 one functional investigation; statistical performance comparison remains a later
 milestone.
 
+## Optional received-prefix correctness
+
+For the supported synthetic IPv4 workload, add `--observer-prefixes` to
+`investigate` to request the same bounded final snapshot on **both** baseline
+and candidate. Use a supporting immutable sink image and at most 100,000
+expected prefixes. Invalid capture selection refuses before host checks or
+destination creation. Omitting the option preserves existing execution, plan,
+report and default assertion behavior.
+
+```sh
+venv/bin/python recipes.py investigate /absolute/artifacts/recipe.json \
+  --baseline-target /absolute/artifacts/baseline-target.json \
+  --candidate-target /absolute/artifacts/candidate-target.json \
+  --observer-prefixes --diagnostics basic --timeout 120 \
+  --workdir /absolute/disk/work/pair-001 \
+  --results-dir /absolute/disk/results/pair-001
+venv/bin/python recipes.py investigation-verify \
+  /absolute/disk/results/pair-001/report/investigation.json
+```
+
+Each side retains its own original result package, selection/capture receipts,
+clock bounds and target identity. The report's optional `correctness` view
+evaluates all six existing named assertions against the verified packages.
+The human table lists count (`observer.count`) and identity (`observer.prefixes`)
+separately: equal counts can accompany a failed prefix-set check. The selected
+command's JSON result also includes this view. Expected sets come from the
+recipe, never from a count observed in the result.
+Diagnostics remain independently selected; `--diagnostics none` can leave role
+health unmeasured instead of manufacturing a passing health observation.
+
+Recipe reproduction and named correctness are independent. `investigate` exit
+0 means the controller recorded its pair; `investigation-verify` success means
+the evidence and prose agree. Neither means every selected assertion passed.
+Read each side's `correctness.attempts` outcome and individual assertion status.
+An unavailable capture is unmeasured, not an empty set, mismatch or pass. A
+missing attempt keeps its original reason and an inconclusive correctness
+entry with no fabricated assertions. Existing harness/interruption/controller
+stop rules still prevent successors when required and preserve partial work.
+
+For already collected target-bound packages, request evaluation explicitly:
+
+```sh
+venv/bin/python recipes.py investigation-report \
+  --baseline /absolute/baseline/result.json --candidate /absolute/candidate/result.json \
+  --observer-prefixes --output-dir /absolute/new/report
+venv/bin/python recipes.py investigation-rebuild /absolute/new/report/investigation.json \
+  --output-dir /absolute/new/rebuilt-report
+```
+
+The report-only flag requests an evaluation view; it starts no capture and is
+not proof that either package captured prefixes. Old or incomplete packages
+remain unmeasured. The view is optional; omitting it is not a prefix pass or an
+authentication of the original caller's evaluation intent. Rebuild preserves
+the selected view, controller stops and original IDs. Verification reconstructs
+the named outcomes from bundled, hash-verified evidence, including stored
+logical artifacts, and refuses altered summaries or prose even when their
+report checksums are recomputed. Older engines refuse the new optional report
+field; existing reports without it retain their original format and semantics.
+
+The [prefix contract](observer-prefixes.md) defines one post-measurement snapshot,
+not convergence-time identity, attributes or continuous correctness. Capture
+has uncalibrated overhead and qualifies no timing comparison. Use the
+[immediate functional protocol](functional-validation.md) for a separately
+authorized small pair. Repeated comparisons and bisection capture remain deferred;
+performance policy is disabled and formal 10% calibration deferred.
+
 For repeated target comparisons and named observable correctness checks, follow
 the [comparison guide](comparisons.md). The single-pair workflow here preserves
 its functional meaning; repeated descriptive statistics do not enable calibrated

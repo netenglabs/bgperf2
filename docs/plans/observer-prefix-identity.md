@@ -27,7 +27,9 @@ bounded/failed socket reads; accepted/rejected replacement, withdrawals, session
 reset and concurrent capture. Independently review code before local commit and
 run native repository gates plus offline Go race/vet checks with cached modules.
 
-Comparison, investigation and bisection capture integration is deferred. A
+Repeated comparison and bisection capture integration is deferred. Opt-in
+functional investigation capture is now implemented in its
+[follow-on milestone](investigation-prefix-identity.md). A
 separately selected assertion on a package without capture remains unmeasured.
 No source/build/worker execution, acquisition, push, publication or deletion is
 authorized by this implementation goal. Performance policy stays disabled and
@@ -61,7 +63,7 @@ The [2026-11-03 real-BIRD case](observer-prefix-runtime-validation.md#successful
 now validates this specific runtime path: one 12.088-second worker, all six
 assertions passed, exact 100-prefix snapshot, 45-artifact verified package,
 observed directory/socket ownership and modes, and independently accepted owned
-cleanup. Capture integration into comparison/search and broader workload/UID
+cleanup. Capture integration into repeated comparison/search and broader workload/UID
 qualification remain deferred.
 
 ### Historical remaining-validation proposal

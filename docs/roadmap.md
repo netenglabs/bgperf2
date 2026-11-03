@@ -22,6 +22,15 @@ The [immediate functional protocol](functional-validation.md) is the preferred
 path for newly prepared small correctness checks; existing campaign/queue
 admission rules and comparison qualification remain separate.
 
+The [functional investigation extension](plans/investigation-prefix-identity.md)
+now adds opt-in capture on both baseline and candidate and a separately verified
+six-assertion report view. Count and identity outcomes stay distinct; missing
+capture stays unmeasured and recipe reproduction retains its original meaning.
+Offline checks cover mismatched sets, partial work, report tampering and
+rebuild/storage relocation. A direct two-worker real functional pair remains
+separately prepared/approved validation; repeated comparisons and bisection
+capture are deferred.
+
 Make bgperf2 a performance tester that daemon developers can use to reproduce
 problems, test their own fixes and investigate regressions. Reuse existing
 batch/scenario inputs, repetitions, ordering, measurement artifacts, provenance,

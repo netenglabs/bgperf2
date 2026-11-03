@@ -489,6 +489,8 @@ def main(argv=None):
             command.add_argument('--results-dir', required=True)
             command.add_argument('--timeout', type=float, default=300)
             command.add_argument('--diagnostics', choices=('basic', 'none'), default='basic')
+            command.add_argument('--observer-prefixes', action='store_true',
+                                 help='capture final received IPv4 prefixes on both functional attempts')
         if name == 'prepare':
             command.add_argument('--pull', action='store_true',
                                  help='explicitly acquire missing selected repository digests after disclosure')
@@ -496,6 +498,8 @@ def main(argv=None):
     report.add_argument('--baseline', required=True)
     report.add_argument('--candidate')
     report.add_argument('--output-dir', required=True)
+    report.add_argument('--observer-prefixes', action='store_true',
+                        help='evaluate all six correctness assertions, including final prefix identity')
     rebuild = commands.add_parser('investigation-rebuild', help='verify and rebuild an existing functional investigation report')
     rebuild.add_argument('document')
     rebuild.add_argument('--output-dir', required=True)
@@ -565,8 +569,9 @@ def main(argv=None):
             _write_document(verify_result_package(args.document))
         elif args.command == 'investigation-report':
             from recipe_investigation import write_investigation_report
+            options = {'observer_prefixes': True} if args.observer_prefixes else {}
             _write_document(write_investigation_report(baseline=args.baseline,
-                candidate=args.candidate, output_dir=args.output_dir))
+                candidate=args.candidate, output_dir=args.output_dir, **options))
         elif args.command == 'investigation-rebuild':
             from recipe_investigation import rebuild_investigation_report
             _write_document(rebuild_investigation_report(args.document, output_dir=args.output_dir))
@@ -645,11 +650,12 @@ def main(argv=None):
                     emit_disclosure=disclose_build, timeout=args.timeout))
             elif args.command == 'investigate':
                 from recipe_investigation import run_investigation
+                options = {'observer_prefixes': True} if args.observer_prefixes else {}
                 result = run_investigation(document,
                     baseline_target=read_document(args.baseline_target),
                     candidate_target=read_document(args.candidate_target),
                     workdir=args.workdir, results_dir=args.results_dir,
-                    timeout=args.timeout, diagnostics=args.diagnostics)
+                    timeout=args.timeout, diagnostics=args.diagnostics, **options)
                 _write_document(result)
                 return result['exit_code']
             elif args.command == 'run':

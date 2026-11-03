@@ -281,6 +281,49 @@ def _memory(attempt):
     return target
 
 
+def _correctness(attempts, recipe, paths):
+    """An explicit evaluation view, independent of recipe reproduction outcomes."""
+    from recipe_assertions import default_assertions, evaluate_assertions
+    outcomes = {}
+    for label, attempt in attempts.items():
+        if attempt['availability'] == 'missing':
+            outcomes[label] = {'outcome': 'inconclusive', 'assertions': [], 'reason': attempt['reason']}
+        else:
+            outcomes[label] = evaluate_assertions(default_assertions(recipe, include_prefixes=True),
+                                                  recipe, paths[label])
+    return {'observer_prefixes': True, 'attempts': outcomes}
+
+
+def _correctness_lines(report):
+    if 'correctness' not in report:
+        return []
+    lines = ['', '## Named correctness assertions', '',
+             'Explicit assertion evaluation, separate from recipe reproduction and any general fix verdict.',
+             'This report selection does not prove capture occurred. Missing or unavailable capture remains unmeasured.', '',
+             '| Attempt | Assertion | Status | Observed |', '| --- | --- | --- | --- |']
+    for label, outcome in report['correctness']['attempts'].items():
+        for item in outcome['assertions']:
+            observed = item.get('observed')
+            if item['capability'] == 'observer_prefix_identity' and isinstance(observed, dict):
+                observed = {key: observed.get(key) for key in ('observed_count', 'missing_count', 'unexpected_count')}
+            # Compact JSON avoids multiline table cells and escaping preserves prose integrity.
+            text = json.dumps(observed, sort_keys=True, allow_nan=False).replace('|', '\\|')
+            lines.append(f"| {label} | {item['name']} | {item['status']} | `{text}` |")
+        if not outcome['assertions']:
+            lines.append(f'| {label} | not evaluated | unmeasured | `null` |')
+    for label, outcome in report['correctness']['attempts'].items():
+        lines += ['', f"### {label} correctness: {outcome['outcome']}", '']
+        if outcome.get('reason'):
+            lines.append(outcome['reason'])
+        for item in outcome['assertions']:
+            lines.append(f"- **{item['name']}** ({item['status']}): {item['reason']}")
+            for evidence in item.get('evidence', []):
+                lines.append(f"  [Verified witness]({label}/{evidence['path']})")
+    lines += ['', 'Prefix identity witnesses one post-measurement snapshot, not attributes, delivery history or convergence-time identity.',
+              'Capture has uncalibrated overhead; no timing or performance comparison is qualified.']
+    return lines
+
+
 def _render(report, controller_stop=None):
     predicate = report['assessment']['predicate'] or {}
     lines = ['# Baseline/fix investigation', '', report['scope'], '',
@@ -293,6 +336,10 @@ def _render(report, controller_stop=None):
         image = target.get('image', 'unavailable')
         instrumentation = (target.get('provenance') or {}).get('instrumentation', 'unknown')
         lines.append(f"| {label} | {attempt['status']} | {attempt['reproduction']['outcome']} | {instrumentation} | `{image}` |")
+    if 'correctness' in report:
+        lines += ['', 'The observed outcome above evaluates only the recipe reproduction predicate. '
+                  'Named correctness below may fail or remain unmeasured independently; matching reproduction outcomes are not a routing-correctness pass.']
+    lines += _correctness_lines(report)
     lines += ['', '## Frozen controls', '',
               'Both available attempts must reference the exact same canonical recipe. Only the target selection may change.',
               'Generator and observer requested identities are fixed; observed identities must agree before a pair verdict.', '',
@@ -369,9 +416,11 @@ def _render(report, controller_stop=None):
 
 def write_investigation_report(*, baseline, candidate=None, output_dir,
                                baseline_missing=None, candidate_missing=None,
-                               controller_stop=None):
+                               controller_stop=None, observer_prefixes=False):
     """Verify and snapshot supplied packages into a portable new report directory."""
     output = Path(output_dir)
+    if type(observer_prefixes) is not bool:
+        raise recipes.ContractError('observer_prefixes must be boolean')
     if not output.is_absolute() or os.path.lexists(output):
         raise recipes.ContractError('Choose an absolute new investigation report directory')
     if controller_stop is not None:
@@ -399,6 +448,9 @@ def write_investigation_report(*, baseline, candidate=None, output_dir,
               'recipe_sha256': recipes.recipe_sha256(recipe) if recipe is not None else None,
               'frozen_recipe': recipe, 'attempts': attempts, 'differences': differences,
               'assessment': assessment}
+    if observer_prefixes:
+        report['correctness'] = _correctness(attempts, recipe,
+            {label: path for label, (path, _) in sources.items()})
     if controller_stop is not None:
         report['controller_stop'] = {'path': 'controller-stop.json',
                                     'sha256': hashlib.sha256(_json(controller_stop).encode('utf-8')).hexdigest()}
@@ -431,7 +483,11 @@ def verify_investigation_report(path):
         raise recipes.ContractError('Select the bundled investigation.json manifest')
     document = _load(root, path.name)
     recipes._keys(document, ('schema', 'scope', 'recipe_sha256', 'frozen_recipe', 'attempts', 'differences', 'assessment'),
-                  optional=('controller_stop',))
+                  optional=('controller_stop', 'correctness'))
+    if 'correctness' in document:
+        recipes._keys(document['correctness'], ('observer_prefixes', 'attempts'), where='correctness')
+        if document['correctness']['observer_prefixes'] is not True:
+            raise recipes.ContractError('Correctness selection must be boolean true')
     recipes._keys(document['attempts'], ('baseline', 'candidate'), where='attempts')
     if document.get('schema') != SCHEMA or set(document.get('attempts', {})) != {'baseline', 'candidate'}:
         raise recipes.ContractError('Unsupported investigation report')
@@ -498,6 +554,11 @@ def verify_investigation_report(path):
         raise recipes.ContractError('Investigation frozen recipe binding differs')
     if document.get('assessment') != _assessment(attempts, recipe, controller_stop):
         raise recipes.ContractError('Investigation assessment disagrees with evidence')
+    if 'correctness' in document:
+        expected = _correctness(attempts, recipe,
+            {label: root / label / 'result.json' for label in attempts})
+        if _json(document['correctness']) != _json(expected):
+            raise recipes.ContractError('Investigation correctness disagrees with bundled evidence')
     differences = _differences(attempts['baseline'], attempts['candidate']) if all(x['availability'] == 'present' for x in attempts.values()) else []
     if document.get('differences') != differences:
         raise recipes.ContractError('Investigation differences disagree with evidence')
@@ -522,8 +583,9 @@ def rebuild_investigation_report(path, *, output_dir):
         inputs[label] = path.parent / label / 'result.json' if attempt['availability'] == 'present' else None
         inputs[label + '_missing'] = ({'status': attempt['status'], 'reason': attempt['reason']}
                                       if attempt['availability'] == 'missing' else None)
+    options = {'observer_prefixes': True} if 'correctness' in document else {}
     return write_investigation_report(**inputs, output_dir=output,
-                                     controller_stop=_read_controller_stop(path.parent, document))
+                                     controller_stop=_read_controller_stop(path.parent, document), **options)
 
 
 def _recover_package(path, label, recipe, target):
@@ -540,10 +602,12 @@ def _recover_package(path, label, recipe, target):
 
 
 def run_investigation(recipe, *, baseline_target, candidate_target, workdir, results_dir,
-                      timeout=300, diagnostics='basic', run=None, check=None):
+                      timeout=300, diagnostics='basic', observer_prefixes=False, run=None, check=None):
     """Run at most one serial baseline and candidate, then preserve a portable report."""
     from recipe_targets import validate_target
     recipes.validate_recipe(recipe)
+    from recipe_prefixes import validate_selection
+    validate_selection(recipe, observer_prefixes)
     for target in (baseline_target, candidate_target):
         validate_target(target, recipe)
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
@@ -560,8 +624,9 @@ def run_investigation(recipe, *, baseline_target, candidate_target, workdir, res
                 'reason': 'Both selected targets must pass prerequisites before either experiment starts.', 'prerequisites': reports}
     work.mkdir(parents=True, mode=0o700)
     results.mkdir(parents=True, mode=0o700)
+    options = {'observer_prefixes': True} if observer_prefixes else {}
     _write(results / 'investigation-plan.json', {'recipe': recipe, 'targets': {'baseline': baseline_target, 'candidate': candidate_target},
-                                               'diagnostics': diagnostics, 'timeout_per_attempt_seconds': timeout})
+                                               'diagnostics': diagnostics, 'timeout_per_attempt_seconds': timeout, **options})
     from recipe_run import run_recipe
     execute = run or run_recipe
     paths = {'baseline': None, 'candidate': None}
@@ -571,7 +636,7 @@ def run_investigation(recipe, *, baseline_target, candidate_target, workdir, res
     for label, target in (('baseline', baseline_target), ('candidate', candidate_target)):
         try:
             result = execute(recipe, workdir=work / label, results_dir=results / label,
-                             timeout=timeout, target=target, diagnostics=diagnostics)
+                             timeout=timeout, target=target, diagnostics=diagnostics, **options)
             path = results / label / 'result.json'
             if path.is_file():
                 paths[label] = path
@@ -605,6 +670,9 @@ def run_investigation(recipe, *, baseline_target, candidate_target, workdir, res
             break
     report = write_investigation_report(baseline=paths['baseline'], candidate=paths['candidate'],
                                        output_dir=results / 'report', baseline_missing=missing['baseline'],
-                                       candidate_missing=missing['candidate'], controller_stop=controller_stop)
-    return {'schema': SCHEMA, 'status': 'recorded', 'exit_code': stop_exit,
-            'report': str(results / 'report/investigation.json'), 'assessment': report['assessment']}
+                                       candidate_missing=missing['candidate'], controller_stop=controller_stop, **options)
+    result = {'schema': SCHEMA, 'status': 'recorded', 'exit_code': stop_exit,
+              'report': str(results / 'report/investigation.json'), 'assessment': report['assessment']}
+    if observer_prefixes:
+        result['correctness'] = report['correctness']
+    return result

@@ -71,3 +71,46 @@ push/publication or remote transfer is included. Capture remains one final
 snapshot and has uncalibrated overhead. Repeated comparison/bisection capture,
 broader workload/UID qualification and timing-policy activation are separate;
 performance policy stays disabled and formal 10% calibration deferred.
+
+## Approved direct pair completed — 2026-11-03 UTC
+
+Implementation commit `cb7b1d1` passed 2,803 tests with one optional skip and
+independent code review. The separately reviewed case then received explicit
+approval for two serial workers and its functional-only root-storage exception.
+The immediate functional protocol ran directly, with no scheduler, builds,
+version probes, acquisition or retry. A private clean source checkout retained
+that implementation revision independently of subsequent documentation changes.
+
+Both distinct original attempts completed: baseline
+`bgperf_recipe_17cf2791a07d47fa97f3ed9675a1c0f6` in 11.332393 seconds and
+candidate `bgperf_recipe_334759fbf957481bad64ed3cd2c40fd4` in 12.033889 seconds,
+within their respective 120-second worker budgets. The outer controller exited
+normally with status `recorded` in 30.133623 seconds, below its 600-second
+deadline. The report has no controller stop and records
+`same_observed_reproduction` separately from correctness.
+
+Each side passed all six assertions: sessions, injection, exact count,
+completion, observed role health and exact prefix identity. Both snapshots
+contained all 100 expected prefixes with zero missing or unexpected. Public
+verification accepted 45 artifacts per original package and 96 files per
+investigation report. Independent per-side assertion exports agreed. The
+separate rebuilt report verified with the same correctness view and original
+attempt identities. Original monitor directories were collector-owned mode
+0700; retained socket endpoints were mode 0666. Both runtimes reported no
+cleanup errors; native inventories are retained for owned-resource reconciliation.
+
+Case inputs, mandatory controller-completion acceptance addendum, approval,
+actual command exits, original work/packages, rebuilt report and review evidence
+remain under `/tmp/bgperf2-investigation-prefix-20261103/`. The frozen packet
+and preparation records remain unchanged. Shared-store references still require
+the retained local artifact store; local checksums do not constitute a backup.
+
+This qualifies the selected two-side capture/report/rebuild path for the existing
+BIRD 2.19.2 target/generator image and sink 0.2.0 observer, one peer and 100 IPv4
+host routes. Both labels used the same image. Ordinary foreign CPU was recorded
+(reported maxima 309% and 311%); worker durations are budget observations, not a
+performance comparison. The case establishes no changed-binary or upstream-fix
+verdict, continuous correctness, new workload/UID qualification or calibrated
+capture overhead. The upstream investigation stays paused; repeated comparison
+and bisection capture remain deferred, performance policy disabled and formal
+10% calibration deferred. The two-worker allowance is consumed.

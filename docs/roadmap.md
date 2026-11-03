@@ -27,9 +27,11 @@ now adds opt-in capture on both baseline and candidate and a separately verified
 six-assertion report view. Count and identity outcomes stay distinct; missing
 capture stays unmeasured and recipe reproduction retains its original meaning.
 Offline checks cover mismatched sets, partial work, report tampering and
-rebuild/storage relocation. A direct two-worker real functional pair remains
-separately prepared/approved validation; repeated comparisons and bisection
-capture are deferred.
+rebuild/storage relocation. The separately approved
+[direct two-worker real functional pair](plans/investigation-prefix-identity.md#approved-direct-pair-completed--2026-11-03-utc)
+completed with six passing assertions per side, exact 100-prefix snapshots,
+verified packages and report rebuild. This same-image control qualifies the
+selected integration path; repeated comparisons and bisection capture are deferred.
 
 Make bgperf2 a performance tester that daemon developers can use to reproduce
 problems, test their own fixes and investigate regressions. Reuse existing

@@ -11,6 +11,16 @@ broader live bisection/diagnostics and performance calibration remain deferred. 
 
 ## Operator decision: descriptive comparisons first — 2026-10-31
 
+Follow-through on 2026-11-03: the operator selected continued work after the
+successful [received-prefix runtime validation](observer-prefix-runtime-validation.md#successful-existing-image-worker--2026-11-03).
+New small functional checks should use the existing immediate bounded recipe
+workflow, with concurrent activity recorded and active-measurement/resource/
+ownership/cleanup guards retained. Hourly CPU-idleness admission is not required
+solely for timing quality in a correctness-only question. Existing frozen
+cases retain their rules. The [functional guide](../functional-validation.md)
+owns this protocol; performance comparisons and deferred calibration remain
+separate. This selects a workflow, not additional builds or workers.
+
 The operator's next selected implementation goal on 2026-11-01 is
 [received IPv4 prefix identity](observer-prefix-identity.md), strengthening the
 existing synthetic correctness witnesses beyond count agreement. Upstream BIRD

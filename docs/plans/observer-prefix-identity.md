@@ -52,9 +52,22 @@ remain separately approved validation work.
   subsequent focused Python/docs checks passed 147 tests. Final native commit
   gate and pinned offline Go vet/race results are recorded in the external
   local checkpoint `/tmp/bgperf2-prefix-identity-20261101/completion.md`, including
-  the actual implementation commit. No runtime case has executed.
+  the actual implementation commit. No runtime case executed in that offline
+  implementation checkpoint.
 
 ## Remaining validation
+
+The [2026-11-03 real-BIRD case](observer-prefix-runtime-validation.md#successful-existing-image-worker--2026-11-03)
+now validates this specific runtime path: one 12.088-second worker, all six
+assertions passed, exact 100-prefix snapshot, 45-artifact verified package,
+observed directory/socket ownership and modes, and independently accepted owned
+cleanup. Capture integration into comparison/search and broader workload/UID
+qualification remain deferred.
+
+### Historical remaining-validation proposal
+
+The paragraphs below retain the earlier manual admission refusal and original
+next-case proposal as history.
 
 Implementation is complete at `e7798ad` with the final 2,692-test gate and
 independent review. The [real-BIRD runtime case](observer-prefix-runtime-validation.md)

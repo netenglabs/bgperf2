@@ -19,6 +19,7 @@ rewritten.
 * [Prepare your own source checkout](docs/maintainer-checkout.md) (isolated revision range and verified, unexecuted handoff)
 * [Roadmap and development plans](docs/roadmap.md)
 * [Portable recipe and result contracts](docs/recipes.md) (export, prepare, isolated execution and verified result packages)
+* [Small functional checks](docs/functional-validation.md) (immediate bounded execution, load observations and verified correctness)
 * [Investigate a local BIRD fix](docs/investigations.md) (target/build identities, diagnostics and baseline/fix reports)
 * [Localize a deterministic regression](docs/bisection.md) (bounded revision search, recovery and verified boundary evidence)
 * [How bgperf2 works](docs/how_bgperf_works.md) ·

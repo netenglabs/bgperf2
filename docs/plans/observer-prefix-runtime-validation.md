@@ -1,4 +1,59 @@
-# Real BIRD prefix-identity validation — approved attempt stopped at admission
+# Real BIRD prefix-identity validation — functional worker passed
+
+## Successful existing-image worker — 2026-11-03
+
+Fresh lab case05 completed one original worker, with zero new builds or probes,
+in dispatch `20261103T171001Z-a5d6b30eee` (17:10:33–17:13:24 UTC). Engine revision
+was `705cc187299017cb6e031ba022bc13b035126abd`, with independent source clones and
+lab revision `73d53cfcc4807d07f8ad54ff14b94844bd89c7c4`. The original attempt ID is
+`bgperf_recipe_0410d5bf1e9147b1a2c787057067ba1f`; its recorded worker interval was
+**12.088471408 seconds within 120 seconds**. Dispatch time includes reviews and
+orchestration and is a different interval.
+
+The existing BIRD target/generator image was
+`sha256:db0a8e144635b1d4b9f81f24ee78f11383c5b0cbd79f10353edcb8452e9af423`.
+Observer image was
+`sha256:58491f5d3ad4d4872c13d53243f482f3cf7245997991b924990358795212ab38`, the
+successful sink 0.2.0 build/probe retained from separate case02. Its source
+archive hash is `ef7e4dac9fb498e4d01b09c4b7c6beb7bea258ff002079c1874724b26362da40`.
+Reusing that exact image did not relabel or rebuild it.
+
+All six assertions passed: session establishment, injection completion, count
+100, completed experiment, role health and exact prefix identity. The snapshot
+contained exactly `100.0.0.0/32` through `100.0.0.99/32`, with zero missing or
+unexpected prefixes. Public verification checked the package's 45 listed
+artifact hashes and recipe digest
+`5b397d2cdb49a2a1a91e367062b3525f8bcb382c49f461783dce2e630a092b64`.
+Independent final review accepted the evidence and owned cleanup. Collector
+UID/GID 1000/1000 owned the mode-0700 monitor directory; the container-root
+socket was UID/GID 0/0, mode 0666. The lstat receipt did not contact the socket.
+Native container/network/volume inventories matched after cleanup.
+
+Original work/results remain under
+`/tmp/bgperf2-prefix-retry-20261103/execution05/`; dispatch/reviews under
+`/home/jpietsch/bgperf-work/quiet-queue/runs/bgperf2-prefix-identity-05/20261103T171001Z-a5d6b30eee/`.
+The frozen case, authorization and source pins are in the former parent's
+`case05`, `deployment-authorized`, `snapshots` and activation records. Existing
+store/converter bindings are explicit in its command graph. Read-only public
+package/assertion re-verification is retained at
+`/tmp/bgperf2-prefix-closeout-20261103/`. Same-device retention is not independent
+backup; referenced objects require their store.
+
+This establishes this bounded real-BIRD capture/permission/cleanup path on the
+observed host. It does not establish convergence-time identity, attributes,
+continuous health/correctness, other UID mappings, broader workloads or
+performance. Comparison/search capture integration remains deferred, performance
+policy disabled and formal 10% calibration deferred. Earlier case01 admission
+refusal, case02 pre-worker review refusal, case03 source-pin refusal and case04
+citation refusal remain separate preserved outcomes; none is rerun or relabeled.
+
+For future small correctness checks, select the
+[immediate functional protocol](../functional-validation.md). Case05's hourly
+quiet admission remains historical; its 12-second functional question did not
+require that scheduling policy for timing quality. No additional execution is
+authorized by this closeout.
+
+## Historical original case01 preparation and refusal
 
 The operator approved the frozen case at engine
 `9bcfe1da1063f5d89a8cd258750ffabb163e542d`, including the functional root-storage

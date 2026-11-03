@@ -96,5 +96,8 @@ formal 10% calibration deferred.
 Implementation and offline validation are tracked in the
 [milestone plan](plans/observer-prefix-identity.md). Real image/build/worker
 compatibility is separate validation and has not been established by unit tests.
-The [bounded runtime case](plans/observer-prefix-runtime-validation.md) prepares
-that next validation without starting a build or worker.
+The [bounded runtime validation](plans/observer-prefix-runtime-validation.md#successful-existing-image-worker--2026-11-03)
+passed one real-BIRD 100-prefix worker with exact identities, observed UID/mode
+evidence, verified package and owned cleanup. This qualifies that case only.
+Use the [immediate functional protocol](functional-validation.md) when preparing
+future small correctness checks; timing comparisons keep their separate rules.

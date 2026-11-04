@@ -451,12 +451,16 @@ def main(argv=None):
     export.add_argument('-o', '--output')
     for name in ('validate', 'inspect', 'result-validate', 'result-verify', 'plan', 'check',
                  'prepare', 'run', 'target-image', 'target-validate', 'target-source-plan',
-                 'target-build', 'investigate', 'investigation-verify', 'investigation-status'):
+                 'target-build', 'investigate', 'investigation-verify', 'investigation-status',
+                 'investigation-check'):
         command = commands.add_parser(name)
         command.add_argument('document')
         if name == 'investigation-status':
             command.add_argument('--format', choices=('json', 'text'), default='json',
                                  help='verified summary format (default: json)')
+        if name == 'investigation-check':
+            command.add_argument('--side', choices=('both', 'baseline', 'candidate'), default='both',
+                                 help='attempts whose assertions determine the CI exit (default: both)')
         if name in ('check', 'run'):
             command.add_argument('--workdir', required=True)
             command.add_argument('--results-dir', required=True)
@@ -588,6 +592,11 @@ def main(argv=None):
                 print(render_investigation_status(status), end='')
             else:
                 _write_document(status)
+        elif args.command == 'investigation-check':
+            from recipe_investigation import check_investigation
+            result = check_investigation(args.document, side=args.side)
+            _write_document(result)
+            return result['exit_code']
         elif args.command == 'comparison-verify':
             from recipe_comparison_report import verify_comparison_report
             _write_document(verify_comparison_report(args.document))

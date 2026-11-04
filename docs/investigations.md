@@ -63,6 +63,31 @@ It displays any report-bound controller stop; its absence does not establish
 the original outer CLI exit. Full execution acceptance still needs that exit
 record and the case's other declared evidence.
 
+For CI, check selected correctness with a process exit:
+
+```sh
+venv/bin/python recipes.py investigation-check \
+  /absolute/disk/results/pair-001/report/investigation.json
+# Check a candidate fix while retaining the baseline's expected failure.
+venv/bin/python recipes.py investigation-check \
+  /absolute/disk/results/pair-001/report/investigation.json --side candidate
+```
+
+The JSON view (`bgperf2/investigation-check/v1alpha1`) retains the verified status
+fields and adds `checked_attempts`, `outcome`, `exit_code` and `reasons`. The
+default checks both sides; `--side baseline` or `--side candidate` selects one.
+Both sides remain in the output, including failures outside the selection.
+Exit 0 requires selected correctness, present/completed checked originals,
+every selected assertion in those attempts passed
+and no report-bound controller stop. Exit 4 means a checked assertion failed; failure
+takes precedence even when other checked evidence is incomplete. Exit 5 means no
+checked assertion failed but selection, completion or checked evidence is incomplete/unmeasured,
+or a controller stop exists. Invalid input or integrity refusal returns 2 with
+stderr and no check JSON. Legacy unselected reports cannot pass implicitly.
+Use `investigation-status` for inspection that exits 0 regardless of assertion
+results. Neither command replaces original outer-exit and case acceptance
+evidence, establishes a general fix verdict or starts new work.
+
 An unavailable capture is unmeasured, not an empty set, mismatch or pass. A
 missing attempt keeps its original reason and an inconclusive correctness
 entry with no fabricated assertions. Existing harness/interruption/controller

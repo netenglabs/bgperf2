@@ -599,6 +599,39 @@ def investigation_status(path):
             'scope': 'Verified report summary only. Success means integrity, not assertion success or execution approval.'}
 
 
+def check_investigation(path, *, side='both'):
+    """Check selected named correctness; no runtime or general fix verdict."""
+    recipes._choice(side, ('both', 'baseline', 'candidate'), 'investigation check side')
+    checked = ['baseline', 'candidate'] if side == 'both' else [side]
+    status = investigation_status(path)
+    reasons, failed = [], False
+    if not status['correctness_selected']:
+        reasons.append('Received-prefix correctness was not selected in this report.')
+    if status['controller_stop'] is not None:
+        stop = status['controller_stop']
+        reasons.append(f'Report records a {stop["attempt"]} controller stop: {stop["reason"]}')
+    for label in checked:
+        item = status['attempts'][label]
+        if item['availability'] != 'present':
+            reasons.append(f'{label}: original package unavailable ({item["status"]}): {item["reason"]}')
+        elif item['status'] != 'completed':
+            reasons.append(f'{label}: experiment status is {item["status"]}, not completed.')
+        correctness = item['correctness']
+        if correctness is None:
+            continue
+        for row in correctness['assertions']:
+            if row['status'] == 'failed':
+                failed = True
+            if row['status'] != 'passed':
+                reasons.append(f'{label}: {row["name"]} is {row["status"]}: {row["reason"]}')
+    outcome = 'failed' if failed else 'inconclusive' if reasons else 'passed'
+    return {**status, 'schema': 'bgperf2/investigation-check/v1alpha1',
+            'checked_attempts': checked,
+            'outcome': outcome, 'exit_code': {'passed': 0, 'failed': 4, 'inconclusive': 5}[outcome],
+            'reasons': reasons,
+            'scope': 'Selected named correctness for checked_attempts only; not original outer-exit acceptance, a general fix verdict or execution approval.'}
+
+
 def render_investigation_status(status):
     """Keep evidence text printable when shown in a terminal."""
     def text(value):

@@ -38,6 +38,11 @@ verified JSON/terminal view of reproduction, original attempts, controller stops
 and separate count/identity assertions. It starts no runtime work and preserves
 legacy, partial and unmeasured meanings.
 
+The [CI investigation check](plans/investigation-check.md) adds explicit exit
+codes for passed assertions, observed failure and inconclusive evidence in
+verified reports. It leaves integrity/status exits and reproduction unchanged
+and requires no new runtime work.
+
 Make bgperf2 a performance tester that daemon developers can use to reproduce
 problems, test their own fixes and investigate regressions. Reuse existing
 batch/scenario inputs, repetitions, ordering, measurement artifacts, provenance,

@@ -12,7 +12,6 @@ import copy
 import hashlib
 import io
 import json
-import os
 from pathlib import Path
 import socket
 import subprocess
@@ -28,7 +27,7 @@ import recipe_bisection as bisection
 import recipe_targets as targets
 from scripts.comparison_smoke import ComparisonRuntime
 from scripts.investigation_smoke import _command as recipe_command
-from scripts.recipe_smoke import SimulatedHost, _write
+from scripts.recipe_smoke import SimulatedHost, SimulatedOS, _write
 
 CASES = ('assertions', 'target-crash', 'skipped', 'ambiguous', 'unstable')
 TOOLCHAIN = 'sha256:' + 'a' * 64
@@ -46,24 +45,6 @@ def _command(arguments, *, expected=0):
     if code != expected:
         raise RuntimeError(f'Simulated bisection {arguments[0]} exited {code}; expected {expected}')
     return json.loads(stream.getvalue())
-
-
-class SimulatedOS:
-    """Redirect only the modeled recipe controller's host lock to this output.
-
-    Other modules retain the actual os module, including bisection's session
-    locking. Independent walkthroughs never contend with real recipe attempts.
-    """
-    def __init__(self, lock):
-        self.lock = lock
-        self.original_lock = Path('/tmp') / f'bgperf2-recipe-{os.getuid()}.lock'
-
-    def __getattr__(self, name):
-        return getattr(os, name)
-
-    def open(self, path, flags, mode=0o777, *, dir_fd=None):
-        selected = self.lock if os.fsdecode(path) == str(self.original_lock) else path
-        return os.open(selected, flags, mode, dir_fd=dir_fd)
 
 
 class SimulatedChain:

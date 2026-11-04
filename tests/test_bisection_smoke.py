@@ -185,7 +185,8 @@ def test_smoke_host_locks_are_private_without_replacing_other_module_os(tmp_path
         open = staticmethod(trap)
 
     # Trap this smoke's OS boundary without changing the shared os module.
-    monkeypatch.setattr(smoke, 'os', Boundary())
+    from scripts import recipe_smoke as fixture_helpers
+    monkeypatch.setattr(fixture_helpers, 'os', Boundary())
     first, second = (smoke.SimulatedOS(tmp_path / name) for name in ('first.lock', 'second.lock'))
     with patch.object(recipe_run, 'os', first):
         assert bisection.os is os and recipe_run.os is not os

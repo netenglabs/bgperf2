@@ -156,7 +156,7 @@ checkouts and handoff paths are location-bound; retain their original layout.
 
 
 def run_smoke(output, *, predicate='assertions'):
-    recipes._choice(predicate, ('assertions', 'target_crash'), 'predicate')
+    recipes._choice(predicate, ('assertions', 'target_crash', 'prefix_assertions'), 'predicate')
     real_popen = subprocess.Popen
 
     def local_git_only(arguments, *args, **kwargs):
@@ -197,7 +197,7 @@ def run_smoke(output, *, predicate='assertions'):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True)
-    parser.add_argument('--predicate', choices=('assertions', 'target_crash'), default='assertions')
+    parser.add_argument('--predicate', choices=('assertions', 'target_crash', 'prefix_assertions'), default='assertions')
     args = parser.parse_args(argv)
     try:
         result = run_smoke(args.output, predicate=args.predicate)

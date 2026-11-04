@@ -117,8 +117,12 @@ The [prefix contract](observer-prefixes.md) defines one post-measurement snapsho
 not convergence-time identity, attributes or continuous correctness. Capture
 has uncalibrated overhead and qualifies no timing comparison. Use the
 [immediate functional protocol](functional-validation.md) for a separately
-authorized small pair. Repeated comparisons and bisection capture remain deferred;
-performance policy is disabled and formal 10% calibration deferred.
+authorized small pair. [Repeated comparisons](comparisons.md) can explicitly
+select capture, and [deterministic localization](bisection.md) supports the
+combined `prefix_assertions` predicate. The
+[exact-prefix walkthrough](maintainer-workflow.md#exact-prefix-regression-workflow)
+connects these paths using modeled evidence. Performance policy is disabled and
+formal 10% calibration deferred.
 
 For repeated target comparisons and named observable correctness checks, follow
 the [comparison guide](comparisons.md). The single-pair workflow here preserves

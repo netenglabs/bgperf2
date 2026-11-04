@@ -42,9 +42,19 @@ Capture is selected by standalone `run --observer-prefixes` or
 which forwards it symmetrically to both functional attempts. The latter also
 evaluates all six named assertions in a separate report view. Report-only
 `investigation-report --observer-prefixes` evaluates existing packages without
-starting capture; missing evidence remains unmeasured. Repeated comparison and
-bisection plans do not enable capture. No action, policy, IPv6 or broader
-workload support is added.
+starting capture; missing evidence remains unmeasured.
+[`comparison-plan --observer-prefixes`](comparisons.md) freezes capture for
+every normal or staged comparison attempt and selects all six assertions by
+default; an explicit assertion spec remains independent of capture.
+The [`prefix_assertions` bisection predicate](bisection.md) selects the four
+existing worker-budget assertions plus final prefix identity and requests
+capture for fresh search and confirmation workers. Imported and recovered
+packages need matching retained evidence; missing capture stays ambiguous
+unless another selected assertion decisively fails. The same predicate flows
+through source-range preparation and maintainer handoffs. Unselected plans and
+legacy predicates preserve their behavior. No action, policy, IPv6 or broader
+workload support is added. See the
+[connected exact-prefix walkthrough](maintainer-workflow.md#exact-prefix-regression-workflow).
 
 ## Snapshot and evidence boundaries
 

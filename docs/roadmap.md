@@ -7,6 +7,13 @@ CLI and versioned artifacts; none is required to use the engine.
 
 ## Current direction
 
+The operator selected the larger
+[exact-prefix maintainer workflow](plans/prefix-maintainer-workflow.md): extend
+capture through repeated comparisons and deterministic localization, and connect
+reproduction, candidate CI, recovery and portable evidence in a maintained
+walkthrough. This explicitly selects the previously deferred capture extensions;
+it does not authorize real builds/workers or performance calibration.
+
 The upstream BIRD correctness investigation is paused at the operator's request.
 Its [screening record](plans/upstream-bird-correctness-screening.md) preserves four
 investigated fixes and their supported-workload gaps. No upstream reproducer or
@@ -31,7 +38,9 @@ rebuild/storage relocation. The separately approved
 [direct two-worker real functional pair](plans/investigation-prefix-identity.md#approved-direct-pair-completed--2026-11-03-utc)
 completed with six passing assertions per side, exact 100-prefix snapshots,
 verified packages and report rebuild. This same-image control qualifies the
-selected integration path; repeated comparisons and bisection capture are deferred.
+selected integration path. The larger selected workflow now carries capture
+through repeated comparisons and the explicit `prefix_assertions` localization
+predicate; real qualification of those new execution paths remains separate.
 
 The [read-only investigation status](plans/investigation-status.md) adds a concise
 verified JSON/terminal view of reproduction, original attempts, controller stops

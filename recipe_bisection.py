@@ -113,10 +113,13 @@ def validate_plan(plan):
                         'worker_timeout', 'build_timeout', 'diagnostics', 'assumption'))
     recipes._choice(plan['schema'], (PLAN_SCHEMA,), 'schema')
     recipes.validate_recipe(plan['recipe'])
-    recipes._choice(plan['predicate'], ('target_crash', 'assertions'), 'predicate')
+    recipes._choice(plan['predicate'], ('target_crash', 'assertions', 'prefix_assertions'), 'predicate')
+    if plan['predicate'] == 'prefix_assertions':
+        from recipe_prefixes import validate_selection
+        validate_selection(plan['recipe'], True)
     if plan['predicate'] == 'target_crash' and plan['recipe']['reproduction']['expected_outcome'] != 'target_crash':
         raise recipes.ContractError('Crash search requires a target_crash reproduction question')
-    if plan['predicate'] == 'assertions' and plan['recipe']['reproduction']['expected_outcome'] != 'experiment_completed':
+    if plan['predicate'] in ('assertions', 'prefix_assertions') and plan['recipe']['reproduction']['expected_outcome'] != 'experiment_completed':
         raise recipes.ContractError('Assertion search requires an experiment_completed reproduction question')
     if plan['assumption'] != 'one monotone good-to-bad transition on the selected first-parent chain':
         raise recipes.ContractError('The deterministic monotonicity assumption must remain explicit')
@@ -154,6 +157,10 @@ def validate_plan(plan):
 
 def make_plan(recipe, build_plans, commit_objects, *, predicate, max_trials,
               worker_timeout=120, build_timeout=1200):
+    if predicate == 'prefix_assertions':
+        recipes.validate_recipe(recipe)
+        from recipe_prefixes import validate_selection
+        validate_selection(recipe, True)
     candidates = [{'revision': build['source']['commit'], 'build_plan': copy.deepcopy(build),
                    'commit_object': base64.b64encode(raw).decode('ascii')}
                   for build, raw in zip(build_plans, commit_objects, strict=True)]
@@ -210,16 +217,18 @@ def classification(plan, index, result_path):
             raise recipes.ContractError('Artifact changed or exceeds inspection bound: ' + name)
         return json.loads(data, object_pairs_hook=recipes._pairs, parse_constant=recipes._nonfinite)
 
-    spec = default_assertions(recipe)
-    spec['assertions'] = spec['assertions'][:4]
+    prefixes = plan['predicate'] == 'prefix_assertions'
+    spec = default_assertions(recipe, include_prefixes=True) if prefixes else default_assertions(recipe)
+    spec['assertions'] = [row for row in spec['assertions'] if row['capability'] != 'observed_role_health'] if prefixes else spec['assertions'][:4]
     assertions = evaluate_assertions(spec, recipe, result_path)
     budget = assertions['worker_deadline']
     answer = 'ambiguous'
     reason = 'No decisive supported predicate witness within the selected worker budget.'
     if budget['satisfied'] is True and budget['timeout_seconds'] == plan['worker_timeout']:
-        if plan['predicate'] == 'assertions' and result['status'] in ('completed', 'experiment_failed'):
+        if plan['predicate'] in ('assertions', 'prefix_assertions') and result['status'] in ('completed', 'experiment_failed'):
             if assertions['outcome'] == 'passed':
-                answer, reason = 'good', 'All four supported bounded assertions pass.'
+                answer, reason = 'good', ('All four bounded assertions and the final prefix identity assertion pass.'
+                                         if prefixes else 'All four supported bounded assertions pass.')
             elif assertions['outcome'] == 'failed':
                 answer, reason = 'bad', 'At least one supported bounded assertion has a decisive failed witness.'
         elif plan['predicate'] == 'target_crash':
@@ -600,8 +609,9 @@ def step(session, *, build=None, run=None):
             return append_failure(path, selected, kind, f'Build not completed: {type(exc).__name__}: {exc}; original cache/work retained.')
         name = f't{selected["trial"]:04d}'
         try:
+            options = {'observer_prefixes': True} if plan['predicate'] == 'prefix_assertions' else {}
             result = (run or run_recipe)(plan['recipe'], target=target, workdir=path / 'work' / name,
-                results_dir=path / 'results' / name, timeout=plan['worker_timeout'], diagnostics=plan['diagnostics'])
+                results_dir=path / 'results' / name, timeout=plan['worker_timeout'], diagnostics=plan['diagnostics'], **options)
             result_path = path / 'results' / name / 'result.json'
             if result_path.is_file():
                 return append_result(path, plan, records, selected, result_path)
@@ -728,7 +738,7 @@ def main(argv=None):
     create = commands.add_parser('plan')
     create.add_argument('--recipe', required=True)
     create.add_argument('--build-plan', action='append', required=True, help='ordered clean per-revision source build plans')
-    create.add_argument('--predicate', choices=('target_crash', 'assertions'), required=True)
+    create.add_argument('--predicate', choices=('target_crash', 'assertions', 'prefix_assertions'), required=True)
     create.add_argument('--max-trials', type=int, required=True)
     create.add_argument('--worker-timeout', type=float, default=120)
     create.add_argument('--build-timeout', type=float, default=1200)
@@ -751,6 +761,11 @@ def main(argv=None):
     try:
         if args.command == 'plan':
             from recipe_targets import _git
+            if args.predicate == 'prefix_assertions':
+                from recipe_prefixes import validate_selection
+                selected_recipe = load(safe(args.recipe))
+                recipes.validate_recipe(selected_recipe)
+                validate_selection(selected_recipe, True)
             if not 2 <= len(args.build_plan) <= MAX_CANDIDATES:
                 raise recipes.ContractError('Select 2..256 consecutive first-parent revisions')
             builds = [load(safe(p)) for p in args.build_plan]

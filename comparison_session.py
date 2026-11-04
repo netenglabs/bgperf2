@@ -257,6 +257,8 @@ def _execute(plan, entry, *, workdir, results_dir, session, pressure, sample=Non
             '--target', str(session / ('target-' + entry['role'] + '.json')),
             '--workdir', str(workdir), '--results-dir', str(results_dir),
             '--timeout', str(plan['timeout']), '--diagnostics', plan['diagnostics']]
+    if plan.get('observer_prefixes'):
+        args.append('--observer-prefixes')
     samples = []
     if pressure is not None:
         try:

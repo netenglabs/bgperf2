@@ -225,6 +225,10 @@ def _confounders(plan, attempts):
     overhead = [item['id'] for item in present if item['diagnostic_mode']['value'] != 'none']
     if overhead:
         issue('diagnostic_overhead', 'Basic or unrecorded diagnostic probes have uncalibrated overhead.', overhead)
+    if plan.get('observer_prefixes'):
+        issue('observer_prefix_capture',
+              'Selected final prefix capture has uncalibrated overhead; it does not qualify a timing comparison.',
+              [item['id'] for item in present])
     mismatched_modes = [item['id'] for item in present if item['diagnostic_mode']['value'] != plan['diagnostics']]
     if mismatched_modes:
         issue('diagnostic_mode', 'Observed diagnostic mode differs from the frozen comparison plan or is unavailable.', mismatched_modes)
@@ -305,6 +309,21 @@ def _render(report):
         '| --- | --- | --- | --- | --- |']
     for role, counts in report['correctness'].items():
         lines.append(f"| {role} | {counts['passed']} | {counts['failed']} | {counts['inconclusive']} | {counts['unavailable']} |")
+    if report['plan'].get('observer_prefixes'):
+        lines += ['', '## Received-prefix correctness', '',
+            'Count is the convergence-confirmation witness; identity is one final post-measurement snapshot. Neither establishes attributes or continuous correctness.', '',
+            '| Attempt | Count outcome | Count observed | Identity outcome | Prefixes observed | Missing | Unexpected |',
+            '| --- | --- | --- | --- | --- | --- | --- |']
+        for item in report['attempts']:
+            rows = {row['name']: row for row in (item['assertions'] or {}).get('assertions', [])}
+            count, identity = rows.get('observer.count'), rows.get('observer.prefixes')
+            prefix = (identity or {}).get('observed') or {}
+            values = [item['id'], (count or {}).get('status', 'not selected'),
+                      (count or {}).get('observed'), (identity or {}).get('status', 'not selected'),
+                      prefix.get('observed_count'), prefix.get('missing_count'), prefix.get('unexpected_count')]
+            if item['assertions'] is None:
+                values[1] = values[3] = 'unavailable'
+            lines.append('| ' + ' | '.join('unmeasured' if value is None else str(value) for value in values) + ' |')
     lines += ['', '## Target identities', '',
         '| Role | Immutable target image | Declared instrumentation | Source commit |',
         '| --- | --- | --- | --- |']

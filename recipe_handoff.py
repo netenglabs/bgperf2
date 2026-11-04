@@ -169,6 +169,8 @@ def _graph(location, destinations, plan, builds, comparison):
     recipe = str(packet / 'inputs/recipe.json')
     target = {label: str(build / label / 'target.json') for label in ('baseline', 'candidate')}
     timeout, build_timeout = str(plan['worker_timeout']), str(plan['build_timeout'])
+    prefixes = plan['predicate'] == 'prefix_assertions'
+    capture = ['--observer-prefixes'] if prefixes else []
     steps = []
     def add(name, argv, depends=(), *, mode='offline', condition=None):
         steps.append({'id': name, 'argv': list(map(str, argv)), 'depends_on': list(depends), 'mode': mode,
@@ -182,27 +184,37 @@ def _graph(location, destinations, plan, builds, comparison):
         '--workdir', work / 'reproduction', '--results-dir', results / 'reproduction'], ['build_baseline'], mode='explicit_read_only_probes')
     add('reproduce', [python, recipe_cli, 'run', recipe, '--target', target['baseline'],
         '--workdir', work / 'reproduction', '--results-dir', results / 'reproduction',
-        '--timeout', timeout, '--diagnostics', 'basic'], ['check_baseline'], mode='explicit_worker',
+        '--timeout', timeout, '--diagnostics', 'basic', *capture], ['check_baseline'], mode='explicit_worker',
         condition='A target crash may legitimately return exit 4 with experiment_failed/reproduced. Inspect the actual frozen question, status, reproduction evidence and owned cleanup; this dependency is not automatic permission to continue.')
     add('verify_reproduction', [python, recipe_cli, 'result-verify', results / 'reproduction/result.json'], ['reproduce'])
     assertions = build / 'assertions.json'
-    add('export_assertions', [python, recipe_cli, 'assertions-export', recipe, '-o', assertions], ['build_baseline'])
+    capabilities = []
+    if prefixes:
+        for capability in ('session_establishment', 'injection_completion', 'observer_route_count',
+                           'experiment_completion', 'observed_role_health', 'observer_prefix_identity'):
+            capabilities += ['--capability', capability]
+    add('export_assertions', [python, recipe_cli, 'assertions-export', recipe, '-o', assertions, *capabilities], ['build_baseline'])
     add('check_reproduction_assertions', [python, recipe_cli, 'assertions-check', assertions,
         '--result', results / 'reproduction/result.json'], ['export_assertions', 'verify_reproduction'],
         condition='Inspect named observable assertions separately from reproduction. Exit 4 means failed assertions; exit 5 means inconclusive evidence. Neither is a calibrated performance verdict.')
     add('investigate', [python, recipe_cli, 'investigate', recipe, '--baseline-target', target['baseline'],
         '--candidate-target', target['candidate'], '--workdir', work / 'investigation',
-        '--results-dir', results / 'investigation', '--timeout', timeout, '--diagnostics', 'basic'],
+        '--results-dir', results / 'investigation', '--timeout', timeout, '--diagnostics', 'basic', *capture],
         ['build_baseline', 'build_candidate'], mode='explicit_workers',
         condition='Select this separate fresh pair explicitly; both target prerequisites are checked by investigate. Controller stops remain inconclusive; never invent a candidate attempt or retry.')
     add('verify_investigation', [python, recipe_cli, 'investigation-verify', results / 'investigation/report/investigation.json'], ['investigate'])
+    if prefixes:
+        add('check_candidate_correctness', [python, recipe_cli, 'investigation-check',
+            results / 'investigation/report/investigation.json', '--side', 'candidate'], ['verify_investigation'],
+            condition='Checks candidate named correctness while retaining baseline failures; no original outer-exit acceptance, general fix verdict or execution permission follows.')
     add('rebuild_investigation', [python, recipe_cli, 'investigation-rebuild', results / 'investigation/report/investigation.json',
         '--output-dir', results / 'investigation-rebuilt'], ['verify_investigation'])
     if comparison:
         comparison_plan = build / 'comparison-plan.json'
         argv = [python, recipe_cli, 'comparison-plan', recipe, '--baseline-target', target['baseline'],
                 '--candidate-target', target['candidate'], '--repetitions', comparison['repetitions'],
-                '--order', comparison['order'], '--timeout', timeout, '--diagnostics', 'none', '-o', comparison_plan]
+                '--order', comparison['order'], '--timeout', timeout, '--diagnostics',
+                'basic' if prefixes else 'none', '-o', comparison_plan, *capture]
         if comparison['seed'] is not None:
             argv += ['--seed', comparison['seed']]
         add('plan_comparison', argv, ['build_baseline', 'build_candidate'],

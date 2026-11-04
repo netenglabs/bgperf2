@@ -36,9 +36,14 @@ def comparison_sequence(repetitions, order, seed):
 
 def validate_comparison_plan(plan):
     recipes._keys(plan, ('schema', 'recipe', 'targets', 'repetitions', 'order', 'seed',
-                         'diagnostics', 'timeout', 'assertions', 'sequence'), where='comparison plan')
+                         'diagnostics', 'timeout', 'assertions', 'sequence'),
+                  optional=('observer_prefixes',), where='comparison plan')
     recipes._choice(plan['schema'], (PLAN_SCHEMA,), 'comparison plan.schema')
     recipes.validate_recipe(plan['recipe'])
+    if 'observer_prefixes' in plan and plan['observer_prefixes'] is not True:
+        raise recipes.ContractError('Comparison prefix capture selection must be boolean true')
+    from recipe_prefixes import validate_selection
+    validate_selection(plan['recipe'], plan.get('observer_prefixes', False))
     recipes._keys(plan['targets'], ROLES, where='comparison plan.targets')
     from recipe_targets import validate_target
     for role in ROLES:
@@ -68,7 +73,7 @@ def validate_comparison_plan(plan):
 
 def make_comparison_plan(recipe, *, baseline_target, candidate_target, repetitions,
                          order='alternating', seed=None, timeout=300, diagnostics='none',
-                         assertions=None):
+                         assertions=None, observer_prefixes=False):
     """Freeze every requested attempt and its controls without runtime probes."""
     # Validate counts before constructing a potentially unbounded sequence.
     recipes._integer(repetitions, 'repetitions', 1)
@@ -79,13 +84,19 @@ def make_comparison_plan(recipe, *, baseline_target, candidate_target, repetitio
         recipes._integer(seed, 'shuffle seed')
     elif seed is not None:
         raise recipes.ContractError('seed applies only to shuffle order')
+    recipes.validate_recipe(recipe)
+    from recipe_prefixes import validate_selection
+    validate_selection(recipe, observer_prefixes)
     from recipe_assertions import default_assertions
     plan = {'schema': PLAN_SCHEMA, 'recipe': copy.deepcopy(recipe),
             'targets': {'baseline': copy.deepcopy(baseline_target), 'candidate': copy.deepcopy(candidate_target)},
             'repetitions': repetitions, 'order': order, 'seed': seed,
             'timeout': timeout, 'diagnostics': diagnostics,
-            'assertions': copy.deepcopy(assertions) if assertions is not None else default_assertions(recipe),
+            'assertions': copy.deepcopy(assertions) if assertions is not None else
+                          default_assertions(recipe, include_prefixes=observer_prefixes),
             'sequence': comparison_sequence(repetitions, order, seed)}
+    if observer_prefixes:
+        plan['observer_prefixes'] = True
     validate_comparison_plan(plan)
     return plan
 
@@ -136,12 +147,13 @@ def run_comparison(plan, *, workdir, results_dir, run=None, check=None):
     execute = run or run_recipe
     stop_exit = 0
     observed_attempt_ids = set()
+    capture = {'observer_prefixes': True} if plan.get('observer_prefixes') else {}
     for index, entry in enumerate(plan['sequence']):
         attempt = attempts[index]
         try:
             result = execute(plan['recipe'], workdir=work / entry['id'], results_dir=results / entry['id'],
                              timeout=plan['timeout'], diagnostics=plan['diagnostics'],
-                             target=plan['targets'][entry['role']])
+                             target=plan['targets'][entry['role']], **capture)
             recipes._choice(result.get('status'), tuple(recipes.RESULT_EXIT_CODES), 'attempt status')
             code = result.get('exit_code', recipes.RESULT_EXIT_CODES[result['status']][0])
             if type(code) is not int or code not in recipes.RESULT_EXIT_CODES[result['status']]:

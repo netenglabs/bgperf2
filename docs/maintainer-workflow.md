@@ -1,5 +1,10 @@
 # Follow one problem from reproduction to a regression boundary
 
+For exact prefix identity, the [connected prefix workflow](#exact-prefix-regression-workflow)
+below starts with real inert Git preparation and exercises the generated handoff
+through candidate CI, repeated comparison and localization. The original crash
+walkthrough remains available independently.
+
 Run this maintained offline walkthrough to learn how a recipe, local target
 change, diagnostic witnesses and deterministic revision search fit together.
 It exercises the public recipe and bisection CLIs with one shared
@@ -94,3 +99,46 @@ contracts, prerequisites, execution boundaries and limitations. The smaller
 [recipe](../scripts/recipe_smoke.py), [investigation](../scripts/investigation_smoke.py)
 and [bisection](../scripts/bisection_smoke.py) smokes retain their separate focused
 cases; this walkthrough connects public commands around one modeled problem.
+
+## Exact-prefix regression workflow
+
+```sh
+venv/bin/python scripts/prefix_workflow_smoke.py --output /absolute/new/prefix-workflow
+```
+
+Open `/absolute/new/prefix-workflow/REPORT.md`. Setup uses the maintained
+checkout-preparation workflow with four real local Git commits containing inert
+source comments and a retained dirty candidate. Only allowlisted local Git
+commands execute during preparation. Build/image/daemon behavior and numeric
+observations are explicitly **SIMULATED**. Subsequent stages forbid all real
+subprocess and network operations while exercising the public CLIs and actual
+handoff command arguments. No BIRD source or deliberately introduced BIRD fault
+is compiled or executed; no actual upstream bug or fix is claimed.
+`checkout/REPORT.md` remains the historical preparation snapshot; its then-future
+destinations subsequently contain this walkthrough's modeled execution evidence.
+The frozen setup account and handoff packet are preserved unchanged.
+
+| Stage | Retained entry point | Meaning |
+| --- | --- | --- |
+| Preparation | `checkout/REPORT.md`, `source-before.json`, `source-after.json`, `prepared-before.json`, `prepared-after.json` | Actual frozen source proofs, private Git bank, isolated historical checkouts, candidate plan and generated handoff remain unchanged through later stages. |
+| Reproduction and candidate | `return/investigation/REPORT.md` | All modeled attempts complete with count 100. Baseline substitutes one prefix, candidate has the exact set. Completion/reproduction is separate from prefix truth. |
+| CI | `commands.json` | Default both-side check exits 4, candidate check exits 0, missing selected candidate exits 5. Full integrity verification covers both sides. |
+| Repetition | `return/comparison/REPORT.md` | Two rounds/four distinct original attempts retain separate count and identity assertions. Capture remains an uncalibrated confounder, so no controlled timing delta follows. |
+| Interruption | `return/pending/REPORT.md`, `interruption/` | A collected original exists before journal append. A pending reservation refuses another trial; explicit recovery records that same original without rerunning work. |
+| Localization | `return/bisection/REPORT.md` | The combined `prefix_assertions` predicate finds the modeled revision 1/2 boundary and requires fresh good/bad confirmations. Build caching never reuses a worker observation. |
+| Portability | `return/`, `verification.json` | Copied reports verify independently, and offline reconstruction starts no modeled build or worker. Prepared checkouts, original work and build caches remain at their original location-bound paths. |
+
+The fixed question is `experiment_completed`, so the prefix mismatch does not
+change recipe reproduction into a routing-correctness verdict. The optional
+capture receipts and named assertions supply that separate evidence. The
+combined localization predicate can also classify another decisive supported
+assertion failure; a count failure alone must not be called an observed prefix
+identity mismatch. Missing evidence stays unmeasured or ambiguous.
+
+Use the [prefix contract](observer-prefixes.md), [comparison guide](comparisons.md),
+[CI check](investigations.md) and [bisection guide](bisection.md) for supported
+commands and limits. This walkthrough adds no execution authority, source trust,
+binary reproducibility, live path qualification, continuous route correctness
+or performance verdict. Keep the original evidence; a portable report tree and
+local checksums are not a complete independent backup. Performance policy stays
+disabled and formal 10% calibration deferred.

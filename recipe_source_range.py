@@ -438,7 +438,10 @@ def prepare_range(recipe, *, source_root, good, bad, toolchain_image, runtime_im
     targets._image(toolchain_image, 'toolchain_image')
     targets._image(runtime_image, 'runtime_image')
     cflags, configure_flags = targets._flags(cflags, configure_flags, instrumentation)
-    recipes._choice(predicate, ('assertions','target_crash'), 'predicate')
+    recipes._choice(predicate, ('assertions','target_crash','prefix_assertions'), 'predicate')
+    if predicate == 'prefix_assertions':
+        from recipe_prefixes import validate_selection
+        validate_selection(recipe, True)
     expected = 'target_crash' if predicate == 'target_crash' else 'experiment_completed'
     if recipe['reproduction']['expected_outcome'] != expected:
         raise recipes.ContractError('Predicate differs from the frozen reproduction question')
@@ -652,7 +655,7 @@ def main(argv=None):
     prepare.add_argument('--instrumentation',default='debug')
     prepare.add_argument('--cflags',default='-O0 -g')
     prepare.add_argument('--configure-flag',action='append',default=[])
-    prepare.add_argument('--predicate',choices=('assertions','target_crash'),default='assertions')
+    prepare.add_argument('--predicate',choices=('assertions','target_crash','prefix_assertions'),default='assertions')
     prepare.add_argument('--max-trials',type=int,default=32)
     prepare.add_argument('--worker-timeout',type=float,default=120)
     prepare.add_argument('--build-timeout',type=float,default=1200)

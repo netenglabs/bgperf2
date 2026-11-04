@@ -66,6 +66,38 @@ default full set with `diagnostics none` yields inconclusive health. Select the
 full set with `basic` when investigating those observations, retaining its
 uncalibrated overhead confounder. Unsupported capabilities cannot be requested.
 
+For exact received-prefix checks on every repeated attempt, select capture in
+the frozen plan:
+
+```sh
+venv/bin/python recipes.py comparison-plan /absolute/artifacts/recipe.json \
+  --baseline-target /absolute/artifacts/baseline-target.json \
+  --candidate-target /absolute/artifacts/candidate-target.json \
+  --observer-prefixes --repetitions 2 --order alternating \
+  --diagnostics basic --timeout 120 \
+  --output /absolute/artifacts/prefix-comparison-plan.json
+```
+
+`--observer-prefixes` selects the existing bounded final snapshot on both sides
+of every round. It requires a supporting immutable sink image and at most
+100,000 expected prefixes. The optional plan field is strictly `true`; omitting
+it preserves old plan shapes, defaults and runner arguments. The selected
+default assertion set contains all six assertions, including prefix identity.
+An explicit `--assertions` document remains the requested specification: capture
+does not silently add predicates or turn a count-only specification into an
+identity check. The plan and captured artifacts retain that distinction.
+Invalid selection or capture bounds refuse before runtime probes or output
+creation. Old engines refuse plans containing the new optional selection.
+
+Each selected report includes a separate count/identity table for every planned
+attempt, with exact observed, missing and unexpected prefix counts when measured.
+Missing or unavailable capture stays unmeasured, and stopped/not-run positions
+retain their original meanings. Selected capture always records an uncalibrated
+overhead confounder, even with an explicit specification that omits identity;
+it withholds controlled descriptive deltas without discarding observations.
+One final snapshot establishes neither route attributes nor continuous truth.
+No capture-overhead calibration or performance policy is enabled.
+
 `alternating` produces AB, BA, AB, BA across rounds. `shuffle --seed INTEGER`
 orders the two roles independently in each round using deterministic SHA-256
 keys, following the existing batch ordering approach. Every round contains
@@ -148,11 +180,18 @@ no route identities or attributes. Unsupported attribute, policy, recovery,
 IPv6 and action predicates are refused instead of reduced to counts or sleeps.
 
 An explicitly selected [received-prefix identity assertion](observer-prefixes.md)
-can instead inspect a complete final snapshot from standalone
-`run --observer-prefixes`. It is separate from the five defaults and from the
-convergence-time count. Comparison execution does not enable snapshot capture;
-packages without it leave this assertion unmeasured. Attribute predicates remain
-unsupported.
+inspects a complete final snapshot from a supporting capture-selected run or
+comparison plan. It is separate from the five unselected defaults and from the
+convergence-time count. Merely selecting that assertion does not enable capture;
+the comparison plan must independently select `--observer-prefixes`. Packages
+without complete capture leave the assertion unmeasured. Attribute predicates
+remain unsupported.
+
+For compatibility, an older unselected plan can still evaluate an explicitly
+requested identity assertion against independently captured packages. Its old
+confounder rules are not retroactively reclassified. An absent capture confounder
+is not proof that capture did not occur or that its overhead was calibrated;
+use the explicit plan selection for newly prepared capture comparisons.
 
 ## Inspect and rebuild the report
 

@@ -530,6 +530,8 @@ def main(argv=None):
     comparison_plan.add_argument('--seed', type=int)
     comparison_plan.add_argument('--timeout', type=float, default=300)
     comparison_plan.add_argument('--diagnostics', choices=('none', 'basic'), default='none')
+    comparison_plan.add_argument('--observer-prefixes', action='store_true',
+                                 help='capture bounded final IPv4 prefixes on every planned comparison attempt')
     comparison_plan.add_argument('-o', '--output')
     compare = commands.add_parser('compare', help='explicitly execute a frozen serial comparison plan')
     compare.add_argument('document')
@@ -624,12 +626,14 @@ def main(argv=None):
                 _write_document(spec, args.output)
             elif args.command == 'comparison-plan':
                 from recipe_comparison import make_comparison_plan
+                options = {'observer_prefixes': True} if args.observer_prefixes else {}
                 _write_document(make_comparison_plan(document,
                     baseline_target=read_document(args.baseline_target),
                     candidate_target=read_document(args.candidate_target),
                     repetitions=args.repetitions, order=args.order, seed=args.seed,
                     timeout=args.timeout, diagnostics=args.diagnostics,
-                    assertions=read_document(args.assertions) if args.assertions else None), args.output)
+                    assertions=read_document(args.assertions) if args.assertions else None,
+                    **options), args.output)
             elif args.command == 'comparison-start':
                 from comparison_session import start_session
                 result = start_session(document, workdir=args.workdir, results_dir=args.results_dir,

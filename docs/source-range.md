@@ -39,6 +39,16 @@ toolchain/runtime identities, predicate and trial/time budgets are fixed for
 the complete range. Image pins are declarations: preparation does not inspect
 Docker, prove that images exist, or select replacement images.
 
+`--predicate prefix_assertions` also requires `experiment_completed` and adds
+the final exact prefix-set witness to the existing four bounded assertions.
+Its capture limit (at most 100,000 expected prefixes) is checked before any Git
+operation or destination creation. The prepared plan retains this predicate;
+later explicit trials and confirmations request capture automatically. No
+capture, image inspection or source build happens during preparation. Missing
+capture in an imported trial remains unmeasured, not good. See the
+[bisection predicate contract](bisection.md) for failure precedence and final
+snapshot limitations.
+
 Open the generated `REPORT.md` and inspect these records:
 
 | Path | Meaning |

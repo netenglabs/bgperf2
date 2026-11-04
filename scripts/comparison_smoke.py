@@ -22,7 +22,7 @@ if str(ROOT) not in sys.path:
 
 import recipes
 from scripts.investigation_smoke import _command
-from scripts.recipe_smoke import SimulatedHost, _write
+from scripts.recipe_smoke import SimulatedHost, SimulatedOS, _write
 
 BASELINE_IMAGE = 'sha256:' + '1' * 64
 CANDIDATE_IMAGE = 'sha256:' + '4' * 64
@@ -170,6 +170,7 @@ def _run_smoke(output):
     cases = {}
     with ExitStack() as stack:
         host.patch(stack)
+        stack.enter_context(patch.object(recipe_run, 'os', SimulatedOS(output / 'modeled-recipe.lock')))
         baseline = output / 'baseline-target.json'
         candidate = output / 'candidate-target.json'
         debug = output / 'debug-candidate-target.json'

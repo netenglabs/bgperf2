@@ -65,6 +65,19 @@ independently fail or remain inconclusive. Read each result and stop condition;
 a dependency edge does not authorize the next action. The supported assertion
 and crash bisection predicates retain their existing recipe meanings.
 
+For a range prepared with `prefix_assertions`, the derived command graph keeps
+that selection throughout: reproduction and investigation explicitly request
+prefix capture, assertion export includes prefix identity, and the candidate
+CI step uses `investigation-check --side candidate`. An explicitly selected
+comparison requests capture with basic diagnostics and the six default named
+assertions, so health observations are requested rather than disabled by `none`;
+missing evidence stays unmeasured.
+The bisection predicate itself remains the four worker-budget assertions plus
+prefix identity, excluding optional role-health from boundary classification.
+Candidate CI may pass alongside a baseline failure; original outer exits and
+case acceptance still require their separate evidence. Existing non-prefix
+handoffs retain their previous command arguments and budgets.
+
 Comparison is omitted unless repetitions are explicitly selected:
 
 ```sh

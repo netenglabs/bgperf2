@@ -164,3 +164,28 @@ def test_main_runs_from_outside_checkout(tmp_path, monkeypatch, capsys):
     assert smoke.main(['--output', str(tmp_path / 'standalone')]) == 0
     summary = json.loads(capsys.readouterr().out)
     assert summary['simulation'] is True and Path(summary['report']).is_file()
+
+
+@pytest.mark.parametrize('walkthrough', ['comparison', 'recipe', 'investigation'])
+def test_modeled_walkthroughs_never_open_the_real_recipe_host_lock(tmp_path, monkeypatch, walkthrough):
+    import os
+    from scripts.bisection_smoke import SimulatedOS as legacy_import
+    from scripts.recipe_smoke import SimulatedOS
+    from scripts import recipe_smoke, investigation_smoke
+    assert legacy_import is SimulatedOS
+    original_open = os.open
+    global_lock = Path('/tmp') / f'bgperf2-recipe-{os.getuid()}.lock'
+    output = tmp_path / 'isolated'
+    observed = []
+    def refuse_real_lock(path, flags, mode=0o777, *, dir_fd=None):
+        selected = Path(os.fsdecode(path))
+        if selected == global_lock:
+            raise BlockingIOError('SIMULATED foreign recipe lock; must not be touched')
+        if selected == output / 'modeled-recipe.lock':
+            observed.append(selected)
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+    monkeypatch.setattr(os, 'open', refuse_real_lock)
+    selected_smoke = {'comparison': smoke, 'recipe': recipe_smoke, 'investigation': investigation_smoke}[walkthrough]
+    summary = selected_smoke.run_smoke(output)
+    assert summary['simulation'] is True and observed
+    assert set(observed) == {output / 'modeled-recipe.lock'}

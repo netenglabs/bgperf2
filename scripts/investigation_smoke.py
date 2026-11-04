@@ -24,7 +24,7 @@ if str(ROOT) not in sys.path:
 
 import recipes
 import recipe_preflight as preflight
-from scripts.recipe_smoke import SimulatedHost, _write
+from scripts.recipe_smoke import SimulatedHost, SimulatedOS, _write
 
 BASELINE_IMAGE = 'sha256:' + '1' * 64
 CANDIDATE_IMAGE = 'sha256:' + '4' * 64
@@ -255,6 +255,7 @@ def run_smoke(output):
     runtimes = {}
     with ExitStack() as stack:
         host.patch(stack)
+        stack.enter_context(patch.object(recipe_run, 'os', SimulatedOS(output / 'modeled-recipe.lock')))
         stack.enter_context(patch.object(recipe_targets, '_git', source.git))
         stack.enter_context(patch.object(recipe_targets, '_run_build', host.build))
         stack.enter_context(patch.object(subprocess, 'Popen', _forbidden))

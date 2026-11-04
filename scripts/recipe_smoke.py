@@ -15,6 +15,7 @@ import argparse
 from contextlib import ExitStack, redirect_stdout
 import io
 import json
+import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -26,6 +27,20 @@ if str(ROOT) not in sys.path:
 
 import recipes
 import recipe_preflight as preflight
+
+
+class SimulatedOS:
+    """Redirect only the modeled recipe host lock into retained smoke output."""
+    def __init__(self, lock):
+        self.lock = lock
+        self.original_lock = Path('/tmp') / f'bgperf2-recipe-{os.getuid()}.lock'
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+    def open(self, path, flags, mode=0o777, *, dir_fd=None):
+        selected = self.lock if os.fsdecode(path) == str(self.original_lock) else path
+        return os.open(selected, flags, mode, dir_fd=dir_fd)
 
 
 def _command(arguments):
@@ -154,6 +169,7 @@ def run_smoke(output):
 
     with ExitStack() as stack:
         host.patch(stack)
+        stack.enter_context(patch.object(recipe_run, 'os', SimulatedOS(output / 'modeled-recipe.lock')))
         stack.enter_context(patch.object(subprocess, 'Popen', forbidden))
         stack.enter_context(patch.object(socket.socket, 'connect', forbidden))
         stack.enter_context(patch.object(socket, 'create_connection', forbidden))

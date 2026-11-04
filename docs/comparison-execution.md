@@ -12,6 +12,14 @@ workflow always requires the selected correctness assertions and an exact
 worker-budget match. It never retries a stopped session, extends a worker
 budget, downloads an image, builds a target or repairs host setup.
 
+Prefix capture is selected once in `comparison-plan --observer-prefixes`, not
+overridden at start or step. Every public recipe controller receives the frozen
+selection, so both roles and all repetitions use the same capture behavior.
+Selected default assertions include the six named witnesses and gate final
+identity separately from convergence-time count; missing/unavailable capture
+stops the session as inconclusive rather than supplying a pass. Reports retain
+the original package, prefix evidence and the capture-overhead confounder.
+
 ```sh
 venv/bin/python recipes.py comparison-start /absolute/aa-plan.json \
   --workdir /absolute/new-aa-work --results-dir /absolute/new-aa-results \
@@ -43,6 +51,14 @@ experiment completion. It applies the existing [observer timing](observer-timing
 resolution screen; legacy whole-second timing fields are unchanged. Subsequent
 steps reverify original packages, prior assessments and source attempt identities.
 Missing supplements are errors, never silently recreated.
+
+This exact-four requirement remains explicit: a capture-selected plan with its
+default six assertions is incompatible with `--observer-window`. To collect
+prefixes while using that separate timing supplement, explicitly supply a
+four-assertion specification when planning; the prefix evidence is retained but
+identity is then outside the selected staged assertion gate. No assertion is
+silently removed, and capture's uncalibrated-overhead confounder remains. Omit
+`--observer-window` for the default six-assertion prefix-correctness workflow.
 
 After the first attempt, the session waits in `first_review`. An external reviewer
 must inspect the checkpoint report, package, assertion outcomes, supplements,

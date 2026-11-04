@@ -6,6 +6,11 @@ It supports the existing four observable correctness assertions or a captured
 target-daemon crash. Performance predicates are refused; regression policy
 remains `disabled` and performance qualification `not_assessed`.
 
+The explicit `prefix_assertions` predicate adds final received-prefix identity
+to the four existing worker-budget assertions. It enables bounded prefix
+capture on every fresh trial and confirmation. The original `assertions` and
+`target_crash` predicates retain their existing selection and runner defaults.
+
 This implementation is validated with controlled, Docker-free histories and one
 [bounded live count-fault case](plans/milestone-d-runtime-validation.md#approved-waited-execution-completed--2026-10-26).
 The deliberately introduced local fault confirmed its boundary with fresh workers;
@@ -130,6 +135,26 @@ count and experiment completion, all within the selected worker budget. These
 are the [existing named observable assertions](comparisons.md), not route or
 attribute truth. A decisive failure from an otherwise measured experiment may
 be bad; harness failure or an unsupported/missing witness stays ambiguous.
+
+Select `--predicate prefix_assertions` in `plan` for those four assertions plus
+`observer.prefixes`. The recipe must expect `experiment_completed` and contain
+at most 100,000 expected prefixes; planning refuses larger capture requests
+before source-object probes or outputs. Every new worker receives the same
+explicit capture request. Imported/recovered packages must supply their own
+verified selection and complete capture evidence: absence or unavailable capture
+is unmeasured and cannot make a good trial. With a satisfied matching worker
+budget, all five assertions passing is good and any decisive selected failure
+is bad; otherwise the trial is ambiguous. A count failure can therefore be bad
+even while identity is unmeasured. Inspect the individual rows rather than
+calling every bad trial a demonstrated prefix-set mismatch.
+
+The identity witness is one [post-measurement snapshot](observer-prefixes.md),
+separate from convergence-time count. It establishes no attributes or continuous
+correctness and has uncalibrated overhead. Capture requests do not acquire a
+supporting observer image or grant trial execution authority. Original source
+bindings, cache controls, reservation recovery, distinct original identities and
+fresh boundary confirmations are unchanged. Real prefix-localization runtime
+qualification remains separate from the maintained simulated walkthrough.
 
 `target_crash` requires a recipe whose expected outcome is `target_crash`, basic
 diagnostics, a clean process-presence observation followed by absence and a

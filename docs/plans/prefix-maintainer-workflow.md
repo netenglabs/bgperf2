@@ -137,3 +137,66 @@ Live staged comparison and source-build/prefix-localization qualification remain
 separate. The four-worker allowance is consumed with no automatic successor.
 Upstream investigation remains paused; performance policy stays disabled and
 formal 10% calibration deferred.
+
+## Operator continuation — 2026-11-04 UTC
+
+After the normal four-worker case succeeded, the operator requested continued
+work on the larger goal rather than treating its completed worker allowance as
+a failed or finished overall qualification effort. There is no token/time-budget
+failure. Implementation and the selected normal path are delivered; the live
+staged and localization paths remain separate acceptance gaps.
+
+Prepare the remaining validation as one review batch: a minimal staged A/A pair
+using existing images and explicit first/final independent review gates, plus
+a concrete localization case if the preserved controlled-test source/build
+proofs support it. Source inspection is restricted to those named preserved
+test records; the upstream bug investigation stays paused. Do not create a new
+source fault, silently relabel cached image targets, or claim a prefix mismatch
+from a count-only witness. A same-good endpoint control, if selected, can qualify
+capture and refusal but cannot confirm a regression boundary.
+
+Complete substantive preparation and any required supported-workflow fixes,
+checks, review, documentation and local checkpoints before presenting the
+execution decision. Cases must explain their natural worker/build counts,
+fresh confirmations, review pauses, exact source/image bindings and terminal
+recovery rules. Prior successful-case positions are not automatic permission
+for new runs, and reaching a case ceiling is not a failure of the larger goal.
+No new real build/worker, acquisition, scheduler or policy activation follows
+from this continuation. Preparation evidence lives under
+`/tmp/bgperf2-prefix-qualification-20261104/`.
+
+The remaining batch has a concrete natural scope: two staged workers (one per
+role, exercising first/final review), then three public local-source build
+invocations and five fresh localization workers. The preserved controlled
+history contains a good revision, an inert-comment good revision and its
+documented deliberate single-prefix suppression. Fresh plans preserve all three
+source identities and first-parent proofs. Updating the framework/observer
+changes the recipe binding, so old target/cache declarations cannot be edited
+or imported as new targets; the existing Docker compilation layers may be reused
+by actual public builds without claiming fresh compilation.
+
+Localization must first witness the selected good/bad endpoints, classify the
+midpoint, and obtain fresh good/bad confirmations. The controlled bad result is
+expected to fail count and prefix identity while completing the experiment;
+that is an expected test witness, not an upstream bug or an arbitrary failure.
+Its prefix observation must be collected afresh and cannot be inferred from an
+old count. It does not establish a count-preserving wrong-prefix live boundary.
+Unexpected, unavailable or ambiguous evidence remains an incomplete case.
+
+The build/localization phase is conditional on an actual accepted staged final
+review. Each later localization step requires inspection of its exact request,
+verified original evidence, owned cleanup and independent review of the prior
+trial; no automatic run-over-skipped-results or approval loop is selected.
+Confirmation cache identities must already verify, preventing an unnoticed
+fourth build. Per-command timeouts bound actual execution; there is no arbitrary
+overall goal/token deadline and review pauses do not fabricate a failed goal.
+
+Qualification cases use an independent clean committed engine at `28e6a54`,
+with its existing locked environment and private Git/object/source hashes.
+Pending parent documentation is explicitly excluded. The staged controller's
+existing child argv has no `-E/-B`, so these cases freeze an explicit minimal
+`env -i` profile, including known store/converter and bytecode-disable settings,
+instead of inheriting Python/Git/Docker overrides. Engine defaults do not change.
+Observer-window, pressure/prior-series combinations, forced build-timeout or
+interruption experiments and performance calibration are outside this batch;
+they do not silently become new closure requirements for the selected goal.

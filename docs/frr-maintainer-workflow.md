@@ -8,9 +8,12 @@ with all FRR images or arbitrary registry images. BIRD remains the default targe
 
 Implemented and reviewed at `f81404b`; the native repository gate passed 3,071
 tests with one skipped. The [delivery plan](plans/frr-maintainer-workflow.md)
-records modeled acceptance and the bounded real-image validation proposal.
-Actual FRR runtime qualification remains unassessed until separately approved
-execution and evidence review complete.
+records modeled acceptance and the separately approved
+[successful real-image functional pair](plans/frr-maintainer-workflow.md#approved-same-image-functional-pair-completed--2026-11-04-utc).
+Both originals passed all six assertions, exact-prefix checks, independent review
+and owned cleanup; original and reconstructed reports verified. This qualifies
+that selected same-image functional path. Broader live comparison/minimization,
+performance and source/build qualification remain separate.
 
 Supply immutable image IDs (`sha256:…`) or repository digests for all three roles.
 An image pin identifies selected bytes; it does not establish FRR source revision,
@@ -107,4 +110,4 @@ checks exit 4 for a selected failure and 5 for inconclusive evidence; candidate-
 checking does not silently accept a missing candidate. Health is a bounded snapshot,
 not a proof of continuous liveness. Portable report checksums detect changed
 evidence without authenticating that execution occurred. Performance policy remains
-disabled, qualification unassessed and formal 10% calibration deferred.
+disabled, performance qualification unassessed and formal 10% calibration deferred.

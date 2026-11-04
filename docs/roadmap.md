@@ -20,9 +20,13 @@ Delivered at `f81404b`: strict same-adapter identities, scoped FRR dispatch and
 conservative diagnostics, plus a modeled public workflow with assertions,
 investigations, repeated/staged comparisons and minimization. Independent code
 review had no findings; the native gate passed 3,071 tests, one skipped. The
-selected real-image A/A validation is two serial 120-second workers and zero
-builds, with exact-prefix checks and independent review; it remains unexecuted
-pending one frozen-case approval. Supplied-image source/build facts stay unknown.
+separately approved
+[real-image A/A validation](plans/frr-maintainer-workflow.md#approved-same-image-functional-pair-completed--2026-11-04-utc)
+completed two serial workers, all twelve assertions and exact 100-prefix sets,
+with independent first/final acceptance, verified identical report reconstruction
+and owned cleanup. Zero builds or acquisitions occurred. This qualifies the
+selected functional original-pair path; broader FRR live comparisons/minimization
+and performance remain unqualified. Supplied-image source/build facts stay unknown.
 
 [Bounded reproducer minimization](plans/reproducer-minimization.md) was delivered
 at `506ff4b` with modeled verification and required gates. Its first

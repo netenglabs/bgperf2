@@ -161,3 +161,69 @@ Preserve every partial output and reconcile exact owned resources; no automatic
 retry, broad Docker cleanup, evidence deletion or acquisition is authorized.
 No live worker/build has run in this milestone. Performance policy stays
 disabled, formal 10% calibration deferred and the upstream investigation paused.
+
+## Approved same-image functional pair completed — 2026-11-04 UTC
+
+The operator explicitly approved the frozen case and functional-only root-storage
+exception. Execution used the independent clean source at
+`2689ad1ee50d5394575a8daaebc04417c5f04e22`, the exact three image IDs above,
+and the reviewed case manifest
+`dce85a25d1022961e09ffe69001100392b9abd2d21a3dec66c55e9b591a7c12a`.
+The separately sealed host-Git supplement
+`1aa8b3fdab7dc3be5856aae20cec149451f35860bd2b5040a61d564978952014`
+binds actual configuration dependencies after the runner sanitizes Git variables.
+No frozen source, environment, case, supplement or earlier evidence was changed.
+Actual execution evidence is `/tmp/bgperf2-frr-workflow-20261104/execution01/`.
+
+| Original | Attempt UUID suffix | Worker seconds | Outer command seconds | Assertions | Exact prefix set |
+| --- | --- | ---: | ---: | --- | --- |
+| baseline | `2c45f853ed364839a126beefb875c270` | 12.13472594297491 | 14.84437992493622 | 6/6 passed | 100 received, zero missing/unexpected |
+| candidate | `c1fa9524c11f490ab41babe2b366ab17` | 11.803601235849783 | 14.356481462018564 | 6/6 passed | 100 received, zero missing/unexpected |
+
+Both original packages verified. Count and prefix-set assertions independently
+passed; experiment completion and reproduction retained their existing meanings.
+Actual first independent acceptance preceded the fresh candidate prerequisite
+checks and second worker. All 47 exact frozen/supplement operation receipts show
+exit zero, no outer timeout and empty stderr. There were exactly two original
+workers, zero retries, zero builds, zero acquisitions and no scheduler job.
+
+Final independent review accepted with no findings:
+`execution01/final-review.json`, SHA256
+`069836d6210d5c4866f1aff977e0fa8d33af5bcb4b53cfb7addc7c98f9be5edf`.
+It verified approval, source/image/recipe bindings, finite original budgets,
+all twelve assertions and original permissions; native lstat found collector-owned
+mode0700 monitor directories and mode0666 sockets. Both runtimes record explicit
+empty cleanup errors. Native inventories confirm all six exact owned container
+IDs and both attempt-scoped networks absent. Foreign resources were unchanged
+semantically: 75 containers, six networks and 495 volumes.
+
+Public investigation reporting, verification, correctness checking and status
+inspection succeeded. A fresh reconstruction verified and matched all 91 report
+files physically and semantically. The portable report is
+`execution01/report/REPORT.md`; original work/packages, raw omissions, receipts,
+review records and reconstructed report remain preserved. Local preservation is
+not independent backup or authenticated execution provenance.
+
+An incomplete automated first-review check initially treated comma-separated
+Docker mount order as meaningful and stopped before the independent review was
+complete. The exact parser artifact and subsequent review versions are retained.
+Set comparison confirmed identical foreign mounts; the completed actual first
+review accepted the original. `execution01/protocol-assessment.json` records why
+this was not an actual independent rejection or runtime harness failure. No
+worker was rerun and no measurement evidence was modified.
+
+The observed target banner was `FRRouting 10.7.0-my-manual-build`; generator
+reported BIRD 2.19.2 and observer 0.2.0. This does not establish source revision,
+build flags, instrumentation or reconstructibility. FRR zclient warnings remain
+in the original logs. Recorded peak foreign CPU was 542%/734%; the selected
+immediate functional protocol permits unrelated activity and supplies no quiet
+host or performance qualification. Role health remains a bounded container
+snapshot, not continuous FRR daemon liveness or a daemon-exit witness.
+
+This completes bounded real-image qualification of the selected FRR
+reproduction/assertion/original-pair/report path. Broader live FRR comparisons,
+minimization, source builds, revision search, crash reproduction and target thread
+controls are not qualified by this case; unsupported interfaces retain their
+explicit refusals. No general fix, changed binary or performance improvement is
+claimed. Performance policy remains disabled, formal 10% calibration deferred
+and the upstream investigation paused. Nothing was pushed or published.

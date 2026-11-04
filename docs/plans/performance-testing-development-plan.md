@@ -23,6 +23,12 @@ This extension authorizes no real workers/builds/acquisitions and changes no
 measurement definitions or calibrated performance policy. Formal 10% calibration
 remains deferred; the upstream investigation remains paused.
 
+Its separately approved [FRR same-image functional pair](frr-maintainer-workflow.md#approved-same-image-functional-pair-completed--2026-11-04-utc)
+has now passed original assertions, exact-prefix checks, independent reviews,
+report reconstruction and owned cleanup with two workers and zero builds.
+That bounded qualification does not extend to broader live FRR comparison,
+minimization or performance detection; the linked plan owns the complete record.
+
 ## Operator decision: descriptive comparisons first — 2026-10-31
 
 Follow-through on 2026-11-03: the operator selected continued work after the

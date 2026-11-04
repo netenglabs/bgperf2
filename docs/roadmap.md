@@ -8,7 +8,8 @@ CLI and versioned artifacts; none is required to use the engine.
 ## Current direction
 
 The operator selected the [FRR source-to-fix and correctness-localization milestone](plans/frr-source-workflow.md)
-after the completed supplied-image pair at `03a4e778`. It adds source-bound
+after the completed supplied-image pair at `03a4e778`. Delivered at `701ae2c`
+with independent review and a native gate passing 3,141 tests, one skipped. It adds source-bound
 `frr-local/v1` builds, offline source-range/handoff preparation and deterministic
 assertion/prefix-assertion bisection. The [FRR source guide](frr-source-workflow.md)
 connects candidate CI, image-only minimization and fresh source plans for reduced

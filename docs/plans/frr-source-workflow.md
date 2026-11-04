@@ -69,7 +69,8 @@ resource-limit semantics. The final focused selection passed all 332 tests (`foc
 Independent review accepted with one nonblocking configuration-base follow-up.
 The recipe now uses `/etc`, matching the existing compiled adapter recipe and
 current FRR installation guidance; the guide states source-version default-path
-limits. Focused review verification and the native commit gate remain pending.
+limits. Focused review verification accepted the correction with `R1` resolved and no
+remaining findings. The native commit gate passed; see the delivery record below.
 
 Read-only local-source readiness is `source-readiness.json`. The available FRR
 8.0 checkout has tracked topotest symlinks; its original bytes remain unchanged
@@ -77,3 +78,38 @@ and it does not satisfy the existing regular-file contract. The separate
 [bounded live proposal](frr-source-runtime-validation.md) records that gap and
 unselected builder/runtime inputs. It is not execution-ready and requests no
 approval or new worker. Pristine FRR source support is not claimed.
+
+
+## Delivered implementation — 2026-11-04 UTC
+
+Implementation commit: `701ae2c48cfa92daad9220848132fdcca0fc2994`.
+Independent broad review and focused correction verification are preserved under
+`review-broad/` and `review-focused/` in the evidence root. The accepted frozen
+implementation diff SHA256 is `8c47925cef8f0e203ebac6209ddaedb4dabaf3f2565cc3c3f6fbd65b69f1d372`.
+The required review-state check matched source/index/Git state before the commit.
+The normal native commit hook verified the 34-package locked environment and
+passed **3,141 tests, one skipped**, in 337.29 seconds. No hook was bypassed.
+`implementation-commit.stdout`, `.stderr` and `.exit` retain the actual local
+commit and gate result; its exit is zero.
+
+Final standalone modeled evidence is `modeled-final/REPORT.md`: sixteen distinct
+simulated originals, seven modeled builds, a fresh confirmed one-peer/two-route
+reduction, unchanged-original recovery, fresh source-boundary confirmations,
+eight relocated verification receipts and changed-report refusal. All sources,
+images, builds and observations there are simulated. Earlier modeled outputs and
+failed fixture checks remain separate and retained. The final source-layout
+selection passed eleven tests; the broader focused selection passed 332.
+
+Source/build contracts, source-range preparation, maintainer handoffs, modeled
+integrated acceptance and reviewed engine implementation are complete. The
+[public source guide](../frr-source-workflow.md) is the maintained entry point.
+Live source-build/changed-image/minimization/bisection qualification remains
+unassessed. The [separate live proposal](frr-source-runtime-validation.md) is
+prepared with finite bounds and explicit unresolved source/base prerequisites;
+it is not an executable approved packet and no execution approval is requested.
+
+Earlier supplied-image originals and their preservation remain untouched. No
+real build, worker, acquisition, upstream investigation, scheduler job, evidence
+transfer, push or publication occurred. Policy stays disabled and calibration
+deferred. Local checksums and readback do not provide authenticated execution
+provenance or independent backup.

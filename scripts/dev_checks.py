@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import stat
@@ -124,7 +125,9 @@ def run_logged(argv, *, cwd, env, output, timeout, detect_api_errors=False, prom
     started = time.monotonic()
     next_progress = started + 30
     reason = None
-    markers = ('enotfound', "can't reach api server", 'api error:', 'eai_again')
+    api_failure = re.compile(
+        r"^\s*(?:error:\s*)?(?:(?:getaddrinfo\s+)?(?:enotfound|eai_again)\b|"
+        r"can't reach api server\b|api error:)", re.IGNORECASE)
     with tempfile.TemporaryFile() as input_stream, (output / 'stdout.log').open('wb') as stdout, (output / 'stderr.log').open('wb') as stderr:
         if prompt is not None:
             input_stream.write(prompt.encode())
@@ -146,7 +149,7 @@ def run_logged(argv, *, cwd, env, output, timeout, detect_api_errors=False, prom
                             stream.seek(max(0, (output / name).stat().st_size - 8192))
                             lines = stream.read().decode(errors='replace').lower().splitlines()
                             # Do not mistake a quoted error in valid JSON findings for an API failure.
-                            if any(any(marker in line for marker in markers)
+                            if any(api_failure.match(line)
                                    for line in lines if not line.lstrip().startswith(('{', '[', '"'))):
                                 reason = 'review backend/API failure'
                                 break

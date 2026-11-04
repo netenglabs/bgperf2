@@ -182,6 +182,19 @@ def test_focused_review_cannot_drop_blocker(repo, tmp_path):
     assert result['status'] == 'not_ready' and 'omitted' in result['reason']
 
 
+@pytest.mark.parametrize('excerpt', [
+    '    except FileNotFoundError:',
+    "markers = ('enotfound', 'eai_again')",
+    "print('API Error: ENOTFOUND')",
+])
+def test_reviewer_reading_source_is_not_an_api_failure(repo, tmp_path, excerpt):
+    stage(repo)
+    code = ('import sys,time; print(' + repr(excerpt) + ', file=sys.stderr, flush=True); '
+            'time.sleep(.15); print(\'{"findings":[],"resolved_ids":[]}\')')
+    result = reviewer.review(repo[0], tmp_path / 'review', backend=[sys.executable, '-c', code])
+    assert result['status'] == 'ready'
+
+
 def test_unstaged_changes_refuse_before_backend(repo, tmp_path):
     stage(repo)
     (repo[0] / 'source.py').write_text('unstaged')

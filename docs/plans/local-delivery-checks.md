@@ -11,6 +11,12 @@ delivered in consumer lab `bf682b4`; legacy evidence migration remains separate.
 The lab consumes the engine's standalone checker through an explicit binding,
 without copying it. Neither the lab nor its deployment is required by the engine.
 
+Storage adoption review exposed a runner defect: the substring `enotfound`
+matched Python `FileNotFoundError` in source printed by a read-only reviewer.
+The runner now recognizes API/DNS diagnostic prefixes instead of arbitrary
+substrings in source excerpts. Native API failure/timeout handling remains
+bounded, and regressions cover Python exceptions and quoted API examples.
+
 Decisions:
 
 - Freeze the complete staged diff; reject unstaged and untracked source changes.

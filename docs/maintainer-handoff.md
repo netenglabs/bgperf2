@@ -6,8 +6,9 @@ can be another range revision or a separately planned local clean/dirty change.
 The handoff does not infer that it fixes the problem. Both selected targets keep
 the exact same recipe, generator, observer and reproduction question.
 
-This source/build handoff remains BIRD-only; it does not extend the
-[supplied-image FRR workflow](frr-maintainer-workflow.md) to FRR source builds.
+The source/build handoff supports BIRD and `frr_c` correctness histories; see
+the [FRR source workflow](frr-source-workflow.md). FRR crash predicates remain
+unsupported. Preparation does not qualify real FRR source builds.
 
 This command creates a new, checksummed local bundle with canonical inputs,
 the exact existing bisection plan, dependency-ordered public command arguments

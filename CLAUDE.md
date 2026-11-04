@@ -140,15 +140,16 @@ functional pair and verifies its bundled evidence/prose without statistical
 performance decisions. Read `docs/investigations.md` before changing those
 contracts or their trust/accounting boundaries. Read `docs/recipes.md`
 before changing its recipe/result schemas or status meanings. It currently
-supports the documented synthetic IPv4 BIRD or supplied-image `frr_c` target,
+supports the documented synthetic IPv4 BIRD or `frr_c` target,
 with BIRD generators and sink observer; recipe
 execution requires the explicit `run` operation. Declared identities are not verified images or
 host qualification, and experiment status is separate from reproduction outcome.
 
 Read `docs/frr-maintainer-workflow.md` for the supplied-image FRR scope and
 `docs/plans/frr-maintainer-workflow.md` for its delivery record. FRR uses its
-existing compiled adapter and container names. Daemon-crash witnesses, target
-thread controls, local-source builds and revision search remain BIRD-only.
+existing compiled adapter and container names. Daemon-crash witnesses and target thread controls remain BIRD-only.
+Read `docs/frr-source-workflow.md` and `docs/plans/frr-source-workflow.md` for the
+`frr-local/v1` trusted local build and correctness revision-search extension.
 `scripts/frr_workflow_smoke.py` exercises FRR contracts with simulated runtimes.
 
 `recipe_assertions.py` evaluates named observable correctness witnesses against

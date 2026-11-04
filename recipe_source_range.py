@@ -204,7 +204,7 @@ def _source_signature(git, root, config):
             'diff_sha256': _sha(git.run(root, 'diff', '--binary', '--no-ext-diff', '--no-textconv', 'HEAD', '--'))}
 
 
-def _tree_budget(git, root, revision):
+def _tree_budget(git, root, revision, adapter='bird'):
     rows = git.run(root, 'ls-tree', '-rlz', '--full-tree', revision).split(b'\0')
     count = total = 0
     names = set()
@@ -232,8 +232,7 @@ def _tree_budget(git, root, revision):
                 declarations = line.split(None,1)[1]
                 if re.search(rb'(?<![A-Za-z0-9_-])(?:working-tree-encoding|ident)(?:=|\s|$)',declarations):
                     raise recipes.ContractError('Selected working-tree-encoding/ident attributes require manual preparation')
-    if not {'configure.ac','Makefile.in'} <= names:
-        raise recipes.ContractError('Every selected revision requires BIRD-style configure.ac and Makefile.in')
+    targets._source_shape(names, adapter)
     return {'bytes': total, 'files': count}
 
 
@@ -342,9 +341,9 @@ def _object_hash(kind, data):
     return digest.hexdigest()
 
 
-def _verify_objects(git, root, revisions, proofs):
+def _verify_objects(git, root, revisions, proofs, adapter='bird'):
     """Git cat-file does not authenticate its object storage; hash selected bytes."""
-    budgets = [_tree_budget(git,root,revision) for revision in revisions]
+    budgets = [_tree_budget(git,root,revision,adapter) for revision in revisions]
     if (2*sum(row['bytes'] for row in budgets) > MAX_CHECKOUT_BYTES
             or sum(row['files'] for row in budgets) > MAX_CHECKOUT_FILES):
         raise recipes.ContractError('Selected object traversal exceeds the aggregate preparation bound')
@@ -433,13 +432,14 @@ def prepare_range(recipe, *, source_root, good, bad, toolchain_image, runtime_im
                   predicate='assertions', max_trials=32, worker_timeout=120, build_timeout=1200):
     """Create one isolated local clone and clean per-revision build plans."""
     recipes.validate_recipe(recipe)
-    if recipe['roles']['target']['adapter'] != 'bird':
-        raise recipes.ContractError('Source range preparation is BIRD-only; FRR supports supplied images')
+    adapter = recipe['roles']['target']['adapter']
+    if adapter == 'frr_c' and predicate == 'target_crash':
+        raise recipes.ContractError('FRR target_crash source ranges are unsupported')
     recipes._match(good, recipes._REVISION, 'good', 'a full Git commit')
     recipes._match(bad, recipes._REVISION, 'bad', 'a full Git commit')
     targets._image(toolchain_image, 'toolchain_image')
     targets._image(runtime_image, 'runtime_image')
-    cflags, configure_flags = targets._flags(cflags, configure_flags, instrumentation)
+    cflags, configure_flags = targets._build_flags(adapter, cflags, configure_flags, instrumentation)
     recipes._choice(predicate, ('assertions','target_crash','prefix_assertions'), 'predicate')
     if predicate == 'prefix_assertions':
         from recipe_prefixes import validate_selection
@@ -474,12 +474,12 @@ def prepare_range(recipe, *, source_root, good, bad, toolchain_image, runtime_im
         raise recipes.ContractError('Source must have no hidden skip-worktree or assume-unchanged index flags')
     before = _source_signature(git,source,config)
     revisions, proofs = _chain(git,source,good,bad)
-    tree_budgets = [_tree_budget(git,source,revision) for revision in revisions]
+    tree_budgets = [_tree_budget(git,source,revision,adapter) for revision in revisions]
     totals = {key:sum(row[key] for row in tree_budgets) for key in ('bytes','files')}
     upper_bound = {'bytes':2*totals['bytes'],'files':totals['files']}
     if upper_bound['bytes'] > MAX_CHECKOUT_BYTES or upper_bound['files'] > MAX_CHECKOUT_FILES:
         raise recipes.ContractError('Aggregate selected checkout resource limit exceeded')
-    _verify_objects(git,source,revisions,proofs)
+    _verify_objects(git,source,revisions,proofs,adapter)
     free = shutil.disk_usage(output.parent).free
     if free < object_budget['bytes'] + upper_bound['bytes'] + MAX_METADATA_BYTES + 16*1024**2:
         raise recipes.ContractError('Insufficient observed free disk for bounded local preparation')
@@ -494,7 +494,7 @@ def prepare_range(recipe, *, source_root, good, bad, toolchain_image, runtime_im
         owned_git.run(output,'clone','--bare','--local','--no-hardlinks','--no-tags',
                 '--template='+str(output/'template'),'--',source,repository)
         _metadata_guard(repository)
-        _verify_objects(owned_git,repository,revisions,proofs)
+        _verify_objects(owned_git,repository,revisions,proofs,adapter)
         build_plans, candidates, materialized = [], [], []
         for index,(revision,raw) in enumerate(zip(revisions,proofs,strict=True)):
             relative = f'checkouts/{index:03d}-{revision}'
@@ -560,8 +560,7 @@ def _verify_preparation(manifest_path, *, terminal=True):
     if manifest['prepared_repository'] != 'repository.git' or manifest['bisection_plan'] != 'bisection-plan.json' or manifest['copy_mode'] != 'local-bare-clone-no-hardlinks':
         raise recipes.ContractError('Prepared source layout differs')
     recipes.validate_recipe(manifest['recipe'])
-    if manifest['recipe']['roles']['target']['adapter'] != 'bird':
-        raise recipes.ContractError('Source range preparation is BIRD-only; FRR supports supplied images')
+    adapter = manifest['recipe']['roles']['target']['adapter']
     if recipes.recipe_sha256(manifest['recipe']) != manifest['recipe_sha256']:
         raise recipes.ContractError('Prepared recipe binding differs')
     for key in ('good','bad'):
@@ -591,7 +590,7 @@ def _verify_preparation(manifest_path, *, terminal=True):
         raise recipes.ContractError('Prepared replacement refs are unsupported')
     _verify_objects(git,root/'repository.git',
         [candidate['revision'] for candidate in plan['candidates']],
-        [base64.b64decode(candidate['commit_object'],validate=True) for candidate in plan['candidates']])
+        [base64.b64decode(candidate['commit_object'],validate=True) for candidate in plan['candidates']], adapter)
     tree_budgets, materialized = [], []
     for index,(candidate,frozen) in enumerate(zip(manifest['candidates'],plan['candidates'],strict=True)):
         recipes._keys(candidate,('revision','source_root','build_plan','build_plan_sha256','commit_sha256'))
@@ -625,7 +624,7 @@ def _verify_preparation(manifest_path, *, terminal=True):
         raw = git.run(checkout,'cat-file','commit',revision)
         if _sha(raw) != candidate['commit_sha256'] or raw != base64.b64decode(frozen['commit_object'],validate=True):
             raise recipes.ContractError('Prepared commit proof differs')
-        tree_budgets.append(_tree_budget(git,checkout,revision))
+        tree_budgets.append(_tree_budget(git,checkout,revision,adapter))
     totals = {key:sum(row[key] for row in tree_budgets) for key in ('bytes','files')}
     upper_bound = {'bytes':2*totals['bytes'],'files':totals['files']}
     physical_totals = {key:sum(row[key] for row in materialized) for key in ('bytes','files')}

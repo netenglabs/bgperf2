@@ -37,6 +37,7 @@ class FRRRuntime:
         self.runtime = ComparisonRuntime('known-difference')
         self.attempts = []
         self.mismatch = mismatch
+        self.failure_images = {BASELINE_IMAGE}
 
     def execute(self, document, workdir, attempt_id, timeout):
         selection = recipes.read_document(workdir / 'target-selection.json')
@@ -49,7 +50,7 @@ class FRRRuntime:
         budget.update(started_monotonic_s=1, ended_monotonic_s=1 + budget['elapsed_seconds'])
         (workdir / 'execution-budget.json').write_text(json.dumps(budget))
         total = prefixes.expected_count(document)
-        wrong = self.mismatch and selection['roles']['target']['image'] == BASELINE_IMAGE and total >= 2
+        wrong = self.mismatch and selection['roles']['target']['image'] in self.failure_images and total >= 2
         events = recipes.read_document(workdir / 'raw-events.json')
         events['events'][-1]['counters']['accepted_prefixes'] = total - int(wrong)
         (workdir / 'raw-events.json').write_text(json.dumps(events))

@@ -5,7 +5,7 @@
 
 """Declarative recipe/result contracts and explicit preparation/execution CLI.
 
-The envelope supports synthetic IPv4 BIRD and supplied-image FRR targets,
+The envelope supports synthetic IPv4 BIRD and FRR targets,
 with BIRD generators and the sink instrument. It imports no container runtime.
 """
 

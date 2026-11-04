@@ -29,7 +29,7 @@ def git(root,*args):
 
 
 @pytest.fixture
-def source(tmp_path,monkeypatch):
+def source(tmp_path,monkeypatch,request):
     home = tmp_path/'home'
     home.mkdir()
     monkeypatch.setenv('HOME',str(home))
@@ -39,7 +39,13 @@ def source(tmp_path,monkeypatch):
     git(root,'config','user.name','Inert source fixture')
     git(root,'config','user.email','fixture@example.invalid')
     (root/'configure.ac').write_text('# Inert source-range fixture, never executed\n')
-    (root/'Makefile.in').write_text('# Inert source-range fixture, never executed\n')
+    params = getattr(request.node, 'callspec', None)
+    adapter = params.params.get('recipe', params.params.get('adapter', 'bird')) if params else 'bird'
+    if adapter == 'frr_c':
+        (root/'Makefile.am').write_text('# Inert FRR fixture, never executed\n')
+        (root/'bootstrap.sh').write_text('# Inert FRR fixture, never executed\n')
+    else:
+        (root/'Makefile.in').write_text('# Inert source-range fixture, never executed\n')
     revisions = []
     for index in range(3):
         (root/'main.c').write_text(f'/* inert revision {index} */\n')
@@ -49,8 +55,11 @@ def source(tmp_path,monkeypatch):
     return root,revisions
 
 
-@pytest.fixture
-def recipe():
+@pytest.fixture(params=['bird', 'frr_c'])
+def recipe(request):
+    if request.param == 'frr_c':
+        from test_frr_contracts import frr_recipe
+        return frr_recipe()
     return recipes.read_document(ranges.ENGINE_ROOT/'examples/recipes/synthetic-ipv4.recipe.json')
 
 
@@ -451,9 +460,9 @@ def test_external_owned_config_include_is_refused_before_git(recipe,source,tmp_p
 
 
 def test_aggregate_tree_entries_are_bounded_before_checkout(recipe,source,tmp_path,monkeypatch):
-    # Nine source files across the three revisions fit; root directory entries
-    # bring the materialized total to twelve and must also consume the bound.
-    monkeypatch.setattr(ranges,'MAX_CHECKOUT_FILES',10)
+    # Source files fit; root directory entries must also consume the bound.
+    files = sum(path.is_file() for path in source[0].iterdir()) * len(source[1])
+    monkeypatch.setattr(ranges,'MAX_CHECKOUT_FILES',files + 1)
     with pytest.raises(recipes.ContractError,match='tree traversal exceeds'):
         prepare(recipe,source,tmp_path/'refused')
     assert not (tmp_path/'refused').exists()
@@ -463,9 +472,11 @@ def test_added_empty_directories_consume_materialized_entry_budget(recipe,source
     output = tmp_path/'prepared'
     manifest = prepare(recipe,source,output)
     checkout = output/manifest['candidates'][0]['source_root']
+    entries = sum(ranges._checkout_budget(output / row['source_root'])['entries']
+                  for row in manifest['candidates'])
     for index in range(4):
         (checkout/f'empty-{index}').mkdir()
-    monkeypatch.setattr(ranges,'MAX_CHECKOUT_FILES',13)
+    monkeypatch.setattr(ranges,'MAX_CHECKOUT_FILES',entries + 1)
     manifest['resource_limits'] = ranges._limits()
     reseal(output,manifest)
     with pytest.raises(recipes.ContractError,match='Aggregate materialized checkout entry'):

@@ -54,7 +54,7 @@ def selected(tmp_path, monkeypatch):
         if not state['range_valid']:
             raise recipes.ContractError('SIMULATED prepared range changed')
         return {'valid': True}
-    def snapshot(root, revision, include_dirty):
+    def snapshot(root, revision, include_dirty, *, adapter='bird'):
         state['source_checks'].append((root, revision, include_dirty))
         value = snapshots[str(root)]
         assert revision == value['requested_revision'] and include_dirty == value['include_dirty']
@@ -294,11 +294,15 @@ def test_public_cli_has_no_execution_option_and_emits_only_verified_bundle(selec
     assert json.loads(capsys.readouterr().out)['valid']
 
 
-@pytest.mark.parametrize('predicate', ['assertions', 'target_crash'])
+@pytest.mark.parametrize('adapter,predicate', [('bird', 'assertions'), ('bird', 'target_crash'),
+    ('frr_c', 'assertions'), ('frr_c', 'prefix_assertions')])
 def test_real_prepared_range_and_dirty_fix_produce_a_verified_action_handoff(
-        tmp_path, source, monkeypatch, predicate):
+        tmp_path, source, monkeypatch, adapter, predicate):
     source_root, revisions = source
     recipe = recipes.read_document(handoff.ROOT / 'examples/recipes/synthetic-ipv4.recipe.json')
+    if adapter == 'frr_c':
+        from test_frr_contracts import frr_recipe
+        recipe = frr_recipe()
     recipe['reproduction']['question'] = 'INERT local maintainer handoff fixture; no source code runs'
     recipe['reproduction']['expected_outcome'] = 'target_crash' if predicate == 'target_crash' else 'experiment_completed'
     (source_root / 'main.c').write_text('/* retained dirty local fix; never compiled */\n')

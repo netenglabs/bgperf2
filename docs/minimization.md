@@ -1,7 +1,7 @@
 # Bounded reproducer minimization
 
 `recipe_minimization.py` reduces the peer count and prefixes per peer of one
-synthetic IPv4 recipe with a BIRD or supplied-image `frr_c` target, BIRD generators
+synthetic IPv4 recipe with a BIRD or `frr_c` target, BIRD generators
 and sink observer, while preserving one existing named
 [correctness assertion](comparisons.md). The preservation predicate is exactly
 that assertion's observed `failed` status. For example, `observer.count` checks
@@ -15,6 +15,12 @@ target override, build, acquisition or source-history search. See the
 [recipe guide](recipes.md) for supported workloads, prerequisite checks and
 verified result packages. The [implementation plan](plans/reproducer-minimization.md)
 records the selected scope and acceptance receipts.
+
+For a source-built image, explicitly export a recipe selecting its returned
+immutable image before minimization. Replan source targets for a reduced recipe;
+targets bound to the original recipe cannot be reused by relabeling them. The
+[FRR source walkthrough](frr-source-workflow.md) connects these stages without
+adding builds to the minimizer.
 
 The [FRR walkthrough](frr-maintainer-workflow.md) includes modeled minimization
 through the same interface. It establishes no FRR failure or live qualification.

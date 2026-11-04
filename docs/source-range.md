@@ -7,9 +7,9 @@ objects once into an independent bare repository, creates detached checkouts
 inside a new output directory, and freezes a build plan for every consecutive
 first-parent revision. It produces the existing versioned bisection plan.
 
-Source-range preparation remains BIRD-only. Supplied-image FRR recipes use the
-[FRR workflow](frr-maintainer-workflow.md) and refuse this operation before
-source inspection or destination creation.
+Source-range preparation supports BIRD and `frr_c` correctness histories. The
+[FRR source workflow](frr-source-workflow.md) uses `frr-local/v1`; FRR crash
+predicates and thread controls remain unsupported.
 
 No source configure script, build, image acquisition, hook, submodule operation
 or worker runs. Preparation does not initialize or execute a search. The good
@@ -61,7 +61,7 @@ Open the generated `REPORT.md` and inspect these records:
 | `bisection-plan.json` | Existing bisection contract with all selected raw commit proofs and per-revision build plans. |
 | `repository.git/` | One independent local bare clone; object files are copied with `--no-hardlinks`, without alternates or registration in the original repository. |
 | `checkouts/000-FULLSHA/` | Owned detached worktrees for selected revisions. |
-| `build-plans/000-FULLSHA.json` | Existing strict `bird-local/v1` plans, with absolute checkout paths and source snapshot hashes. |
+| `build-plans/000-FULLSHA.json` | Existing strict `bird-local/v1` or `frr-local/v1` plans, with absolute checkout paths and source snapshot hashes. |
 | `git-commands.json` | Bounded preparation Git operations and output hashes; existing source-planner probes retain their documented implementation. |
 | `progress/`, `outcome-started.json`, `outcome.json` | Retained progress and final prepared/failed outcome. Failure keeps available clone, checkouts and plans. |
 
@@ -86,8 +86,9 @@ the selected good revision older than the bad revision on that chain. The
 original source must be a full standalone checkout with a real `.git`
 directory. Linked worktrees, bare source repositories and root `commondir`
 redirection require manual preparation. Existing source-planner restrictions
-remain: every selected revision needs regular `configure.ac` and `Makefile.in`
-files, no source symlink/submodule, and at most 256 MiB/20,000 source files.
+remain: every selected BIRD revision needs regular `configure.ac` and
+`Makefile.in`; FRR needs `configure.ac`, `Makefile.am` and `bootstrap.sh`. Both
+require no source symlink/submodule and at most 256 MiB/20,000 source files.
 Pristine BIRD trees containing symlink aliases remain unsupported; preparation
 does not dereference or replace those aliases.
 

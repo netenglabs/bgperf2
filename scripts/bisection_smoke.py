@@ -125,7 +125,8 @@ class SimulatedBisection:
                  'build_log_sha256': hashlib.sha256(log).hexdigest(), 'image_id': image,
                  'binary_sha256': None, 'reconstructible': False}
         target = {'schema': targets.TARGET_SCHEMA, 'recipe_sha256': document['recipe_sha256'],
-                  'adapter': 'bird', 'image': image, 'label': 'SIMULATED revision ' + str(index),
+                  'adapter': document['recipe']['roles']['target']['adapter'],
+                  'image': image, 'label': 'SIMULATED revision ' + str(index),
                   'provenance': {'kind': 'local_source', 'source': document['source'], 'build': built,
                                  'instrumentation': document['instrumentation'], 'limits': document['limits']}}
         targets.validate_target(target, document['recipe'])

@@ -100,9 +100,10 @@ rebuilding and verification. Use fresh owned destinations for real execution.
 
 Basic FRR diagnostics retain scoped container state, target memory and failures;
 they do not manufacture daemon-exit evidence from FRR's daemonizing startup.
-FRR `target_crash`, target thread controls, trusted-local-source builds, revision
-bisection, source-range preparation and source handoffs are explicitly unsupported
-in this supplied-image scope. No automatic image build or acquisition occurs.
+FRR `target_crash` and target thread controls remain unsupported. The separate
+[FRR source workflow](frr-source-workflow.md) adds trusted-local-source builds,
+correctness bisection, source-range preparation and source handoffs. The completed
+supplied-image pair does not qualify those source interfaces. No automatic image build or acquisition occurs.
 
 Experiment completion and correctness are separate. Inspection/verification exit
 success means valid evidence, not a passing daemon. Investigation correctness

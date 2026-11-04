@@ -1,13 +1,14 @@
 # Prepare your own maintainer checkout
 
-Use this path when you already have a selected local BIRD-style source checkout,
+Use this path when you already have a selected local BIRD or FRR source checkout,
 a recipe and the revisions you want to investigate. It replaces manual creation
 of a clean checkout and build plan for every bisection revision with one isolated
 preparation, then freezes the concrete public commands for your baseline and fix.
 
-This source preparation remains BIRD-only. For an existing FRR image, use the
-[supplied-image FRR workflow](frr-maintainer-workflow.md); FRR source builds and
-revision search are explicitly unsupported.
+For FRR source requirements, fixed build layout and correctness localization,
+use the [FRR source workflow](frr-source-workflow.md). Existing FRR images retain
+the separate [supplied-image workflow](frr-maintainer-workflow.md). FRR crashes
+and thread controls remain unsupported.
 
 Preparation uses local Git and filesystem reads/writes only. Source configure
 code, builds, Docker probes and workers remain separate operations. Image

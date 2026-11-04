@@ -766,6 +766,11 @@ end-to-end check.
 
 ## Development
 
+The [FRR source workflow](docs/frr-source-workflow.md) connects trusted local
+builds, candidate correctness checks, bounded minimization and revision search.
+Its maintained modeled walkthrough runs without Docker or a real compiler;
+live source qualification remains separate.
+
 Use the [comparison walkthrough](docs/comparisons.md) for explicit observable
 assertions and repeated serial comparisons of two selections of the same supported target adapter, with
 portable verified reports. The maintained Docker-free demo includes controlled

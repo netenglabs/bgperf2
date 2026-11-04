@@ -90,7 +90,8 @@ def _sources(source_range, baseline, candidate):
         recipes._same(build['recipe'], recipe, label + ' recipe')
         _safe(build['source_root'])
         actual, _, _ = targets._snapshot(build['source_root'], build['source']['requested_revision'],
-                                         build['source']['include_dirty'])
+                                         build['source']['include_dirty'],
+                                         adapter=recipe['roles']['target']['adapter'])
         recipes._same(actual, build['source'], label + ' current source snapshot')
     bindings = {name: {'path': str(path), 'sha256': _sha(data[name])} for name, path in paths.items()}
     return plan, builds, bindings, data['bisection_plan'], preparation

@@ -186,8 +186,12 @@ def test_rehashed_prefix_report_cannot_change_assertion_or_prose(tmp_path, alter
         bisect.verify_report(output / 'bisection.json')
 
 
-def test_prefix_source_preparation_and_handoff_keep_capture_selection(source, tmp_path):
+@pytest.mark.parametrize('adapter', ['bird', 'frr_c'])
+def test_prefix_source_preparation_and_handoff_keep_capture_selection(source, tmp_path, adapter):
     recipe = recipes.read_document(ranges.ENGINE_ROOT / 'examples/recipes/synthetic-ipv4.recipe.json')
+    if adapter == 'frr_c':
+        from test_frr_contracts import frr_recipe
+        recipe = frr_recipe()
     original, revisions = source
     before = source_state(original)
     prepared = tmp_path / 'prepared'

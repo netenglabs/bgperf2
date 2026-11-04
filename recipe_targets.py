@@ -1,5 +1,5 @@
 # Copyright (C) 2026 bgperf2 contributors. Apache-2.0.
-"""Strict target substitutions and explicit, local-only BIRD source builds.
+"""Strict target substitutions and explicit, local-only daemon source builds.
 
 Importing this module probes no host and initializes no Docker client. Source
 code is an explicit local trust boundary: the fixed build recipe executes that
@@ -29,6 +29,32 @@ BUILD_SCHEMA = 'bgperf2/target-build/v1alpha1'
 INSTRUMENTATION = ('unknown', 'optimized', 'debug', 'asan', 'profiling')
 SOURCE_LIMIT = 256 * 1024 * 1024
 FLAG = re.compile(r'[A-Za-z0-9_./=+,:@%\-]+\Z')
+BUILD_RECIPES = {'bird': 'bird-local/v1', 'frr_c': 'frr-local/v1'}
+SOURCE_FILES = {'bird': {'configure.ac', 'Makefile.in'},
+                'frr_c': {'configure.ac', 'Makefile.am', 'bootstrap.sh'}}
+FRR_CONFIGURE = ('--prefix=/usr', '--sbindir=/usr/lib/frr', '--sysconfdir=/etc',
+                 '--localstatedir=/var/run/frr', '--enable-user=frr',
+                 '--enable-group=frr', '--enable-vty-group=frrvty')
+
+
+def _build_flags(adapter, cflags, configure_flags, instrumentation):
+    cflags, options = _flags(cflags, configure_flags, instrumentation)
+    if adapter == 'frr_c':
+        fixed = {flag.split('=', 1)[0] for flag in FRR_CONFIGURE}
+        # Installation layout/accounts are part of the existing adapter ABI.
+        fixed.update(('--exec-prefix', '--bindir', '--libdir', '--libexecdir'))
+        if any(flag.split('=', 1)[0].replace('--disable-', '--enable-', 1) in fixed for flag in options):
+            raise recipes.ContractError('frr-local/v1 fixes installation paths and daemon accounts')
+        if instrumentation == 'optimized' and any(
+                flag == '--enable-gcov' or flag.startswith('--enable-gcov=') for flag in options):
+            raise recipes.ContractError('optimized FRR refuses gcov instrumentation')
+    return cflags, options
+
+
+def _source_shape(names, adapter):
+    if not SOURCE_FILES[adapter] <= set(names):
+        raise recipes.ContractError(BUILD_RECIPES[adapter] + ' requires ' +
+                                   ', '.join(sorted(SOURCE_FILES[adapter])) + ' source files')
 
 
 def _sha(data):
@@ -141,14 +167,12 @@ def validate_target(document, recipe=None):
         if provenance['source'] is not None or provenance['build'] is not None:
             raise recipes.ContractError('supplied images must not invent source/build identities')
     else:
-        if document['adapter'] != 'bird':
-            raise recipes.ContractError('Local-source builds are BIRD-only; FRR supports supplied images')
         source = _source(provenance['source'])
         build = provenance['build']
         recipes._keys(build, ('recipe', 'toolchain_image', 'runtime_image', 'toolchain_image_id', 'runtime_image_id', 'compiler_flags', 'linker_flags',
                              'configure_flags', 'dockerfile_sha256', 'source_snapshot_sha256',
                              'build_log_sha256', 'image_id', 'binary_sha256', 'reconstructible'), where='build')
-        recipes._choice(build['recipe'], ('bird-local/v1',), 'build.recipe')
+        recipes._choice(build['recipe'], (BUILD_RECIPES[document['adapter']],), 'build.recipe')
         for field in ('toolchain_image', 'runtime_image', 'toolchain_image_id', 'runtime_image_id', 'image_id'):
             _image(build[field], 'build.' + field)
         if not all(build[field].startswith('sha256:') for field in ('toolchain_image_id', 'runtime_image_id')):
@@ -159,9 +183,9 @@ def validate_target(document, recipe=None):
             _hex(build[field], 'build.' + field)
         if build['source_snapshot_sha256'] != source['snapshot_sha256']:
             raise recipes.ContractError('build/source snapshot identities differ')
-        _flags(build['compiler_flags'], build['configure_flags'], provenance['instrumentation'])
+        _build_flags(document['adapter'], build['compiler_flags'], build['configure_flags'], provenance['instrumentation'])
         if build['linker_flags'] != build['compiler_flags']:
-            raise recipes.ContractError('bird-local/v1 passes the recorded flags to compilation and linking')
+            raise recipes.ContractError('Local builds pass the recorded flags to compilation and linking')
         if build['binary_sha256'] is not None or build['reconstructible'] is not False:
             raise recipes.ContractError('binary identity and reconstruction are not established by this builder')
     if recipe is not None:
@@ -197,7 +221,7 @@ def _git(root, *args):
     return result.stdout
 
 
-def _snapshot(source_root, revision, include_dirty):
+def _snapshot(source_root, revision, include_dirty, *, adapter='bird'):
     root = Path(source_root)
     if not root.is_absolute() or not root.is_dir():
         raise recipes.ContractError('source_root: specify an existing absolute Git checkout')
@@ -278,8 +302,7 @@ def _snapshot(source_root, revision, include_dirty):
                 consumed += len(data)
     if not entries or len(entries) > 20000 or sum(len(data) for _, data in entries.values()) > SOURCE_LIMIT:
         raise recipes.ContractError('Source snapshot is empty or exceeds the 256 MiB/20,000-file limit')
-    if not {'configure.ac', 'Makefile.in'} <= entries.keys():
-        raise recipes.ContractError('bird-local/v1 requires a BIRD-style configure.ac and Makefile.in source tree')
+    _source_shape(entries, adapter)
     if (_git(root, 'rev-parse', '--verify', 'HEAD^{commit}').decode().strip() != head
             or _git(root, 'diff', '--binary', '--no-ext-diff', '--no-textconv', revision, '--') != patch
             or sorted(path for path in _git(root, 'ls-files', '--others', '--exclude-standard', '-z').decode('utf-8').split('\0') if path) != untracked_paths):
@@ -305,16 +328,15 @@ def plan_source_build(recipe, source_root, revision, *, toolchain_image, runtime
                       configure_flags=()):
     """Inspect local source and emit identities; never execute code or Docker."""
     recipes.validate_recipe(recipe)
-    if recipe['roles']['target']['adapter'] != 'bird':
-        raise recipes.ContractError('Local-source builds are BIRD-only; FRR supports supplied images')
+    adapter = recipe['roles']['target']['adapter']
     _image(toolchain_image, 'toolchain_image'); _image(runtime_image, 'runtime_image')
-    cflags, configure_flags = _flags(cflags, configure_flags, instrumentation)
-    source, _, _ = _snapshot(source_root, revision, include_dirty)
+    cflags, configure_flags = _build_flags(adapter, cflags, configure_flags, instrumentation)
+    source, _, _ = _snapshot(source_root, revision, include_dirty, adapter=adapter)
     plan = {'schema': BUILD_SCHEMA, 'recipe': copy.deepcopy(recipe),
             'recipe_sha256': recipes.recipe_sha256(recipe), 'source_root': str(Path(source_root).resolve()),
             'source': source, 'toolchain_image': toolchain_image, 'runtime_image': runtime_image,
             'instrumentation': instrumentation, 'cflags': cflags, 'configure_flags': configure_flags,
-            'build_recipe': 'bird-local/v1', 'network': 'none',
+            'build_recipe': BUILD_RECIPES[adapter], 'network': 'none',
             'requirements': ['Toolchain image must already contain bash, tar, autoreconf, C compiler, make and BIRD development dependencies.',
                              'Runtime image must already contain bash, iproute2 and all libraries required by the installed BIRD binaries.'],
             'limits': ['Only the explicit source checkout is trusted. Its configure/build code executes inside the selected Docker builder.',
@@ -325,6 +347,11 @@ def plan_source_build(recipe, source_root, revision, *, toolchain_image, runtime
                        'Immutable base images and source hashes do not prove hermetic builds or a reconstructible binary.',
                        'Compiler/linker flags are requested build configuration; trusted source may override them. Build commands remain in build.log.',
                        'Build timeout stops owned CLI clients; daemon-side build/cache work may continue.']}
+    if adapter == 'frr_c':
+        plan['requirements'] = [
+            'Toolchain image must already contain bash, tar, bootstrap/autotools, C compiler, make, Python and all selected FRR development dependencies, including libyang; bootstrap must work offline.',
+            'Runtime image must already contain bash, iproute2, coreutils, frr user/group, frrvty group and all installed FRR libraries, including sanitizer/profiling libraries when selected.',
+            'Runtime base must permit root startup and must not contain /etc/frr.old; the existing adapter moves /etc/frr before starting bgpd.']
     return validate_build_plan(plan)
 
 
@@ -334,8 +361,7 @@ def validate_build_plan(plan):
                         'configure_flags', 'build_recipe', 'network', 'requirements', 'limits'))
     recipes._choice(plan['schema'], (BUILD_SCHEMA,), 'schema')
     recipes.validate_recipe(plan['recipe'])
-    if plan['recipe']['roles']['target']['adapter'] != 'bird':
-        raise recipes.ContractError('Local-source builds are BIRD-only; FRR supports supplied images')
+    adapter = plan['recipe']['roles']['target']['adapter']
     if recipes.recipe_sha256(plan['recipe']) != plan['recipe_sha256']:
         raise recipes.ContractError('Build plan recipe binding differs')
     if not isinstance(plan['source_root'], str) or not Path(plan['source_root']).is_absolute():
@@ -343,10 +369,10 @@ def validate_build_plan(plan):
     _source(plan['source'])
     for field in ('toolchain_image', 'runtime_image'):
         _image(plan[field], field)
-    cflags, options = _flags(plan['cflags'], plan['configure_flags'], plan['instrumentation'])
+    cflags, options = _build_flags(adapter, plan['cflags'], plan['configure_flags'], plan['instrumentation'])
     if cflags != plan['cflags'] or options != plan['configure_flags']:
         raise recipes.ContractError('Build flags must use their canonical spelling')
-    recipes._choice(plan['build_recipe'], ('bird-local/v1',), 'build_recipe')
+    recipes._choice(plan['build_recipe'], (BUILD_RECIPES[adapter],), 'build_recipe')
     recipes._choice(plan['network'], ('none',), 'network')
     for field in ('requirements', 'limits'):
         if not isinstance(plan[field], list) or not plan[field] or not all(isinstance(value, str) and value.strip() for value in plan[field]):
@@ -356,6 +382,20 @@ def validate_build_plan(plan):
 
 def _dockerfile(toolchain_id, runtime_id, plan):
     options = ' '.join(shlex.quote(value) for value in plan['configure_flags'])
+    if plan['build_recipe'] == 'frr-local/v1':
+        fixed = ' '.join(FRR_CONFIGURE)
+        return (f'FROM {toolchain_id} AS build\nWORKDIR /src/frr\n'
+                'COPY source.tar /src/source.tar\nRUN tar -xf /src/source.tar -C /src/frr\n'
+                f'ENV CFLAGS={json.dumps(plan["cflags"])}\nENV LDFLAGS={json.dumps(plan["cflags"])}\n'
+                f'RUN bash ./bootstrap.sh && ./configure {fixed} {options} && make -j2 '
+                '&& make install DESTDIR=/install && test -x /install/usr/lib/frr/bgpd '
+                '&& test -x /install/usr/bin/vtysh\n'
+                f'FROM {runtime_id}\nUSER root\nCOPY --from=build /install/ /\n'
+                'RUN id frr && getent group frrvty && test ! -e /etc/frr.old '
+                '&& install -d -m 775 -o frr -g frrvty /etc/frr /var/run/frr '
+                '&& install -d -m 755 -o frr -g frr /var/log/frr /var/lib/frr\n'
+                'ENV PATH=/usr/lib/frr:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n'
+                'ENTRYPOINT []\nCMD ["/bin/bash"]\n')
     return (f'FROM {toolchain_id} AS build\nWORKDIR /src/bird\n'
             'COPY source.tar /src/source.tar\n'
             'RUN tar -xf /src/source.tar -C /src/bird\n'
@@ -413,7 +453,9 @@ def build_target(plan, *, output_dir, emit_disclosure, timeout=1200, command=Non
     engine = Path(__file__).resolve().parent
     if canonical == engine or engine in canonical.parents:
         raise recipes.ContractError('Build output must be outside the engine checkout')
-    source, snapshot, patch = _snapshot(plan['source_root'], plan['source']['requested_revision'], plan['source']['include_dirty'])
+    adapter = plan['recipe']['roles']['target']['adapter']
+    source, snapshot, patch = _snapshot(plan['source_root'], plan['source']['requested_revision'],
+                                        plan['source']['include_dirty'], adapter=adapter)
     if source != plan['source']:
         raise recipes.ContractError('Local source changed since planning; create and review a new plan')
     report = runtime._report(plan['recipe'], 'target-build')
@@ -426,7 +468,7 @@ def build_target(plan, *, output_dir, emit_disclosure, timeout=1200, command=Non
     env = {key: value for key, value in env.items() if not key.startswith('BUILDX_')}
     env['DOCKER_BUILDKIT'] = '0'
     bases = {role: runtime.inspect_image(plan[role], host, env) for role in ('toolchain_image', 'runtime_image')}
-    tag = 'bgperf/bird-local:' + uuid.uuid4().hex
+    tag = 'bgperf/' + plan['build_recipe'].split('/')[0] + ':' + uuid.uuid4().hex
     inspect = ['docker', '--host', host, 'image', 'inspect', tag]
     try:
         runtime.run_command(inspect, env=env)
@@ -465,11 +507,11 @@ def build_target(plan, *, output_dir, emit_disclosure, timeout=1200, command=Non
         if labels.get('bgperf2.local_source_sha256') != source['snapshot_sha256']:
             raise recipes.ContractError('Built image does not carry the selected source snapshot identity')
         runtime.inspect_image(image_id, host, env)
-        target = {'schema': TARGET_SCHEMA, 'recipe_sha256': plan['recipe_sha256'], 'adapter': 'bird',
-                  'image': image_id, 'label': 'BIRD local ' + source['commit'][:12],
+        target = {'schema': TARGET_SCHEMA, 'recipe_sha256': plan['recipe_sha256'], 'adapter': adapter,
+                  'image': image_id, 'label': ('BIRD' if adapter == 'bird' else 'FRR') + ' local ' + source['commit'][:12],
                   'provenance': {'kind': 'local_source', 'source': source,
                                  'instrumentation': plan['instrumentation'], 'limits': plan['limits'],
-                                 'build': {'recipe': 'bird-local/v1', 'toolchain_image': plan['toolchain_image'],
+                                 'build': {'recipe': plan['build_recipe'], 'toolchain_image': plan['toolchain_image'],
                                            'runtime_image': plan['runtime_image'], 'compiler_flags': plan['cflags'],
                                            'toolchain_image_id': bases['toolchain_image']['image_id'],
                                            'runtime_image_id': bases['runtime_image']['image_id'],

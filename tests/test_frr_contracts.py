@@ -90,27 +90,21 @@ def test_frr_crash_question_refused_without_claiming_bird_exit_witness():
         recipes.validate_recipe(recipe)
 
 
-def test_frr_source_build_refused_before_source_or_host_probe(monkeypatch):
-    monkeypatch.setattr(targets, '_snapshot', lambda *a, **k: pytest.fail('source inspected'))
-    with pytest.raises(recipes.ContractError, match='BIRD-only'):
-        targets.plan_source_build(frr_recipe(), '/must-not-open', 'a' * 40,
-            toolchain_image='sha256:' + 'a' * 64, runtime_image='sha256:' + 'b' * 64)
-
-
-def test_frr_source_range_and_bisection_refused_before_iterator_or_probe(monkeypatch):
+def test_frr_crash_search_refused_before_source_or_host_probe(monkeypatch):
     import recipe_source_range as ranges
     import recipe_bisection as bisection
     monkeypatch.setattr(targets, '_git', lambda *a, **k: pytest.fail('Git probed'))
-    with pytest.raises(recipes.ContractError, match='BIRD-only'):
+    with pytest.raises(recipes.ContractError, match='FRR target_crash'):
         ranges.prepare_range(frr_recipe(), source_root='/must-not-open', good='a' * 40,
             bad='b' * 40, toolchain_image='sha256:' + 'a' * 64,
-            runtime_image='sha256:' + 'b' * 64, output_dir='/must-not-create')
+            runtime_image='sha256:' + 'b' * 64, output_dir='/must-not-create',
+            predicate='target_crash')
     def forbidden_iterator():
         pytest.fail('source plans iterated')
         yield
-    with pytest.raises(recipes.ContractError, match='BIRD-only'):
+    with pytest.raises(recipes.ContractError, match='FRR target_crash'):
         bisection.make_plan(frr_recipe(), forbidden_iterator(), forbidden_iterator(),
-                            predicate='assertions', max_trials=4)
+                            predicate='target_crash', max_trials=4)
 
 
 def test_frr_minimization_rebuilds_valid_candidate_and_dynamic_assertion():

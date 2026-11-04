@@ -6,11 +6,12 @@ walkthrough, start with the [maintainer workflow](maintainer-workflow.md).
 Use one immutable [recipe](recipes.md), with separate target/build identity
 records for the baseline and candidate. The recipe's workload, generator,
 observer, engine revision, completion contract and reproduction question stay
-fixed. Supported synthetic IPv4 targets are BIRD and supplied-image `frr_c`, with
+fixed. Supported synthetic IPv4 targets are BIRD and `frr_c`, with
 BIRD generators and sink observer. Both target selections must use the recipe's
 adapter. See the [FRR guide](frr-maintainer-workflow.md) for compatible supplied
-images and conservative container diagnostics. Source builds, revision search,
-target threads and target-crash reproduction remain BIRD-only. This is one
+images and conservative container diagnostics. The [FRR source workflow](frr-source-workflow.md)
+adds local builds and correctness revision search. Target threads and target-crash
+reproduction remain BIRD-only. This is one
 functional investigation; [descriptive comparisons](comparisons.md) are separate
 and calibrated performance decisions remain disabled.
 
@@ -202,7 +203,8 @@ the report; their timings are not normalized or automatically compared.
 Source planning is read-only. Select a full local Git checkout at the requested
 full commit. The maintained `bird-local/v1` recipe requires BIRD-style
 `configure.ac` and `Makefile.in` files, and a toolchain/runtime pair already
-present under exact immutable identities:
+present under exact immutable identities. FRR uses the separately fixed
+[`frr-local/v1` recipe](frr-source-workflow.md) through the same commands:
 
 ```sh
 venv/bin/python recipes.py target-source-plan /absolute/artifacts/recipe.json \
@@ -259,8 +261,10 @@ is a separate trust boundary from accepting a declarative reproduction recipe.
 
 Compiler flags are also passed as linker flags; declarative configure options
 may be supplied with repeated `--configure-flag=--OPTION`. Sanitizer/profiling
-modes require corresponding flags. The recipe checks installed BIRD and birdc
+modes require corresponding flags. The BIRD recipe checks installed BIRD and birdc
 executables at its fixed prefix and puts that prefix first in the runtime PATH.
+The FRR recipe checks `/usr/lib/frr/bgpd` and `/usr/bin/vtysh`, copies the
+installed tree and prepares the existing adapter's FRR directories/accounts.
 Requested flags are recorded configuration: trusted build code can override
 them, so the build log remains important. No verified binary hash or hermetic
 reconstruction claim is made.

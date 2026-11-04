@@ -1,9 +1,10 @@
-# Localize a deterministic BIRD regression
+# Localize a deterministic daemon regression
 
 `recipe_bisection.py` searches an explicitly selected consecutive first-parent
 revision chain using one frozen recipe and fixed local-source build controls.
-It supports the existing four observable correctness assertions or a captured
-target-daemon crash. Performance predicates are refused; regression policy
+It supports the existing four observable correctness assertions for BIRD or
+`frr_c`, and a captured target-daemon crash for BIRD only. FRR source requirements
+and modeled validation are documented in the [FRR source workflow](frr-source-workflow.md). Performance predicates are refused; regression policy
 remains `disabled` and performance qualification `not_assessed`.
 
 The explicit `prefix_assertions` predicate adds final received-prefix identity

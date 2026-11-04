@@ -26,7 +26,7 @@ remains satisfied; create the separate artifact directory before exporting.
 
 ## Export one cell
 
-The supported workload is synthetic IPv4 with a BIRD or supplied-image `frr_c` target, BIRD
+The supported workload is synthetic IPv4 with a BIRD or `frr_c` target, BIRD
 generator and sink observer, with disjoint prefixes and no policy filter or
 additional receivers. Scenario files, Mako, MRT, hooks, local build instructions,
 other adapters and workload extensions are refused. These limits keep downloaded
@@ -35,8 +35,9 @@ runs.
 
 The selected source target determines the adapter; role identities must match it.
 See the [FRR guide](frr-maintainer-workflow.md) for adapter-compatible images and
-its modeled public CLI walkthrough. FRR target threads, `target_crash`, local-source
-builds and revision searches are explicitly unsupported. BIRD defaults and existing
+its modeled public CLI walkthrough. The [FRR source workflow](frr-source-workflow.md)
+adds explicit local builds and correctness revision searches. FRR target threads
+and `target_crash` remain unsupported. BIRD defaults and existing
 recipe identities are unchanged.
 
 An optional test-level `pin` uses the existing `bench` CPU layout syntax:
@@ -231,7 +232,7 @@ After the OS prerequisites, locked environment and selected exact images are
 available, use one clean checkout at the recipe's full engine revision. Running
 a recipe executes containers with the current user's Docker authority. Read the
 recipe, trust the selected images and choose an otherwise idle suitable Linux
-host before execution. Supported targets are BIRD and supplied-image `frr_c`,
+host before execution. Supported targets are BIRD and `frr_c`,
 with BIRD generators and sink observer.
 The public fixture's fake image pins cannot run.
 

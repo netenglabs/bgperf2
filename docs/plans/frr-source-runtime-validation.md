@@ -1,9 +1,88 @@
 # Proposed FRR source-build functional validation
 
-This is a preparation proposal, **not an execution-ready or approved case**.
+Case02 is prepared and independently reviewed, **awaiting separate explicit
+execution approval**. No build or worker has started. The original proposal and
+read-only findings below remain preparation history; the case02 record is current.
 The [implementation plan](frr-source-workflow.md) and
 [source guide](../frr-source-workflow.md) own engine delivery and contracts.
 The earlier supplied-image pair remains complete; its two workers will not rerun.
+
+## Prepared case02 — 2026-11-04 UTC
+
+Evidence root: `/tmp/bgperf2-frr-source-validation-20261104/`.
+The reviewable entry point is `READY-final.md`; exact public argv and conditional
+review dependencies are `preparation/case02/commands.json`. The final approval
+input manifest is `preparation/approval-inputs02.json`, SHA256
+`3faba7eb2f6d0603df42ffde2c08a8271b89f5a9ea6800cd6e7b59c212bb69d9`.
+Its closed inputs remain marked `not_authorized`; later approval must be recorded
+separately without editing the frozen packet. Local checksums do not authenticate
+execution or provide independent backup.
+
+The independent engine/environment copy is pinned at
+`ab7d65b2926bb3da9815d45bcb142b4e548fdb46`. Available local FRR 10.3.1 source
+`35e662efa7cc9ef3e97a253368950cc1a58f3bc1` was explicitly adapted into
+`b7ffb580af3066b05f73fb07f6b6fc56db199d9f`, parented to that upstream object.
+The preparation tool materialized 79 topotest aliases only; all 7,804 original
+regular files retain exact bytes and Git modes. Independent readback reconstructed
+the adaptation and checked 7,989 derived regular files, original checkout/index
+preservation, upstream attribution and 7,382 private engine/environment files.
+No original checkout, source guard or measurement definition was changed.
+This is packaging-adapted source, not pristine-source qualification.
+
+Both selected builder and runtime base are the existing immutable FRR image
+listed below. Static local archive inspection authenticated its configuration
+and layer hashes and found the existing compiler/autotools, frr/frrvty accounts,
+no `/etc/frr.old`, and libyang 2.1.128 matching the selected source's declared
+minimum. No container, compiler or source code was executed. The base retains
+an existing FRR installation and possible residual modules/libraries; it is
+explicitly a mixed base. Build review must inspect fresh installed binaries and
+library paths, and both workers must report FRR 10.3.1. No pristine-runtime or
+clean-distribution claim follows from metadata or an eventual passing pair.
+
+The concrete scope is one `frr-local/v1` build, requested `-O2 -g`, optimized
+declaration and `--disable-doc`, at most 1,200 build-client seconds. Its outer
+1,800-second bound includes snapshot/prerequisite overhead, with 15-second
+termination grace. After actual independent build acceptance, execute at most
+two distinct serial 120-second workers using that one returned target image,
+one peer/100 prefixes each, with 240-second outer bounds and 15-second graces.
+This means two independent worker observations, not independent source builds.
+Zero retries, acquisitions, extra probe containers or scheduler jobs.
+
+Require fresh native guard, exact image/input checks and 16 GiB available memory/
+20 GiB free-disk floors before the build and each worker. Readiness observed
+50,125,889,536 available memory bytes and 342,326,005,760 free disk bytes;
+these are snapshots, not reservations or capacity qualification. Paths are on
+root-backed ext4; **a fresh explicit functional-only root-storage exception is
+required**. The previous pair's exception does not carry forward.
+
+Actual independent build acceptance precedes the baseline. Baseline acceptance
+must establish six passed assertions, exact 100-prefix set, FRR 10.3.1 banner,
+valid original/package/budget/exit and owned cleanup before fresh candidate
+prerequisites and the second worker. Final acceptance requires all twelve
+assertions, distinct originals, verified report/check/status/reconstruction,
+report equality, actual exits and semantic foreign-resource reconciliation.
+Any failed/missing/uncertain evidence or rejected review stops successors.
+Retain partial state; build cancellation cannot prove daemon-side cache work
+ended and never authorizes another build or worker.
+
+Tooling review resolved the alias-normalization and image-whiteout findings.
+Focused final review resolved the later disposition, one-build pair wording and
+host dependency/receipt binding findings, with no blocking defects. Its retained
+nonblocking provenance note is explicit: initial unprefixed environment-freeze
+receipts came from an earlier unretained helper version. They are historical
+records rather than proof of a retained producer. `environment_final.py` then
+ran a fresh guard, pinned-head check and two native locked-dependency checks
+with exact receipts, its own recorded source hash and unchanged private inputs.
+The final verifier also binds/rechecks the named host stdlib, interpreter,
+probe-mapped shared libraries and tool bytes; this is not a hermetic-host claim.
+All earlier drafts/refusals and case01 remain separate and unselected.
+
+Preparation ran no source build, worker, acquisition or scheduler. The completed
+supplied-image pair, raw evidence and frozen delivery remain untouched. No
+upstream investigation, remote evidence transfer, push or publication occurred.
+Performance policy remains disabled and calibration deferred. Live source-build,
+minimization and bisection qualification remain unassessed until separately
+approved execution and its actual reviews complete.
 
 ## Proposed first live question and natural bounds
 

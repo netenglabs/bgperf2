@@ -44,6 +44,25 @@ Recipe reproduction and named correctness are independent. `investigate` exit
 0 means the controller recorded its pair; `investigation-verify` success means
 the evidence and prose agree. Neither means every selected assertion passed.
 Read each side's `correctness.attempts` outcome and individual assertion status.
+For a concise verified view, use:
+
+```sh
+venv/bin/python recipes.py investigation-status \
+  /absolute/disk/results/pair-001/report/investigation.json --format text
+```
+
+The default format is JSON (`bgperf2/investigation-status/v1alpha1`). Both formats
+verify the full report and bundled packages before showing reproduction,
+controller stops, original attempt IDs and named assertion results. Count and
+prefix identity remain separate. Exit 0 means verified inspection, even when
+assertions failed or remain unmeasured; it is not acceptance or execution
+approval. Reports without selected correctness show null in JSON and
+`not selected` in text. This command neither collects evidence nor starts,
+resumes or retries work, and does not change the report or source checkout.
+It displays any report-bound controller stop; its absence does not establish
+the original outer CLI exit. Full execution acceptance still needs that exit
+record and the case's other declared evidence.
+
 An unavailable capture is unmeasured, not an empty set, mismatch or pass. A
 missing attempt keeps its original reason and an inconclusive correctness
 entry with no fabricated assertions. Existing harness/interruption/controller

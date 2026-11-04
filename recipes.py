@@ -451,9 +451,12 @@ def main(argv=None):
     export.add_argument('-o', '--output')
     for name in ('validate', 'inspect', 'result-validate', 'result-verify', 'plan', 'check',
                  'prepare', 'run', 'target-image', 'target-validate', 'target-source-plan',
-                 'target-build', 'investigate', 'investigation-verify'):
+                 'target-build', 'investigate', 'investigation-verify', 'investigation-status'):
         command = commands.add_parser(name)
         command.add_argument('document')
+        if name == 'investigation-status':
+            command.add_argument('--format', choices=('json', 'text'), default='json',
+                                 help='verified summary format (default: json)')
         if name in ('check', 'run'):
             command.add_argument('--workdir', required=True)
             command.add_argument('--results-dir', required=True)
@@ -578,6 +581,13 @@ def main(argv=None):
         elif args.command == 'investigation-verify':
             from recipe_investigation import verify_investigation_report
             _write_document(verify_investigation_report(args.document))
+        elif args.command == 'investigation-status':
+            from recipe_investigation import investigation_status, render_investigation_status
+            status = investigation_status(args.document)
+            if args.format == 'text':
+                print(render_investigation_status(status), end='')
+            else:
+                _write_document(status)
         elif args.command == 'comparison-verify':
             from recipe_comparison_report import verify_comparison_report
             _write_document(verify_comparison_report(args.document))

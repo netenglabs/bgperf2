@@ -33,6 +33,11 @@ completed with six passing assertions per side, exact 100-prefix snapshots,
 verified packages and report rebuild. This same-image control qualifies the
 selected integration path; repeated comparisons and bisection capture are deferred.
 
+The [read-only investigation status](plans/investigation-status.md) adds a concise
+verified JSON/terminal view of reproduction, original attempts, controller stops
+and separate count/identity assertions. It starts no runtime work and preserves
+legacy, partial and unmeasured meanings.
+
 Make bgperf2 a performance tester that daemon developers can use to reproduce
 problems, test their own fixes and investigate regressions. Reuse existing
 batch/scenario inputs, repetitions, ordering, measurement artifacts, provenance,

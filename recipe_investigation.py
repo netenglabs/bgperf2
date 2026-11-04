@@ -476,7 +476,7 @@ def write_investigation_report(*, baseline, candidate=None, output_dir,
     return report
 
 
-def verify_investigation_report(path):
+def _verified_investigation_report(path):
     path = Path(path)
     root = path.parent
     if path.name != 'investigation.json':
@@ -564,8 +564,84 @@ def verify_investigation_report(path):
         raise recipes.ContractError('Investigation differences disagree with evidence')
     if _regular_bytes(root, 'REPORT.md').decode('utf-8') != _render(document, controller_stop):
         raise recipes.ContractError('Human report disagrees with the verified investigation evidence')
-    return {'valid': True, 'schema': SCHEMA, 'files_verified': len(listed),
+    return document, controller_stop, dict(zip(document['attempts'], originals)), len(listed)
+
+
+def verify_investigation_report(path):
+    document, _, _, count = _verified_investigation_report(path)
+    return {'valid': True, 'schema': SCHEMA, 'files_verified': count,
             'outcome': document['assessment']['outcome']}
+
+
+def investigation_status(path):
+    """Summarize the verified snapshot without starting or changing any work."""
+    document, stop, originals, count = _verified_investigation_report(path)
+    selected = 'correctness' in document
+    attempts = {}
+    for label in ('baseline', 'candidate'):
+        original = originals[label]
+        item = document['attempts'][label]
+        correctness = None
+        if selected:
+            observed = document['correctness']['attempts'][label]
+            correctness = {'outcome': observed['outcome'], 'assertions': [
+                {key: row[key] for key in ('name', 'status', 'expected', 'observed', 'reason')}
+                for row in observed['assertions']]}
+            if 'reason' in observed:
+                correctness['reason'] = observed['reason']
+        attempts[label] = {key: item[key] for key in ('availability', 'status', 'reason')}
+        attempts[label].update(attempt_id=original['attempt']['id'] if original else None,
+                               correctness=correctness)
+    return {'schema': 'bgperf2/investigation-status/v1alpha1', 'verified': True,
+            'files_verified': count, 'recipe_sha256': document['recipe_sha256'],
+            'reproduction': document['assessment'], 'controller_stop': stop,
+            'correctness_selected': selected, 'attempts': attempts,
+            'scope': 'Verified report summary only. Success means integrity, not assertion success or execution approval.'}
+
+
+def render_investigation_status(status):
+    """Keep evidence text printable when shown in a terminal."""
+    def text(value):
+        return ''.join(c if c.isprintable() else repr(c)[1:-1] for c in str(value))
+
+    lines = ['Verified investigation report',
+             'Recipe reproduction: ' + text(status['reproduction']['outcome']),
+             'Correctness selected: ' + ('yes' if status['correctness_selected'] else 'no'),
+             text(status['scope'])]
+    if status['controller_stop'] is not None:
+        stop = status['controller_stop']
+        lines.append('Controller stopped: ' + text(stop['attempt']) + ' / ' + text(stop['status']))
+        lines.append('  ' + text(stop['reason']))
+    for label, item in status['attempts'].items():
+        lines += ['', text(label) + ': ' + text(item['status']) + ' (' + text(item['availability']) + ')',
+                  '  Original attempt: ' + text(item['attempt_id'] or 'unavailable'),
+                  '  ' + text(item['reason'])]
+        correctness = item['correctness']
+        if correctness is None:
+            lines.append('  Correctness: not selected; no assertion pass inferred.')
+            continue
+        lines.append('  Correctness: ' + text(correctness['outcome']))
+        if 'reason' in correctness:
+            lines.append('  ' + text(correctness['reason']))
+        for row in correctness['assertions']:
+            observed = row['observed']
+            detail = json.dumps(observed, sort_keys=True, ensure_ascii=True)
+            if row['name'] == 'roles.healthy' and isinstance(observed, list):
+                detail = ', '.join(text(item['role']) + '=' + text(
+                                       item['state'].get('Status', 'unknown')
+                                       if isinstance(item['state'], dict) else 'unknown')
+                                   for item in observed)
+            elif row['name'] == 'observer.prefixes' and isinstance(observed, dict):
+                detail = ', '.join(key + '=' + str(observed[key])
+                                   for key in ('observed_count', 'missing_count', 'unexpected_count'))
+                for key in ('missing_sample', 'unexpected_sample'):
+                    if observed.get(key):
+                        detail += ', ' + key + '=' + json.dumps(observed[key], ensure_ascii=True)
+            lines.append('  ' + text(row['name']) + ': ' + text(row['status']) +
+                         '; observed=' + detail)
+            if row['status'] != 'passed':
+                lines.append('    ' + text(row['reason']))
+    return '\n'.join(lines) + '\n'
 
 
 def rebuild_investigation_report(path, *, output_dir):

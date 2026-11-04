@@ -114,7 +114,7 @@ def supplied_target(recipe, image, *, label=None, instrumentation='unknown'):
     _image(image, 'image')
     recipes._choice(instrumentation, INSTRUMENTATION, 'instrumentation')
     document = {'schema': TARGET_SCHEMA, 'recipe_sha256': recipes.recipe_sha256(recipe),
-                'adapter': 'bird', 'image': image, 'label': label,
+                'adapter': recipe['roles']['target']['adapter'], 'image': image, 'label': label,
                 'provenance': {'kind': 'supplied_image', 'source': None, 'build': None,
                                'instrumentation': instrumentation,
                                'limits': ['Source, toolchain, compiler flags, binary hash and reconstructibility are unknown for a supplied image.',
@@ -127,7 +127,7 @@ def validate_target(document, recipe=None):
     recipes._keys(document, ('schema', 'recipe_sha256', 'adapter', 'image', 'label', 'provenance'))
     recipes._choice(document['schema'], (TARGET_SCHEMA,), 'schema')
     _hex(document['recipe_sha256'], 'recipe_sha256')
-    recipes._choice(document['adapter'], ('bird',), 'adapter')
+    recipes._choice(document['adapter'], recipes.TARGET_ADAPTERS, 'adapter')
     _image(document['image'], 'image')
     if document['label'] is not None:
         recipes._text(document['label'], 'label')
@@ -141,6 +141,8 @@ def validate_target(document, recipe=None):
         if provenance['source'] is not None or provenance['build'] is not None:
             raise recipes.ContractError('supplied images must not invent source/build identities')
     else:
+        if document['adapter'] != 'bird':
+            raise recipes.ContractError('Local-source builds are BIRD-only; FRR supports supplied images')
         source = _source(provenance['source'])
         build = provenance['build']
         recipes._keys(build, ('recipe', 'toolchain_image', 'runtime_image', 'toolchain_image_id', 'runtime_image_id', 'compiler_flags', 'linker_flags',
@@ -164,6 +166,7 @@ def validate_target(document, recipe=None):
             raise recipes.ContractError('binary identity and reconstruction are not established by this builder')
     if recipe is not None:
         recipes.validate_recipe(recipe)
+        recipes._same(document['adapter'], recipe['roles']['target']['adapter'], 'target adapter')
         if document['recipe_sha256'] != recipes.recipe_sha256(recipe):
             raise recipes.ContractError('target override belongs to a different base recipe')
     return document
@@ -302,6 +305,8 @@ def plan_source_build(recipe, source_root, revision, *, toolchain_image, runtime
                       configure_flags=()):
     """Inspect local source and emit identities; never execute code or Docker."""
     recipes.validate_recipe(recipe)
+    if recipe['roles']['target']['adapter'] != 'bird':
+        raise recipes.ContractError('Local-source builds are BIRD-only; FRR supports supplied images')
     _image(toolchain_image, 'toolchain_image'); _image(runtime_image, 'runtime_image')
     cflags, configure_flags = _flags(cflags, configure_flags, instrumentation)
     source, _, _ = _snapshot(source_root, revision, include_dirty)
@@ -329,6 +334,8 @@ def validate_build_plan(plan):
                         'configure_flags', 'build_recipe', 'network', 'requirements', 'limits'))
     recipes._choice(plan['schema'], (BUILD_SCHEMA,), 'schema')
     recipes.validate_recipe(plan['recipe'])
+    if plan['recipe']['roles']['target']['adapter'] != 'bird':
+        raise recipes.ContractError('Local-source builds are BIRD-only; FRR supports supplied images')
     if recipes.recipe_sha256(plan['recipe']) != plan['recipe_sha256']:
         raise recipes.ContractError('Build plan recipe binding differs')
     if not isinstance(plan['source_root'], str) or not Path(plan['source_root']).is_absolute():

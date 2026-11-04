@@ -1,4 +1,4 @@
-# Test and diagnose a BIRD fix
+# Test and diagnose a target change
 
 For a connected reproduction, local-fix investigation and revision-search
 walkthrough, start with the [maintainer workflow](maintainer-workflow.md).
@@ -6,9 +6,13 @@ walkthrough, start with the [maintainer workflow](maintainer-workflow.md).
 Use one immutable [recipe](recipes.md), with separate target/build identity
 records for the baseline and candidate. The recipe's workload, generator,
 observer, engine revision, completion contract and reproduction question stay
-fixed. The initial supported adapter is synthetic IPv4 BIRD/BIRD/sink. This is
-one functional investigation; statistical performance comparison remains a later
-milestone.
+fixed. Supported synthetic IPv4 targets are BIRD and supplied-image `frr_c`, with
+BIRD generators and sink observer. Both target selections must use the recipe's
+adapter. See the [FRR guide](frr-maintainer-workflow.md) for compatible supplied
+images and conservative container diagnostics. Source builds, revision search,
+target threads and target-crash reproduction remain BIRD-only. This is one
+functional investigation; [descriptive comparisons](comparisons.md) are separate
+and calibrated performance decisions remain disabled.
 
 ## Optional received-prefix correctness
 

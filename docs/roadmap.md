@@ -7,8 +7,17 @@ CLI and versioned artifacts; none is required to use the engine.
 
 ## Current direction
 
-The operator selected [bounded reproducer minimization](plans/reproducer-minimization.md)
-as the next substantial feature after live staged prefix validation. The first
+The operator selected the [supplied-image FRR maintainer workflow](plans/frr-maintainer-workflow.md)
+as the next substantial goal. It extends the portable path to the existing `frr_c`
+adapter with BIRD generators and sink observer, preserving BIRD behavior. The
+[FRR guide](frr-maintainer-workflow.md) covers immutable image selection,
+assertions, investigations, descriptive comparisons and bounded minimization.
+FRR source builds, revision searches, daemon-crash witnesses and target threads
+are outside this scope. Real runtime qualification requires a separate concrete
+execution approval; no images are built or acquired by this selection.
+
+[Bounded reproducer minimization](plans/reproducer-minimization.md) was delivered
+at `506ff4b` with modeled verification and required gates. Its first
 scope reduces synthetic peers/prefix counts while preserving one selected
 assertion failure, with fresh baseline/confirmation, charged reservations and
 portable evidence. The [public guide](minimization.md) describes the explicit

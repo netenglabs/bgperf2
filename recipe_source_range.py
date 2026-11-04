@@ -433,6 +433,8 @@ def prepare_range(recipe, *, source_root, good, bad, toolchain_image, runtime_im
                   predicate='assertions', max_trials=32, worker_timeout=120, build_timeout=1200):
     """Create one isolated local clone and clean per-revision build plans."""
     recipes.validate_recipe(recipe)
+    if recipe['roles']['target']['adapter'] != 'bird':
+        raise recipes.ContractError('Source range preparation is BIRD-only; FRR supports supplied images')
     recipes._match(good, recipes._REVISION, 'good', 'a full Git commit')
     recipes._match(bad, recipes._REVISION, 'bad', 'a full Git commit')
     targets._image(toolchain_image, 'toolchain_image')
@@ -558,6 +560,8 @@ def _verify_preparation(manifest_path, *, terminal=True):
     if manifest['prepared_repository'] != 'repository.git' or manifest['bisection_plan'] != 'bisection-plan.json' or manifest['copy_mode'] != 'local-bare-clone-no-hardlinks':
         raise recipes.ContractError('Prepared source layout differs')
     recipes.validate_recipe(manifest['recipe'])
+    if manifest['recipe']['roles']['target']['adapter'] != 'bird':
+        raise recipes.ContractError('Source range preparation is BIRD-only; FRR supports supplied images')
     if recipes.recipe_sha256(manifest['recipe']) != manifest['recipe_sha256']:
         raise recipes.ContractError('Prepared recipe binding differs')
     for key in ('good','bad'):

@@ -22,6 +22,7 @@ rewritten.
 * [Portable recipe and result contracts](docs/recipes.md) (export, prepare, isolated execution and verified result packages)
 * [Small functional checks](docs/functional-validation.md) (immediate bounded execution, load observations and verified correctness)
 * [Investigate a local BIRD fix](docs/investigations.md) (target/build identities, diagnostics and baseline/fix reports)
+* [Supplied-image FRR maintainer workflow](docs/frr-maintainer-workflow.md) (functional assertions, reports and bounded minimization)
 * [Localize a deterministic regression](docs/bisection.md) (bounded revision search, recovery and verified boundary evidence)
 * [How bgperf2 works](docs/how_bgperf_works.md) ·
   [Benchmarking a remote target](docs/benchmark_remote_target.md) ·
@@ -766,7 +767,7 @@ end-to-end check.
 ## Development
 
 Use the [comparison walkthrough](docs/comparisons.md) for explicit observable
-assertions and repeated serial comparisons of two BIRD target selections, with
+assertions and repeated serial comparisons of two selections of the same supported target adapter, with
 portable verified reports. The maintained Docker-free demo includes controlled
 differences, noise and inconclusive evidence. Calibrated regression verdicts
 remain disabled pending separately authorized calibration.

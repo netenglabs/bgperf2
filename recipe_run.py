@@ -181,7 +181,10 @@ class SubprocessBackend:
                             stop_errors.append('Worker could not be reaped after SIGKILL; inspect host before further execution.')
                 record_stage('collection', reason='Worker stopped; collect owned diagnostics before removing resources.')
                 try:
-                    diagnostic = collect_diagnostics(workdir, attempt_id, env, mode=self.diagnostics)
+                    adapter_options = ({'target_adapter': document['roles']['target']['adapter']}
+                                       if document['roles']['target']['adapter'] != 'bird' else {})
+                    diagnostic = collect_diagnostics(workdir, attempt_id, env, mode=self.diagnostics,
+                                                     **adapter_options)
                 except Exception as exc:
                     from recipe_diagnostics import SCHEMA, memory_record
                     diagnostic = {'schema': SCHEMA, 'mode': self.diagnostics,

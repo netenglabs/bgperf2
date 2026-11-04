@@ -5,6 +5,10 @@ a recipe and the revisions you want to investigate. It replaces manual creation
 of a clean checkout and build plan for every bisection revision with one isolated
 preparation, then freezes the concrete public commands for your baseline and fix.
 
+This source preparation remains BIRD-only. For an existing FRR image, use the
+[supplied-image FRR workflow](frr-maintainer-workflow.md); FRR source builds and
+revision search are explicitly unsupported.
+
 Preparation uses local Git and filesystem reads/writes only. Source configure
 code, builds, Docker probes and workers remain separate operations. Image
 availability, host suitability and execution authorization remain unassessed.

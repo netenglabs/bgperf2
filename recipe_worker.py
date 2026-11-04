@@ -58,7 +58,7 @@ class OwnedDocker:
 
 
 def scoped_adapter(adapter, image, prefix, *, role=None, work=None, capture_exit=False,
-                   capture_prefixes=False):
+                   capture_prefixes=False, target_adapter='bird'):
     """Preserve adapter behavior, replacing only binary and runtime name."""
     class Selected(adapter):
         @classmethod
@@ -92,7 +92,8 @@ def scoped_adapter(adapter, image, prefix, *, role=None, work=None, capture_exit
 
         def get_startup_cmd(self):
             command = super().get_startup_cmd()
-            if not capture_exit or role != 'target':
+            if (not capture_exit or role != 'target' or target_adapter != 'bird'
+                    or self.name.endswith('_frrouting_compiled_target')):
                 return command
             # BIRD's existing -d command stays in the foreground. Capture its
             # status only after it returns, without moving measurement clocks.
@@ -108,10 +109,11 @@ def execute(document, work, attempt, engine, *, target=None):
     from recipe_targets import effective_roles
     from recipe_diagnostics import stage
     roles = effective_roles(document, target)
+    target_adapter = roles['target']['adapter']
     options = recipes.read_document(work / 'diagnostic-options.json') if (work / 'diagnostic-options.json').is_file() else {'mode': 'none'}
     stage(work, 'setup')
     parser = engine.create_args_parser()
-    argv = ['-b', attempt, '-d', str(work), 'bench', '-t', 'bird',
+    argv = ['-b', attempt, '-d', str(work), 'bench', '-t', target_adapter,
             '-n', str(resolved['neighbors']), '-p', str(resolved['prefixes_per_peer']),
             '--image', roles['target']['image'], '--monitor', 'sink',
             '--results-dir', str(work / 'artifacts')]
@@ -123,7 +125,7 @@ def execute(document, work, attempt, engine, *, target=None):
     # Copy the runtime namespace; compatibility wrappers needing shared globals
     # are rebound below so every bench dependency receives this scoped object.
     runtime = types.SimpleNamespace(**vars(engine))
-    runtime.TARGET_CLASSES = {'bird': scoped_adapter(engine.TARGET_CLASSES['bird'], roles['target']['image'], attempt, role='target', work=work, capture_exit=options.get('mode') == 'basic')}
+    runtime.TARGET_CLASSES = {target_adapter: scoped_adapter(engine.TARGET_CLASSES[target_adapter], roles['target']['image'], attempt, role='target', work=work, capture_exit=options.get('mode') == 'basic', target_adapter=target_adapter)}
     runtime.MONITOR_CLASSES = {'sink': scoped_adapter(engine.MONITOR_CLASSES['sink'], roles['observer']['image'], attempt, role='observer', work=work,
         capture_prefixes=options.get('observer_prefixes', False))}
     runtime.BIRDTester = scoped_adapter(engine.BIRDTester, roles['generator']['image'], attempt, role='generator', work=work)
@@ -214,12 +216,12 @@ def health_outcome(name, state, expected):
     """Classify only observed stopped containers; missing state never attests."""
     if state.get('Running') is not False:
         return None
-    is_target = name.endswith('_bird_target')
-    is_observer = name.endswith('_monitor')
+    from recipe_diagnostics import role_for_name
+    is_observer = role_for_name(name) == 'observer'
     failure = {'status': 'inconclusive' if is_observer else 'experiment_failed',
                'reason': f'Required role container {name} stopped.', 'container_state': state}
     code = state.get('ExitCode')
-    if is_target and isinstance(code, int) and not isinstance(code, bool) and code != 0:
+    if name.endswith('_bird_target') and isinstance(code, int) and not isinstance(code, bool) and code != 0:
         failure['reproduction'] = {
             'outcome': 'reproduced' if expected == 'target_crash' else 'not_reproduced',
             'reason': 'Target container exited abnormally; container-level crash witness, not daemon-process diagnosis.',
@@ -295,7 +297,9 @@ def main(argv=None):
                     if failure is None and diagnostic_client is not None:
                         failure = live_sample(diagnostic_client, owned, live,
                                               expected=document['reproduction']['expected_outcome'],
-                                              exit_reader=lambda: read_bird_exit(work, attempt + '/bird/recipe-bird-exit.json'))
+                                              target_adapter=roles['target']['adapter'],
+                                              exit_reader=(lambda: read_bird_exit(work, attempt + '/bird/recipe-bird-exit.json'))
+                                              if roles['target']['adapter'] == 'bird' else None)
                         with terminal_lock:
                             if finalized:
                                 return

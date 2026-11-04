@@ -1,16 +1,21 @@
-# Compare two BIRD targets
+# Compare two target selections
 
 The separately approved [four-worker prefix case](plans/prefix-maintainer-workflow.md#approved-normal-comparison-validation--2026-11-04-utc)
 passed all 24 assertions with exact 100-prefix snapshots and verified original
 and rebuilt reports. It qualifies that same-image normal functional path, not
 live staged capture, a changed binary or performance detection.
 
-Use one immutable synthetic IPv4 BIRD/BIRD/sink recipe and two
+Use one immutable synthetic IPv4 recipe with a BIRD or supplied-image `frr_c`
+target, BIRD generators and sink observer, and two same-adapter
 [target selections](investigations.md). A comparison repeats the whole pair,
 preserves every attempt and returns a portable JSON and Markdown report.
 It does not enable calibrated performance verdicts. Read the
 [measurement dictionary](measurement-dictionary.md) for the existing clocks and
 accounting boundaries; no measurement definition changes here.
+
+The [FRR guide](frr-maintainer-workflow.md) documents its supplied-image scope
+and modeled comparison evidence. Cross-daemon image overrides are refused;
+actual FRR runtime qualification remains separate from modeled checks.
 
 This descriptive workflow is delivered for the supported recipe. Formal reliable
 10% regression detection is deferred and is not a release blocker; automated

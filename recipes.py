@@ -5,7 +5,7 @@
 
 """Declarative recipe/result contracts and explicit preparation/execution CLI.
 
-The first envelope deliberately supports only synthetic IPv4 BIRD workloads,
+The envelope supports synthetic IPv4 BIRD and supplied-image FRR targets,
 with BIRD generators and the sink instrument. It imports no container runtime.
 """
 
@@ -42,6 +42,7 @@ _REVISION = re.compile(r'[0-9a-f]{40}\Z')
 _IMAGE = re.compile(r'(?:sha256:[0-9a-f]{64}|[a-zA-Z0-9][a-zA-Z0-9._:/-]*@sha256:[0-9a-f]{64})\Z')
 _KEY = re.compile(r'[0-9a-f]{16}\Z')
 _TEST_REQUIRED = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
+TARGET_ADAPTERS = ('bird', 'frr_c')
 _TEST_OPTIONAL = ('prefix_scope', 'repetitions', 'order', 'seed', 'monitor', 'pin')
 _TARGET_KEYS = ('name', 'tester_type', 'version', 'image', 'label', 'threads')
 
@@ -217,7 +218,7 @@ def _source_tests(text):
         for ti, target in enumerate(test['targets']):
             tw = f'{where}.targets[{ti}]'
             _keys(target, ('name',), _TARGET_KEYS[1:], tw)
-            _choice(target['name'], ('bird',), f'{tw}.name')
+            _choice(target['name'], TARGET_ADAPTERS, f'{tw}.name')
             _choice(target.get('tester_type'), (None, 'bird'), f'{tw}.tester_type')
             for field in ('image', 'label'):
                 if target.get(field) is not None:
@@ -230,8 +231,11 @@ def _source_tests(text):
                 _text(str(target['version']), f'{tw}.version')
             if target.get('threads') is not None:
                 _integer(target['threads'], f'{tw}.threads', 1)
+                if target['name'] != 'bird':
+                    raise ContractError(f'{tw}.threads: FRR target thread controls are unsupported')
             expanded = expand_target_versions([target])[0]
-            run_name = expanded.get('label') or ('bird ' + expanded['version'] if expanded.get('version') else 'bird')
+            run_name = expanded.get('label') or (expanded['name'] + ' ' + expanded['version']
+                                                if expanded.get('version') else expanded['name'])
             if run_name in run_names:
                 raise ContractError(f'{tw}: repeated run name {run_name!r}; select unique labels')
             run_names.add(run_name)
@@ -266,7 +270,7 @@ def _select(text, test_name, cell_key):
     raw_target = selected_test['targets'][cell['ordinal'] % len(targets)]
     target = cell['target']
     resolved_target = {
-        'name': 'bird', 'tester_type': target.get('tester_type') or 'bird',
+        'name': target['name'], 'tester_type': target.get('tester_type') or 'bird',
         'filter_type': 'in', 'version': target.get('version'),
         'image': target.get('image'), 'label': target.get('label'),
         'threads': target.get('threads'),
@@ -282,9 +286,9 @@ def _select(text, test_name, cell_key):
     return selected_test, cell, raw_target, resolved
 
 
-def _roles(roles):
+def _roles(roles, target_adapter='bird'):
     _keys(roles, ('target', 'generator', 'observer'), where='roles')
-    for role, adapter in (('target', 'bird'), ('generator', 'bird'), ('observer', 'sink')):
+    for role, adapter in (('target', target_adapter), ('generator', 'bird'), ('observer', 'sink')):
         _keys(roles[role], ('adapter', 'image'), where=f'roles.{role}')
         _choice(roles[role]['adapter'], (adapter,), f'roles.{role}.adapter')
         _match(roles[role]['image'], _IMAGE, f'roles.{role}.image',
@@ -293,10 +297,12 @@ def _roles(roles):
 
 def _recipe(text, test_name, cell_key, engine_revision, roles, question, expected_outcome):
     _match(engine_revision, _REVISION, 'engine.revision', 'a full 40-character lowercase Git revision')
-    _roles(roles)
     _text(question, 'reproduction.question')
     _choice(expected_outcome, EXPECTED_OUTCOMES, 'reproduction.expected_outcome')
     test, cell, raw_target, resolved = _select(text, test_name, cell_key)
+    _roles(roles, resolved['target']['name'])
+    if resolved['target']['name'] == 'frr_c' and expected_outcome == 'target_crash':
+        raise ContractError('FRR target_crash reproduction is unsupported; use observable functional assertions')
     if cell['target'].get('image') is not None:
         _same(roles['target']['image'], cell['target']['image'], 'roles.target.image')
     return {
@@ -567,8 +573,10 @@ def main(argv=None):
             _write_document(result)
             return result['exit_code']
         elif args.command == 'export':
+            selected_adapter = _select(Path(args.batch).read_bytes().decode('utf-8'),
+                                       args.test, args.cell)[3]['target']['name']
             roles = {role: {'adapter': adapter, 'image': getattr(args, role + '_image')}
-                     for role, adapter in (('target', 'bird'), ('generator', 'bird'), ('observer', 'sink'))}
+                     for role, adapter in (('target', selected_adapter), ('generator', 'bird'), ('observer', 'sink'))}
             document = export_recipe(args.batch, args.test, args.cell,
                                      engine_revision=args.engine_revision, roles=roles,
                                      question=args.question, expected_outcome=args.expected_outcome)

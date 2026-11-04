@@ -7,6 +7,10 @@ objects once into an independent bare repository, creates detached checkouts
 inside a new output directory, and freezes a build plan for every consecutive
 first-parent revision. It produces the existing versioned bisection plan.
 
+Source-range preparation remains BIRD-only. Supplied-image FRR recipes use the
+[FRR workflow](frr-maintainer-workflow.md) and refuse this operation before
+source inspection or destination creation.
+
 No source configure script, build, image acquisition, hook, submodule operation
 or worker runs. Preparation does not initialize or execute a search. The good
 and bad endpoint names declare intended outcomes; they are not observations.

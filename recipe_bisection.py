@@ -113,6 +113,8 @@ def validate_plan(plan):
                         'worker_timeout', 'build_timeout', 'diagnostics', 'assumption'))
     recipes._choice(plan['schema'], (PLAN_SCHEMA,), 'schema')
     recipes.validate_recipe(plan['recipe'])
+    if plan['recipe']['roles']['target']['adapter'] != 'bird':
+        raise recipes.ContractError('Source revision bisection is BIRD-only; FRR supports supplied images')
     recipes._choice(plan['predicate'], ('target_crash', 'assertions', 'prefix_assertions'), 'predicate')
     if plan['predicate'] == 'prefix_assertions':
         from recipe_prefixes import validate_selection
@@ -157,6 +159,9 @@ def validate_plan(plan):
 
 def make_plan(recipe, build_plans, commit_objects, *, predicate, max_trials,
               worker_timeout=120, build_timeout=1200):
+    recipes.validate_recipe(recipe)
+    if recipe['roles']['target']['adapter'] != 'bird':
+        raise recipes.ContractError('Source revision bisection is BIRD-only; FRR supports supplied images')
     if predicate == 'prefix_assertions':
         recipes.validate_recipe(recipe)
         from recipe_prefixes import validate_selection

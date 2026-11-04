@@ -91,7 +91,7 @@ def stage(work, name, *, status='entered', reason=None):
 
 
 def role_for_name(name):
-    if name.endswith('_bird_target'):
+    if name.endswith(('_bird_target', '_frrouting_compiled_target')):
         return 'target'
     if name.endswith('_monitor'):
         return 'observer'
@@ -206,7 +206,7 @@ def read_bird_exit(work, relative):
         return None
 
 
-def live_sample(client, owned, previous, *, expected, exit_reader=None):
+def live_sample(client, owned, previous, *, expected, exit_reader=None, target_adapter='bird'):
     """One optional diagnostic pass; an absent process attests only after presence."""
     samples = previous.setdefault('samples', [])
     seen = previous.setdefault('bird_seen', [])
@@ -224,7 +224,8 @@ def live_sample(client, owned, previous, *, expected, exit_reader=None):
                 peaks[sample['role']] = max(usage, peaks.get(sample['role'], 0))
         except Exception as exc:
             sample['errors'].append('memory: ' + type(exc).__name__)
-        if sample['role'] == 'target':
+        if (sample['role'] == 'target' and target_adapter == 'bird'
+                and not name.endswith('_frrouting_compiled_target')):
             try:
                 processes = client.top(identifier, ps_args='-eo pid,comm')
                 titles, rows = processes.get('Titles', []), processes.get('Processes', [])
@@ -257,10 +258,14 @@ def live_sample(client, owned, previous, *, expected, exit_reader=None):
         del samples[:removed]
     previous['schema'] = SCHEMA
     previous['instrumentation'] = 'optional Docker stats and fixed BIRD process-list probes; observation overhead is uncalibrated'
+    if target_adapter != 'bird' or any(sample['name'].endswith('_frrouting_compiled_target') for sample in samples):
+        previous['instrumentation'] = 'optional Docker stats; observation overhead is uncalibrated'
+        previous['unsupported'] = ['FRR daemon process presence and exit-status witnesses are unsupported; container state does not diagnose bgpd.']
     return failure
 
 
-def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memory_reader=None):
+def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memory_reader=None,
+                        target_adapter='bird'):
     """Collect before owned cleanup. Exclude environment, mounts, journals and cores."""
     work = Path(work)
     command = command or bounded_probe
@@ -274,6 +279,9 @@ def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memor
                                'bird_daemon_exit': 'fixed startup wrapper records status after BIRD exits',
                                'daemon_process_rss': False, 'privileged_cores': False},
               'privileged_artifacts': {'cores': 'not_requested', 'kernel_journal': 'not_requested'}}
+    if target_adapter != 'bird':
+        report['capabilities'].update(bird_process_presence=False, bird_daemon_exit=False)
+        report['unsupported'] = ['FRR daemon process presence and exit-status witnesses are unsupported; container state does not diagnose bgpd.']
     if mode == 'none':
         report.update(status='disabled', missing=['Optional runtime diagnostics were explicitly disabled.'])
         write_json(work / 'diagnostics.json', report)
@@ -310,6 +318,9 @@ def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memor
                 if labels.get('bgperf2.recipe.attempt') != attempt or inspected.get('Id') != identifier:
                     raise ValueError('Diagnostic ownership/ID recheck failed; foreign resource retained')
                 name = inspected.get('Name', '').lstrip('/')
+                if name.endswith('_frrouting_compiled_target'):
+                    report['capabilities'].update(bird_process_presence=False, bird_daemon_exit=False)
+                    report['unsupported'] = ['FRR daemon process presence and exit-status witnesses are unsupported; container state does not diagnose bgpd.']
                 filtered = {key: state.get(key) for key in ('Status', 'Running', 'ExitCode', 'OOMKilled', 'Error', 'StartedAt', 'FinishedAt')}
                 item = {'id': identifier, 'name': name, 'role': role_for_name(name),
                         'image_id': inspected.get('Image'), 'state': filtered,

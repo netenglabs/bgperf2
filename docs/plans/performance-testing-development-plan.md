@@ -9,6 +9,20 @@ count-fault bisection with fresh confirmations. Pristine-source/source-bug-fix,
 broader live bisection/diagnostics and performance calibration remain deferred. See the
 [comparison guide](../comparisons.md) and [bisection guide](../bisection.md).
 
+## Supplied-image FRR extension — selected 2026-11-04
+
+The [FRR maintainer plan](frr-maintainer-workflow.md) extends the delivered
+recipe, target-identity, diagnostics, assertion, investigation, descriptive
+comparison and minimization interfaces to the existing `frr_c` target adapter.
+Generators remain BIRD and the observer remains sink. Its
+[public guide](../frr-maintainer-workflow.md) distinguishes modeled contract
+checks from separately approved real-image qualification. Historical BIRD
+validation below retains its original scope. FRR local-source builds, revision
+searches, target-crash witnesses and target thread controls remain unsupported.
+This extension authorizes no real workers/builds/acquisitions and changes no
+measurement definitions or calibrated performance policy. Formal 10% calibration
+remains deferred; the upstream investigation remains paused.
+
 ## Operator decision: descriptive comparisons first — 2026-10-31
 
 Follow-through on 2026-11-03: the operator selected continued work after the

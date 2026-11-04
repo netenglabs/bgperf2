@@ -104,9 +104,11 @@ Source/build contracts, source-range preparation, maintainer handoffs, modeled
 integrated acceptance and reviewed engine implementation are complete. The
 [public source guide](../frr-source-workflow.md) is the maintained entry point.
 Live source-build/changed-image/minimization/bisection qualification remains
-unassessed. The [separate live proposal](frr-source-runtime-validation.md) is
-prepared with finite bounds and explicit unresolved source/base prerequisites;
-it is not an executable approved packet and no execution approval is requested.
+separate. The [runtime validation record](frr-source-runtime-validation.md)
+records the later approved case: one successful source build and independent
+static acceptance, followed by a frozen-input prerequisite stop before any
+worker. Functional source/changed-image/minimization/bisection qualification
+remains unassessed; that stopped case will not resume.
 
 Earlier supplied-image originals and their preservation remain untouched. No
 real build, worker, acquisition, upstream investigation, scheduler job, evidence

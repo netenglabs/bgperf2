@@ -1,11 +1,63 @@
-# Proposed FRR source-build functional validation
+# FRR source-build functional validation
 
-Case02 is prepared and independently reviewed, **awaiting separate explicit
-execution approval**. No build or worker has started. The original proposal and
-read-only findings below remain preparation history; the case02 record is current.
+Case02 was explicitly approved and **stopped before its first worker** after one
+successful build. A frozen-input prerequisite detected seven new Python cache
+files created by the image-audit helper. No worker or retry ran. The stopped
+execution record below is current; preparation and proposal sections remain history.
 The [implementation plan](frr-source-workflow.md) and
 [source guide](../frr-source-workflow.md) own engine delivery and contracts.
 The earlier supplied-image pair remains complete; its two workers will not rerun.
+
+## Approved case02 stopped before workers — 2026-11-04 UTC
+
+The operator approved the final case02 digest and functional-only root-backed
+storage exception. Execution used frozen engine `ab7d65b` and the exact source,
+bases and finite budgets below. Evidence is retained locally under
+`/tmp/bgperf2-frr-source-validation-20261104/execution01/`.
+
+The one public `target-build` command exited zero in 355.65 seconds without a
+timeout, within its 1,200-second inner and 1,800-second outer bounds. It returned
+image `sha256:0ddb9e0d6a4c5e888f4adad90e1872925ed3db4f2ce42c90496f654845dc3f8d`.
+Actual independent build review accepted the source/configuration/log/image
+bindings, fresh installed bgpd/vtysh/libfrr files, exported layer hashes and
+semantic foreign-resource reconciliation. Configure reported FRR 10.3.1; no
+runtime banner has been observed in this case. The mixed-base residual files,
+configure local-state-directory warning and nonhermetic build limits remain
+explicit in the originals.
+
+Fresh baseline guard, capacity, dependency, image and host snapshots passed;
+available memory was 60,520,435,712 bytes and free disk 329,882,144,768 bytes.
+The subsequent `verify-packet` prerequisite exited one because the frozen
+engine/environment file set had changed. The recorder created `STOP.json`,
+permanently blocking both workers. The baseline target check and worker were
+never invoked. Counts: **one build, zero workers, zero retries, zero new
+functional assertions**, and no pair report.
+
+The execution image-audit helper was invoked with host `python3` without `-B`.
+Its imports of frozen engine modules wrote seven new `__pycache__/*.cpython-314.pyc`
+files. This was an execution-tool mistake, not an FRR failure. Readback found
+all 7,382 previously frozen entries unchanged, with no removals or modified
+entries. The added caches remain preserved; no repair, deletion, reseal or
+prerequisite retry was performed. The passing build review does not override
+the later failed prerequisite or qualify runtime behavior.
+
+Post-stop read-only inventory again contains the same 75 foreign containers,
+six networks and 495 volumes, with unchanged public identities and semantic
+mount/network/label sets. No build container remains. The built image and all
+partial evidence remain local. The preparation seal itself remains unchanged;
+its listed original bytes remain verifiable, while the frozen file set has the
+seven disclosed additions. Local checksums are not independent backup or
+authenticated execution provenance.
+
+Source-build execution and static installation have now been observed for this
+one adapted snapshot. Live functional source qualification, minimization and
+bisection remain unassessed. Any later runtime case needs newly reviewed inputs
+and separate authorization; this case will not resume. A future audit launcher
+must disable bytecode writes before importing any frozen module and verify its
+input file set after inspection. No engine behavior was changed for this stop.
+The earlier supplied-image pair is untouched. Upstream investigation remains
+paused, performance policy disabled and calibration deferred. Nothing was
+pushed, published, acquired or transferred remotely.
 
 ## Prepared case02 — 2026-11-04 UTC
 

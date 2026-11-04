@@ -14,10 +14,13 @@ with independent review and a native gate passing 3,141 tests, one skipped. It a
 assertion/prefix-assertion bisection. The [FRR source guide](frr-source-workflow.md)
 connects candidate CI, image-only minimization and fresh source plans for reduced
 recipes. Implementation validation is modeled; live source qualification remains
-separate. The [first source-build functional case](plans/frr-source-runtime-validation.md#prepared-case02--2026-11-04-utc)
-is now prepared with an explicit local 10.3.1 packaging adaptation, verified
-frozen inputs and one-build/two-worker bounds, awaiting separate execution and
-fresh root-storage approval. Its mixed-base and provenance limits remain explicit.
+separate. The [first approved source-build case](plans/frr-source-runtime-validation.md#approved-case02-stopped-before-workers--2026-11-04-utc)
+completed one adapted FRR 10.3.1 build with independent static acceptance, then
+stopped before either worker: the audit helper created seven Python cache files
+inside the frozen engine copy, causing its input-file-set prerequisite to fail.
+No worker or retry ran; functional source qualification remains unassessed.
+Its mixed-base and provenance limits remain explicit. A future case requires
+reviewed tooling and fresh authorization; the stopped case will not resume.
 FRR crash/thread controls stay unsupported. No completed case is rerun,
 upstream investigation stays paused and calibration remains deferred.
 

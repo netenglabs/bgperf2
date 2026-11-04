@@ -88,3 +88,76 @@ identities, failures and observations in these walkthroughs are simulated and
 establish no FRR defect or live qualification. Initial inherited-store refusal
 and earlier successful outputs remain preserved separately; the smoke now uses
 its private artifact store.
+
+## Reviewed implementation delivered — 2026-11-04 UTC
+
+Implementation commit: `f81404bd2bd65eb16f58ff334d135b3acc295e2d`.
+The actual repository `/code-review` workflow accepted the frozen complete diff
+with no findings; its SHA256 is
+`a8127b59aa2322ef26199927c13ed17f01e72ac73a0b724f6551d42c911f6569`.
+The ready review matched the source/index/Git state immediately before the local
+commit. The ordinary native hook passed its measurement guard, checked the
+34-package locked environment, and passed **3,071 tests, one skipped** in
+255.50 seconds. No hook was bypassed. Review/provider output, gate receipts,
+commit output and checks are retained under the evidence root; no push occurred.
+
+Final modeled evidence is `modeled-staged-final/REPORT.md`: 60 public CLI
+receipts, 14 distinct simulated originals and nine valid verification receipts.
+The accepted code review is preserved in `accepted-review/`. The earlier
+`modeled/` refusal and both intermediate successful walkthroughs remain intact.
+Implementation and modeled-contract acceptance are complete. Live FRR adapter,
+diagnostic and original-pair qualification remain unassessed.
+
+## Concrete live validation scope for one approval
+
+The supplied-image metadata and prior prefix-capable observer evidence select
+one same-image FRR A/A pair. This is a compatibility question: does the existing
+compiled FRR adapter deliver exactly 100 expected IPv4 /32 routes through the
+portable workflow on each independent original? It alleges no bug, fix, changed
+binary, source revision or performance difference. Generator and observer stay
+fixed. Source, binary build flags and instrumentation of FRR remain unknown.
+
+| Role | Existing immutable local image |
+| --- | --- |
+| FRR target, both sides | `sha256:2ab2018dfe70088f318ee9b9c976bd2fd610580460e1715fe14548042dcc133d` |
+| BIRD generator | `sha256:db0a8e144635b1d4b9f81f24ee78f11383c5b0cbd79f10353edcb8452e9af423` |
+| Prefix-capable sink, currently untagged | `sha256:58491f5d3ad4d4872c13d53243f482f3cf7245997991b924990358795212ab38` |
+
+Budget: two serial original workers, one baseline and one candidate, each at
+most 120 seconds, one peer and 100 prefixes, no retries. Two are needed to test
+the investigation's independent-original accounting; a copied result cannot
+supply the other side. Zero builds, acquisitions or additional probe workers.
+The first worker must pass all six assertions, original-package checks and an
+actual independent review before the second can start. Candidate checks, report
+verification, correctness/status inspection and fresh report reconstruction then
+require final independent acceptance. Each invocation has a practical 240-second
+outer cancellation bound plus 15-second termination grace; unknown cleanup stops
+successors and never authorizes another worker.
+
+The packet freezes the final clean checkout into an independent detached clone,
+copies its locked environment and inventories private source/Git/environment
+dependencies. Exact public argv, environment allowlist, source/image bindings,
+evidence paths, conditional review gates and recovery live in
+`preparation/case01/` under the evidence root. `preparation/prepare_case.py`
+prepares and verifies that packet without executing it. Independent tooling
+review `preparation/tool-review-02.json` resolved the initial metadata-step and
+environment-pinning findings. Frozen packet readback remains a separate required
+acceptance step after this documentation checkpoint; actual results belong only
+under the fresh `execution01/` sibling after explicit approval.
+
+Read-only readiness observed the exact images, native guard, locked environment
+and required tools successfully. The available-memory/disk snapshots exceeded
+the declared 16 GiB/20 GiB floors. Recheck before each worker; snapshots are not
+reservations. `/tmp` is disk-backed ext4 on root device `/dev/sda5`, requiring
+an explicit **functional-only root-storage exception** in execution approval.
+No quiet-CPU wait, hourly scheduling or measurement-host qualification is implied.
+Advisory activity and runtime contention/missing reasons remain evidence.
+
+This small case deliberately uses standalone unconverted result packages and
+retains original work; it changes no deployed artifact-store defaults, timer or
+existing evidence. Any refusal, failed assertion, missing capture, interruption,
+unknown launch/cleanup, changed identity or rejected review stops successors.
+Preserve every partial output and reconcile exact owned resources; no automatic
+retry, broad Docker cleanup, evidence deletion or acquisition is authorized.
+No live worker/build has run in this milestone. Performance policy stays
+disabled, formal 10% calibration deferred and the upstream investigation paused.

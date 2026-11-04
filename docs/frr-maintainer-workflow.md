@@ -6,6 +6,12 @@ with bgperf2's compiled FRR adapter: its executable paths, generated configurati
 startup commands and version/neighbor queries. It does not promise compatibility
 with all FRR images or arbitrary registry images. BIRD remains the default target.
 
+Implemented and reviewed at `f81404b`; the native repository gate passed 3,071
+tests with one skipped. The [delivery plan](plans/frr-maintainer-workflow.md)
+records modeled acceptance and the bounded real-image validation proposal.
+Actual FRR runtime qualification remains unassessed until separately approved
+execution and evidence review complete.
+
 Supply immutable image IDs (`sha256:…`) or repository digests for all three roles.
 An image pin identifies selected bytes; it does not establish FRR source revision,
 build flags, provenance, correctness or host qualification. `target-image` retains

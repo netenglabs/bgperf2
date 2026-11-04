@@ -16,6 +16,14 @@ FRR source builds, revision searches, daemon-crash witnesses and target threads
 are outside this scope. Real runtime qualification requires a separate concrete
 execution approval; no images are built or acquired by this selection.
 
+Delivered at `f81404b`: strict same-adapter identities, scoped FRR dispatch and
+conservative diagnostics, plus a modeled public workflow with assertions,
+investigations, repeated/staged comparisons and minimization. Independent code
+review had no findings; the native gate passed 3,071 tests, one skipped. The
+selected real-image A/A validation is two serial 120-second workers and zero
+builds, with exact-prefix checks and independent review; it remains unexecuted
+pending one frozen-case approval. Supplied-image source/build facts stay unknown.
+
 [Bounded reproducer minimization](plans/reproducer-minimization.md) was delivered
 at `506ff4b` with modeled verification and required gates. Its first
 scope reduces synthetic peers/prefix counts while preserving one selected

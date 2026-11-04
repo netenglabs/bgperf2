@@ -10,6 +10,14 @@ import recipe_run
 import recipe_worker
 
 
+@pytest.fixture(autouse=True)
+def isolated_recipe_lock(monkeypatch, tmp_path_factory):
+    """Modeled backends must not contend with other checkouts' host locks."""
+    from scripts.recipe_smoke import SimulatedOS
+    lock = tmp_path_factory.mktemp('modeled-recipe-lock') / 'host.lock'
+    monkeypatch.setattr(recipe_run, 'os', SimulatedOS(lock))
+
+
 @pytest.mark.parametrize('status', ['completed', 'experiment_failed', 'interrupted', 'harness_failed'])
 def test_stored_attempt_reclaims_only_verified_bulk_after_backend_returns(tmp_path, monkeypatch, status):
     monkeypatch.setenv('BGPERF_ARTIFACT_STORE', str(tmp_path / 'store'))

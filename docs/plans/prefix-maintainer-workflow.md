@@ -200,3 +200,26 @@ instead of inheriting Python/Git/Docker overrides. Engine defaults do not change
 Observer-window, pressure/prior-series combinations, forced build-timeout or
 interruption experiments and performance calibration are outside this batch;
 they do not silently become new closure requirements for the selected goal.
+
+### Preparation interruption and current boundary
+
+The localization preparation subagent subsequently returned an automated
+platform content restriction before final packet/readiness/review completion.
+Its unfinished artifacts are preserved under the qualification root and must
+not be executed or described as an approved case. The denied turn is not
+retried or completed through another agent. This is not a test failure or an
+overall budget limit; the larger qualification remains incomplete.
+
+Continue the existing staged same-image case's read-only readiness and
+independent preparation review. Only that two-worker, zero-build phase may be
+presented for execution approval if its checks pass, including its explicit
+functional root-storage exception. The unfinished localization phase is excluded
+from that approval. See the qualification root's `BLOCKER.md` and `RUNBOOK.md`
+for the retained interruption record, exact scope and recovery boundary.
+
+The final documentation gate also exposed a remaining pure-test isolation gap:
+six simulated storage/lifecycle cases in `tests/test_recipe_run.py` attempted
+the real shared host lock and failed during concurrent local checks. Their
+module now uses the existing `SimulatedOS` helper with a private per-test lock.
+Production locking is unchanged. Two concurrent focused module runs passed;
+the failed gate logs remain preserved rather than rewritten as successful.

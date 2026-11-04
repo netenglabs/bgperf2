@@ -223,3 +223,51 @@ the real shared host lock and failed during concurrent local checks. Their
 module now uses the existing `SimulatedOS` helper with a private per-test lock.
 Production locking is unchanged. Two concurrent focused module runs passed;
 the failed gate logs remain preserved rather than rewritten as successful.
+
+## Live staged qualification — 2026-11-04 UTC
+
+The operator approved the concrete standalone two-worker staged case, including
+its functional root-storage exception and actual first/final independent review
+pauses. Fresh native admission passed all 13 read-only checks. The independent
+clean engine remained pinned to `28e6a54567e280e44e880a66543df876ff00deca`;
+both labels selected the existing BIRD image, one peer and 100 IPv4 host routes,
+with sink 0.2 observation, basic diagnostics and six assertions per original.
+
+| Original | Worker ID | Worker elapsed | Assertions | Prefix identity |
+| --- | --- | ---: | --- | --- |
+| Baseline | `bgperf_recipe_e7eaf0a38f9043c380d727797c99ab12` | 12.2993576981 s | 6 passed | 100 observed, 0 missing, 0 unexpected |
+| Candidate | `bgperf_recipe_a0d0765d5c264010b76a4c5fa46445e6` | 12.5653143439 s | 6 passed | 100 observed, 0 missing, 0 unexpected |
+
+The public session advanced ready → first_review → ready → final_review →
+complete. The second worker remained not_run until an actual independent first
+review accepted the original/checkpoint and the public receipt recorded it.
+Fresh guard/capacity/image checks preceded the second step. A different actual
+independent final reviewer accepted both originals and the final checkpoint;
+only then was the public final acceptance recorded. Both outer steps exited
+normally in 17.1576/17.7538 seconds, within the 300-second step caps; finite
+worker clock anchors satisfied their 120-second limits.
+
+All 45 frozen command receipts exited 0. Both 45-artifact originals verified;
+all 12 assertions passed. The final portable report and independent offline
+rebuild each contain 96 checksum-listed files plus `checksums.json`, with all
+97 physical files byte-identical. Their `comparison.json` SHA256 is
+`54218a55f702223b9636b6dc592545a095dfd02ee0990551e80f49a29e8d2f8c`.
+Native inventories showed all six owned containers absent, and original
+collector-owned monitor directories/socket endpoints retained 0700/0666 modes
+without permission changes or endpoint contacts. Cleanup errors were empty.
+
+The accepted completion check records complete/index 2, two distinct originals,
+owned cleanup verified and zero remaining worker positions. No build, retry,
+extra worker, acquisition or scheduler ran. Evidence and actual independent
+review texts/decisions are retained under
+`/tmp/bgperf2-prefix-qualification-20261104/staged/`; its
+`EXECUTION-CLOSEOUT.md` records the operational account and preservation boundary.
+The local documentation checkpoint before this execution was `a120f62`.
+
+This qualifies the selected live staged prefix-capture/review path. Supplied
+image instrumentation remains unknown, diagnostics and capture are uncalibrated,
+and foreign CPU was recorded; descriptive deltas stay withheld, performance
+policy disabled/unassessed and formal 10% calibration deferred. This same-image
+case establishes no changed-binary or localization result. The broader goal
+remains incomplete: the earlier localization preparation interruption and paused
+upstream investigation remain unchanged and excluded from further execution.

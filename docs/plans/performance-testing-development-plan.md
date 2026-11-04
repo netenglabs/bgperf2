@@ -425,8 +425,9 @@ adapter acceptance checks are deferred is not fully accepted.
 
 Milestone A includes only the lifecycle robustness and assertions necessary for
 a reliable first reproduction workflow. Full diagnostic capture and generalized
-assertion interfaces remain in B/C. Phase 7 minimization, policy, IPv6 and other
-new workload families remain deferred until explicitly selected.
+assertion interfaces remain in B/C. Phase 7 is now selected for bounded peer and
+prefix-count minimization; policy, IPv6 and other new workload families remain
+deferred until explicitly selected.
 
 ## Technical delivery sequence
 
@@ -643,7 +644,11 @@ daemon repository is modified and no upstream issue/comment is posted.
 
 ### 7. Minimize a reproducer
 
-Status: deferred within this plan until recipes and predicates prove useful.
+Status: selected 2026-11-04 for bounded synthetic peer/prefix-count reduction
+after live staged prefix validation. The [active minimization plan](reproducer-minimization.md)
+and [public guide](../minimization.md) own implementation, validation and exact
+scope. Live minimizer qualification remains unassessed. Attribute/MRT subset
+reduction and performance minimization remain unsupported/deferred.
 
 Reduce selected peers, routes, attributes or input subsets while checking the
 same reproduction predicate. Every candidate has its own recipe/input identity.

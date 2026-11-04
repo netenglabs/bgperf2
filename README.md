@@ -17,6 +17,7 @@ rewritten.
 * [Debugging](#debugging)
 * [One maintainer investigation](docs/maintainer-workflow.md) (offline reproduction, local rollback, interruption recovery and correctness bisection)
 * [Prepare your own source checkout](docs/maintainer-checkout.md) (isolated revision range and verified, unexecuted handoff)
+* [Minimize a reproducer](docs/minimization.md) (bounded peer/prefix-count reduction with fresh confirmation and verified evidence)
 * [Roadmap and development plans](docs/roadmap.md)
 * [Portable recipe and result contracts](docs/recipes.md) (export, prepare, isolated execution and verified result packages)
 * [Small functional checks](docs/functional-validation.md) (immediate bounded execution, load observations and verified correctness)

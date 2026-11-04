@@ -162,6 +162,14 @@ before changing its predicates, cache identity, journal or confirmation rules.
 Planning and reporting never authorize builds or measurements, and performance
 predicates remain unsupported.
 
+`recipe_minimization.py` owns strict plans, canonical reduced recipes, selected
+assertion classification and bounded greedy search. `recipe_minimization_session.py`
+owns charged reservations, explicit single-step execution through the existing
+runner, result-only recovery and portable report reconstruction;
+`minimization_cli.py` supplies the standalone CLI. Read `docs/minimization.md`
+before changing these contracts. Offline operations never launch a worker;
+performance minimization, builds and source-history selection are unsupported.
+
 `recipe_source_range.py` prepares explicit local first-parent histories into
 owned checkouts and frozen plans; read `docs/source-range.md` before changing
 its Git isolation, object checks or preparation verifier. `recipe_handoff.py`
@@ -296,7 +304,7 @@ claims.
 
 **`docs/invariants/workload-controls.md`** — `bgperf2.py` argument guards, `check_batch_test()`,
 `bench_output_prefix()`; `cpu_pinning.py` (pure CPU-list and pinning helpers);
-`recipes.py`, `recipe_worker.py`, `recipe_preflight.py` (portable CPU layout); `base.py`'s `gen_conf()`/`gen_paths()`/`scenario_neighbors()`; `churn.py`;
+`recipes.py`, `recipe_minimization.py`, `recipe_worker.py`, `recipe_preflight.py` (portable CPU layout and recipe controls); `base.py`'s `gen_conf()`/`gen_paths()`/`scenario_neighbors()`; `churn.py`;
 `policy.py`; `bird.py`.
 
 - Session count and table size are one axis. `--prefix-scope total`, `--path-diversity D`,
@@ -386,7 +394,7 @@ component, and `bgperf2.py`'s `write_event_artifact()`, which catches for it.
   component: a throttled generator and one blocked writing to an undrained target are the same
   measurement, and three controlled runs of one shape all return it.
 
-**`docs/invariants/host-and-environment.md`** — `recipe_preflight.py`, `recipe_prepare.py`, `recipe_run.py`, `recipe_worker.py`, `recipe_diagnostics.py`, `contention.py`, `role_cpu.py`, the controller
+**`docs/invariants/host-and-environment.md`** — `recipe_preflight.py`, `recipe_prepare.py`, `recipe_run.py`, `recipe_minimization_session.py`, `recipe_worker.py`, `recipe_diagnostics.py`, `contention.py`, `role_cpu.py`, the controller
 threads, and the `-d` warnings.
 
 - **Measure CPU as a delta between two `/proc` samples, never `ps -eo pcpu`**, which fails in both

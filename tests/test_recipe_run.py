@@ -18,6 +18,21 @@ def isolated_recipe_lock(monkeypatch, tmp_path_factory):
     monkeypatch.setattr(recipe_run, 'os', SimulatedOS(lock))
 
 
+def test_busy_lock_is_explicitly_not_started_before_probes_or_outputs(tmp_path):
+    import fcntl
+    import os
+    descriptor = recipe_run.os.open(recipe_run.os.original_lock, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(recipe_run.RecipeNotStarted, match='host lock'):
+            recipe_run.run_recipe(recipe(), workdir=tmp_path / 'work', results_dir=tmp_path / 'results',
+                check=lambda *a, **k: pytest.fail('prerequisites must not run'),
+                backend=SimpleNamespace(execute=lambda *a: pytest.fail('worker must not run')))
+        assert not list(tmp_path.iterdir())
+    finally:
+        os.close(descriptor)
+
+
 @pytest.mark.parametrize('status', ['completed', 'experiment_failed', 'interrupted', 'harness_failed'])
 def test_stored_attempt_reclaims_only_verified_bulk_after_backend_returns(tmp_path, monkeypatch, status):
     monkeypatch.setenv('BGPERF_ARTIFACT_STORE', str(tmp_path / 'store'))

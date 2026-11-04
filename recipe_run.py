@@ -19,6 +19,14 @@ ROOT = Path(__file__).parent
 OWNER_LABEL = 'bgperf2.recipe.attempt'
 
 
+class RecipeNotStarted(recipes.ContractError):
+    """The cooperating host lock refused execution before probes or an attempt.
+
+    Existing ContractError handlers and CLI exit semantics remain applicable.
+    Other execution errors do not establish that a worker never started.
+    """
+
+
 def _write(path, value):
     descriptor, temporary = tempfile.mkstemp(prefix='.' + path.name + '-', dir=path.parent)
     try:
@@ -248,7 +256,7 @@ def run_recipe(document, *, workdir, results_dir, timeout=300, target=None,
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            raise recipes.ContractError('Another cooperating recipe attempt holds the host lock') from exc
+            raise RecipeNotStarted('Another cooperating recipe attempt holds the host lock') from exc
         report = (check or preflight.check_recipe)(document, workdir=workdir, results_dir=results_dir, target=target)
         if report['status'] != 'checks_passed':
             # Refused destinations must never be used to publish a report.

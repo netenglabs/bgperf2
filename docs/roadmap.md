@@ -7,6 +7,14 @@ CLI and versioned artifacts; none is required to use the engine.
 
 ## Current direction
 
+The operator selected [bounded reproducer minimization](plans/reproducer-minimization.md)
+as the next substantial feature after live staged prefix validation. The first
+scope reduces synthetic peers/prefix counts while preserving one selected
+assertion failure, with fresh baseline/confirmation, charged reservations and
+portable evidence. The [public guide](minimization.md) describes the explicit
+one-worker interface and offline modeled walkthrough. No build, acquisition,
+source-history investigation or real-worker approval follows from this selection.
+
 The operator selected the larger
 [exact-prefix maintainer workflow](plans/prefix-maintainer-workflow.md): extend
 capture through repeated comparisons and deterministic localization, and connect
@@ -18,8 +26,12 @@ Its separately approved
 [normal comparison validation](plans/prefix-maintainer-workflow.md#approved-normal-comparison-validation--2026-11-04-utc)
 completed four real existing-image workers with all 24 assertions passed,
 exact 100-prefix snapshots, verified original/rebuilt reports and owned cleanup.
-This qualifies that same-image functional path; live staged capture and prefix
-localization remain separate, and performance policy stays disabled.
+The separately approved
+[staged validation](plans/prefix-maintainer-workflow.md#live-staged-qualification--2026-11-04-utc)
+also completed two workers/all 12 assertions, actual accepted first/final reviews,
+verified rebuilt evidence and owned cleanup. These qualify the selected normal
+and staged same-image functional paths. Prefix localization remains unfinished
+and excluded following its preparation interruption; performance policy stays disabled.
 
 The upstream BIRD correctness investigation is paused at the operator's request.
 Its [screening record](plans/upstream-bird-correctness-screening.md) preserves four
@@ -47,7 +59,8 @@ completed with six passing assertions per side, exact 100-prefix snapshots,
 verified packages and report rebuild. This same-image control qualifies the
 selected integration path. The larger selected workflow now carries capture
 through repeated comparisons and the explicit `prefix_assertions` localization
-predicate; real qualification of those new execution paths remains separate.
+predicate. Normal and staged capture have since passed their bounded live
+validation; live prefix-localization qualification remains separate and unfinished.
 
 The [read-only investigation status](plans/investigation-status.md) adds a concise
 verified JSON/terminal view of reproduction, original attempts, controller stops

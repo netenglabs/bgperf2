@@ -92,3 +92,48 @@ per-output modeled-lock helper already used by bisection/maintainer smokes;
 production locking is unchanged. A regression refuses any real host-lock open
 while the public comparison smoke runs successfully. The original failed gate
 and final retry are preserved separately in task evidence.
+
+## Approved normal comparison validation — 2026-11-04 UTC
+
+After the complete implementation/review at `f20c943` and a 2,922-pass native
+gate (one optional skip), the operator approved the frozen four-worker A/A
+case and its functional-only root-storage exception. Fresh native admission
+passed before the single direct comparison invocation. There was no scheduler,
+build, probe container, image/package acquisition or retry.
+
+| Sequence position | Worker seconds | Named assertions | Exact prefix set |
+| --- | ---: | --- | --- |
+| r001-baseline | 11.785825 | Six passed | 100 expected; missing 0, unexpected 0 |
+| r001-candidate | 12.387204 | Six passed | 100 expected; missing 0, unexpected 0 |
+| r002-candidate | 13.110714 | Six passed | 100 expected; missing 0, unexpected 0 |
+| r002-baseline | 12.505563 | Six passed | 100 expected; missing 0, unexpected 0 |
+
+All four distinct original attempts completed within their 120-second worker
+budgets. The outer controller exited normally with status `recorded` and exit 0
+in 64.201782 seconds, below the 900-second deadline. All 33 recorded commands
+exited 0. Independent per-attempt assertion exports agreed with the report.
+Public verification accepted 45 artifacts per original and 190 files in each
+original/rebuilt comparison bundle. The verified rebuilt report is identical,
+including original attempt identities, correctness and frozen plan.
+
+The read-only original-work permission receipt shows collector-owned mode-0700
+monitor directories and socket endpoints of the expected type/mode 0666. All
+runtime records explicitly report empty cleanup errors; native post-run
+container/network/volume inventories contain none of the four owned scopes or
+12 captured owned container IDs. Foreign inventory activity is recorded, not
+claimed globally unchanged. Source, raw capture, load, approval, command exits,
+packages, permissions, cleanup and review evidence remain under
+`/tmp/bgperf2-prefix-workflow-20261103/`, separate from the unchanged preparation
+packet and earlier milestones. Retain the referenced local store; local hashes
+and copies are not an independent backup.
+
+This qualifies normal comparison capture for the selected BIRD 2.19.2 target
+and generator, sink 0.2.0 observer, one peer and 100 synthetic IPv4 host routes.
+Both target labels used the same immutable image. Unknown instrumentation,
+basic diagnostics, prefix capture and recorded foreign CPU remain confounders;
+descriptive deltas stay withheld. The run is not a changed-binary comparison,
+upstream bug/fix, continuous-correctness, hardware or performance qualification.
+Live staged comparison and source-build/prefix-localization qualification remain
+separate. The four-worker allowance is consumed with no automatic successor.
+Upstream investigation remains paused; performance policy stays disabled and
+formal 10% calibration deferred.

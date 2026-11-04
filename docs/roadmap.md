@@ -1,6 +1,6 @@
 # bgperf2 roadmap
 
-Updated 2026-11-03 UTC. This is the public index of engine development plans.
+Updated 2026-11-04 UTC. This is the public index of engine development plans.
 Everything needed to understand, use and contribute to bgperf2 belongs in this
 repository. Other projects can build campaigns and services on its documented
 CLI and versioned artifacts; none is required to use the engine.
@@ -13,6 +13,13 @@ capture through repeated comparisons and deterministic localization, and connect
 reproduction, candidate CI, recovery and portable evidence in a maintained
 walkthrough. This explicitly selects the previously deferred capture extensions;
 it does not authorize real builds/workers or performance calibration.
+
+Its separately approved
+[normal comparison validation](plans/prefix-maintainer-workflow.md#approved-normal-comparison-validation--2026-11-04-utc)
+completed four real existing-image workers with all 24 assertions passed,
+exact 100-prefix snapshots, verified original/rebuilt reports and owned cleanup.
+This qualifies that same-image functional path; live staged capture and prefix
+localization remain separate, and performance policy stays disabled.
 
 The upstream BIRD correctness investigation is paused at the operator's request.
 Its [screening record](plans/upstream-bird-correctness-screening.md) preserves four

@@ -1,5 +1,10 @@
 # Compare two BIRD targets
 
+The separately approved [four-worker prefix case](plans/prefix-maintainer-workflow.md#approved-normal-comparison-validation--2026-11-04-utc)
+passed all 24 assertions with exact 100-prefix snapshots and verified original
+and rebuilt reports. It qualifies that same-image normal functional path, not
+live staged capture, a changed binary or performance detection.
+
 Use one immutable synthetic IPv4 BIRD/BIRD/sink recipe and two
 [target selections](investigations.md). A comparison repeats the whole pair,
 preserves every attempt and returns a portable JSON and Markdown report.

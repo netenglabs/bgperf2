@@ -7,6 +7,17 @@ CLI and versioned artifacts; none is required to use the engine.
 
 ## Current direction
 
+The operator selected and completed [FRR combined-controller functional validation](plans/frr-controller-runtime-validation.md)
+after controlled localization. Five public `step --execute` trials exercised
+three native build-cache misses and two cache hits with fresh confirmations;
+one public comparison command completed four fresh originals in alternating
+bad/good/good/bad order. All nine originals matched their declared correctness
+outcomes (50 passing assertions, four intentional prefix-identity failures),
+with verified owned cleanup and rebuilt/relocated reports. Compilation was
+cached; no fresh-compile, full-search-loop or performance qualification follows.
+The finite case is closed; upstream stays paused, policy disabled and calibration
+deferred. Six concurrent engine edits remain preserved separately.
+
 The operator selected [controlled FRR correctness localization](plans/frr-correctness-localization-validation.md)
 after the completed source-built pair. Earlier documentation is integrated into
 `milestone-a-newcomer`, with six concurrent edits preserved. The new functional

@@ -261,3 +261,9 @@ For a separate, offline view of the existing sink's finer count timestamps, see
 the [observer delivery timing supplement](observer-timing.md). It retains
 observed crossing bounds and an explicit discovery screen, while leaving this
 comparison report and all legacy timing definitions unchanged.
+
+The [FRR combined-controller case](plans/frr-controller-runtime-validation.md)
+separately exercised the public comparison command with two alternating pairs
+and four fresh bad/good/good/bad originals, exact prefix witnesses, owned cleanup
+and rebuilt/relocated reports. This validates the selected functional controller
+path, not statistical repetition adequacy or performance sensitivity.

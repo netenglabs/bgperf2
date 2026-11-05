@@ -134,3 +134,10 @@ minimization and source-bound external-trial prefix bisection. Its local fault,
 rollback, finite budgets and fresh confirmations establish only the recorded
 functional scope; combined-controller execution and broader source support
 remain separate qualifications.
+
+The [combined-controller validation](plans/frr-controller-runtime-validation.md)
+now separately covers five public bisection `step --execute` trials, including
+three native builds and two build-cache hits with fresh workers, plus a four-run
+alternating public comparison. Its report reconstruction/relocation and cleanup
+passed; compilation was cached. The full-search loop and performance remain
+outside this bounded functional qualification.

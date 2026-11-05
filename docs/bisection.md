@@ -237,3 +237,9 @@ exhaustion yield no confirmed boundary. `run --execute` exits 5 unless confirmed
 successful report verification proves consistency, not a successful regression
 search. Review the trial classifications and limitations before interpreting
 any boundary. Nothing posts an upstream issue or enables performance policy.
+
+The [combined FRR controller case](plans/frr-controller-runtime-validation.md)
+separately completed five public `step --execute` trials from an empty cache:
+three native build invocations, two cache hits and five fresh workers confirmed
+the controlled adjacent prefix-fault boundary. Compilation was cached; the
+full-search `run --execute` loop remains outside that bounded qualification.

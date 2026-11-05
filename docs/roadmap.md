@@ -7,6 +7,11 @@ CLI and versioned artifacts; none is required to use the engine.
 
 ## Current direction
 
+The operator selected [merge readiness](plans/milestone-a-merge-readiness.md):
+close hosted CI environment assumptions, review the accumulated branch and merge
+`milestone-a-newcomer` into `master` after green PR checks. Completed functional
+cases remain closed; the six concurrent engine edits are preserved separately.
+
 The operator selected and completed [FRR combined-controller functional validation](plans/frr-controller-runtime-validation.md)
 after controlled localization. Five public `step --execute` trials exercised
 three native build-cache misses and two cache hits with fresh confirmations;

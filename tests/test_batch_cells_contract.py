@@ -60,7 +60,9 @@ def test_total_prefix_normalization_preserves_raw_target_version_labels():
     assert target == {'name': 'bird', 'versions': ['2.19.2', '3.1.0']}
 
 
-def test_nondefault_workload_dimensions_still_reach_identity():
+def test_nondefault_workload_dimensions_still_reach_identity(monkeypatch):
+    # This is an identity fixture, not a probe of the CI runner CPU topology.
+    monkeypatch.setattr(bgperf2, 'host_cpus', lambda: frozenset(range(6)))
     target = {'name': 'bird', 'tester_type': 'bird'}
     test = {'name': 'dimensions', 'neighbors': [4], 'prefixes': [100],
             'filter_test': ['None'], 'targets': [target],

@@ -113,6 +113,12 @@ local Docker daemon for the bootstrap's normal idle guard. There is no separate
 CI Python installation script, and the pip download cache is keyed by the lock;
 each job creates a fresh venv.
 
+The hosted job removes only its disposable runner image's system Git LFS
+filter defaults before the inert source tests. This repository uses no LFS
+objects. Source preparation still refuses inherited filters, and tests of
+fixture-created local/global filters remain enabled. Identity fixtures declare
+their CPU topology explicitly rather than assuming the runner has six CPUs.
+
 Incoming whitespace is checked against the push's previous commit or the pull
 request's base. The pull request tests the checkout action's default merge
 revision. A force-push predecessor absent from the fetched history is fetched

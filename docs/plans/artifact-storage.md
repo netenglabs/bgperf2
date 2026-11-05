@@ -9,6 +9,34 @@ in `6b56a29`, with test binding isolation in `9a9bf34`. Initial consumer
 deployment was activated and verified on 2026-11-03 UTC (2026-11-02 Pacific).
 Consumers retain ownership of their deployment and worker pins.
 
+## Recovery registration follow-up — 2026-11-05
+
+The operator selected completing six preserved storage-recovery edits on a new
+branch from master `4fdfe9b`, with review, interruption/GC tests and a separate
+PR. The original worktree and its uncommitted patch remain preserved. This
+follow-up changes evidence publication bookkeeping, not measurement behavior,
+runtime authority, historical registrations or deployed storage pins.
+
+Minimization now registers an intended final evidence path during capture,
+before publishing its catalog and releasing the store lock. Verification and
+rename follow. This prevents permanent temporary-path registrations without
+creating an unrooted interval in which GC could remove a reused old object.
+The draft's deferred registration reproduced that collection gap in a scratch
+regression; the final-path registration closes it. Bisection and minimization
+also register verified moved partials at their retained locations. Original
+immutable roots remain permanent, including when recovery publishes a different
+catalog at the old path. Unverifiable partial bytes are preserved unchanged.
+
+The 97 focused tests passed, covering an aged reused object through GC before
+rename, interrupted minimization capture/recovery, moved stored partials in both
+controllers, export after GC and existing publication/recovery behavior. All
+workers/builds in these tests are simulated; no completed runtime case reruns.
+Delivery requires a clean local diff review, the native full locked gate and
+green PR checks. Commit/PR and check receipts are retained at
+`/tmp/bgperf2-artifact-recovery-review-20261105/`; Git history and the PR record
+identify the final delivery revision. Performance policy remains disabled,
+upstream investigation paused and calibration deferred.
+
 ## Scope and ownership
 
 The engine owns a documented versioned storage transport, direct attempt

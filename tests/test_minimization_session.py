@@ -456,13 +456,13 @@ def test_interrupted_snapshot_can_recover_original_without_worker_retry(tmp_path
     copies = []
     publish = session._publish
 
-    def interrupted_copy(source, result, destination):
+    def interrupted_copy(source, result, destination, **kwargs):
         copies.append(destination)
         if len(copies) == 1 and interruption == 'staging_copy':
             destination.mkdir()
             (destination / 'retained-partial').write_bytes(b'SIMULATED interrupted copy')
             raise OSError('SIMULATED interrupted copy')
-        original_copy(source, result, destination)
+        original_copy(source, result, destination, **kwargs)
 
     def interrupted_journal(path, relative, document):
         if relative.startswith('trials/') and interruption == 'journal_publication':
@@ -493,6 +493,74 @@ def test_interrupted_snapshot_can_recover_original_without_worker_retry(tmp_path
     else:
         retained = list((root / 'snapshots').rglob('retained-partial'))
         assert len(retained) == 1 and retained[0].read_bytes().startswith(b'SIMULATED')
+
+
+def _stale_roots(store):
+    stale = []
+    for path in (store / 'roots').glob('*.json'):
+        record = json.loads(path.read_bytes())
+        catalog = Path(record['package']) / '.artifact-store.json'
+        if not catalog.is_file() or json.loads(catalog.read_bytes()) != record['catalog']:
+            stale.append(record['package'])
+    return stale
+
+
+def test_recorded_trial_evidence_leaves_no_stale_store_registration(tmp_path, monkeypatch):
+    """The staged copy is renamed into evidence/; its registration must follow it,
+    including when a crash after capture forces recovery to copy again."""
+    import recipe_investigation
+    monkeypatch.setenv('BGPERF_ARTIFACT_STORE', str(tmp_path / 'store'))
+    root = initialize(tmp_path)
+    run, calls = fake_runner(tmp_path)
+    original_copy = recipe_investigation._copy_package
+    copies = []
+
+    def crash_after_capture(source, result, destination, **kwargs):
+        copies.append(destination)
+        original_copy(source, result, destination, **kwargs)
+        if len(copies) == 1:
+            raise OSError('SIMULATED crash before rename')
+
+    monkeypatch.setattr(recipe_investigation, '_copy_package', crash_after_capture)
+    with pytest.raises(OSError, match='SIMULATED crash'):
+        session.step_session(root, execute=True, run=run)
+    assert session.recover_trial(root)['trials_recorded'] == 1
+    assert session.step_session(root, execute=True, run=run)['trials_recorded'] == 2
+    assert len(calls) == 2 and len(copies) == 3
+    roots = sorted(package for package in (json.loads(p.read_bytes())['package'] for p in (tmp_path / 'store/roots').glob('*.json'))
+                   if Path(package).is_relative_to(root))
+    assert roots == [str(root / 'evidence/t0001'), str(root / 'evidence/t0002')]
+    assert _stale_roots(tmp_path / 'store') == []
+
+
+def test_moved_aside_stored_partial_stays_registered_where_it_lives(tmp_path, monkeypatch):
+    from artifact_store import Store, capture_tree
+    monkeypatch.setenv('BGPERF_ARTIFACT_STORE', str(tmp_path / 'store'))
+    root = initialize(tmp_path)
+    run, calls = fake_runner(tmp_path)
+    reserved = session.reserve_trial(root)
+    run(reserved['recipe'], workdir=Path(reserved['paths']['workdir']),
+        results_dir=Path(reserved['paths']['results_dir']), target=reserved['target'],
+        timeout=120, diagnostics='basic', observer_prefixes=False)
+    partial = tmp_path / 'partial'; partial.mkdir()
+    (partial / 'peer.log').write_bytes(b'SIMULATED partial\n' * 100000)
+    capture_tree(partial, root / 'evidence/t0001', Store(tmp_path / 'store'))  # registered, fails classification
+    assert session.recover_trial(root)['trials_recorded'] == 1
+    retained = list((root / 'snapshots').glob('t0001-retained-*'))
+    assert len(retained) == 1
+    packages = {json.loads(p.read_bytes())['package'] for p in (tmp_path / 'store/roots').glob('*.json')}
+    assert {str(retained[0]), str(root / 'evidence/t0001')} <= packages
+    # Its old immutable root also remains: registration never releases evidence
+    # even after another catalog occupies the original path.
+    assert _stale_roots(tmp_path / 'store') == [str(root / 'evidence/t0001')]
+    from test_artifact_store import old
+    from artifact_store import export_tree
+    store = Store(tmp_path / 'store')
+    for obj in (store.root / 'objects').glob('*/*.zst'):
+        old(obj)
+    assert store.maintain(apply=True, grace_seconds=3600)['orphan_objects'] == []
+    export_tree(retained[0], tmp_path / 'retained-export')
+    assert (tmp_path / 'retained-export/peer.log').read_bytes() == (partial / 'peer.log').read_bytes()
 
 
 def test_readers_refuse_snapshot_during_mutating_worker(tmp_path):

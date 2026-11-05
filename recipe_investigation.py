@@ -184,13 +184,13 @@ def _read_attempt(path, label, missing):
                            'reason': item['reason']} for item in result['artifacts']]}, recipe, result
 
 
-def _copy_package(path, result, destination):
+def _copy_package(path, result, destination, *, register_at=None):
     root = Path(path).parent
     from artifact_store import configured_store, capture_tree, StorageError
     try:
         store = configured_store()
         if store:
-            capture_tree(root.absolute(), destination.absolute(), store)
+            capture_tree(root.absolute(), destination.absolute(), store, register_at=register_at)
             verify_result_package(destination / 'result.json')
             return
     except StorageError as exc:

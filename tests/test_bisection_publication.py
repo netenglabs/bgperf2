@@ -116,3 +116,36 @@ def test_supplied_result_cannot_override_an_already_published_failure(tmp_path, 
     assert failure.read_bytes() == before
     assert bisection.session_status(session)['counts'] == dict(good=0, bad=0, skipped=1, ambiguous=0)
     assert bisection.report(session, tmp_path / 'report')['valid']
+
+
+def test_recovery_roots_moved_stored_partial_and_preserves_it_through_gc(tmp_path, monkeypatch):
+    import json
+    from artifact_store import Store, capture_tree, export_tree
+    from test_artifact_store import old
+
+    monkeypatch.setenv('BGPERF_ARTIFACT_STORE', str(tmp_path / 'store'))
+    session, _, builds, runs, build, run = prepared(tmp_path)
+    source = tmp_path / 'partial-source'
+    source.mkdir()
+    raw = b'SIMULATED retained partial evidence\n' * 40000
+    (source / 'peer.log').write_bytes(raw)
+    store = Store(tmp_path / 'store')
+    def interrupted_copy(path, result, destination):
+        capture_tree(source, destination, store)
+        raise OSError('SIMULATED interrupted stored copy')
+
+    with monkeypatch.context() as changes:
+        changes.setattr(bisection, '_copy_package', interrupted_copy)
+        with pytest.raises(bisection.recipes.ContractError, match='recover'):
+            bisection.step(session, build=build, run=run)
+    assert builds == runs == [0]
+    recovered = bisection.recover(session, result_path=session / 'results/t0001/result.json')
+    assert recovered['classification'] == 'good' and builds == runs == [0]
+    retained, = (session / 'failures').glob('t0001-partial-*')
+    roots = [json.loads(p.read_text()) for p in (store.root / 'roots').glob('*.json')]
+    assert str(retained) in {r['package'] for r in roots}
+    for obj in (store.root / 'objects').glob('*/*.zst'):
+        old(obj)
+    assert store.maintain(apply=True, grace_seconds=3600)['orphan_objects'] == []
+    export_tree(retained, tmp_path / 'retained-export')
+    assert (tmp_path / 'retained-export/peer.log').read_bytes() == raw

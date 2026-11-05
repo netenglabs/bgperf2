@@ -348,11 +348,16 @@ def _record(root, result=None):
         except (recipes.ContractError, OSError):
             # Preserve prior partial bytes without letting them block recovery
             # from the independently reverified original package.
-            os.rename(destination, snapshots / (_trial_name(pending) + '-retained-' + uuid.uuid4().hex))
+            retained = snapshots / (_trial_name(pending) + '-retained-' + uuid.uuid4().hex)
+            os.rename(destination, retained)
+            from artifact_store import register_moved
+            register_moved(retained)
     if not os.path.lexists(destination):
         from recipe_investigation import _copy_package
         staging = snapshots / (_trial_name(pending) + '-copy-' + uuid.uuid4().hex)
-        _copy_package(expected, _load(expected), staging)
+        # Root the final path while capture holds the store lock, so GC cannot
+        # collect a reused object while staging is verified before the rename.
+        _copy_package(expected, _load(expected), staging, register_at=destination)
         recipes._same(core.classify_result(plan, candidate, staging / 'result.json'), assessment, 'staged trial evidence')
         os.rename(staging, destination)
         _sync_directory(destination.parent)

@@ -131,11 +131,60 @@ command uses `recipe_preflight.py` for read-only local prerequisite probes.
 `recipe_prepare.py` plans selected immutable image acquisition locally; only
 explicit `prepare --pull` may pull missing repository digests after disclosure.
 Both share `recipe_preflight.py` probes and guards without initializing the engine
-runtime or executing a recipe. Read `docs/recipes.md`
+runtime. `recipe_run.py` and `recipe_worker.py` provide explicit bounded recipe
+execution using the existing lifecycle; `recipe_results.py` packages and verifies
+local evidence. `recipe_targets.py` owns strict external target/build identities
+and the explicit trusted-local-source builder; `recipe_diagnostics.py` owns
+bounded owned-resource diagnostics. `recipe_investigation.py` records one
+functional pair and verifies its bundled evidence/prose without statistical
+performance decisions. Read `docs/investigations.md` before changing those
+contracts or their trust/accounting boundaries. Read `docs/recipes.md`
 before changing its recipe/result schemas or status meanings. It currently
-supports only the documented synthetic IPv4 BIRD/BIRD/sink subset; recipe
-execution is not implemented. Declared identities are not verified images or
+supports the documented synthetic IPv4 BIRD or `frr_c` target,
+with BIRD generators and sink observer; recipe
+execution requires the explicit `run` operation. Declared identities are not verified images or
 host qualification, and experiment status is separate from reproduction outcome.
+
+Read `docs/frr-maintainer-workflow.md` for the supplied-image FRR scope and
+`docs/plans/frr-maintainer-workflow.md` for its delivery record. FRR uses its
+existing compiled adapter and container names. Daemon-crash witnesses and target thread controls remain BIRD-only.
+Read `docs/frr-source-workflow.md` and `docs/plans/frr-source-workflow.md` for the
+`frr-local/v1` trusted local build and correctness revision-search extension.
+`scripts/frr_workflow_smoke.py` exercises FRR contracts with simulated runtimes.
+
+`recipe_assertions.py` evaluates named observable correctness witnesses against
+verified packages. `recipe_comparison.py` freezes and executes explicit serial
+repeated comparisons through the recipe runner; `recipe_comparison_report.py`
+bundles and independently reconstructs descriptive statistics, confounders and
+prose. Read `docs/comparisons.md` before changing these contracts. Comparison
+planning and reporting are offline, and calibrated regression policy remains
+disabled pending a separately selected calibration. `scripts/comparison_smoke.py`
+exercises the public workflow using strictly simulated runtimes.
+
+`comparison_session.py` and `comparison_pressure.py` own staged serial reviews
+and optional explicit operational pressure screens; read
+`docs/comparison-execution.md` before changing their accounting or stop behavior.
+`recipe_bisection.py` owns bounded deterministic local-source revision searches,
+explicit recovery and portable boundary evidence. Read `docs/bisection.md`
+before changing its predicates, cache identity, journal or confirmation rules.
+Planning and reporting never authorize builds or measurements, and performance
+predicates remain unsupported.
+
+`recipe_minimization.py` owns strict plans, canonical reduced recipes, selected
+assertion classification and bounded greedy search. `recipe_minimization_session.py`
+owns charged reservations, explicit single-step execution through the existing
+runner, result-only recovery and portable report reconstruction;
+`minimization_cli.py` supplies the standalone CLI. Read `docs/minimization.md`
+before changing these contracts. Offline operations never launch a worker;
+performance minimization, builds and source-history selection are unsupported.
+
+`recipe_source_range.py` prepares explicit local first-parent histories into
+owned checkouts and frozen plans; read `docs/source-range.md` before changing
+its Git isolation, object checks or preparation verifier. `recipe_handoff.py`
+binds those plans to an unexecuted maintainer command graph; read
+`docs/maintainer-handoff.md` before changing its destination, budget or argv
+contracts. `docs/maintainer-checkout.md` is the real-local-Git preparation entry
+point; its maintained example runs no daemon source or workload.
 
 ### Pure batch cells
 
@@ -262,7 +311,8 @@ nowhere at all; `tests/test_docs_index.py` now runs the guard against every modu
 claims.
 
 **`docs/invariants/workload-controls.md`** — `bgperf2.py` argument guards, `check_batch_test()`,
-`bench_output_prefix()`; `base.py`'s `gen_conf()`/`gen_paths()`/`scenario_neighbors()`; `churn.py`;
+`bench_output_prefix()`; `cpu_pinning.py` (pure CPU-list and pinning helpers);
+`recipes.py`, `recipe_minimization.py`, `recipe_worker.py`, `recipe_preflight.py` (portable CPU layout and recipe controls); `base.py`'s `gen_conf()`/`gen_paths()`/`scenario_neighbors()`; `churn.py`;
 `policy.py`; `bird.py`.
 
 - Session count and table size are one axis. `--prefix-scope total`, `--path-diversity D`,
@@ -352,7 +402,7 @@ component, and `bgperf2.py`'s `write_event_artifact()`, which catches for it.
   component: a throttled generator and one blocked writing to an undrained target are the same
   measurement, and three controlled runs of one shape all return it.
 
-**`docs/invariants/host-and-environment.md`** — `recipe_preflight.py`, `recipe_prepare.py`, `contention.py`, `role_cpu.py`, the controller
+**`docs/invariants/host-and-environment.md`** — `recipe_preflight.py`, `recipe_prepare.py`, `recipe_run.py`, `recipe_minimization_session.py`, `recipe_worker.py`, `recipe_diagnostics.py`, `contention.py`, `role_cpu.py`, the controller
 threads, and the `-d` warnings.
 
 - **Measure CPU as a delta between two `/proc` samples, never `ps -eo pcpu`**, which fails in both
@@ -368,7 +418,7 @@ threads, and the `-d` warnings.
 - Per-role CPU is a cgroup delta, summed only when every member was read, and changes no verdict.
 - The bench directory must not be in RAM, and must not be on the root filesystem.
 
-**`docs/invariants/provenance-and-verify.md`** — `recipe_preflight.py`, `recipe_prepare.py`, `Container.version_string()`,
+**`docs/invariants/provenance-and-verify.md`** — `recipe_preflight.py`, `recipe_prepare.py`, `recipe_targets.py`, `Container.version_string()`,
 `collect_provenance()`, `verify`, and every module carrying a version command (`rustybgp.py` and
 `openbgp.py` included — both had the bug this document is about).
 

@@ -1,0 +1,9 @@
+# Proposed synthetic calibration input only; no execution is authorized.
+tests:
+  - name: comparison-pilot
+    monitor: sink
+    neighbors: [2]
+    prefixes: [100000]
+    filter_test: [None]
+    targets:
+      - name: bird

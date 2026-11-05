@@ -61,6 +61,16 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.lock
 
+      - name: Remove runner-only Git LFS defaults
+        run: |
+          # Inert source fixtures deliberately refuse inherited Git filters.
+          # The hosted image preconfigures LFS even though this repo uses none.
+          # Remove only that disposable runner preset; keep filter guards and
+          # fixture-created local/global filter tests unchanged.
+          if git config --system --get-regexp '^filter\.lfs\.'; then
+            sudo git config --system --remove-section filter.lfs
+          fi
+
       - name: Bootstrap the hashed environment and run Docker-free tests
         run: python3.14 scripts/bootstrap.py
 

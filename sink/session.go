@@ -51,6 +51,7 @@ type config struct {
 	connectRetry        time.Duration
 	coalesce, heartbeat time.Duration
 	hostname            string
+	snapshotSocket      string
 }
 
 // sessionError is how a session ends: the NOTIFICATION to send, if any, and
@@ -289,6 +290,10 @@ type sink struct {
 	pending []*conn // in OpenConfirm
 	active  *conn   // Established
 	connIDs atomic.Uint64
+	// Populated only with snapshot capture enabled. The same mutex protects
+	// active-session identity, table updates and resets from snapshot copies.
+	snapshotTable   *table
+	snapshotUpdates uint64
 }
 
 func idValue(a netip.Addr) uint32 {
@@ -355,6 +360,8 @@ func (s *sink) forget(c *conn) {
 	s.unpend(c)
 	if s.active == c {
 		s.active = nil
+		s.snapshotTable = nil
+		s.snapshotUpdates = 0
 	}
 }
 
@@ -480,10 +487,28 @@ func (s *sink) holdSession(c *conn, neg negotiated) error {
 		ibgpID = s.cfg.routerID
 	}
 	t := newTable(s.cfg.localAS, ibgpID)
+	if s.cfg.snapshotSocket != "" {
+		s.mu.Lock()
+		if s.active == c {
+			s.snapshotTable = t
+			s.snapshotUpdates = 0
+		}
+		s.mu.Unlock()
+	}
 	st := countState{at: monotonicNS()}
 	// The session starts empty, and says so.
 	s.log.Count(st, true)
 	defer func() {
+		// Invalidate the exposed table before logging can block on I/O or
+		// the log mutex. A lost session must never serve its old prefixes.
+		if s.cfg.snapshotSocket != "" {
+			s.mu.Lock()
+			if s.active == c {
+				s.snapshotTable = nil
+				s.snapshotUpdates = 0
+			}
+			s.mu.Unlock()
+		}
 		// GoBGP drops the adj-RIB-in when a session goes down; the count
 		// goes to zero with it, written at once rather than coalesced.
 		s.log.Count(countState{at: monotonicNS()}, true)
@@ -534,10 +559,20 @@ func (s *sink) holdSession(c *conn, neg negotiated) error {
 				s.log.Line('M', se)
 				return se
 			}
+			// Default monitoring takes no additional table lock. Opt-in
+			// capture serializes only table mutation and the bounded copy;
+			// snapshot sorting, encoding and writes never hold this lock.
+			if s.cfg.snapshotSocket != "" {
+				s.mu.Lock()
+			}
 			r := t.apply(b, handling == bgp.ERROR_HANDLING_TREAT_AS_WITHDRAW)
 			st.updates++
 			st.accepted = t.accepted
 			st.at = monotonicNS()
+			if s.cfg.snapshotSocket != "" {
+				s.snapshotUpdates = st.updates
+				s.mu.Unlock()
+			}
 			if r.eor {
 				st.eor++
 				s.log.EndOfRIB(st)

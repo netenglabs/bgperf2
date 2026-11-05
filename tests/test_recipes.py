@@ -130,6 +130,7 @@ def test_canonical_recipe_digest_escapes_unicode_and_preserves_string_whitespace
     ({'prefix_scope': 'totl'}, 'prefix_scope'),
     ({'targets': [{'name': 'bird', 'file': 'scenario.yaml'}]}, 'file'),
     ({'targets': [{'name': 'bird', 'command': 'echo unexpected'}]}, 'command'),
+    ({'targets': [{'name': 'bird', 'pin': 'target=0,monitor=1,testers=2'}]}, 'pin'),
     ({'targets': [{'name': 'bird', 'tester_type': 'bgpdump2'}]}, 'tester_type'),
     ({'targets': [{'name': 'bird', 'tester_type': False}]}, 'tester_type'),
     ({'targets': [{'name': 'bird', 'tester_type': 0}]}, 'tester_type'),

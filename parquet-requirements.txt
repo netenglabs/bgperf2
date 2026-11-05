@@ -1,0 +1,2 @@
+# Install in a separate converter environment, not the locked engine venv.
+pyarrow==26.0.0

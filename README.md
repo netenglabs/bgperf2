@@ -15,8 +15,15 @@ rewritten.
 * [Getting results you can trust](#trust)
 * [Targets and versions](#targets)
 * [Debugging](#debugging)
+* [One maintainer investigation](docs/maintainer-workflow.md) (offline reproduction, local rollback, interruption recovery and correctness bisection)
+* [Prepare your own source checkout](docs/maintainer-checkout.md) (isolated revision range and verified, unexecuted handoff)
+* [Minimize a reproducer](docs/minimization.md) (bounded peer/prefix-count reduction with fresh confirmation and verified evidence)
 * [Roadmap and development plans](docs/roadmap.md)
-* [Portable recipe and result contracts](docs/recipes.md) (export, validate, plan, check and selected image preparation; no execution)
+* [Portable recipe and result contracts](docs/recipes.md) (export, prepare, isolated execution and verified result packages)
+* [Small functional checks](docs/functional-validation.md) (immediate bounded execution, load observations and verified correctness)
+* [Investigate a local BIRD fix](docs/investigations.md) (target/build identities, diagnostics and baseline/fix reports)
+* [Supplied-image FRR maintainer workflow](docs/frr-maintainer-workflow.md) (functional assertions, reports and bounded minimization)
+* [Localize a deterministic regression](docs/bisection.md) (bounded revision search, recovery and verified boundary evidence)
 * [How bgperf2 works](docs/how_bgperf_works.md) ·
   [Benchmarking a remote target](docs/benchmark_remote_target.md) ·
   [MRT injection](docs/mrt.md) ·
@@ -93,7 +100,12 @@ The separate `venv/bin/python recipes.py` entry point offers `export`, `validate
 CLI; it never acquires images or starts containers. It supports a small synthetic
 IPv4 recipe contract. `prepare RECIPE` reports a local image acquisition plan;
 only `prepare RECIPE --pull` can acquire missing selected repository digests.
-Recipe execution remains future work. See the [recipe guide and public fixture](docs/recipes.md).
+`run` explicitly executes the selected recipe with a bounded worker and returns
+a local result package; `result-verify` checks its files and recipe binding.
+`target-image`, `target-source-plan` and explicit `target-build` supply a target
+override without changing recipe controls. `investigate` records a serial
+baseline/fix pair with diagnostics and a verified human/JSON report. See the
+[recipe guide](docs/recipes.md) and [local-fix walkthrough](docs/investigations.md).
 
 ## <a name="first-run"></a>Your first run
 
@@ -130,6 +142,10 @@ Common options:
 Try `-n1 -p1` first if anything looks wrong; see [Debugging](#debugging).
 
 ## <a name="outputs"></a>What a run writes
+
+Recipe workflows can use [shared artifact storage](docs/artifact-storage.md) to
+compress and deduplicate bulk evidence automatically. Comparisons reference the
+same objects; independent expanded packages are produced on explicit export.
 
 Everything generated goes under `results/` (gitignored), or `--results-dir`.
 Every file of a run is named from one stem built from what the run was —
@@ -749,6 +765,25 @@ It covers the measurement, parsing and batch layers; a real `bench` is the only
 end-to-end check.
 
 ## Development
+
+The [FRR source workflow](docs/frr-source-workflow.md) connects trusted local
+builds, candidate correctness checks, bounded minimization and revision search.
+Its maintained modeled walkthrough runs without Docker or a real compiler;
+live source qualification remains separate.
+
+Use the [comparison walkthrough](docs/comparisons.md) for explicit observable
+assertions and repeated serial comparisons of two selections of the same supported target adapter, with
+portable verified reports. The maintained Docker-free demo includes controlled
+differences, noise and inconclusive evidence. Calibrated regression verdicts
+remain disabled pending separately authorized calibration.
+
+Use [staged comparison execution](docs/comparison-execution.md) for serial
+per-attempt checks and explicit review gates. The
+[deterministic bisection guide](docs/bisection.md) covers local revision searches
+with fresh boundary confirmations; its controlled walkthrough needs no Docker
+or quiet measurement window. Live bisection qualification remains deferred;
+the [milestone B record](docs/plans/milestone-b-runtime-validation.md) describes
+the successfully exercised packaging-patched source-build case and its limits.
 
 The [public roadmap](docs/roadmap.md) indexes current priorities, detailed plans
 and deferred workload ideas. Engine plans and implementation decisions live in

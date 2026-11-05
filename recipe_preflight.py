@@ -97,7 +97,7 @@ def _report(document, mode):
     recipes.validate_recipe(document)
     report = {'schema': PREREQUISITES_SCHEMA, 'mode': mode,
               'recipe_sha256': recipes.recipe_sha256(document),
-              'status': 'checks_passed', 'execution': 'not_implemented',
+              'status': 'checks_passed', 'execution': 'not_requested',
               'comparison': 'not_assessed', 'checks': [],
               'acquisition': 'none',
               'scope': 'Only implemented checks are reported; this is not a ready-to-run qualification.'}
@@ -120,6 +120,10 @@ def _report(document, mode):
 def plan_recipe(document):
     """Describe exact declared inputs without consulting the host or acquiring data."""
     report = _report(document, 'plan')
+    if 'pin' in document['resolved']:
+        _add(report, 'cpu_pinning', 'unknown',
+             'Declared role CPU layout; online CPUs and physical topology are not probed by plan.',
+             requested=document['resolved']['pin'])
     for role, declaration in document['roles'].items():
         _add(report, 'image.' + role, 'unknown',
              'Declared immutable reference; local availability, contents and build provenance are unverified.',
@@ -138,6 +142,7 @@ def _environment():
                'DOCKER_CONTEXT', 'DOCKER_CONFIG', 'DOCKER_TLS',
                'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH')}
     env['GIT_OPTIONAL_LOCKS'] = '0'  # status must never refresh the index.
+    env['GIT_NO_REPLACE_OBJECTS'] = '1'  # the requested revision means its original objects.
     return env
 
 
@@ -149,6 +154,10 @@ def _engine(report, document, env):
         revision = run_command([*git, 'rev-parse', '--verify', 'HEAD^{commit}'], env=env).strip()
         if not re.fullmatch(r'[0-9a-f]{40}', revision):
             raise ProbeError('Git returned an invalid full HEAD revision')
+        entries = run_command([*git, 'ls-files', '-v', '-z'], env=env).split('\0')
+        if any(entry and entry[:1] != 'H' for entry in entries):
+            raise ProbeError('Engine index has hidden or unsupported entries; use a full checkout '
+                             'without assume-unchanged or skip-worktree flags')
         dirty = run_command([*git, 'status', '--porcelain',
                              '--untracked-files=all', '--ignore-submodules=none'], env=env)
         if revision != document['engine']['revision']:
@@ -227,6 +236,29 @@ def _capacity(report):
              cpu_count=count, affinity=affinity, memory_available_bytes=int(match[1]) * 1024)
     except (OSError, ValueError, AttributeError) as exc:
         _add(report, 'host_capacity', 'unknown', f'Capacity snapshot unavailable: {exc}')
+
+
+def _online_cpus():
+    from cpu_pinning import parse_cpu_list
+    return parse_cpu_list(Path('/sys/devices/system/cpu/online').read_text().strip())
+
+
+def _pinning(report, document):
+    """Check explicit logical IDs against sysfs, not controller affinity."""
+    requested = document['resolved'].get('pin')
+    if requested is None:
+        return
+    from cpu_pinning import resolve_pin
+    try:
+        online = _online_cpus()
+        resolve_pin(requested, 0, online)
+        _add(report, 'cpu_pinning', 'pass',
+             'Requested CPU IDs are online in the controller host view. '
+             'SMT/core separation, effective Docker placement and host qualification remain unassessed.',
+             requested=requested, online_cpus=sorted(online))
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
+        _add(report, 'cpu_pinning', 'refused', f'Cannot satisfy the requested CPU layout: {exc}',
+             requested=requested)
 
 
 def _mount_key(path):
@@ -334,11 +366,44 @@ def runtime_prerequisites(report, document):
     return env, host, bootstrap_ok
 
 
-def check_recipe(document, *, workdir, results_dir):
+def _store_destination(report, mounts):
+    from artifact_store import configured_store
+    try:
+        store = configured_store()
+        if store is None:
+            return
+        ancestor = store.root
+        while not os.path.lexists(ancestor):
+            ancestor = ancestor.parent
+        if not ancestor.is_dir() or not os.access(ancestor, os.W_OK | os.X_OK):
+            raise ProbeError('Store ancestor must be a writable searchable directory')
+        fs_type = filesystem_type(_mount_key(ancestor), mounts)
+        if fs_type is None or is_memory_backed(_mount_key(ancestor), mounts):
+            raise ProbeError('Artifact store requires identified disk-backed storage')
+        stats = os.statvfs(ancestor)
+        _add(report, 'destinations.artifact_store', 'pass',
+             'Explicit persistent store; no directories created and no capacity qualification.',
+             path=str(store.root), existing_ancestor=str(ancestor), filesystem_type=fs_type,
+             available_bytes=stats.f_bavail * stats.f_frsize)
+    except (OSError, ValueError, TypeError) as exc:
+        _add(report, 'destinations.artifact_store', 'refused', str(exc))
+
+
+def check_recipe(document, *, workdir, results_dir, target=None):
     """Take explicit bounded snapshots, without acquiring or creating anything."""
+    from recipe_targets import effective_roles
+    roles = effective_roles(document, target)
     report = _report(document, 'check')
+    report['roles'] = copy.deepcopy(roles)
+    report['target_override'] = copy.deepcopy(target)
+    from artifact_store import validate_destinations, StorageError
+    try:
+        validate_destinations(workdir, results_dir)
+    except StorageError as exc:
+        _add(report, 'destinations.artifact_store', 'refused', str(exc))
+        return report
     env, host, bootstrap_ok = runtime_prerequisites(report, document)
-    for role, declaration in document['roles'].items():
+    for role, declaration in roles.items():
         if bootstrap_ok:
             _image(report, role, declaration['image'], host, env)
         else:
@@ -346,11 +411,13 @@ def check_recipe(document, *, workdir, results_dir):
                  'Not probed: the existing environment and active-measurement guard must pass first.',
                  requested=declaration['image'])
     _capacity(report)
+    _pinning(report, document)
     try:
         mounts = Path('/proc/mounts').read_text()
     except OSError as exc:
         _add(report, 'destinations', 'refused', f'Cannot read filesystem mounts: {exc}')
     else:
+        _store_destination(report, mounts)
         work = _destination(report, 'workdir', workdir, mounts)
         results = _destination(report, 'results_dir', results_dir, mounts)
         if work is not None and results is not None:

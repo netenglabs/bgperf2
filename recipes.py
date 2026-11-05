@@ -3,9 +3,9 @@
 # you may not use this file except in compliance with the License.
 # You may obtain a copy at http://www.apache.org/licenses/LICENSE-2.0
 
-"""Read-only declarative recipe and result contracts; no execution interface.
+"""Declarative recipe/result contracts and explicit preparation/execution CLI.
 
-The first envelope deliberately supports only synthetic IPv4 BIRD workloads,
+The envelope supports synthetic IPv4 BIRD and FRR targets,
 with BIRD generators and the sink instrument. It imports no container runtime.
 """
 
@@ -24,6 +24,7 @@ from batch_cells import (BatchLoader, DEFAULT_CHURN_BURSTS,
                          DEFAULT_POLICY_RELOAD_BLOCKS, DEFAULT_RECEIVERS,
                          batch_cell_id, batch_cell_key, construct_batch_cells,
                          expand_target_versions, resolve_prefix_scope)
+from cpu_pinning import resolve_pin
 
 RECIPE_SCHEMA = 'bgperf2/recipe/v1alpha1'
 RESULT_SCHEMA = 'bgperf2/result/v1alpha1'
@@ -41,7 +42,8 @@ _REVISION = re.compile(r'[0-9a-f]{40}\Z')
 _IMAGE = re.compile(r'(?:sha256:[0-9a-f]{64}|[a-zA-Z0-9][a-zA-Z0-9._:/-]*@sha256:[0-9a-f]{64})\Z')
 _KEY = re.compile(r'[0-9a-f]{16}\Z')
 _TEST_REQUIRED = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
-_TEST_OPTIONAL = ('prefix_scope', 'repetitions', 'order', 'seed', 'monitor')
+TARGET_ADAPTERS = ('bird', 'frr_c')
+_TEST_OPTIONAL = ('prefix_scope', 'repetitions', 'order', 'seed', 'monitor', 'pin')
 _TARGET_KEYS = ('name', 'tester_type', 'version', 'image', 'label', 'threads')
 
 
@@ -150,6 +152,21 @@ _RecipeBatchLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TA
                                   _yaml_mapping)
 
 
+def _recipe_pin(value):
+    """Bound untrusted CPU ranges before using the shared pure CLI rules."""
+    _text(value, 'source.pin')
+    if len(value) > 4096:
+        raise ContractError('source.pin: CPU layout exceeds 4096 characters')
+    # The CLI parser expands ranges. Refuse huge endpoints before allocation,
+    # including Unicode decimal digits and overlong integer spellings.
+    if any(len(number) > 4 or int(number) > 4095 for number in re.findall(r'\d+', value)):
+        raise ContractError('source.pin: recipe CPU IDs must be between 0 and 4095 (at most four digits)')
+    try:
+        return resolve_pin(value, 0, range(4096))
+    except ValueError as exc:
+        raise ContractError(f'source.pin: {exc}') from exc
+
+
 def _source_tests(text):
     """Validate every source test before selecting or expanding any cell."""
     _text(text, 'source.text')
@@ -184,6 +201,8 @@ def _source_tests(text):
         scope = test.get('prefix_scope')
         _choice(scope, (None, 'per-peer', 'total'), f'{where}.prefix_scope')
         _choice(test.get('monitor'), (None, 'sink'), f'{where}.monitor')
+        if 'pin' in test:
+            _recipe_pin(test['pin'])
         repetitions = test.get('repetitions', 1)
         _integer(repetitions, f'{where}.repetitions', 1)
         order = test.get('order', 'matrix')
@@ -199,7 +218,7 @@ def _source_tests(text):
         for ti, target in enumerate(test['targets']):
             tw = f'{where}.targets[{ti}]'
             _keys(target, ('name',), _TARGET_KEYS[1:], tw)
-            _choice(target['name'], ('bird',), f'{tw}.name')
+            _choice(target['name'], TARGET_ADAPTERS, f'{tw}.name')
             _choice(target.get('tester_type'), (None, 'bird'), f'{tw}.tester_type')
             for field in ('image', 'label'):
                 if target.get(field) is not None:
@@ -212,8 +231,11 @@ def _source_tests(text):
                 _text(str(target['version']), f'{tw}.version')
             if target.get('threads') is not None:
                 _integer(target['threads'], f'{tw}.threads', 1)
+                if target['name'] != 'bird':
+                    raise ContractError(f'{tw}.threads: FRR target thread controls are unsupported')
             expanded = expand_target_versions([target])[0]
-            run_name = expanded.get('label') or ('bird ' + expanded['version'] if expanded.get('version') else 'bird')
+            run_name = expanded.get('label') or (expanded['name'] + ' ' + expanded['version']
+                                                if expanded.get('version') else expanded['name'])
             if run_name in run_names:
                 raise ContractError(f'{tw}: repeated run name {run_name!r}; select unique labels')
             run_names.add(run_name)
@@ -234,12 +256,13 @@ def _select(text, test_name, cell_key):
     if selected_test is None:
         raise ContractError(f'selection.test: no source test named {test_name!r}')
     targets = expand_target_versions(selected_test['targets'])
+    pin = _recipe_pin(selected_test['pin']) if 'pin' in selected_test else None
     cells = construct_batch_cells(
         selected_test, targets, repetitions=selected_test.get('repetitions', 1),
         prefix_resolver=resolve_prefix_scope, path_diversity=DEFAULT_PATH_DIVERSITY,
         receivers=DEFAULT_RECEIVERS, churn_prefixes=DEFAULT_CHURN_PREFIXES,
         churn_bursts=DEFAULT_CHURN_BURSTS,
-        policy_reload_blocks=DEFAULT_POLICY_RELOAD_BLOCKS, pin=None, monitor='sink')
+        policy_reload_blocks=DEFAULT_POLICY_RELOAD_BLOCKS, pin=pin, monitor='sink')
     matches = [cell for cell in cells if batch_cell_key(batch_cell_id(test_name, cell)) == cell_key]
     if len(matches) != 1:
         raise ContractError(f'selection.cell_key: expected exactly one source cell matching {cell_key!r}, found {len(matches)}')
@@ -247,7 +270,7 @@ def _select(text, test_name, cell_key):
     raw_target = selected_test['targets'][cell['ordinal'] % len(targets)]
     target = cell['target']
     resolved_target = {
-        'name': 'bird', 'tester_type': target.get('tester_type') or 'bird',
+        'name': target['name'], 'tester_type': target.get('tester_type') or 'bird',
         'filter_type': 'in', 'version': target.get('version'),
         'image': target.get('image'), 'label': target.get('label'),
         'threads': target.get('threads'),
@@ -258,12 +281,14 @@ def _select(text, test_name, cell_key):
         'receivers': 0, 'monitor': 'sink', 'repetition': cell['repetition'],
         'ordinal': cell['ordinal'], 'target': resolved_target,
     }
+    if 'pin' in selected_test:
+        resolved['pin'] = cell['pin']
     return selected_test, cell, raw_target, resolved
 
 
-def _roles(roles):
+def _roles(roles, target_adapter='bird'):
     _keys(roles, ('target', 'generator', 'observer'), where='roles')
-    for role, adapter in (('target', 'bird'), ('generator', 'bird'), ('observer', 'sink')):
+    for role, adapter in (('target', target_adapter), ('generator', 'bird'), ('observer', 'sink')):
         _keys(roles[role], ('adapter', 'image'), where=f'roles.{role}')
         _choice(roles[role]['adapter'], (adapter,), f'roles.{role}.adapter')
         _match(roles[role]['image'], _IMAGE, f'roles.{role}.image',
@@ -272,10 +297,12 @@ def _roles(roles):
 
 def _recipe(text, test_name, cell_key, engine_revision, roles, question, expected_outcome):
     _match(engine_revision, _REVISION, 'engine.revision', 'a full 40-character lowercase Git revision')
-    _roles(roles)
     _text(question, 'reproduction.question')
     _choice(expected_outcome, EXPECTED_OUTCOMES, 'reproduction.expected_outcome')
     test, cell, raw_target, resolved = _select(text, test_name, cell_key)
+    _roles(roles, resolved['target']['name'])
+    if resolved['target']['name'] == 'frr_c' and expected_outcome == 'target_crash':
+        raise ContractError('FRR target_crash reproduction is unsupported; use observable functional assertions')
     if cell['target'].get('image') is not None:
         _same(roles['target']['image'], cell['target']['image'], 'roles.target.image')
     return {
@@ -333,7 +360,7 @@ def inspect_recipe(document):
         'roles': document['roles'], 'inputs': document['inputs'],
         'resources': document['resources'], 'seeds': document['seeds'],
         'completion': document['completion'], 'reproduction': document['reproduction'],
-        'execution': 'not_implemented', 'comparison': 'not_assessed',
+        'execution': 'explicit_run_required', 'comparison': 'not_assessed',
         'identity_limit': 'Image pins are declared inputs; their existence, contents and build provenance have not been verified.',
     }
 
@@ -428,28 +455,254 @@ def main(argv=None):
     export.add_argument('--expected-outcome', choices=EXPECTED_OUTCOMES,
                         default='experiment_completed')
     export.add_argument('-o', '--output')
-    for name in ('validate', 'inspect', 'result-validate', 'plan', 'check', 'prepare'):
+    for name in ('validate', 'inspect', 'result-validate', 'result-verify', 'plan', 'check',
+                 'prepare', 'run', 'target-image', 'target-validate', 'target-source-plan',
+                 'target-build', 'investigate', 'investigation-verify', 'investigation-status',
+                 'investigation-check'):
         command = commands.add_parser(name)
         command.add_argument('document')
-        if name == 'check':
+        if name == 'investigation-status':
+            command.add_argument('--format', choices=('json', 'text'), default='json',
+                                 help='verified summary format (default: json)')
+        if name == 'investigation-check':
+            command.add_argument('--side', choices=('both', 'baseline', 'candidate'), default='both',
+                                 help='attempts whose assertions determine the CI exit (default: both)')
+        if name in ('check', 'run'):
             command.add_argument('--workdir', required=True)
             command.add_argument('--results-dir', required=True)
+            command.add_argument('--target', help='strict target override/build identity JSON')
+        if name == 'run':
+            command.add_argument('--timeout', type=float, default=300,
+                                 help='whole-attempt runtime deadline in seconds (default: 300)')
+            command.add_argument('--diagnostics', choices=('basic', 'none'), default='basic')
+            command.add_argument('--observer-prefixes', action='store_true',
+                                 help='capture a bounded accepted IPv4 prefix snapshot after measurement (requires supporting sink image)')
+        if name == 'target-image':
+            command.add_argument('--image', required=True)
+            command.add_argument('--label')
+            command.add_argument('--instrumentation', choices=('unknown', 'optimized', 'debug', 'asan', 'profiling'), default='unknown')
+            command.add_argument('-o', '--output')
+        if name == 'target-validate':
+            command.add_argument('--recipe', help='also verify canonical recipe binding')
+        if name == 'target-source-plan':
+            for flag in ('source', 'revision', 'toolchain-image', 'runtime-image'):
+                command.add_argument('--' + flag, required=True)
+            command.add_argument('--instrumentation', choices=('unknown', 'optimized', 'debug', 'asan', 'profiling'), default='debug')
+            command.add_argument('--cflags', default='-O0 -g')
+            command.add_argument('--configure-flag', action='append', default=[])
+            command.add_argument('--include-dirty', action='store_true')
+            command.add_argument('-o', '--output')
+        if name == 'target-build':
+            command.add_argument('--output-dir', required=True)
+            command.add_argument('--timeout', type=float, default=1200)
+        if name == 'investigate':
+            command.add_argument('--baseline-target', required=True)
+            command.add_argument('--candidate-target', required=True)
+            command.add_argument('--workdir', required=True)
+            command.add_argument('--results-dir', required=True)
+            command.add_argument('--timeout', type=float, default=300)
+            command.add_argument('--diagnostics', choices=('basic', 'none'), default='basic')
+            command.add_argument('--observer-prefixes', action='store_true',
+                                 help='capture final received IPv4 prefixes on both functional attempts')
         if name == 'prepare':
             command.add_argument('--pull', action='store_true',
                                  help='explicitly acquire missing selected repository digests after disclosure')
+    report = commands.add_parser('investigation-report', help='verify and bundle an existing functional pair')
+    report.add_argument('--baseline', required=True)
+    report.add_argument('--candidate')
+    report.add_argument('--output-dir', required=True)
+    report.add_argument('--observer-prefixes', action='store_true',
+                        help='evaluate all six correctness assertions, including final prefix identity')
+    rebuild = commands.add_parser('investigation-rebuild', help='verify and rebuild an existing functional investigation report')
+    rebuild.add_argument('document')
+    rebuild.add_argument('--output-dir', required=True)
+    assertion_export = commands.add_parser('assertions-export', help='export explicit supported observable assertions')
+    assertion_export.add_argument('document')
+    assertion_export.add_argument('-o', '--output')
+    assertion_export.add_argument('--capability', action='append',
+        choices=('session_establishment', 'injection_completion', 'observer_route_count',
+                 'experiment_completion', 'observed_role_health', 'observer_prefix_identity'),
+        help='repeat to select capabilities; default exports the five count/session/health assertions')
+    assertion_check = commands.add_parser('assertions-check', help='evaluate assertions from a verified result package')
+    assertion_check.add_argument('document')
+    assertion_check.add_argument('--result', required=True)
+    comparison_plan = commands.add_parser('comparison-plan', help='freeze a repeated target comparison without runtime probes')
+    comparison_plan.add_argument('document')
+    comparison_plan.add_argument('--baseline-target', required=True)
+    comparison_plan.add_argument('--candidate-target', required=True)
+    comparison_plan.add_argument('--assertions')
+    comparison_plan.add_argument('--repetitions', type=int, required=True)
+    comparison_plan.add_argument('--order', choices=('alternating', 'shuffle'), default='alternating')
+    comparison_plan.add_argument('--seed', type=int)
+    comparison_plan.add_argument('--timeout', type=float, default=300)
+    comparison_plan.add_argument('--diagnostics', choices=('none', 'basic'), default='none')
+    comparison_plan.add_argument('--observer-prefixes', action='store_true',
+                                 help='capture bounded final IPv4 prefixes on every planned comparison attempt')
+    comparison_plan.add_argument('-o', '--output')
+    compare = commands.add_parser('compare', help='explicitly execute a frozen serial comparison plan')
+    compare.add_argument('document')
+    compare.add_argument('--workdir', required=True)
+    compare.add_argument('--results-dir', required=True)
+    comparison_report = commands.add_parser('comparison-report', help='bundle an existing comparison ledger without runtime access')
+    comparison_report.add_argument('document')
+    comparison_report.add_argument('--attempts', required=True)
+    comparison_report.add_argument('--output-dir', required=True)
+    comparison_verify = commands.add_parser('comparison-verify', help='verify bundled comparison evidence and conclusions')
+    comparison_verify.add_argument('document')
+    session_start = commands.add_parser('comparison-start', help='prepare an explicitly gated comparison session')
+    session_start.add_argument('document')
+    session_start.add_argument('--workdir', required=True)
+    session_start.add_argument('--results-dir', required=True)
+    session_start.add_argument('--observer-window', action='store_true')
+    session_start.add_argument('--pressure-policy', help='explicit operational screen JSON; no default screen')
+    session_start.add_argument('--prior-review', help='accepted final review receipt of prior series')
+    session_step = commands.add_parser('comparison-step', help='run exactly one attempt, synchronously assess, then stop')
+    session_step.add_argument('results_dir')
+    session_review = commands.add_parser('comparison-review', help='record an external review at a waiting checkpoint')
+    session_review.add_argument('results_dir')
+    session_review.add_argument('--reviewer', required=True)
+    session_review.add_argument('--evidence', required=True)
+    session_review.add_argument('--decision', choices=('accepted', 'rejected'), required=True)
     args = parser.parse_args(argv)
     try:
-        if args.command == 'export':
+        if args.command in ('comparison-step', 'comparison-review'):
+            from comparison_session import step_session, record_review
+            result = (step_session(args.results_dir) if args.command == 'comparison-step' else
+                      record_review(args.results_dir, reviewer=args.reviewer,
+                                    evidence=args.evidence, decision=args.decision))
+            _write_document(result)
+            return result['exit_code']
+        elif args.command == 'export':
+            selected_adapter = _select(Path(args.batch).read_bytes().decode('utf-8'),
+                                       args.test, args.cell)[3]['target']['name']
             roles = {role: {'adapter': adapter, 'image': getattr(args, role + '_image')}
-                     for role, adapter in (('target', 'bird'), ('generator', 'bird'), ('observer', 'sink'))}
+                     for role, adapter in (('target', selected_adapter), ('generator', 'bird'), ('observer', 'sink'))}
             document = export_recipe(args.batch, args.test, args.cell,
                                      engine_revision=args.engine_revision, roles=roles,
                                      question=args.question, expected_outcome=args.expected_outcome)
             _write_document(document, args.output)
+        elif args.command == 'result-verify':
+            from recipe_results import verify_result_package
+            _write_document(verify_result_package(args.document))
+        elif args.command == 'investigation-report':
+            from recipe_investigation import write_investigation_report
+            options = {'observer_prefixes': True} if args.observer_prefixes else {}
+            _write_document(write_investigation_report(baseline=args.baseline,
+                candidate=args.candidate, output_dir=args.output_dir, **options))
+        elif args.command == 'investigation-rebuild':
+            from recipe_investigation import rebuild_investigation_report
+            _write_document(rebuild_investigation_report(args.document, output_dir=args.output_dir))
+        elif args.command == 'investigation-verify':
+            from recipe_investigation import verify_investigation_report
+            _write_document(verify_investigation_report(args.document))
+        elif args.command == 'investigation-status':
+            from recipe_investigation import investigation_status, render_investigation_status
+            status = investigation_status(args.document)
+            if args.format == 'text':
+                print(render_investigation_status(status), end='')
+            else:
+                _write_document(status)
+        elif args.command == 'investigation-check':
+            from recipe_investigation import check_investigation
+            result = check_investigation(args.document, side=args.side)
+            _write_document(result)
+            return result['exit_code']
+        elif args.command == 'comparison-verify':
+            from recipe_comparison_report import verify_comparison_report
+            _write_document(verify_comparison_report(args.document))
+        elif args.command == 'assertions-check':
+            from recipe_assertions import evaluate_assertions
+            from recipe_results import verify_result_package
+            verify_result_package(args.result)
+            from recipe_investigation import _load
+            bound = _load(Path(args.result).parent, 'recipe.json')
+            result = evaluate_assertions(read_document(args.document), bound, args.result)
+            _write_document(result)
+            return 0 if result.get('outcome') == 'passed' else 4 if result.get('outcome') == 'failed' else 5
         else:
             document = read_document(args.document)
             if args.command == 'inspect':
                 _write_document(inspect_recipe(document))
+            elif args.command == 'assertions-export':
+                from recipe_assertions import default_assertions
+                spec = default_assertions(document,
+                    include_prefixes=bool(args.capability and 'observer_prefix_identity' in args.capability))
+                if args.capability:
+                    if len(args.capability) != len(set(args.capability)):
+                        raise ContractError('Duplicate assertion capability selection')
+                    spec['assertions'] = [item for item in spec['assertions'] if item['capability'] in args.capability]
+                _write_document(spec, args.output)
+            elif args.command == 'comparison-plan':
+                from recipe_comparison import make_comparison_plan
+                options = {'observer_prefixes': True} if args.observer_prefixes else {}
+                _write_document(make_comparison_plan(document,
+                    baseline_target=read_document(args.baseline_target),
+                    candidate_target=read_document(args.candidate_target),
+                    repetitions=args.repetitions, order=args.order, seed=args.seed,
+                    timeout=args.timeout, diagnostics=args.diagnostics,
+                    assertions=read_document(args.assertions) if args.assertions else None,
+                    **options), args.output)
+            elif args.command == 'comparison-start':
+                from comparison_session import start_session
+                result = start_session(document, workdir=args.workdir, results_dir=args.results_dir,
+                    observer_window=args.observer_window,
+                    pressure=read_document(args.pressure_policy) if args.pressure_policy else None,
+                    prior_review=args.prior_review)
+                _write_document(result)
+                return result['exit_code']
+            elif args.command == 'compare':
+                from recipe_comparison import run_comparison
+                result = run_comparison(document, workdir=args.workdir, results_dir=args.results_dir)
+                _write_document(result)
+                return result['exit_code']
+            elif args.command == 'comparison-report':
+                from recipe_comparison_report import build_comparison_report
+                _write_document(build_comparison_report(document, read_document(args.attempts), args.output_dir))
+            elif args.command == 'target-image':
+                from recipe_targets import supplied_target
+                _write_document(supplied_target(document, args.image, label=args.label,
+                    instrumentation=args.instrumentation), args.output)
+            elif args.command == 'target-validate':
+                from recipe_targets import validate_target
+                validate_target(document, read_document(args.recipe) if args.recipe else None)
+                _write_document({'valid': True, 'schema': document['schema']})
+            elif args.command == 'target-source-plan':
+                from recipe_targets import plan_source_build
+                plan = plan_source_build(document, args.source, args.revision,
+                    toolchain_image=args.toolchain_image, runtime_image=args.runtime_image,
+                    instrumentation=args.instrumentation, cflags=args.cflags,
+                    include_dirty=args.include_dirty, configure_flags=args.configure_flag)
+                _write_document(plan, args.output)
+            elif args.command == 'target-build':
+                from recipe_targets import build_target
+                def disclose_build(plan):
+                    print(json.dumps(plan, indent=2, sort_keys=True), file=sys.stderr, flush=True)
+                _write_document(build_target(document, output_dir=args.output_dir,
+                    emit_disclosure=disclose_build, timeout=args.timeout))
+            elif args.command == 'investigate':
+                from recipe_investigation import run_investigation
+                options = {'observer_prefixes': True} if args.observer_prefixes else {}
+                result = run_investigation(document,
+                    baseline_target=read_document(args.baseline_target),
+                    candidate_target=read_document(args.candidate_target),
+                    workdir=args.workdir, results_dir=args.results_dir,
+                    timeout=args.timeout, diagnostics=args.diagnostics, **options)
+                _write_document(result)
+                return result['exit_code']
+            elif args.command == 'run':
+                validate_recipe(document)
+                from recipe_run import run_recipe
+                options = {}
+                if args.target:
+                    options['target'] = read_document(args.target)
+                if args.diagnostics != 'basic':
+                    options['diagnostics'] = args.diagnostics
+                if args.observer_prefixes:
+                    options['observer_prefixes'] = True
+                result = run_recipe(document, workdir=args.workdir,
+                                    results_dir=args.results_dir, timeout=args.timeout, **options)
+                _write_document(result)
+                return result['exit_code']
             elif args.command in ('plan', 'check', 'prepare'):
                 # Also validate in this module before importing the host layer:
                 # direct script execution names this module __main__, while the
@@ -466,9 +719,10 @@ def main(argv=None):
                     report = prepare_recipe(document, pull=args.pull, emit_disclosure=disclose)
                 else:
                     from recipe_preflight import check_recipe, plan_recipe
+                    options = {'target': read_document(args.target)} if args.command == 'check' and args.target else {}
                     report = (plan_recipe(document) if args.command == 'plan' else
                               check_recipe(document, workdir=args.workdir,
-                                           results_dir=args.results_dir))
+                                           results_dir=args.results_dir, **options))
                 _write_document(report)
                 return 2 if report['status'] == 'refused' else 0
             elif args.command == 'result-validate':
@@ -478,7 +732,7 @@ def main(argv=None):
                 validate_recipe(document)
                 _write_document({'valid': True, 'schema': RECIPE_SCHEMA,
                                  'recipe_sha256': recipe_sha256(document)})
-    except (ContractError, OSError, UnicodeError, RecursionError) as exc:
+    except (ValueError, OSError, UnicodeError, RecursionError) as exc:
         print(f'{args.command}: {exc}', file=sys.stderr)
         return 2
     return 0

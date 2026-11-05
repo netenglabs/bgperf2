@@ -26,7 +26,7 @@ def document():
 
 def items(report):
     assert report['schema'] == 'bgperf2/preparation/v1alpha1'
-    assert report['execution'] == 'not_implemented'
+    assert report['execution'] == 'not_requested'
     assert report['comparison'] == 'not_assessed'
     assert report['status'] in {'planned', 'prepared', 'refused'}
     refs = [item['requested'] for item in report['items']]
@@ -66,6 +66,9 @@ def host(document, monkeypatch):
         if argv == [*git, 'rev-parse', '--verify', 'HEAD^{commit}']:
             assert timeout == 15
             return document['engine']['revision'] + '\n'
+        if argv == [*git, 'ls-files', '-v', '-z']:
+            assert timeout == 15
+            return 'H recipe_preflight.py\0'
         if argv == [*git, 'status', '--porcelain', '--untracked-files=all',
                     '--ignore-submodules=none']:
             assert timeout == 15

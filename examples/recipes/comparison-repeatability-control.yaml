@@ -1,0 +1,12 @@
+# Prepared A/A repeatability control; requires separate runtime authorization.
+# Explicit layout for 32 logical CPUs with SMT siblings i and i+16.
+# Check actual topology before use. Controller/kernel work remains unrestricted.
+tests:
+  - name: comparison-repeatability-control
+    monitor: sink
+    pin: target=0,16,monitor=1-2,17-18,testers=3-14,19-30
+    neighbors: [2]
+    prefixes: [1000000]
+    filter_test: [None]
+    targets:
+      - name: bird

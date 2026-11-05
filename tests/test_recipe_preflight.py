@@ -24,9 +24,28 @@ def no_probe(*args, **kwargs):
     raise AssertionError('unexpected prerequisite probe')
 
 
+def test_nested_storage_binding_refused_before_runtime_probes(document, tmp_path, monkeypatch):
+    monkeypatch.setenv('BGPERF_ARTIFACT_STORE', str(tmp_path / 'work/store'))
+    monkeypatch.setattr(preflight, 'runtime_prerequisites', no_probe)
+    report = preflight.check_recipe(document, workdir=tmp_path / 'work', results_dir=tmp_path / 'results')
+    assert report['status'] == 'refused'
+    assert 'nonnested' in report['checks'][-1]['reason']
+    assert not list(tmp_path.iterdir())
+
+
+def test_store_location_refuses_ram_and_does_not_create_directories(tmp_path, monkeypatch):
+    monkeypatch.setenv('BGPERF_ARTIFACT_STORE', str(tmp_path / 'new-store'))
+    monkeypatch.setattr(preflight, 'filesystem_type', lambda *a: 'tmpfs')
+    monkeypatch.setattr(preflight, 'is_memory_backed', lambda *a: True)
+    report = {'checks': [], 'status': 'checks_passed'}
+    preflight._store_destination(report, 'unused')
+    assert report['checks'][0]['status'] == 'refused'
+    assert not list(tmp_path.iterdir())
+
+
 def checks(report):
     assert report['schema'] == 'bgperf2/prerequisites/v1alpha1'
-    assert report['execution'] == 'not_implemented'
+    assert report['execution'] == 'not_requested'
     assert report['comparison'] == 'not_assessed'
     assert report['status'] in {'checks_passed', 'refused'}
     assert len({item['name'] for item in report['checks']}) == len(report['checks'])
@@ -149,6 +168,8 @@ def test_remote_endpoint_refused_before_docker_or_bootstrap(document, monkeypatc
         assert not any('bootstrap.py' in str(arg) for arg in argv)
         if 'rev-parse' in argv:
             return document['engine']['revision'] + '\n'
+        if 'ls-files' in argv:
+            return 'H SIMULATED-engine.py\0'
         if 'status' in argv:
             return ''
         raise preflight.ProbeError('unsupported fake probe')
@@ -182,6 +203,8 @@ def local_probes(document, monkeypatch):
                '-C', str(preflight.ROOT)]
         if argv == [*git, 'rev-parse', '--verify', 'HEAD^{commit}']:
             return document['engine']['revision'] + '\n'
+        if argv == [*git, 'ls-files', '-v', '-z']:
+            return 'H SIMULATED-engine.py\0'
         if argv == [*git, 'status', '--porcelain',
                     '--untracked-files=all', '--ignore-submodules=none']:
             return state['dirty']
@@ -211,8 +234,52 @@ def local_probes(document, monkeypatch):
     return state
 
 
+@pytest.fixture
+def pinned_document(document, tmp_path, monkeypatch):
+    import bgperf2
+    from test_recipes import source, export
+    monkeypatch.setattr(bgperf2, 'host_cpus', lambda: frozenset(range(4)))
+    path, test = source(tmp_path, pin='target=0,monitor=1,testers=2-3')
+    return export(path, test, engine_revision=document['engine']['revision'], roles=document['roles'])
+
+
+def test_pinned_plan_is_declared_without_online_cpu_probe(pinned_document, monkeypatch):
+    monkeypatch.setattr(preflight, '_online_cpus', no_probe)
+    monkeypatch.setattr(preflight, 'run_command', no_probe)
+    entry = checks(preflight.plan_recipe(pinned_document))['cpu_pinning']
+    assert entry['status'] == 'unknown'
+    assert entry['details']['requested'] == pinned_document['resolved']['pin']
+
+
+def test_pinned_check_uses_online_cpus_not_controller_affinity(
+        pinned_document, local_probes, tmp_path, monkeypatch):
+    monkeypatch.setattr(preflight, '_online_cpus', lambda: frozenset(range(4)))
+    monkeypatch.setattr(preflight.os, 'cpu_count', lambda: 4)
+    monkeypatch.setattr(preflight.os, 'sched_getaffinity', lambda pid: {3})
+    report = preflight.check_recipe(pinned_document, workdir=tmp_path / 'work', results_dir=tmp_path / 'results')
+    assert report['status'] == 'checks_passed'
+    assert checks(report)['cpu_pinning']['details']['online_cpus'] == [0, 1, 2, 3]
+    assert not (tmp_path / 'work').exists()
+
+
+@pytest.mark.parametrize('online', [frozenset(range(3)), None])
+def test_missing_or_unreadable_online_cpus_refuse_pinned_execution(
+        pinned_document, local_probes, tmp_path, monkeypatch, online):
+    def observed():
+        if online is None:
+            raise OSError('CPU sysfs unavailable')
+        return online
+    monkeypatch.setattr(preflight, '_online_cpus', observed)
+    report = preflight.check_recipe(pinned_document, workdir=tmp_path / 'work', results_dir=tmp_path / 'results')
+    assert report['status'] == 'refused'
+    assert checks(report)['cpu_pinning']['status'] == 'refused'
+    assert not (tmp_path / 'work').exists()
+    assert not (tmp_path / 'results').exists()
+
+
 def test_observed_checks_inspect_only_selected_pins_without_creating_outputs(
-        document, local_probes, tmp_path):
+        document, local_probes, tmp_path, monkeypatch):
+    monkeypatch.setattr(preflight, '_online_cpus', no_probe)
     before = copy.deepcopy(document)
     marker = tmp_path / 'evidence'
     marker.write_bytes(b'earlier evidence\x00')

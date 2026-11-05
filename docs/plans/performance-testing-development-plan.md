@@ -1,12 +1,368 @@
 # bgperf2 developer performance testing plan
 
-Created 2026-10-23. Status: phase 0 complete; phase 1 in progress.
+Created 2026-10-23; updated 2026-11-01 UTC. Status: milestones A and supplied-image B
+functionally validated, including B's approved packaging-source functional and
+setup-container interruption checks; C noise/resolution discovery and admitted
+repeatability study/descriptive analysis completed; staged comparison
+safeguards and deterministic milestone D implemented, including one bounded live
+count-fault bisection with fresh confirmations. Pristine-source/source-bug-fix,
+broader live bisection/diagnostics and performance calibration remain deferred. See the
+[comparison guide](../comparisons.md) and [bisection guide](../bisection.md).
+
+## Supplied-image FRR extension — selected 2026-11-04
+
+The [FRR maintainer plan](frr-maintainer-workflow.md) extends the delivered
+recipe, target-identity, diagnostics, assertion, investigation, descriptive
+comparison and minimization interfaces to the existing `frr_c` target adapter.
+Generators remain BIRD and the observer remains sink. Its
+[public guide](../frr-maintainer-workflow.md) distinguishes modeled contract
+checks from separately approved real-image qualification. Historical BIRD
+validation below retains its original scope. FRR local-source builds, revision
+searches, target-crash witnesses and target thread controls remain unsupported.
+This extension authorizes no real workers/builds/acquisitions and changes no
+measurement definitions or calibrated performance policy. Formal 10% calibration
+remains deferred; the upstream investigation remains paused.
+
+Its separately approved [FRR same-image functional pair](frr-maintainer-workflow.md#approved-same-image-functional-pair-completed--2026-11-04-utc)
+has now passed original assertions, exact-prefix checks, independent reviews,
+report reconstruction and owned cleanup with two workers and zero builds.
+That bounded qualification does not extend to broader live FRR comparison,
+minimization or performance detection; the linked plan owns the complete record.
+
+## Operator decision: descriptive comparisons first — 2026-10-31
+
+Follow-through on 2026-11-03: the operator selected continued work after the
+successful [received-prefix runtime validation](observer-prefix-runtime-validation.md#successful-existing-image-worker--2026-11-03).
+New small functional checks should use the existing immediate bounded recipe
+workflow, with concurrent activity recorded and active-measurement/resource/
+ownership/cleanup guards retained. Hourly CPU-idleness admission is not required
+solely for timing quality in a correctness-only question. Existing frozen
+cases retain their rules. The [functional guide](../functional-validation.md)
+owns this protocol; performance comparisons and deferred calibration remain
+separate. This selects a workflow, not additional builds or workers.
+
+The operator's next selected implementation goal on 2026-11-01 is
+[received IPv4 prefix identity](observer-prefix-identity.md), strengthening the
+existing synthetic correctness witnesses beyond count agreement. Upstream BIRD
+test selection was deferred at that decision; the
+[resumed correctness screen](upstream-bird-correctness-screening.md) now records
+four investigated fixes without claiming an execution-ready reproducer.
+The bounded opt-in final snapshot is distinct from
+route attributes, convergence-time identity, calibration and broader workloads.
+
+The operator accepted deferring formal reliable-10%-slowdown calibration after
+the [preserved route-work partial case](milestone-c-route-work-discovery.md)
+(analysis recorded at engine `e553df6`). The supported descriptive comparison
+workflow is delivered; calibrated regression detection remains unvalidated and
+is a deferred extension, not a release blocker for that workflow. This decision
+does not satisfy the deferred calibration acceptance criteria or establish a
+minimum detectable effect. Performance policy remains disabled and performance
+bisection remains deferred. Correctness/crash predicates keep their existing
+supported deterministic bisection behavior.
+
+Stop extending the calibration campaign on the busy development workstation.
+Retain every completed/partial case, original result, control image, analysis
+and limitation. No new calibration case, retry, queue enrollment or execution
+follows from the retained images or unused positions. Historical next-calibration
+instructions below describe the earlier sequence; this decision supersedes them
+as the current development priority.
+
+Prioritize usefulness of the existing reproduction, local-fix investigation,
+descriptive comparison and deterministic correctness-bisection workflows. Select
+the next concrete maintainer problem or usability improvement within those
+interfaces; broader adapters, new workloads and minimization remain separate
+scope choices. Calibration need not block that development or its feedback.
+
+First follow-through after decision `c1ddb80`: add offline
+`recipe_bisection.py status SESSION` with readable progress and optional JSON.
+It verifies existing evidence, shows trial/reservation budget and outcome
+counts, failed assertion names, evidence paths and supported boundary state.
+It starts no work and leaves pending reservations intact, distinguishing an
+unrecorded trial from a marker awaiting bookkeeping reconciliation. Existing
+search rules and portable report formats remain unchanged. The
+[bisection guide](../bisection.md#inspect-progress-without-starting-another-trial)
+documents this maintained workflow. Validation: 54 focused bisection tests and
+the standalone five-case simulated walkthrough passed; these establish no new
+live adapter or performance qualification.
+
+Next follow-through after status command `6564c3a`: investigation report creation
+and verification now reject reusing one original attempt ID for both sides.
+Previously, supplying the same package twice, copying it, or reusing its ID in
+a different payload could produce a verified functional pair. Five regression
+cases reproduced acceptance before the fix. The guard reads verified bundled
+result identities and rejects duplicates without changing the report schema;
+separate same-image runs and unavailable attempts retain their existing meaning.
+Validation: six identity cases plus existing investigation/report/walkthrough
+tests passed (44 total). No daemon build, worker or calibration was involved.
+
+Revisit calibration only as one separately approved, bounded campaign on a host
+with predictable available capacity. Before execution, freeze the workload,
+operating conditions, modest-effect control/characterization procedure, detector,
+error goals, justified sample budget, resource/time budget and success/stop
+criteria. Fresh characterization and held-out confirmation remain distinct.
+The campaign succeeds only if the predeclared criteria are met; exhausting its
+budget or obtaining incomplete/inconclusive evidence ends it with calibration
+still deferred, without automatic extensions or another attempt. Neither this
+decision nor scheduling at an idle hour qualifies a host or enables policy.
+
+## Maintainer-workflow readiness goal — completed 2026-11-01 UTC
+
+The operator requested a larger outcome-based batch instead of a handoff after
+each small change. Starting from engine `90ec94e`, complete the supported
+reproduction → local-fix investigation → deterministic correctness-bisection
+workflow, with coherent maintained offline examples and verified interruption
+recovery. Commits are internal checkpoints. Existing measurement evidence and
+calibration deferral remain unchanged.
+
+Acceptance requires one clearly simulated canonical recipe and source history
+across reproduction, candidate investigation and bisection; distinct original
+attempts; public CLI package/report verification; recovery of an interrupted
+original without another worker; preserved controller/failure evidence and
+missing statuses; a readable entry point and result index; independent review,
+meaningful regression tests and required clean commits. All subprocess/network
+boundaries in the walkthrough must remain explicitly simulated. Real builds,
+benchmark workers, downloads, remote transfer, deletion, pushes and publication
+are outside this goal. Report material limits rather than implying broader live
+or performance qualification.
+
+Delivered at engine `36687f4`: the
+[maintainer workflow](../maintainer-workflow.md) and maintained
+`scripts/maintainer_smoke.py` connect reproduction, an explicit local rollback,
+stopped investigation rebuilding, interrupted bisection recovery and fresh
+boundary confirmations. The README and roadmap link this usable entry point.
+
+The batch fixes both audited bisection defects: critical control records publish
+atomically without replacing existing evidence, and an existing failure retains
+priority during recovery. It also fixes both investigation defects: valid
+original worker packages survive outer controller failure with a separate
+checksummed stop record that withholds a pair verdict, and public offline
+`investigation-rebuild` retains packages, missing statuses/reasons and controller
+stops, including reports with no available baseline package.
+
+| Readiness check | Verified outcome |
+| --- | --- |
+| One coherent modeled problem | Same canonical crash recipe and nine-revision source history across all stages; candidate is explicitly a rollback. |
+| Original-observation integrity | All 11 original attempt IDs distinct; search and confirmations use fresh observations. |
+| Interrupted recovery | Two recorded plus one reserved trial becomes three recorded with no pending marker; recovered source ID and original manifest SHA unchanged, with no additional build or worker. |
+| Portable evidence | Independent offline verification of reproduction, resolved investigation, stopped/inconclusive investigation, pending report and confirmed boundary; all 14 recorded verification receipts valid. |
+| Usable result | All 13 human-index links resolve; public command arguments, exits, stdout and stderr remain retained. |
+| Regression validation | 152 focused checks and the standalone walkthrough passed; required full repository gate passed all 2,526 tests. |
+| Review | Independent review accepted implementation, compatibility, retained-demo evidence and documented scope. |
+
+Retained local review output:
+`/tmp/bgperf2-maintainer-readiness-20261101/REPORT.md`. Canonical recipe SHA-256:
+`6a9bbcadedf3202db9f0b95218a415dbc4a50ded0ea70de56434ac72d4af4c2c`.
+The public walkthrough reproduces the demonstration into a separately selected
+fresh output directory; this local path is not a prerequisite.
+
+Readiness is limited to the supported offline synthetic IPv4 BIRD workflow.
+It qualifies no new live source build, daemon, real bug/fix, hardware or timing
+detector. Worker packages and controller stops retain separate meanings;
+controller records/checksums do not authenticate execution. Invalid partial
+packages remain at their original work/results locations rather than being
+bundled as valid observations. Reports without controller stops retain their
+prior structure; new stopped reports add an optional stop reference and artifact.
+Bisection publication covers process interruption, not a general power-loss
+guarantee; previously malformed final journals remain refused for manual
+inspection. Status/recovery use the session lock and refuse active writers.
+Calibration remains deferred, performance policy disabled, and no real build,
+worker, download, evidence deletion/remote transfer, push or publication occurred.
+
+## Maintainer checkout preparation and handoff goal — completed 2026-11-01 UTC
+
+The operator requested a larger follow-on goal after `df8b1d5`. Turn the
+supported workflow into a practical preparation path for an explicitly selected
+local maintainer checkout, while retaining the existing source/build contracts
+and deferred calibration. Complete the whole batch before the next feedback
+handoff; commits remain internal checkpoints.
+
+Acceptance includes preparing the entire bounded first-parent good→bad range
+into isolated clean checkouts and frozen build/bisection plans without changing
+the original repository, running hooks, fetching remote objects or executing source.
+Verify that preparation independently and freeze a maintainer handoff for
+explicit baseline/candidate plans, destinations, budgets and dependency-ordered
+public commands. Future targets must be referenced by their returned target
+artifact paths, not invented images. Preparation, verification and handoff do
+not execute the listed build/worker commands or qualify host/image availability.
+
+Exercise actual local Git with inert BIRD-style source, including original
+HEAD/refs/index/config and dirty/untracked-byte preservation, hooks/filter/network
+refusal, range completeness, source/plan tampering, partial preparation retention
+and handoff semantic verification. Keep the fully simulated execution walkthrough
+as a separate maintained example. Existing regular-file source limits remain;
+this goal does not silently materialize pristine BIRD symlink aliases.
+
+The audit reproduced three source-identity failures: assume-unchanged and
+skip-worktree flags could conceal modified engine files, and replacement refs
+could substitute another tree while naming the original source commit. The
+fixes now reject hidden engine index flags and read raw objects without replacement
+refs. Source-range preparation verifies commit, tree and blob bytes against their
+object IDs, uses an independent local clone and rejects redirected Git metadata.
+Verified handoff freezes build/investigation commands and protects the original
+source even when both selected build plans use prepared copies.
+
+Independent review accepted the implementation and reproduced adversarial
+verification failures. Focused checks passed: 54 source-range tests, 44 handoff
+tests and 89 final checkout-demo, source-identity and documentation checks.
+Both retained public-CLI demonstrations passed with four prepared revisions,
+verified artifacts, unchanged original source and no requested execution:
+`/tmp/bgperf2-maintainer-checkout-ready-assertions-20261101` and
+`/tmp/bgperf2-maintainer-checkout-ready-crash-20261101`.
+
+Delivered at engine `a8ca2b3`. The
+[maintainer checkout guide](../maintainer-checkout.md) joins
+[isolated source-range preparation](../source-range.md), explicit dirty-fix
+planning and the [verified handoff](../maintainer-handoff.md). The README,
+roadmap and existing investigation/bisection guides point to that entry path.
+
+| Readiness check | Verified outcome |
+| --- | --- |
+| Historical preparation | Both assertion and crash demonstrations prepare all four consecutive revisions through the public CLI, using an independent local clone and isolated clean checkouts. |
+| Original checkout preservation | Before/after HEAD, refs, index, configuration and dirty/untracked bytes agree; independent review recomputed the original signatures and confirmed no hook execution. |
+| Source identity | Raw commit/tree/blob hashes are checked; hidden engine index flags, replacement objects, redirected Git metadata and corrupted object storage are refused. |
+| Reviewable execution case | Each handoff retains 19 unexecuted dependency-ordered steps, selected plans, exact budgets, future target paths and unknown image IDs; build/work/results/session destinations remain absent. |
+| Retained evidence | Independent verification accepts both range and handoff artifacts in each demonstration; all seven human-index links per demonstration resolve. |
+| Required validation | The native repository gate passed all 2,639 tests. Its first attempt exposed a missed legacy command mock (27 failures, 2,612 passes); the corrected preparation fixture passed all 31 focused tests before the complete successful rerun. |
+| Independent review | Implementation, adversarial verification cases, final retained artifacts and the incremental fixture correction accepted with no outstanding findings. |
+
+The two retained local demonstration directories above each contain `REPORT.md`,
+public command transcripts, original checkout signatures and verification
+receipts. `scripts/checkout_workflow_smoke.py` recreates either example into a
+fresh selected output directory; those local paths are not prerequisites.
+
+Readiness covers actual local Git preparation with inert fixtures, plus the
+separate previously completed simulated execution/recovery walkthrough. It
+establishes no real BIRD build, daemon bug/fix, image availability, host
+suitability or execution authorization. The original source must have its own
+supported `.git` directory; prepared checkout administration and handoff paths
+remain location-bound. Existing regular-file limits continue to refuse symlink
+aliases/submodules. Object hashes detect inconsistent content, not source trust
+or signed provenance. The handoff is inspectable metadata, not an executor.
+No real daemon build/worker, download, evidence deletion/remote transfer, push
+or publication occurred. Original measurement evidence remains unchanged;
+formal 10% calibration stays deferred and performance policy disabled.
+
+## Real BIRD maintainer validation — hourly functional case passed
+
+The follow-on goal starts at `883f72e` and selects actual local upstream BIRD
+history rather than another inert fixture. The
+[authoritative case plan](real-bird-maintainer-validation.md) freezes the
+pre-2.19.2 → 2.19.2 neutral functional question, same recipe/generator/sink,
+explicit alias-only derived source mapping, exact local images, source/build
+plans, selected public commands, evidence roots, expected outcomes and recovery.
+The supported regular-file guard remains unchanged. Packaging preparation
+authenticates raw upstream/derived objects and preserves the original source;
+this does not authenticate publisher trust or claim pristine-source support.
+
+The proposed execution is two 1,200-second builds and three serial 120-second
+workers (2,760 budget seconds), with independent baseline/final reviews and no
+retry. The generic handoff retains an unexecuted search plan; bisection and
+comparisons are excluded from this neutral case. Both revisions should pass;
+no real bug/fix or introduced routing fault is asserted. Approval must include
+the explicit functional-only root-storage exception, existing local image/source
+trust and host admission/stop rules. No build, worker, acquisition, schedule,
+infrastructure, evidence deletion/transfer, push or publication is authorized
+by preparation. Performance policy stays disabled and 10% calibration deferred.
+
+Implementation checkpoint `12bf6a0` passed independent review and the native
+2,655-test gate. The case plan records the unchanged original source, prior
+evidence inventory, retained real-BIRD rehearsal and final clean-revision
+packet/readback procedure. Final location-bound receipts live outside engine
+Git; they establish preparation only. Real build/worker compatibility and current
+host admission remain execution-time uncertainties.
+
+The operator subsequently approved the frozen case at `45c914a`. Its single
+admission observed unrelated development pytest suites on the same host, failing
+the selected requirement that other development not run during the attempt.
+The case stopped before its first build or worker: **zero builds, zero workers;
+two builds and three workers never run**. The measurement guard and memory/disk
+floors passed, but they do not waive that condition. No automatic wait/retry or
+use of the unused positions follows. The
+[authoritative stopped-execution record](real-bird-maintainer-validation.md#approved-execution-stopped-at-admission--2026-11-01-utc)
+retains approval, observations, accounting and local preservation. Actual
+build/worker compatibility remained unassessed by that manual attempt; policy
+stays disabled and calibration deferred.
+
+The operator then selected a fresh hourly case rather than resuming the manual
+refusal. At execution engine `f07ce88` and lab `4d3d2ae`, run
+`20261101T091001Z-e1d5cba621` completed two successful build commands and three
+distinct functional workers, with all twelve assertions, exact 100-route counts,
+original/rebuilt report verification and matching recorded cleanup inventories.
+Baseline compilation ran; candidate compilation reused cache. The final reviewer
+accepted the evidence, but a lab citation-scope check blocked controller closeout
+because it rejected its own frozen deployment inputs. Lab follow-up `db901dd`
+fixes exact-file citation validation and supplies independent supplemental
+closeout, measured preservation and status-only reconciliation. Original blocked
+records, measured artifacts and consumed budgets remain intact; no work reran.
+The [complete validation record](real-bird-maintainer-validation.md#fresh-hourly-case-functional-validation--2026-11-01-utc)
+retains source identities, local archive and acceptance limits. Foreign CPU was
+recorded during workers, so this qualifies bounded functional compatibility only;
+pristine-source support, actual bug/fix coverage, performance calibration and
+broader live bisection/diagnostics remain deferred.
+
+## Preserved validation history
+
+The [bounded milestone D validation record](milestone-d-runtime-validation.md)
+confirms the deliberate local count-fault boundary with three public builds and
+five serial workers. It retains earlier admission stops, the first-trial load
+monitor limitation, observed contention, cached compilation and independent
+reviews. All runtime authorizations are consumed; no performance policy is enabled.
+The operator selected a 10% observer-window slowdown planning target. The approved
+[controlled repeatability cases](milestone-c-repeatability-validation.md) used
+one optimized build: case 01 stopped after its first worker, zero-build case 02
+after its second, both for outside CPU above the selected cap. Case 02's single
+physical pair is unqualified; statistical detection remains unvalidated.
+The subsequently authorized [queued study and analysis](milestone-c-repeatability-validation.md#queued-repeatability-study-and-analysis-completed--2026-10-29)
+completed 32 workers and 16 same-image pairs. Its pair variation reaches
+−11.39% to +20.94%; overall geometric change +0.44% combines opposite block
+means. Original foreign-CPU confounders and withheld controlled deltas remain.
+The report proposes paired, counterbalanced validation and a draft engineering
+budget; no powered requirement, performance verdict or new runtime is selected.
+The subsequent [debug-control eligibility case](milestone-c-control-eligibility.md#execution-and-descriptive-outcome--2026-10-30-utc)
+completed one cached build and 23 workers before outside CPU permanently stopped
+successors. Three complete optimized/debug pairs had longer observed windows;
+the incomplete, confounded screen leaves known-effect qualification and reliable
+10% detection unestablished. Its nine unrun workers supply no retry budget.
 Direction: make bgperf2 a reusable performance tester, with portable public
 contracts that other tools can build on.
-The operator authorized phase 0 and phase 1a–b prerequisite/preparation implementation on
-2026-10-23. This work starts
+The operator authorized phase 0, phase 1a–b prerequisites/preparation and complete
+milestone A implementation on 2026-10-23. This work starts
 no daemon builds, benchmarks, provisioning or publication, and changes no host
 qualification gate.
+
+The [background-load diagnostic and independently verified analysis](milestone-c-control-eligibility-queued.md#diagnostic04-completed-and-analyzed--2026-10-30)
+completed sixteen workers/eight optimized-debug pairs, with geometric observed
+window change +72.23%. Confounders remain and policy stays disabled. The next
+[interleaved noise/control case](milestone-c-control-separation.md#approved-execution-and-partial-outcome--2026-10-30-utc)
+was approved and permanently stopped at its memory requirement after twelve
+completed workers/six pairs; twenty workers never ran and zero builds occurred.
+Only one of two available local AD brackets exceeds its AA envelope; the full
+eight-comparison screen is unassessed. All originals and partial accounting
+are preserved. No successor execution or calibrated verdict is authorized.
+The approved [hourly case02](milestone-c-control-separation-02-hourly.md)
+completed all 32 workers/sixteen pairs with zero builds and sixteen accepted
+public reviews. All eight AD brackets exceeded their local AA envelopes
+(AD geometric change +78.40%; AA range −14.96% to +10.23%). This large-control
+separation does not calibrate a 10% threshold. Next prepare an independently
+quantified small control, explicit error goals and a justified confirmation
+budget before execution approval. Policy stays disabled; quiet-start scheduling
+does not guarantee quiet conditions throughout a case.
+The approved [route-work discovery case](milestone-c-route-work-discovery.md)
+completed four optimized 0/16/64/256 source builds, then stopped at the first
+worker admission because available memory fell to 38.40 GiB below 48 GiB. All 64
+worker positions remain never run; no control-dose effect is measured. The
+images and full evidence are retained for a separately reviewed fresh zero-build
+case. No successor run is authorized; policy remains disabled.
+The subsequently approved fresh zero-build route-work case 02 completed two
+zero-dose workers, then its third worker was interrupted by the selected live
+dual CPU/PSI pressure screen. All 61 remaining positions never ran; no nonzero
+dose was measured. One complete same-image pair cannot establish repeatability
+or nominate a control. The [route-work record](milestone-c-route-work-discovery.md)
+retains this separate partial execution and the prelaunch correction to record
+background CPU. Policy remains disabled and calibration pending.
+Independent full local preservation/readback and offline sink-log reconstruction
+are complete. The sole same-image pair changed −10.63%; n=1 leaves sample log SD
+unknown, and this partial case supplies no nonzero-dose effect or nomination.
 
 ## Outcome and ownership
 
@@ -60,6 +416,11 @@ commits and continue after each commit. There is no fixed commit or substep limi
 Use parallel implementation and review where the work is independent. Routine
 implementation choices and fixable test failures do not need operator feedback.
 
+The operator reiterated this policy at the milestone C continuation: complete
+larger steps, use subagents with appropriate models/effort for independent work,
+and ask for advancement only when a necessary decision or authorization remains.
+Internal commits and ordinary review fixes are not operator handoff points.
+
 Pause when the operator can make a concrete decision: review a usable workflow
 or report, choose a new daemon/reproduction case, resolve a material compatibility
 or measurement-definition tradeoff, or authorize a specified runtime validation.
@@ -77,15 +438,16 @@ adapter acceptance checks are deferred is not fully accepted.
 
 | Execution milestone | Complete before the feedback handoff | Operator feedback or decision |
 | --- | --- | --- |
-| A. Usable newcomer reproduction workflow — current | Finish phase 1: run one supported recipe through the existing runtime with exact role identities, isolated attempts, result/artifact production and verification, actionable failures, public instructions and a maintained fresh-checkout smoke entry point. Include the timeout, interruption, owned-resource cleanup and partial-result handling needed for this workflow, plus the existing completion/reproduction outcomes. Exercise the complete workflow with fake runtimes and review it end to end. | Review the actual CLI walkthrough and returned result package. Present an exact, bounded real-image/qualified-host smoke proposal for authorization. Select the next daemon or concrete bug when that choice affects the following milestone. |
-| B. Test and diagnose a local fix | Complete phases 2–3 and the existing-workload assertions needed from phase 5: supplied-image/local-source target overrides, recorded build differences, useful crash/memory diagnostics and preserved partial evidence. Deliver one coherent baseline/fix investigation using controlled fixtures and the selected adapter. Keep generator, observer and workload identities fixed. | Review the reproduction/fix report and diagnostic usefulness. Decide any remaining source-build trust, instrumentation or adapter choices that affect real validation. |
-| C. Trustworthy baseline/candidate comparison | Complete phases 4–5: repeated/interleaved comparisons, explicit existing-workload correctness assertions, separate memory/CPU/timing results, missing/failed attempts and confounders, machine-readable output and a useful human report. Include controlled differences, noise and inconclusive examples. | Review comparison outputs and a concrete calibration proposal. Select acceptable effect sizes, measurement budget and any regression policy before calibrated performance verdicts are enabled. |
-| D. Automated regression localization | Complete phase 6 for supported deterministic predicates: bounded revision search, identity-based build caching, resume, skipped/ambiguous revisions and confirmation evidence. Keep performance bisection conditional on milestone C's calibration. | Review the resulting revision boundary and evidence; decide whether to prioritize broader daemon support, calibrated performance bisection or the separately deferred minimization work. |
+| A. Usable newcomer reproduction workflow — functionally validated; ready for feedback | Finish phase 1: run one supported recipe through the existing runtime with exact role identities, isolated attempts, result/artifact production and verification, actionable failures, public instructions and a maintained fresh-checkout smoke entry point. Include the timeout, interruption, owned-resource cleanup and partial-result handling needed for this workflow, plus the existing completion/reproduction outcomes. Exercise the complete workflow with fake runtimes and review it end to end. | Review the actual CLI walkthrough and returned result package. Present an exact, bounded real-image/qualified-host smoke proposal for authorization. Select the next daemon or concrete bug when that choice affects the following milestone. |
+| B. Test and diagnose a local fix — supplied-image functional pair validated | Complete phases 2–3 and the existing-workload assertions needed from phase 5: supplied-image/local-source target overrides, recorded build differences, useful crash/memory diagnostics and preserved partial evidence. Deliver one coherent baseline/fix investigation using controlled fixtures and the selected adapter. Keep generator, observer and workload identities fixed. | Review the reproduction/fix report and diagnostic usefulness. Decide any remaining source-build trust, instrumentation or adapter choices that affect real validation. |
+| C. Descriptive baseline/candidate comparison — delivered; calibrated detection deferred | Complete phases 4–5 for the supported descriptive workflow: repeated/interleaved plans, named correctness assertions, separate memory/CPU/timing observations, variation, missing/failed attempts, confounders and readable/verifiable reports. Preserve calibration limits. | Review practical usefulness and maintainer feedback. Reliable 10% detection is an optional later campaign under the operator decision above, not a release blocker; its acceptance remains unmet and policy disabled. |
+| D. Automated regression localization — bounded live count-fault case validated | Complete phase 6 for supported deterministic predicates: bounded revision search, identity-based build caching, resume, skipped/ambiguous revisions and confirmation evidence. Keep performance bisection conditional on milestone C's calibration. | Review the resulting revision boundary and evidence; decide whether to prioritize broader daemon support, calibrated performance bisection or the separately deferred minimization work. |
 
 Milestone A includes only the lifecycle robustness and assertions necessary for
 a reliable first reproduction workflow. Full diagnostic capture and generalized
-assertion interfaces remain in B/C. Phase 7 minimization, policy, IPv6 and other
-new workload families remain deferred until explicitly selected.
+assertion interfaces remain in B/C. Phase 7 is now selected for bounded peer and
+prefix-count minimization; policy, IPv6 and other new workload families remain
+deferred until explicitly selected.
 
 ## Technical delivery sequence
 
@@ -128,9 +490,14 @@ to introduce the envelope.
 
 ### 1. Deliver the newcomer reproduction workflow
 
-Status: in progress. Phase 1a's offline plan/read-only prerequisite report and
-phase 1b's selected-image preparation are complete locally. Recipe execution
-and result production remain pending; real acquisition has not been validated.
+Status: complete for the supported synthetic BIRD/BIRD/sink functional workflow
+and the explicitly authorized concurrent-work validation scope. Offline
+prerequisites, selected preparation, isolated execution, packaging/verification
+and the maintained simulated fresh-checkout smoke are implemented. The real
+functional attempt and early-timeout check passed; see the
+[validation record and limits](milestone-a-runtime-validation.md). Real
+`prepare --pull` acquisition, performance/hardware qualification and broader
+adapter/diagnostic checks remain unassessed.
 Depends on phase 0; first useful public release milestone.
 
 - Provide export, inspect/plan, prepare and run operations over the same recipe.
@@ -161,7 +528,12 @@ actionable diagnostic, not a partially successful benchmark.
 
 ### 2. Make testing local fixes routine
 
-Status: planned. Depends on phase 1.
+Status: implemented locally for BIRD with controlled fixtures. The supplied-image
+and explicit local-source paths, identity records and investigation CLI are
+reviewed and tested. The supplied-image pair and approved BIRD 2.19.2 plus
+packaging-patch real build/functional pair passed. Pristine-source support,
+actual source-bug-fix and broader adapter qualification remain deferred in the
+[milestone B record](milestone-b-runtime-validation.md). Depends on phase 1.
 
 - Support a target override using a supplied image or an explicitly selected
   source checkout/commit and supported build recipe. Existing image overrides
@@ -182,7 +554,14 @@ real build/adapter qualification is explicitly selected and recorded.
 
 ### 3. Make failures and memory behavior diagnosable
 
-Status: planned. Depends on phases 0–1; can proceed alongside phase 2.
+Status: implemented locally for the supported BIRD recipe workflow. Scoped
+stages, optional diagnostics, host/build identities, memory accounting and
+partial evidence have fake-runtime coverage. Basic diagnostics passed in the
+supplied-image and packaging-source functional pairs. The approved SIGTERM check
+also passed with live setup generator/observer containers, before target startup;
+broader target-interruption/crash/memory diagnostic qualification
+remains deferred. See the [public guide](../investigations.md) and
+[validation record](milestone-b-runtime-validation.md). Depends on phases 0–1.
 
 - Add bounded lifecycle stages and explicit failure paths for setup, session
   establishment, observation, generator failure, target failure and collection.
@@ -210,7 +589,16 @@ crash reproduction without reconstructing the experiment from console output.
 
 ### 4. Compare a baseline and a candidate
 
-Status: planned. Depends on phases 0–3.
+Status: implemented and independently reviewed for the supported synthetic
+recipe. Repeated serial plans, descriptive reports and controlled fixtures are
+documented in the [comparison guide](../comparisons.md). Real noise/resolution
+discovery and the admitted 16-pair repeatability study/descriptive analysis
+completed. Earlier controlled cases retain their outside-CPU stops. The subsequent
+debug-control screen permanently stopped after 23 workers, retaining its partial
+descriptive evidence. The supported descriptive workflow is delivered; formal
+10% calibration is deferred under the operator decision above and regression
+policy remains disabled.
+Depends on phases 0–3.
 
 - Run repeated interleaved comparisons of two target builds on the same
   qualified host, reusing existing ordering/repetition machinery.
@@ -232,7 +620,11 @@ consume the comparison without importing plotting or engine implementation code.
 
 ### 5. Expose correctness assertions for existing workloads
 
-Status: planned. Build basic recipe outcomes in phase 0; extend after phases 1–3.
+Status: implemented for supported synthetic session, injection, exact observer
+count, experiment completion and final container-health witnesses; independently reviewed.
+Bound assertion specifications and outcomes preserve unsupported or missing
+observations. Route/attribute, new action and broader workload oracles remain
+deferred. See the [comparison guide](../comparisons.md).
 
 - Name observable session, count, health and existing action-completion
   assertions, with capabilities and deadlines. Preserve their evidence alongside
@@ -250,7 +642,12 @@ semantics remain documented and separately tested.
 
 ### 6. Bisect reproducible daemon regressions
 
-Status: planned, later. Depends on phases 2–5 and a trustworthy predicate.
+Status: implemented for the existing observable assertions and captured-target
+crash predicates; controlled Docker-free validation plus the
+[bounded live count-fault search](milestone-d-runtime-validation.md#approved-waited-execution-completed--2026-10-26).
+Broader live source-build/crash/recovery qualification and performance predicates
+remain deferred. See the
+[bisection contract and walkthrough](../bisection.md).
 
 - Search an explicitly bounded daemon revision range with the same recipe and
   build contract. Start with deterministic crash/correctness outcomes.
@@ -267,7 +664,11 @@ daemon repository is modified and no upstream issue/comment is posted.
 
 ### 7. Minimize a reproducer
 
-Status: deferred within this plan until recipes and predicates prove useful.
+Status: selected 2026-11-04 for bounded synthetic peer/prefix-count reduction
+after live staged prefix validation. The [active minimization plan](reproducer-minimization.md)
+and [public guide](../minimization.md) own implementation, validation and exact
+scope. Live minimizer qualification remains unassessed. Attribute/MRT subset
+reduction and performance minimization remain unsupported/deferred.
 
 Reduce selected peers, routes, attributes or input subsets while checking the
 same reproduction predicate. Every candidate has its own recipe/input identity.
@@ -294,17 +695,17 @@ host purchases are authorized by this document. Public recipe examples must
 contain no private evidence paths or credentials. Artifact export must preserve
 original evidence and explicitly select what can be shared.
 
-Next execution milestone, when requested: complete milestone A's newcomer
-reproduction workflow. Phase 1c's one-cell execution bridge is an internal part
-of that work, followed by result/artifact production and verification, required
-failure handling, end-to-end fake-runtime validation, public instructions and
-the maintained smoke entry point. Preserve selected role identities, legacy cell
-identity and measurement definitions throughout. Continue through reviewed
-commits until the workflow is ready for concrete operator feedback or a required
-runtime authorization; do not stop after implementing the bridge alone.
-Use the
-[architecture design](architecture-design.md) for background,
-without treating its historical proposed interfaces as current behavior.
+Current handoff: the bounded D live case confirmed its deliberately introduced
+revision boundary and both fresh confirmations; review its
+[evidence and limits](milestone-d-runtime-validation.md#approved-waited-execution-completed--2026-10-26).
+The B supplied-image and packaging-source cases remain accepted in their
+[validation record](milestone-b-runtime-validation.md). C calibration remains
+pending: its [discovery history](milestone-c-calibration-proposal.md) is complete;
+the [controlled repeatability record](milestone-c-repeatability-validation.md)
+records the selected 10% target, both outside-CPU stops and remaining statistical/policy
+decisions. Broader daemon/source/crash validation
+and minimization are separate selections. No further host trial or performance
+policy activation is implied by these completed functional cases.
 
 Progress record: 2026-10-23, this plan records the operator's priorities. No
 engine behavior, measurement definitions or experiments changed. This document
@@ -417,3 +818,612 @@ the earlier command-by-command handoffs. Completed phase 0/1a/1b records and
 commit references remain unchanged. The next continuation targets the complete
 remaining newcomer workflow and a reviewable runtime-validation proposal.
 This is a planning change; no runtime execution or new workload is authorized.
+
+
+### Milestone A implementation and feedback handoff — 2026-10-23
+
+- `049fbbf` completes the authorized newcomer implementation: `recipes.py run`,
+  exact BIRD/BIRD/sink role pins, isolated work/results and runtime names, a
+  bounded worker around the existing engine lifecycle, label/ID-owned resource
+  cleanup, result generation and `result-verify`. Legacy measurement definitions,
+  convergence, bench and batch behavior remain unchanged.
+- The controller holds a cooperating-user host lock across prerequisites and
+  execution; timeouts, Ctrl-C/SIGTERM, stopped roles, missing rows, cleanup and
+  collection failures have explicit status handling. Partial evidence is retained.
+  A target's abnormal container exit is a container-level crash witness, not
+  diagnosis of a daemon crash inside a still-running container. That unsupported
+  case remains bounded by timeout and inconclusive without evidence.
+- Packages contain a canonical recipe, summary, available raw work artifacts,
+  checksums and explicit missing kinds. Unsafe artifacts and traversal failures
+  are recorded; lost reproduction evidence becomes inconclusive. Verification
+  rejects changed, missing, unlisted, symlink and nonregular artifacts. Streaming
+  copying/hashing avoids loading whole logs into memory.
+- `scripts/recipe_smoke.py --output ABSOLUTE_NEW_DIRECTORY` exercises all nine
+  public CLI operations with allowlisted simulated probes and a fake execution
+  backend. An additional test drives the worker bridge through the actual
+  existing lifecycle with queued fake adapters/observations. These are distinct
+  checks; neither is real runtime or hardware acceptance.
+- The maintained smoke also passed from a fresh detached checkout of `049fbbf`
+  using the existing locked Python environment. All nine CLI operations completed,
+  the independently invoked result verifier passed, and the checkout remained
+  clean. Its retained summary explicitly identifies simulated completion and
+  leaves comparison unassessed.
+- Independent subagent reviews covered runtime isolation, image pinning, existing
+  lifecycle integration, failure/stop/cleanup behavior, package completeness,
+  safe verification and the public walkthrough. Findings about partial
+  collection, lost evidence, FIFO manifests and coverage were fixed and tested.
+  The final focused recipe/documentation suite passed 297 tests. The feature
+  commit's normal locked-environment/idle guard and full Docker-free test gate
+  passed all 2,097 tests.
+- Existing locked Python 3.14 packages were copied into the local worktree; no
+  dependencies were installed. Read-only local image inspection informed the
+  [bounded runtime proposal](milestone-a-runtime-validation.md). It found an
+  existing BIRD image and no sink image, so sink supply/build authorization is
+  explicitly separated from experiment execution.
+- No real image download, source build, benchmark, provisioning, 9950 access,
+  push, publication or remote evidence transfer occurred. Hardware acceptance
+  remains unmet; milestone A is ready for workflow/package feedback, not fully
+  accepted as a qualified performance experiment.
+
+Feedback decision: review the [CLI walkthrough](../recipes.md#run-and-return-one-attempt)
+and a locally generated simulated package, then choose whether to authorize the
+[runtime proposal](milestone-a-runtime-validation.md). Recommended scope is one
+functional 1-peer/100-prefix attempt with a 120-second worker budget and an
+optional separate timeout-path attempt, after the missing sink image and host
+suitability are explicitly resolved. Keep BIRD as the first adapter; no new
+daemon or bug selection is necessary to finish A's runtime acceptance. Milestone
+B remains unstarted pending feedback and an explicitly selected investigation.
+
+
+### Authorized functional validation and socket collection fix — 2026-10-23
+
+The operator authorized sink-only acquisition/build and functional checks on
+`jpietsch-server` alongside ordinary work. The active-benchmark exclusion remained;
+resource guards passed, and the root-backed disk exception was explicit. This
+superseded the proposal's idle-host requirement only for functional validation.
+
+At `7b2d502`, the sink build and one real experiment completed: the exact pinned
+BIRD target/generator delivered 100 prefixes against the existing 99-prefix
+completion checkpoint, with no tester errors/timeouts, using the newly built
+immutable sink. Owned runtime cleanup passed and unrelated container/network
+identities were preserved. End-to-end packaging failed on the tester Unix
+control socket, returning `harness_failed` with a verifiable partial package.
+The driver stopped; no automatic retry or real timeout trial followed.
+
+`3165af2` records socket endpoints as checksummed omissions without reading them;
+`8e9ed9b` also proves ordinary control-named files remain evidence. Independent
+review and 32 package tests passed; the normal full locked Docker-free gate
+passed 2,101 tests. Offline replay of the corrected packager on the preserved
+work produced a new verified package, matching all 23 original regular files and
+preserving both original work and the original failed package unchanged. It
+retains distinct execution and packaging revisions and is not a fresh run.
+
+The [runtime validation record](milestone-a-runtime-validation.md) owns exact
+engine/image identities, evidence paths, checksum/coverage verification,
+limitations and the bounded new authorization proposal. Fresh end-to-end
+execution with the socket fix and the real timeout trial remain unaccepted.
+CPU/memory/timing observations under concurrent load are unsuitable for
+performance interpretation. No 9950 access, provisioning, push, publication,
+remote evidence transfer or evidence removal occurred. The sink build cache
+and nonrunning intermediate containers remain; no broad cleanup was performed.
+
+Next handoff: review the corrected package and authorize, if desired, exactly
+one new functional attempt plus the conditional timeout trial, reusing existing
+images with no further downloads or builds. The original stop-on-failure rule
+prevents treating the prior authorization as permission for a benchmark retry.
+
+
+### Fresh end-to-end and early-timeout validation passed — 2026-10-23
+
+The operator separately authorized one fresh functional attempt with a 120-second
+worker budget and, only after success, one 0.01-second early-timeout attempt.
+Both ran exactly once at clean `73fed28`, reusing the existing pinned images with
+no downloads/builds. Ordinary concurrent work and root-backed disk storage
+remained explicitly accepted for functional use; no performance comparison or
+hardware qualification is claimed.
+
+The functional attempt completed, delivered all 100 prefixes under the existing
+completion contract, recorded zero tester errors/timeouts and returned a verified
+26-artifact package without offline repair. All 23 source regular files matched;
+the control socket was retained in work and explicitly recorded as omitted from
+portable evidence. The timeout attempt returned the expected `inconclusive` /
+exit 5 and verified 6-artifact partial package; all 4 source files matched and
+missing observations had explicit reasons. It stopped before generated
+configuration or observed container activity, so live-container timeout cleanup
+remains unqualified. Fake-runtime coverage of that path remains separate.
+
+Independent evidence review passed exact image/engine provenance, raw completion,
+status separation, socket handling and full copy coverage. All 71 baseline
+container identities/states/mount sets and all network IDs were unchanged; no
+worker/mpstat processes remained. New preservation checks verified 120 regular
+files, and all 143 entries in the previous sealed evidence still matched. Exact
+attempt IDs, paths, hashes and limitations are authoritative in the
+[runtime validation record](milestone-a-runtime-validation.md).
+
+Milestone A's implementation and authorized functional validation are complete
+and ready for workflow/package feedback. No further runtime attempts, qualified
+performance trials, registry acquisition, 9950 access, infrastructure changes,
+push or transfer are implied. Milestone B remains unstarted until a specific
+released-target/local-fix investigation is selected. No new approval is needed
+merely to inspect the delivered artifacts or provide feedback.
+
+
+### Milestone B implementation and controlled investigation handoff — 2026-10-23
+
+The operator authorized the whole milestone B implementation on the existing
+`milestone-a-newcomer` branch, using BIRD and controlled baseline/fix fixtures.
+The instruction explicitly excluded real downloads, builds, benchmarks,
+provisioning, 9950 access and pushing. Previous A runtime approvals were not
+reused. Work continued through reviewed implementation, tests, docs and local
+commits without treating internal substeps as operator handoffs.
+
+- `0c59ec6` adds strict external target/build identity contracts and the explicit
+  trusted-local-source BIRD builder. Base recipes remain unchanged; target-only
+  substitution preserves generator, observer and workload identities. Source
+  commit/HEAD, dirty patch/untracked/snapshot hashes, requested and observed base
+  images, compiler/linker flags and instrumentation are recorded. Supplied-image
+  source/build facts and binary reconstruction remain explicitly unknown.
+- The source planner executes no source/build code, mutates no maintainer tree
+  and refuses Git filters, incomplete/promisor/sparse/hidden-index views and
+  unsupported source entries. Snapshot size is bounded; Git/archive memory and
+  actual build resources are not workload estimates or hard host limits. The
+  fixed build recipe requires existing local bases, uses network-none/pull-false,
+  asserts installed BIRD/birdc, preserves failed work and selects a new tag.
+- `a02be06` adds scoped optional BIRD diagnostics, monotonic control stages,
+  pre-cleanup states/logs/cgroup memory and preserved event/sample material before
+  final graph/provenance failures. Stages do not redefine convergence clocks;
+  optional probes have uncalibrated overhead. Retained legacy graph samples are
+  explicitly distinguished from an all-poll journal. Unsupported/unreadable data
+  stays unknown, and collector failures retain any supported reproduction witness.
+- `c86ada0` connects the public CLI, serial investigation, report-only rebuild,
+  self-contained JSON/Markdown reports, verification and maintained smoke.
+  It also records host identity before the worker and forces the source builder
+  onto the selected local legacy daemon, disabling BuildKit/Buildx routing.
+  Host changes or incomplete observed role identities withhold controlled
+  attribution. No statistical performance comparison or universal fix rule is
+  introduced.
+- Reports verify bundled package bytes and the exact frozen recipe, preserve
+  failed versus never-run attempts, record target/build/instrumentation changes,
+  show crash witnesses/log references and carry explicit memory definitions.
+  Both JSON assessment and rendered prose are reconstructed during verification;
+  modified conclusions, unsafe/unlisted artifacts and differing fixed controls
+  are refused. Malformed optional diagnostics retain their raw artifact plus an
+  inspection reason rather than erasing the report.
+- Independent implementation and final reviews covered all three boundaries.
+  Findings fixed before handoff included Git filters/lazy-fetch and cumulative
+  snapshot size, build routing/install identity, bounded client reaping,
+  stage-failure cleanup, diagnostic path ownership, crash evidence conservatism,
+  edited report prose and malformed optional evidence. The final independent
+  focused review passed 109 tests. The implementation feature's normal locked
+  environment/idle guard and full Docker-free gate passed all 2,213 tests.
+- The first source-contract commit gate exposed a scratch Git fixture inheriting
+  hook Git variables. It changed local Git metadata and created an inert fixture
+  commit; the failed gate did not land an implementation commit. The accidental
+  state was preserved at local recovery ref
+  `recovery/milestone-b-hook-fixture` and `/tmp/bgperf2-b-git-recovery`, then the
+  intended branch, index and effective repository settings were restored without
+  editing worktree source files. The fixture helper now strips every `GIT_*`
+  variable; 39 source tests also passed independently under simulated inherited
+  directory/index/object/config context, with caller HEAD/index/config/work
+  byte-checked unchanged. All subsequent normal gates passed.
+- The maintained `scripts/investigation_smoke.py` passed from a fresh detached
+  checkout of `c86ada0` using the existing locked environment, with no dependency
+  installation. Its inert source and fake Git/build/runtime paths exercise
+  target-image validation, dirty-source planning/build identity, direct override,
+  serial investigation, report-only rebuilding and independent verification.
+  No real BIRD bug or fix is claimed. The checkout stayed clean.
+
+Retained feedback artifacts are under `/tmp/bgperf2-milestone-b-feedback`:
+
+| Controlled case | Report | Independently verified report files | Meaning |
+| --- | --- | --- | --- |
+| `resolved` | `resolved/results/report/REPORT.md` | 34 | Modeled child-daemon crash in baseline, candidate completes; same frozen recipe/instruments, distinct target/build identity |
+| `collector-failure` | `collector-failure/results/report/REPORT.md` | 16 | Baseline harness failure preserves available diagnostics; candidate is explicitly `not_run`, assessment inconclusive |
+| `missing-memory` | `missing-memory/results/report/REPORT.md` | 34 | Same modeled functional outcomes; memory remains null with reasons, never zero or a leak verdict |
+
+The simulation question and host facts are conspicuously labeled. Each case has
+an `investigation.json`, checksum manifest and verified result packages; the
+source/build fixture and direct-override result are retained alongside them.
+The separate stdout summary is
+`/tmp/bgperf2-milestone-b-feedback-summary.json`. These are controlled examples,
+not real measurement evidence or adapter/build qualification.
+
+The [public guide](../investigations.md) owns commands and schema/accounting
+meanings; the [runtime proposal](milestone-b-runtime-validation.md) owns the
+explicit future validation decision. Recommended first real scope is a bounded
+supplied-image functional pair using previously observed images, after exact
+read-only availability checks, with no downloads/builds or performance verdict.
+A real source-fix build requires a selected trusted checkout/commit/patch and
+reviewed preprovisioned local bases before an explicit build approval. Forced
+faults, privileged crash capture and live-container timeout qualification are
+not silently included.
+
+Milestone B implementation and its controlled report workflow are ready for
+operator feedback. Real source-build/diagnostic acceptance remains unmet. No
+real download, build, benchmark, provisioning, 9950 access, push, publication,
+notification or evidence transfer ran. Both existing A preservation manifests
+were rechecked: all 143 and 120 entries remained unchanged.
+Milestone C comparison/calibration and all new workload families remain unstarted.
+
+### Milestone C implementation and controlled comparison handoff — 2026-10-23
+
+The operator requested larger complete steps, autonomous progress until a necessary
+decision and parallel subagents with appropriate models/effort. This selected
+milestone C implementation on the existing `milestone-a-newcomer` branch. The
+earlier B runtime authorization was consumed by its recorded pair (`99ad7e0`);
+it was not reused. No real benchmark, download, build, provisioning, remote
+transfer, `9950` access or push occurred during C implementation.
+
+`e4fbbf1` adds strict recipe-bound observable assertion specifications and
+outcomes, plus controller-recorded worker-budget evidence. The recipe/result
+v1 envelopes stay unchanged. Assertions name session readiness, injection
+completion, exact observer count, existing experiment completion and final
+pre-cleanup container health separately. Unsupported predicates are refused;
+missing or inconsistent clocks/budgets remain unmeasured. Health does not claim
+continuous process health, and exact counts do not claim route/attribute truth.
+
+`b7bab14` adds offline frozen plans, explicit serial
+execution, per-attempt ledgers, report-only rebuilding and portable JSON/Markdown
+verification. Each round contains both targets, with alternating AB/BA or
+stable seeded digest ordering; the seed-43 sequence is pinned by a test. Every
+attempt uses new paths through the existing guarded bounded runner. The first
+noncompleted experiment/setup/harness/stop/inconclusive outcome stops execution,
+without retries or automatic continuation. Failed attempts and work never run
+remain distinct. A completed runtime sequence may still have failed or
+unmeasured assertions; the report exposes this rather than changing legacy
+completion semantics.
+
+Reports preserve separate CPU, timing and memory quantities, individual values,
+sample counts, missing/failed/not-run counts, variation and withheld reasons.
+Legacy sampled delivery memory in actual GiB is separate from lifetime cgroup
+peaks/ending observations. Rounded zero memory is below resolution, not an
+observed zero. Diagnostic-none runs do not fabricate optional final health or
+cgroup observations: callers may select the explicit four-assertion subset, or
+retain the full set and see unmeasured health. Basic diagnostics preserve their
+uncalibrated overhead. Performance qualification is always `not_assessed`, with
+regression policy `disabled`; descriptive differences do not imply improvement.
+
+Independent review fixed frozen timeout mismatches, duplicate original attempt
+identities that could invent repetitions, malformed/oversized memory metadata,
+impossible event spans and overflow-safe timeout validation. Verification
+reconstructs assertions, statistics, confounders and prose from bundled verified
+bytes and refuses unlisted/unsafe/modified files. The independent final focused
+suite passed 205 tests, with another 11 tests for the last timeout/CLI changes.
+The normal commit quality gate passed all 2,323 Docker-free tests.
+
+The maintained public `scripts/comparison_smoke.py` walkthrough retains five
+clearly simulated cases under `/tmp/bgperf2-milestone-c-controlled-feedback`,
+with summary `/tmp/bgperf2-milestone-c-controlled-feedback-summary.json`:
+
+| Controlled case | Simulated attempts executed | Files verified in each primary/rebuilt report | Purpose |
+| --- | --- | --- | --- |
+| `known-difference` | 6 | 92 | Known descriptive CPU/timing/legacy sampled-memory differences; optional cgroup/health absent under `none` |
+| `noise` | 6 | 92 | Equal role distributions with nonzero within-role variation |
+| `confounded` | 6 | 92 | Instrumentation/basic-probe confounders withhold differences while retaining observations |
+| `stopped` | 2 | 32 | Harness failure retained, four later attempts explicitly never run |
+| `missing-measurements` | 6 | 91 | Missing final metrics retain null values and reasons |
+
+All ten primary/report-only reports verify using the final implementation; 26
+simulated packages remain with their original work. These are controlled
+examples, not BIRD measurements or host qualification. The public guide is
+[comparisons.md](../comparisons.md). The
+[calibration pilot proposal](milestone-c-calibration-proposal.md) specifies a
+200,000-prefix workload, two proposed four-round series, worker budgets,
+between-series correctness/resolution review and the necessary host/storage/
+effect-size decisions. It authorizes no execution or policy activation.
+
+Milestone C's implementation and controlled feedback workflow are ready for
+review. Real host-trial/calibration acceptance remains unmet, and no calibrated
+performance rule is enabled. Milestone D deterministic bisection remains
+unstarted; performance bisection still depends on a separately calibrated C.
+
+The standalone walkthrough also passed from fresh detached checkout `b7bab14`
+at `/tmp/bgperf2-milestone-c-fresh`, reusing the existing locked environment
+without installation. All five cases passed; retained fresh outputs are under
+`/tmp/bgperf2-milestone-c-fresh-feedback`, with summary
+`/tmp/bgperf2-milestone-c-fresh-summary.json`. The temporary environment symlink
+was removed after verification and the checkout remained clean. The earlier
+milestone A/B preservation manifests were rechecked unchanged: 143, 120 and
+302 regular-file entries still match their sealed bytes. No original evidence
+was deleted or transferred.
+
+### Pilot closeout, supported safeguards and deterministic D — 2026-10-26
+
+The operator selected these three next steps after completion of the hourly
+noise/resolution experiment. The accepted run used engine `57e51b3` and was
+recorded in `1cfe6c5`: exactly eight A/A then eight A/B attempts, 120 worker
+seconds each, diagnostics none, 64 passing named assertions, 16 accepted
+observer timing screens and independent first-attempt, A/A, A/B and cleanup
+reviews. The [calibration record](milestone-c-calibration-proposal.md) retains
+the successful run and every earlier refusal/stopped invocation. This is
+noise/resolution discovery, not performance calibration or a version ranking.
+Lab operations own schedule retirement and the verified local preservation
+receipt; raw evidence is not placed in engine Git or transferred remotely.
+
+The [staged comparison interface](../comparison-execution.md) moves private
+coordinator lessons into an optional supported public workflow. It initializes
+supplement directories before execution, serializes collection/assessment,
+verifies package/assertion/budget/cleanup evidence before successors, requires
+explicit hash-bound first/final reviews, and supports a prior accepted series
+as a prerequisite. Optional pressure monitoring uses an explicit operator
+policy rather than requiring zero utilization. Monitoring errors and material
+pressure stop owned execution and block successors. Setup refusals proven to
+precede any attempt remain not-run. Legacy compare and report contracts stay
+unchanged; no automatic repairs or retry scheduler was introduced.
+
+[Deterministic bisection](../bisection.md) implements phase 6 for the existing
+four observable correctness assertions and a captured nonzero target-daemon
+exit. Hash-checked commit objects prove a consecutive first-parent chain;
+fixed source/build controls bind every trial. Build caches use complete plan
+identity, measurements retain unique original IDs, and both boundary sides
+require fresh confirmation. Skipped and ambiguous candidates remain holes in
+an explicitly unresolved range. Fixed trial budgets never extend. Interrupted
+reservations require explicit recovery; incomplete copies and existing failure
+records are retained without re-executing a worker. Portable reports reconstruct
+predicates, search requests, bounds, confirmations and human prose from evidence.
+
+Independent review tightened crash timing to explicit controller worker start/
+end anchors, retained missing/old clocks as ambiguous, made partial-copy and
+failure-before-journal recovery safe, and refused symlinked session paths. An
+additional check refuses a completed crash trial with unexplained target
+absence. The controller adds optional monotonic anchors to existing worker
+budget evidence without changing benchmark clocks or legacy assertion meaning.
+
+The maintained `scripts/bisection_smoke.py` exercises public planning, execution,
+report rebuilding and verification with five strictly simulated histories:
+assertion boundary, captured-crash boundary, skipped revision, ambiguous
+pause/resume and unstable confirmation. Subprocess and network operations are
+guarded throughout. Separate tests read an inert local Git chain without
+changing its checkout. That fixture strips the entire inherited Git environment;
+a trap-variable regression prevents a commit hook from redirecting it into the
+engine checkout. During validation its original missing isolation created an
+unintended local fixture commit; branch/index were restored with a checked
+compare-and-swap, all implementation edits retained, and an audit patch kept
+outside Git. No accidental fixture files remain in the branch.
+
+These are controlled implementation checks, not a real source build or live
+regression localization. Selecting a trusted daemon revision range, locally
+available builder/runtime images and qualified host remains a separate live
+validation decision. New daemon builds, downloads, benchmarks, infrastructure,
+remote evidence transfers and performance policy activation were not performed.
+
+Delivery commits are `42420a4` (staged comparisons) and `78a03b5` (deterministic
+bisection, controller budget anchors, maintained walkthrough and updated
+contracts). Both passed independent code review before normal local commits.
+The final engine quality gate passed **2,410 Docker-free tests** in 88.61 seconds;
+the locked environment inventory also matched all 34 packages. Independent final
+focused review passed 68 related tests, including 11 walkthrough tests.
+
+The final standalone walkthrough passed at
+`/tmp/bgperf2-milestone-d-final-feedback`, with summary
+`/tmp/bgperf2-milestone-d-final-feedback-summary.json`. It retained 33 simulated
+workers and 25 fake builds across five histories: assertion and crash boundaries
+confirmed; skipped, ambiguous and unstable cases remained unresolved. All 11
+primary, rebuilt and paused portable reports verified. Modeled workers use
+private output-owned host locks, leaving real host/session guards intact.
+These fixtures supply no daemon measurement or performance conclusion.
+
+### Codex/Docker prerequisite diagnosis — 2026-10-26
+
+An assistant-proposed follow-up addressed the Codex execution blocker. The
+operator subsequently clarified that this did not replace the A–D milestone
+objective. Read-only public
+checks at clean engine `78dd9a2` reproduced the distinction: the sandbox check
+refused at bootstrap, while the same recipe/check passed through approved host
+execution, including all three pinned image inspections. Neither created work
+or result directories. This confirms the approved execution path; it does not
+authorize a measurement or establish CPU idleness.
+
+The remaining engine bug was lost diagnostic output: the quality gate captured
+Docker stderr but rendered only its exit code through bootstrap. It now retains
+the last 2,000 diagnostic characters and explains execution-context access and
+approved host execution. A missing daemon is not mislabeled as a permission
+failure. The guard still refuses on every Docker inspection failure, makes one
+probe with no retry or automatic repair, and remains mandatory.
+
+The focused quality-gate/prerequisite suite passed 39 tests. Direct read-only
+verification of the corrected guard returned exit 1 with the actual socket
+permission-denied message in the sandbox and exit 0 through approved host
+execution. Reports and original stderr remain under
+`/tmp/bgperf2-codex-docker-verification-20261026`. The environment guide records
+the remedy. No BIRD regression was selected, and no build, benchmark, download,
+new schedule or remote transfer ran as part of this fix.
+
+### Focused execution and cleanup bug review — 2026-10-26
+
+An assistant-proposed review, accepted as a follow-up, repaired existing
+execution, error-handling and cleanup behavior. Baseline `46f13ba` supplied four confirmed defects,
+reproduced with fake workers and Docker responses before fixes:
+
+- An inspect, ownership or removal failure abandoned the remaining resources
+  of that kind. Cleanup now records each failure and checks every remaining
+  owned container/network once, retaining foreign or uncertain resources.
+- A normal process wait returning after the observed wall-clock budget could
+  still report completed. An exceeded observed budget is now inconclusive,
+  including when the child returned successfully; collection and cleanup
+  remain outside the worker budget.
+- A background health-monitor exception could kill monitoring while the
+  worker reported completed. Monitoring failures now reach the terminal
+  harness-failure outcome rather than being lost in a daemon thread.
+- One malformed container inspection could discard diagnostic state/memory
+  already collected for other containers. The collector now preserves those
+  observations and records a partial collection with the failure.
+
+The initial controller regression tests failed in all four selected cases
+(three cleanup failure kinds plus late completion); container and network
+coverage and related sequencing checks passed after repair. Red/green test
+outputs and review evidence remain under
+`/tmp/bgperf2-execution-bug-review-20261026`. Review scope stops at these four
+defects. No benchmark, daemon build, download, schedule, infrastructure or
+remote evidence transfer is part of this work. Normal Docker-free tests and
+independent review precede the local commit; live Docker/hardware qualification
+remains separate.
+
+The related Docker-free suite passed 114 tests. Independent final review passed
+70 controller/worker/diagnostic tests and accepted all four fixes. The monitor
+regression forces the capture-to-handoff race with real threads; captured errors
+survive concurrent completion. Stopping prevents later artifact/terminal writes,
+and a healthy in-flight SDK probe adds no join delay or new failure threshold.
+
+### Milestone B real-source validation resumed — 2026-10-26
+
+The operator selected continuation of milestone B's real-source validation.
+The Codex/Docker interruption and subsequent repairs did not replace the plan.
+Use the bounded [source-build validation procedure](milestone-b-runtime-validation.md#source-build-and-interruption-validation--2026-10-26)
+on the existing branch, with current reviewed engine code `26e5c5c` plus this
+committed procedure. First qualify the real clean-source build and basic
+diagnostic/interrupt/cleanup paths. No upstream bug or fix is selected by this
+functional check; an actual bug-specific source-fix assessment and milestone D
+live revision search remain distinct acceptance work.
+
+The pristine release source plan subsequently refused two checked-in BSD
+symlinks under the documented source guard. No build or worker started. A
+separate reviewed local packaging commit `ff132d4` materializes only those
+aliases; its execution is a changed source case awaiting the operator decision
+in the [milestone B record](milestone-b-runtime-validation.md#source-plan-refusal-and-prepared-compatibility-case).
+The original source and the engine guard remain unchanged. This preparation
+does not advance B's runtime acceptance or replace the A–D milestone objective.
+
+The operator subsequently approved that changed source case. At clean engine
+`3cf1a0a`, exactly one real build, two completed functional workers and one
+expected setup interruption passed independent review. Both completed workers
+passed all four bounded assertions; every package/report verified and actual
+container/network/volume inventories remained unchanged. The
+[full record and limits](milestone-b-runtime-validation.md#approved-packaging-source-validation-completed--2026-10-26)
+retains the user decision, source/image identities, raw evidence and review
+receipts. Source-builder symlink restrictions remain unchanged. Optional
+generator memory read timeouts stay missing, and interruption reached setup
+containers only; these results imply no routing bug fix, performance conclusion
+or broader fault-path qualification. The bounded authorization is consumed;
+the original A–D milestone objective remains in effect.
+
+### Milestone D bounded live count-fault validation — 2026-10-26
+
+The prepared case at `6d66b2f` and admission stop at `43965e6` were followed by
+the operator's renewed approval and explicit instruction to wait for heavy jobs.
+At runtime engine `43965e6`, three public builds and five distinct serial workers
+confirmed the deliberately introduced `f6f9adbd` → `4bddf6ab` count-fault boundary,
+including fresh workers on both sides. Each step and the two independently
+rebuilt 219-file portable reports passed review. The
+[authoritative execution record](milestone-d-runtime-validation.md#approved-waited-execution-completed--2026-10-26)
+preserves source/build identities, cached-compilation and contention caveats,
+diagnostic nulls, cleanup and local retention coverage. This is a bounded live
+functional qualification, not an upstream bug or performance result. Its runtime
+budget is consumed; C calibration and performance policy remain pending/disabled.
+
+### Milestone C controlled repeatability prepared — 2026-10-27
+
+The operator selected 10% slower observer 10%-to-90% delivery as the practical
+planning target. A read-only audit verified 322 A/A report files and reconstructed
+all eight original supplements: four natural pairs, with apparent same-image
+differences −25.13%, +40.17%, +71.14% and +1.24%. Unknown instrumentation,
+uncontrolled placement and recorded outside CPU work prevent a controlled
+performance conclusion or sample-size calculation. Original report withholding
+and source evidence are unchanged.
+
+Pure CPU layout helpers were extracted in `eca7c2d`; opt-in portable recipe
+pinning followed in `69ac253`, preserving absent-pin identities and forwarding
+canonical placement through the existing worker lifecycle. Independent code
+review accepted both; the feature passed 337 focused tests and its normal
+2,454-test commit gate. Live placement qualification remains pending.
+
+The [controlled repeatability validation](milestone-c-repeatability-validation.md)
+owns the next exact case: one optimized packaging-source build, then two
+separately gated blocks of eight A/A pairs, 32 serial workers maximum. Its new
+idle-host/storage authorization is pending. No builds/workers started during
+preparation. Sixteen pairs are not a powered sample-size claim, and the selected
+10% target is not a regression cutoff. Estimator, error rates/power, adequate
+sample budget, known-effect controls and held-out validation remain separate
+decisions before performance policy or performance bisection can be enabled.
+
+### Milestone C controlled repeatability stopped at first review — 2026-10-27
+
+The operator approved the prepared case at `2b15281`: one optimized source build
+and up to 32 serial A/A workers, with fresh idle admission and the renewed
+root-backed storage exception. The build completed with actual `-O2 -g`
+compilation/linking, immutable image/source/build bindings and independently
+accepted cleanup. Three setup layers used cache; compilation ran.
+
+The first worker completed and passed all four assertions, source/package/report
+verification and observer resolution. Its live requested/effective target,
+monitor and tester CPU layouts matched the recipe. Outside CPU then blocked
+continuation: the retained peak was 173.9710% of one core, above the frozen 100%
+cap. Independent first review rejected continuation; the public session and
+coordinator are permanently stopped. Accounting is one completed build, one
+completed worker, zero failed worker experiments and 31 never run. No pair
+completed, so there is no repeatability, variance, power or performance finding.
+
+The [execution record](milestone-c-repeatability-validation.md#approved-execution-stopped-at-first-review--2026-10-27)
+owns actual bounds, host/pressure evidence, cleanup, source revisions and local
+preservation paths. All original evidence is retained, unrelated resources are
+unchanged, and policy stays disabled. This case's authorization is consumed;
+a further run needs a concrete reviewed case and fresh execution approval.
+
+### Milestone C fresh zero-build case 02 prepared — 2026-10-27
+
+After the operator noted lighter load, a read-only 30-second check passed the
+existing CPU/memory/disk limits without authorizing execution. The
+[case-02 proposal](milestone-c-repeatability-validation.md#case-02-prepared-with-existing-optimized-image--2026-10-27)
+reuses the actual optimized image from case 01: zero builds and at most 32 serial
+workers under unchanged admission, pressure, outside-CPU and review/stop gates.
+Derived target declarations preserve the full immutable image/build provenance;
+only labels and the binding to an equivalent recipe at the final documentation
+revision change. Original build/runtime engine `2b15281`, stop record `8446aef`
+and sealed-preservation completion `edd5ce7` remain separately recorded.
+The original case stays permanently stopped. New destinations and separate
+ledgers are selected; no new worker or host/storage exception is authorized yet.
+
+### Milestone C zero-build case 02 stopped after worker 2 — 2026-10-27
+
+The operator's `try again` approved the prepared case at `e4b0ed7`, including its
+renewed root-backed storage exception. Both serial workers completed with all
+four assertions, live placement, package/report and observer screens verified.
+Independent first review accepted continuation after worker 1 (outside CPU 18%
+of one core). Worker 2 then recorded 124.1111%, above the frozen 100% successor
+cap, and independent review rejected all further continuation. The external
+coordinator stop governs; the generic public `ready` state and accepted first
+receipt remain honestly unmodified because no public mid-block rejection command
+exists. No third worker started.
+
+Accounting is zero builds, two completed experiments, zero failed experiments
+and 30 never run. One physical pair is not operationally qualified and supplies
+no repeatability/power/performance conclusion. Cleanup and all unrelated
+resources are unchanged. The [case-02 execution record](milestone-c-repeatability-validation.md#case-02-execution-stopped-after-worker-2--2026-10-27)
+owns detailed bounds, hashes, accounting and local preservation. Case 01 remains
+stopped and untouched; case 02's approval is also consumed. Policy stays disabled.
+
+### Milestone C debug-control eligibility preparation — 2026-10-29
+
+Starting from `3594dfe`, the next [concrete eligibility case](milestone-c-control-eligibility.md)
+uses the preserved 16-pair analysis to select balanced eight-pair A/A and
+A/debug blocks, with one same-source `-O0 -g` build and at most 32 serial
+120-second workers. Its 5,040-second combined build/worker budget is an
+engineering bound, not a powered requirement. The debug effect is unknown and
+condition remains confounded with block; this screen cannot qualify a known
+10% positive control or enable performance policy. Existing ordinary-report
+confounders, provenance and evidence remain intact. Preparation, candidate-binding
+negative tests and controller rehearsals live separately at
+`/tmp/bgperf2-c-control-eligibility-20261029`. Execution and the fresh intentional
+root-storage exception require explicit operator approval after packet review.
+No new live build, worker or schedule is part of preparation.
+
+### Milestone C debug-control eligibility stopped and analyzed — 2026-10-30 UTC
+
+At clean execution engine `36c678f`, the approved case completed one cached public
+build and 23 unique experiments. The operator removed the arbitrary four-hour
+admission window before execution; all finite build/worker limits and other
+gates remained. Block 1's sixteen same-image workers passed independent public
+first/final reviews. Block 2's first review passed, then its seventh completed
+worker recorded unrounded outside CPU 132.9058% above the frozen 100% successor
+cap. Independent review rejected continuation. Nine workers remain never run;
+no retry, extra worker or final block-2 acceptance was fabricated.
+
+The authoritative [execution and analysis record](milestone-c-control-eligibility.md#execution-and-descriptive-outcome--2026-10-30-utc)
+retains full accounting, cached-build provenance, cleanup and all evidence.
+Independent Decimal arithmetic reproduced all 23 windows and eleven complete
+pair ratios/bounds. Eight same-image pairs span −25.85% to +21.94%; three complete
+optimized/debug pairs span +66.31% to +82.28% (geometric mean +75.92%). The final
+unpaired rejected run is retained. Original CPU/instrumentation confounders,
+chronological-block differences and withheld controlled deltas remain. This is
+an incomplete eligibility screen, not known-10% control qualification or a
+performance verdict. Policy stays disabled and calibration pending.

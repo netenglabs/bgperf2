@@ -15,6 +15,7 @@
 
 from json.decoder import JSONDecodeError
 import sys
+import shlex
 
 from docker.errors import APIError
 
@@ -408,12 +409,14 @@ class SinkMonitor(Instrument, Sink):
 ulimit -n 65536
 exec {binary} -local-as {local_as} -peer-as {peer_as} -router-id {router_id} \\
     -local-address {local_address} -peer-address {peer_address} \\
-    -connect-retry 10s -log {guest}/{log} > {guest}/{stderr} 2>&1
+    -connect-retry 10s {snapshot}-log {guest}/{log} > {guest}/{stderr} 2>&1
 '''.format(binary=self.DAEMON_BINARY, local_as=self.conf['as'],
            peer_as=target['as'], router_id=self.conf['router-id'],
            local_address=self.conf['local-address'],
            peer_address=target['local-address'], guest=self.guest_dir,
-           log=self.LOG_NAME, stderr=self.STDERR_NAME)
+           log=self.LOG_NAME, stderr=self.STDERR_NAME,
+           snapshot=('-snapshot-socket ' + shlex.quote(self.prefix_snapshot_socket) + ' '
+                     if getattr(self, 'prefix_snapshot_socket', None) else ''))
 
     def run(self, conf, dckr_net_name=''):
         # `Container.run()` asks the container for `ip addr` to find its

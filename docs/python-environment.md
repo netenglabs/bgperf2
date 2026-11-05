@@ -61,8 +61,23 @@ access, or a separately supplied cache of the matching wheels.
 
 ## Local Git quality gates
 
+[Bounded local review and validation receipts](local-delivery-checks.md) supplies
+the prepare/review/validate workflow. Hooks reuse successful exact-state checks
+for at most 24 hours; guard, environment and push-safety checks remain fresh.
+
 The guard requires readable Linux procfs and a reachable local Docker daemon,
 even though the Python suite itself does not use Docker.
+
+If Docker inspection fails, the guard retains the last 2,000 characters of its
+diagnostic and stops before installation or tests. A socket permission denial
+can mean the current execution sandbox cannot reach Docker even when host-side
+commands work. For a sandboxed coding agent, request approved host execution
+for the complete Docker-dependent bootstrap/check/hook command, including its
+child processes. Check the reported cause first: an unavailable daemon and a
+permission denial require different remedies. Neither a refusal nor a generic
+nonzero exit establishes host load or a broken Python environment. Keep the
+guard enabled and retain failed check reports; no automatic retry or repair
+is performed.
 
 Bootstrap enables this checkout's tracked `.githooks/`. `--check` only verifies
 an existing environment. Pre-commit runs this repository's locked Docker-free
@@ -97,6 +112,12 @@ enable hooks and run the Docker-free suite. The runner must have a reachable
 local Docker daemon for the bootstrap's normal idle guard. There is no separate
 CI Python installation script, and the pip download cache is keyed by the lock;
 each job creates a fresh venv.
+
+The hosted job removes only its disposable runner image's system Git LFS
+filter defaults before the inert source tests. This repository uses no LFS
+objects. Source preparation still refuses inherited filters, and tests of
+fixture-created local/global filters remain enabled. Identity fixtures declare
+their CPU topology explicitly rather than assuming the runner has six CPUs.
 
 Incoming whitespace is checked against the push's previous commit or the pull
 request's base. The pull request tests the checkout action's default merge

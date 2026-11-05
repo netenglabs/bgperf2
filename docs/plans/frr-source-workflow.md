@@ -112,6 +112,14 @@ package and reconstructed-report checks passing. Final independent acceptance
 and local runtime preservation passed. The stopped case will not resume. Broader
 changed-image/minimization/bisection qualification remains separate.
 
+The later [controlled localization case](frr-correctness-localization-validation.md)
+now records a real introduced prefix fault/rollback contrast, five native
+minimization steps with a fresh one-peer/two-prefix confirmation, and five fresh
+source-bound external bisection trials confirming the adjacent local boundary.
+Supplemental final closeout accepted after offline relocation evidence was
+completed; the original final rejection and runtime stop remain preserved.
+Combined controller/cache paths and broader cases remain separate qualifications.
+
 Earlier supplied-image originals and their preservation remain untouched. No
 real build, worker, acquisition, upstream investigation, scheduler job, evidence
 transfer, push or publication occurred. Policy stays disabled and calibration

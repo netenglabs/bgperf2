@@ -23,7 +23,10 @@ targets bound to the original recipe cannot be reused by relabeling them. The
 adding builds to the minimizer.
 
 The [FRR walkthrough](frr-maintainer-workflow.md) includes modeled minimization
-through the same interface. It establishes no FRR failure or live qualification.
+through the same interface. Its simulated observations establish no FRR failure
+or live qualification. The separate [controlled FRR case](plans/frr-correctness-localization-validation.md)
+records five real native steps and a fresh one-peer/two-prefix confirmation of
+an explicitly introduced local identity fault, with the same bounded-greedy limits.
 
 ## Freeze a search
 

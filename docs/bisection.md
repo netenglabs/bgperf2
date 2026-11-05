@@ -155,7 +155,11 @@ correctness and has uncalibrated overhead. Capture requests do not acquire a
 supporting observer image or grant trial execution authority. Original source
 bindings, cache controls, reservation recovery, distinct original identities and
 fresh boundary confirmations are unchanged. Real prefix-localization runtime
-qualification remains separate from the maintained simulated walkthrough.
+qualification is recorded separately from the maintained simulated walkthrough.
+The [controlled FRR case](plans/frr-correctness-localization-validation.md)
+uses fresh source-bound external trials and `record --result` to confirm a
+deliberately introduced prefix-fault boundary on a reduced recipe. That case
+does not qualify the FRR combined build/run controller or its cache path.
 
 `target_crash` requires a recipe whose expected outcome is `target_crash`, basic
 diagnostics, a clean process-presence observation followed by absence and a

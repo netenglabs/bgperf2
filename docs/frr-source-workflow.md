@@ -126,5 +126,11 @@ startup supplies no BIRD foreground-exit witness; container health remains a
 bounded snapshot. Performance policy stays disabled, formal calibration deferred
 and unrelated upstream investigation paused. No command in this guide authorizes
 real execution, acquisition, evidence transfer, push or publication. The
-[separate live proposal](plans/frr-source-runtime-validation.md) records open
-prerequisites and its bounded proposed scope.
+[source-build functional record](plans/frr-source-runtime-validation.md)
+records the completed retained-image pair and its source/base limitations.
+The [controlled local regression case](plans/frr-correctness-localization-validation.md)
+exercises changed-revision public-run evidence/reporting, native image-only
+minimization and source-bound external-trial prefix bisection. Its local fault,
+rollback, finite budgets and fresh confirmations establish only the recorded
+functional scope; combined-controller execution and broader source support
+remain separate qualifications.

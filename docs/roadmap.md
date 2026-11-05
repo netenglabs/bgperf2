@@ -7,6 +7,19 @@ CLI and versioned artifacts; none is required to use the engine.
 
 ## Current direction
 
+The operator selected [controlled FRR correctness localization](plans/frr-correctness-localization-validation.md)
+after the completed source-built pair. Earlier documentation is integrated into
+`milestone-a-newcomer`, with six concurrent edits preserved. The new functional
+case has completed a deliberately introduced prefix fault/rollback contrast,
+freshly confirmed one-peer/two-prefix minimization, and external-trial bisection
+with fresh confirmations of the adjacent local source boundary. Exactly five
+builds/twelve originals ran with only the seven intentional identity failures.
+Supplemental independent closeout and local runtime preservation passed after
+four missing offline relocation checks were supplied. The original final
+rejection/runtime stop remain retained. Combined comparison/bisection controllers
+and performance conclusions remain outside this case.
+Upstream investigation stays paused, policy disabled and calibration deferred.
+
 The operator selected the [FRR source-to-fix and correctness-localization milestone](plans/frr-source-workflow.md)
 after the completed supplied-image pair at `03a4e778`. Delivered at `701ae2c`
 with independent review and a native gate passing 3,141 tests, one skipped. It adds source-bound

@@ -1,12 +1,100 @@
 # FRR source-build functional validation
 
-Case02 was explicitly approved and **stopped before its first worker** after one
-successful build. A frozen-input prerequisite detected seven new Python cache
-files created by the image-audit helper. No worker or retry ran. The stopped
-execution record below is current; preparation and proposal sections remain history.
+The fresh retained-image case completed two original workers and all twelve
+functional assertions. Report reconstruction, cleanup, final independent
+acceptance and local runtime preservation passed. The earlier case02 remains stopped before its
+first worker after its one successful build. Its evidence and stop were retained;
+the fresh case reused that accepted source-built image without another build.
 The [implementation plan](frr-source-workflow.md) and
 [source guide](../frr-source-workflow.md) own engine delivery and contracts.
 The earlier supplied-image pair remains complete; its two workers will not rerun.
+
+## Fresh retained-image functional pair — 2026-11-05 UTC
+
+The operator instructed “do all that” to complete the repaired audit, fresh
+reviewed packet, two serial originals, assertions, cleanup, reconstruction and
+local preservation. This authorized the same functional-only root-backed `/tmp`
+storage scope. Evidence is
+`/tmp/bgperf2-frr-source-runtime-20261104/`. This is a new case; neither the
+completed supplied-image pair nor the stopped case02 was resumed or rerun.
+
+The private engine/environment is pinned at `ab7d65b` with 7,384 inventoried
+entries and read-only regular files/directories. The corrected audit sets
+`sys.dont_write_bytecode` before imports. An actual recorded import proof ran
+without `-B` or the suppression environment variable and confirmed unchanged
+engine files. Current Docker inspection matched the retained image's ID,
+configuration, layers and source label. Earlier sealed preparation/execution
+bytes were read back before reuse.
+
+Selected packet03 SHA256:
+`31c144920ec5a2c0efffae7ed48145071579aa0ac74d30b5233da8615fc40706`.
+Independent preparation review `preparation03` accepted before fresh baseline
+prerequisites. Two earlier preparation versions were rejected for closeout-tool
+defects: a substring build check rejected report reconstruction, and a stale
+review timestamp reference selected the first rejected packet. Both were fixed
+before workers; exact rejected inputs/reviews remain preserved. Six modeled
+tests of the actual closeout verifier exercised reconstruction acceptance and
+rejection of wrong/rejected review bindings, stale ordering and changed report
+bytes. No rejected runtime original was retried.
+
+Both workers selected the same retained source-built target image
+`sha256:0ddb9e0d6a4c5e888f4adad90e1872925ed3db4f2ce42c90496f654845dc3f8d`.
+The adapted source, selected builder/runtime base, source archive and original
+build acceptance remain the identities recorded below; this case ran zero
+builds. Both versions artifacts and consoles report **FRRouting 10.3.1**.
+
+| Original | Attempt UUID | Worker seconds | Outer seconds | Assertions |
+| --- | --- | ---: | ---: | --- |
+| baseline | `bgperf_recipe_2b9a179eabc44c38a5827a1815ab198f` | 12.037448 | 14.343509 | 6/6 passed |
+| candidate | `bgperf_recipe_e28532a47b26480eaade5c9f9f2329f7` | 12.486378 | 14.540821 | 6/6 passed |
+
+Each worker had one BIRD peer and delivered exactly `100.0.0.0/32` through
+`100.0.0.99/32`, with zero missing/unexpected prefixes. Sessions, injection,
+count, completion, bounded role health and exact prefix identity all passed.
+Each original verified 43 present package artifacts. Actual independent baseline
+acceptance preceded fresh candidate prerequisites and the second launch.
+All 49 frozen public operation receipts show zero exit, no outer timeout and
+empty stderr. Inner 120-second and outer 240-second limits were respected.
+There were two distinct originals, zero retries, acquisitions, probe containers
+or scheduler jobs. The final input verification passed without frozen changes.
+
+Both originals record empty `cleanup_errors`; all six exact owned container IDs
+and both attempt networks are absent. Foreign public identities and semantic
+mount/network/label sets remained unchanged: 75 containers, six networks and
+495 volumes. Native monitor directories and prefix sockets were inspected with
+`lstat` only, retaining 0700/0666 modes. Original work and portable omissions remain.
+
+Public report verification, correctness checking, status and fresh reconstruction
+all passed. All 91 report files match physically and semantically, including
+both independently produced original packages. The report records
+`same_observed_reproduction` and performance `not_assessed`. Final independent
+review accepted in `reviews/final.json`, independently recomputing packet,
+source/image/archive, original-package, assertion and report hashes and checking
+launch gates, native metadata and cleanup. Required packet/pair/report digest
+bindings match. It also rehashed all 15,583 preparation-seal files and 303
+stopped-execution-seal files unchanged, with the original stop still in force.
+The initial final-review provider returned only its usage-limit error, without
+a judgment. That invocation is retained; the separate read-only reviewer does
+not rerun workers, builds or reporting operations.
+
+Raw FRR logs retain 103/104 zclient-send failures; final review explicitly corrects
+the baseline review's inaccurate warning description without rewriting that
+original review. Recorded maximum foreign CPU
+is 755%/498%. Those observations remain evidence. Durations are descriptive;
+this immediate functional case requires no quiet-CPU window. Role health is a
+bounded container snapshot, without continuous bgpd liveness or crash witnesses.
+Adapted source and the mixed base's residual modules/libraries/build tree remain
+explicit. This qualifies no pristine runtime, hermetic/reproducible build,
+upstream defect/fix, performance detector, live minimization or bisection.
+Upstream investigation stays paused, policy disabled and calibration deferred.
+
+Local runtime preservation passed: `closeout/runtime-SHA256SUMS.json` seals all
+605 regular execution files (4,758,591 bytes) and four native sockets, with
+immediate coverage/byte/metadata readback. Final case preservation also retains
+the frozen source/environment, packet versions, reviews, documentation commit
+and gate records; whole-case seal/readback lives at the evidence root. These
+local checks provide neither authenticated execution nor independent backup.
+No push, publication, evidence deletion or remote backup occurred.
 
 ## Approved case02 stopped before workers — 2026-11-04 UTC
 

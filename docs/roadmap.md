@@ -1,6 +1,6 @@
 # bgperf2 roadmap
 
-Updated 2026-11-04 UTC. This is the public index of engine development plans.
+Updated 2026-11-05 UTC. This is the public index of engine development plans.
 Everything needed to understand, use and contribute to bgperf2 belongs in this
 repository. Other projects can build campaigns and services on its documented
 CLI and versioned artifacts; none is required to use the engine.
@@ -14,13 +14,14 @@ with independent review and a native gate passing 3,141 tests, one skipped. It a
 assertion/prefix-assertion bisection. The [FRR source guide](frr-source-workflow.md)
 connects candidate CI, image-only minimization and fresh source plans for reduced
 recipes. Implementation validation is modeled; live source qualification remains
-separate. The [first approved source-build case](plans/frr-source-runtime-validation.md#approved-case02-stopped-before-workers--2026-11-04-utc)
-completed one adapted FRR 10.3.1 build with independent static acceptance, then
-stopped before either worker: the audit helper created seven Python cache files
-inside the frozen engine copy, causing its input-file-set prerequisite to fail.
-No worker or retry ran; functional source qualification remains unassessed.
-Its mixed-base and provenance limits remain explicit. A future case requires
-reviewed tooling and fresh authorization; the stopped case will not resume.
+separate. A [fresh retained-image functional pair](plans/frr-source-runtime-validation.md#fresh-retained-image-functional-pair--2026-11-05-utc)
+has now completed two original FRR 10.3.1 workers and all twelve assertions,
+with package/cleanup checks and 91-file report reconstruction matching. Final
+independent acceptance and local runtime preservation passed. It reused the accepted
+adapted-source build from the earlier stopped case, with corrected audit tooling,
+fresh reviewed inputs and no rebuild or worker retry. The earlier stopped case
+and completed supplied-image pair remain untouched. Mixed-base and provenance
+limits remain explicit; live minimization/bisection are still separate work.
 FRR crash/thread controls stay unsupported. No completed case is rerun,
 upstream investigation stays paused and calibration remains deferred.
 

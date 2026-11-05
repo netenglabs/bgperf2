@@ -105,10 +105,12 @@ integrated acceptance and reviewed engine implementation are complete. The
 [public source guide](../frr-source-workflow.md) is the maintained entry point.
 Live source-build/changed-image/minimization/bisection qualification remains
 separate. The [runtime validation record](frr-source-runtime-validation.md)
-records the later approved case: one successful source build and independent
-static acceptance, followed by a frozen-input prerequisite stop before any
-worker. Functional source/changed-image/minimization/bisection qualification
-remains unassessed; that stopped case will not resume.
+records one successful source build and independent static acceptance, followed
+by a frozen-input prerequisite stop before workers. A fresh retained-image case
+then completed two FRR 10.3.1 originals and twelve assertions, with cleanup,
+package and reconstructed-report checks passing. Final independent acceptance
+and local runtime preservation passed. The stopped case will not resume. Broader
+changed-image/minimization/bisection qualification remains separate.
 
 Earlier supplied-image originals and their preservation remain untouched. No
 real build, worker, acquisition, upstream investigation, scheduler job, evidence

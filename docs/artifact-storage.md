@@ -77,6 +77,20 @@ Interrupted collection retains original work and may leave staging or orphan
 objects. Referenced partial evidence remains pinned. Source files changing
 during collection or reclamation are refused, rather than silently replaced.
 
+When minimization stages a verified trial package for an atomic rename, capture
+registers the intended final evidence path before publishing the staging catalog,
+under the same store lock. This protects reused objects from GC while the staged
+package is verified and avoids permanent roots naming temporary copy paths.
+An interruption after capture keeps those objects pinned; recovery uses the
+verified original without launching another worker.
+
+Minimization and bisection re-register a moved partial at its retained location
+when its catalog and objects verify. Malformed or incomplete catalogs are left
+unchanged and do not block recovery from the verified original. Old immutable
+registrations remain roots even after a different catalog occupies their path;
+they are never replaced or released by recovery. Missing registered objects
+continue to make maintenance refuse collection.
+
 ## Verify, export and recover
 
 ```sh

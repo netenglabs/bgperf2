@@ -7,6 +7,12 @@ CLI and versioned artifacts; none is required to use the engine.
 
 ## Current direction
 
+The operator selected the [artifact-storage recovery follow-up](plans/artifact-storage.md#recovery-registration-follow-up--2026-11-05)
+after merging the maintainer workflows into master at `4fdfe9b`. It completes
+the preserved recovery edits with final-path registration under the store lock,
+retained partial registrations and interruption/GC tests, on a separate branch
+and PR. Existing runtime cases remain closed and deployed pins stay unchanged.
+
 The operator selected [merge readiness](plans/milestone-a-merge-readiness.md):
 close hosted CI environment assumptions, review the accumulated branch and merge
 `milestone-a-newcomer` into `master` after green PR checks. Completed functional

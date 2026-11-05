@@ -11,7 +11,8 @@ import time
 import pytest
 
 from artifact_store import (CATALOG, Store, StorageError, capture_tree,
-                            export_tree, load_catalog, reclaim, verify_tree)
+                            export_tree, load_catalog, reclaim, register_moved,
+                            register_package, verify_tree)
 from recipe_results import write_result_package, verify_result_package
 import recipes
 
@@ -259,3 +260,58 @@ def test_unconfigured_report_copy_does_not_write_to_source_store(tmp_path, monke
     assert (tmp_path / 'report/work/peer.log').read_bytes() == raw
     assert not (tmp_path / 'report' / CATALOG).exists()
     assert verify_result_package(tmp_path / 'report/result.json')['valid']
+def _roots(store_root):
+    return sorted(json.loads(p.read_bytes())['package'] for p in (store_root / 'roots').glob('*.json'))
+
+
+def test_staged_capture_is_rooted_only_at_its_final_path(tmp_path):
+    source = tmp_path / 'source'; source.mkdir()
+    (source / 'peer.log').write_bytes(b'raw\n' * 300000)
+    store = Store(tmp_path / 'store')
+    final, staging = tmp_path / 'evidence/t0001', tmp_path / 'snapshots/t0001-copy'
+    staging.parent.mkdir(); final.parent.mkdir()
+    capture_tree(source, staging, store, register_at=final)
+    assert _roots(tmp_path / 'store') == [str(final)]
+    assert load_catalog(staging)['files']  # the large log is a store reference
+    staging.rename(final)
+    register_package(final)  # idempotent: one identical record
+    root = json.loads(next((tmp_path / 'store/roots').glob('*.json')).read_bytes())
+    assert load_catalog(final) == root['catalog']
+    verify_tree(final)
+    # A retried capture of the same bytes for the same final path reuses that record.
+    capture_tree(source, tmp_path / 'snapshots/retry', store, register_at=final)
+    assert _roots(tmp_path / 'store') == [str(final)]
+
+
+def test_registration_refuses_a_catalog_naming_a_missing_object(tmp_path):
+    source = tmp_path / 'source'; source.mkdir()
+    (source / 'peer.log').write_bytes(b'raw\n' * 300000)
+    store = Store(tmp_path / 'store')
+    capture_tree(source, tmp_path / 'staged', store)
+    before = _roots(tmp_path / 'store')
+    for path in (tmp_path / 'store/objects').rglob('*.zst'):
+        path.unlink()
+    with pytest.raises(StorageError):
+        register_package(tmp_path / 'staged')
+    assert register_moved(tmp_path / 'staged') is None  # moved-aside bytes never block recovery
+    assert _roots(tmp_path / 'store') == before
+    assert register_package(source) is None  # no catalog, no store: nothing to root
+
+
+def test_gc_keeps_reused_old_object_before_staged_package_is_published(tmp_path):
+    source = tmp_path / 'source'
+    source.mkdir()
+    (source / 'peer.log').write_bytes(b'retained evidence\n' * 100000)
+    store = Store(tmp_path / 'store')
+    with (source / 'peer.log').open('rb') as stream:
+        ref = store.put(stream)
+    # Reusing an old unreferenced object must not reset or depend on its age.
+    os.utime(store.object_path(ref), (0, 0))
+    staging, final = tmp_path / 'staged', tmp_path / 'final'
+    capture_tree(source, staging, store, register_at=final)
+    report = store.maintain(apply=True, grace_seconds=3600)
+    assert report['orphan_objects'] == []
+    assert not final.exists()
+    verify_tree(staging)
+    staging.rename(final)
+    verify_tree(final)

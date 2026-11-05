@@ -285,15 +285,21 @@ class Store:
         with self.locked():
             return self._put(source)
 
-    def _catalog(self, package, files):
-        data = {'schema': SCHEMA, 'store': str(self.root), 'files': files}
+    def _register(self, package, data):
         record = {'schema': SCHEMA, 'package': str(safe_absolute(package)), 'catalog': data}
         raw = canonical(record)
         root = self.root / 'roots' / (hashlib.sha256(raw).hexdigest() + '.json')
         if not root.exists():
             publish(root, raw)
+        return root
+
+    def _catalog(self, package, files, *, register_at=None):
+        data = {'schema': SCHEMA, 'store': str(self.root), 'files': files}
         # Register before exposing the package. A crash can retain extra evidence,
-        # but cannot expose a reference whose object is collectible.
+        # but cannot expose a reference whose object is collectible. A staged
+        # package is rooted at its intended final path under this same lock,
+        # before verification and rename can race with maintenance.
+        self._register(package if register_at is None else register_at, data)
         publish(package / CATALOG, canonical(data))
         return data
 
@@ -409,8 +415,50 @@ def large_artifact(relative, size):
     return size >= MINIMUM and Path(relative).suffix in ('.log', '.conf', '.parquet')
 
 
-def capture_tree(source, output, store):
-    """Capture stopped work directly, keeping small files and references expanded."""
+def register_package(package):
+    """Root an existing catalog where it lives, verifying all referenced bytes.
+
+    Returns the immutable root record path, or None without a catalog. Staged
+    captures use capture_tree(register_at=...) to register before releasing the
+    publication lock; this function re-registers already moved partial evidence.
+    """
+    package = safe_absolute(package)
+    data = load_catalog(package)
+    if not data:
+        return None
+    store = Store(data['store'])
+    with store.locked():
+        for ref in data['files'].values():
+            try:
+                with store.open(ref):  # never root a reference GC could not keep
+                    pass
+            except FileNotFoundError as exc:
+                raise StorageError('Catalog names a missing object; not registered') from exc
+        return store._register(package, data)
+
+
+def register_moved(package):
+    """Register a package that was moved aside, where it now lives.
+
+    Its bytes are retained either way. A catalog that cannot be rooted (malformed,
+    or naming a missing object) stays unregistered rather than blocking recovery
+    from the verified original. The root naming its old path keeps pinning
+    its objects even if recovery publishes a different catalog at that old path.
+    Registrations are permanent and are never released or superseded here.
+    """
+    try:
+        return register_package(package)
+    except (StorageError, OSError, ValueError):
+        return None
+
+
+def capture_tree(source, output, store, *, register_at=None):
+    """Capture stopped work directly, keeping small files and references expanded.
+
+    ``register_at`` names the final path of a staged package. Registration still
+    precedes catalog publication under the store lock; the caller verifies the
+    staged package and then renames it without changing its catalog.
+    """
     from recipe_results import _regular_file, _RuntimeSocket
     source, output = safe_absolute(source), safe_absolute(output)
     if not source.is_dir():
@@ -461,7 +509,7 @@ def capture_tree(source, output, store):
                 except _RuntimeSocket:
                     omitted.append(relative)
         sync_tree(output)
-        store._catalog(output, files)
+        store._catalog(output, files, register_at=register_at)
     if omitted:
         publish(output / 'runtime-socket-omissions.json', canonical({'paths': omitted}))
     return {'stored_files': len(files), 'runtime_sockets_omitted': omitted}

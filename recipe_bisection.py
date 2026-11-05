@@ -520,7 +520,10 @@ def append_result(path, plan, records, selected, result_path):
         except (OSError, ValueError, TypeError, recipes.ContractError):
             # An interrupted copy is evidence too. Preserve it before the
             # operator-requested recovery copies the verified original anew.
-            destination.rename(path / 'failures' / f't{selected["trial"]:04d}-partial-{uuid.uuid4().hex}')
+            moved = path / 'failures' / f't{selected["trial"]:04d}-partial-{uuid.uuid4().hex}'
+            destination.rename(moved)
+            from artifact_store import register_moved
+            register_moved(moved)
         else:
             recipes._same(copied, observed, 'existing preserved trial package')
     if not destination.exists():

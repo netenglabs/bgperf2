@@ -7,6 +7,13 @@ CLI and versioned artifacts; none is required to use the engine.
 
 ## Current direction
 
+The operator selected [maintainer first-run release readiness](plans/maintainer-first-run.md)
+after the merged workflows and storage fix at `e9431ee`. It connects a fresh
+checkout to a clearly simulated FRR example, concise verified results and the
+existing own-input preparation path, with explicit clean-checkout CI coverage.
+It changes onboarding and delivery; completed runtime cases remain closed,
+performance policy disabled, upstream investigation paused and calibration deferred.
+
 The operator selected the [artifact-storage recovery follow-up](plans/artifact-storage.md#recovery-registration-follow-up--2026-11-05)
 after merging the maintainer workflows into master at `4fdfe9b`. It completes
 the preserved recovery edits with final-path registration under the store lock,

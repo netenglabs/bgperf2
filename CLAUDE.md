@@ -151,6 +151,9 @@ existing compiled adapter and container names. Daemon-crash witnesses and target
 Read `docs/frr-source-workflow.md` and `docs/plans/frr-source-workflow.md` for the
 `frr-local/v1` trusted local build and correctness revision-search extension.
 `scripts/frr_workflow_smoke.py` exercises FRR contracts with simulated runtimes.
+`scripts/first_run.py` is the newcomer entry point to the maintained FRR source
+simulation. Its prerequisites, expected result and own-input handoff are in
+`docs/first-run.md`; it runs no daemon, build, download or benchmark.
 
 `recipe_assertions.py` evaluates named observable correctness witnesses against
 verified packages. `recipe_comparison.py` freezes and executes explicit serial

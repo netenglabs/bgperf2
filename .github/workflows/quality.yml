@@ -74,6 +74,9 @@ jobs:
       - name: Bootstrap the hashed environment and run Docker-free tests
         run: python3.14 scripts/bootstrap.py
 
+      - name: Run the documented first-run workflow (simulated)
+        run: venv/bin/python scripts/first_run.py --output "$RUNNER_TEMP/bgperf2-first-run"
+
       - name: Run sink Go vet and race tests
         if: steps.changes.outputs.sink == 'true'
         env:

@@ -9,7 +9,8 @@ session, while sampling CPU and memory. It started as a fork of
 rewritten.
 
 * [Install](#install)
-* [Your first run](#first-run)
+* [Your first maintainer workflow](docs/first-run.md) (simulated FRR investigation with verified reports)
+* [Your first benchmark](#first-run)
 * [What a run writes](#outputs)
 * [Batches](#batch)
 * [Getting results you can trust](#trust)
@@ -28,6 +29,12 @@ rewritten.
   [Benchmarking a remote target](docs/benchmark_remote_target.md) ·
   [MRT injection](docs/mrt.md) ·
   [Measurement definitions](docs/measurement-dictionary.md)
+
+New to the maintainer tools? Start with the
+[first-run guide](docs/first-run.md). It takes a fresh checkout through setup,
+an explicitly simulated FRR regression/rollback example and verified reports,
+then points to preparing your own source and workload. The example runs no
+daemon or benchmark and needs no daemon images or private lab inputs.
 
 ## What it does
 
@@ -107,7 +114,7 @@ override without changing recipe controls. `investigate` records a serial
 baseline/fix pair with diagnostics and a verified human/JSON report. See the
 [recipe guide](docs/recipes.md) and [local-fix walkthrough](docs/investigations.md).
 
-## <a name="first-run"></a>Your first run
+## <a name="first-run"></a>Your first benchmark
 
 ```bash
 ./bgperf2.py bench -n 10 -p 1000

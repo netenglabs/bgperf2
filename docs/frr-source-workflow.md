@@ -8,6 +8,10 @@ The [implementation record](plans/frr-source-workflow.md) owns delivery progress
 
 ## Start with the maintained modeled workflow
 
+For a fresh checkout, use the [first-run guide](first-run.md) for prerequisites,
+the concise `scripts/first_run.py` entry point, expected results and the transition
+to your own inputs. The lower-level maintained workflow remains:
+
 ```sh
 venv/bin/python scripts/frr_source_smoke.py --output /absolute/new/frr-source-demo
 ```

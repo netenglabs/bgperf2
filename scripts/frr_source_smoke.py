@@ -235,6 +235,14 @@ def _run_smoke(output):
 All source inspection, commit histories, builds, images, workers and numeric
 observations are **SIMULATED**. No real FRR source, compiler, daemon or network ran.
 
+This example asks whether a maintainer can detect a route-identity regression,
+check a rollback, shrink the reproducer and locate the first bad source change.
+The baseline deliberately delivers the correct count with one wrong prefix;
+its failed identity assertion is the expected starting observation. The rollback
+passes. The later reduction and source boundary are confirmed using fresh
+simulated observations, not reused endpoint results. No numeric value here is
+a performance measurement. Read the linked reports below in order.
+
 - [Source recipe](recipe.json), [baseline plan](baseline-build-plan.json) and
   [candidate plan](candidate-build-plan.json): candidate is an explicit rollback
   to pre-fault revision three, not an upstream fix.
@@ -255,6 +263,10 @@ Checksums do not authenticate execution. FRR crash and thread controls remain
 unsupported. Performance policy is disabled, calibration deferred and broader
 live qualification unassessed. Source-range and handoff preparation have separate
 inert real-Git tests; this walkthrough models source inspection explicitly.
+
+To prepare your own source and workload, continue with docs/first-run.md in
+your checkout. The fixture's revisions, images and observations are illustrative
+inputs and cannot be relabeled into real execution evidence.
 ''')
     return summary
 

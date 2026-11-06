@@ -1,6 +1,6 @@
 # bgperf2 developer performance testing plan
 
-Created 2026-10-23; updated 2026-11-01 UTC. Status: milestones A and supplied-image B
+Created 2026-10-23; updated 2026-11-06 UTC. Status: milestones A and supplied-image B
 functionally validated, including B's approved packaging-source functional and
 setup-container interruption checks; C noise/resolution discovery and admitted
 repeatability study/descriptive analysis completed; staged comparison
@@ -8,6 +8,22 @@ safeguards and deterministic milestone D implemented, including one bounded live
 count-fault bisection with fresh confirmations. Pristine-source/source-bug-fix,
 broader live bisection/diagnostics and performance calibration remain deferred. See the
 [comparison guide](../comparisons.md) and [bisection guide](../bisection.md).
+
+## Audience and next-work decision — 2026-11-06
+
+The operator clarified that the goal is to make performance comparisons easy
+to try for a general audience evaluating BGP daemons, versions and workloads.
+The maintainer and source-investigation workflows remain useful advanced
+options. The README's [benchmark and batch path](../../README.md#performance-comparison)
+is the primary introduction; the [roadmap](../roadmap.md#current-direction)
+owns the current product direction.
+
+After the onboarding merge at `98dd03a`, no new feature milestone is selected.
+Pause feature expansion until use of the existing comparison workflow exposes
+a concrete need. This changes documentation priorities, not execution approval
+or measurement definitions. Completed cases stay closed, the upstream
+investigation stays paused, performance policy stays disabled and calibration
+stays deferred.
 
 ## Supplied-image FRR extension — selected 2026-11-04
 

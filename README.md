@@ -9,18 +9,23 @@ session, while sampling CPU and memory. It started as a fork of
 rewritten.
 
 * [Install](#install)
-* [Your first maintainer workflow](docs/first-run.md) (simulated FRR investigation with verified reports)
 * [Your first benchmark](#first-run)
+* [Try a performance comparison](#performance-comparison)
 * [What a run writes](#outputs)
 * [Batches](#batch)
 * [Getting results you can trust](#trust)
 * [Targets and versions](#targets)
 * [Debugging](#debugging)
+* [Roadmap and development plans](docs/roadmap.md)
+
+Advanced workflows:
+
+* [Repeated recipe comparisons](docs/comparisons.md) (immutable target selections and verified portable reports)
+* [Portable recipe and result contracts](docs/recipes.md) (export, prepare, isolated execution and verified result packages)
+* [Your first maintainer workflow](docs/first-run.md) (simulated FRR investigation with verified reports)
 * [One maintainer investigation](docs/maintainer-workflow.md) (offline reproduction, local rollback, interruption recovery and correctness bisection)
 * [Prepare your own source checkout](docs/maintainer-checkout.md) (isolated revision range and verified, unexecuted handoff)
 * [Minimize a reproducer](docs/minimization.md) (bounded peer/prefix-count reduction with fresh confirmation and verified evidence)
-* [Roadmap and development plans](docs/roadmap.md)
-* [Portable recipe and result contracts](docs/recipes.md) (export, prepare, isolated execution and verified result packages)
 * [Small functional checks](docs/functional-validation.md) (immediate bounded execution, load observations and verified correctness)
 * [Investigate a local BIRD fix](docs/investigations.md) (target/build identities, diagnostics and baseline/fix reports)
 * [Supplied-image FRR maintainer workflow](docs/frr-maintainer-workflow.md) (functional assertions, reports and bounded minimization)
@@ -30,11 +35,11 @@ rewritten.
   [MRT injection](docs/mrt.md) ·
   [Measurement definitions](docs/measurement-dictionary.md)
 
-New to the maintainer tools? Start with the
-[first-run guide](docs/first-run.md). It takes a fresh checkout through setup,
-an explicitly simulated FRR regression/rollback example and verified reports,
-then points to preparing your own source and workload. The example runs no
-daemon or benchmark and needs no daemon images or private lab inputs.
+Start with [one benchmark](#first-run), then use a
+[batch to compare daemons or versions](#performance-comparison) under the same
+workload. You can compare convergence time, CPU and memory without your own
+daemon source checkout or a bug to investigate. The advanced guides cover
+portable evidence, correctness checks and source investigation when you need them.
 
 ## What it does
 
@@ -147,6 +152,47 @@ Common options:
 * `-o FILE` — also append the CSV row to `FILE`.
 
 Try `-n1 -p1` first if anything looks wrong; see [Debugging](#debugging).
+
+## <a name="performance-comparison"></a>Try a performance comparison
+
+Use a [batch](#batch) to compare target daemons or versions with the same peers,
+prefixes, generator and monitor. For a small version comparison, save this as
+`benchmarks/local/compare.yaml` (create the directory if needed):
+
+```yaml
+tests:
+  - name: version-comparison
+    neighbors: [2]
+    prefixes: [100]
+    filter_test: [None]
+    repetitions: 3
+    order: shuffle
+    seed: 20261106
+    targets:
+      - name: bird
+        versions: ['2.19.2', '3.3.2']
+        tester_type: bird
+```
+
+After [installation](#install), build the selected version images and run it:
+
+```bash
+./bgperf2.py prepare -t bird --versions 2.19.2,3.3.2
+./bgperf2.py verify -t bird --versions 2.19.2,3.3.2
+./bgperf2.py batch -c benchmarks/local/compare.yaml
+```
+
+This runs six benchmarks and writes CSV results, a summary and graphs under
+`results/`. The small workload and three repetitions let you try the workflow;
+they do not establish sensitivity to a particular performance difference.
+Choose a workload that matches your question, inspect individual runs and
+variation, and check [measurement conditions](#trust) before interpreting a
+difference. These are descriptive comparisons; automatic performance regression
+verdicts remain disabled and calibration remains deferred.
+
+Change `targets` to compare other [supported daemons or versions](#targets),
+building their images first. For immutable target identities, repeated pairs and
+verified portable evidence, use the advanced [recipe comparison guide](docs/comparisons.md).
 
 ## <a name="outputs"></a>What a run writes
 

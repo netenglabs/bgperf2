@@ -1,29 +1,47 @@
 # bgperf2 roadmap
 
-Updated 2026-11-05 UTC. This is the public index of engine development plans.
+Updated 2026-11-06 UTC. This is the public index of engine development plans.
 Everything needed to understand, use and contribute to bgperf2 belongs in this
 repository. Other projects can build campaigns and services on its documented
 CLI and versioned artifacts; none is required to use the engine.
 
 ## Current direction
 
-The operator selected [maintainer first-run release readiness](plans/maintainer-first-run.md)
-after the merged workflows and storage fix at `e9431ee`. It connects a fresh
-checkout to a clearly simulated FRR example, concise verified results and the
+Make it easy for anyone evaluating BGP implementations to try performance
+comparisons across daemons, versions and workloads. The primary entry point is
+the README's [benchmark and batch comparison path](../README.md#performance-comparison).
+Source investigation, correctness localization and daemon-specific maintainer
+guides are advanced options within that broader purpose.
+
+The operator clarified this direction on 2026-11-06 after the onboarding work
+merged. No new feature milestone is selected. Pause feature expansion and let a
+concrete use of the existing comparison workflow identify any next usability
+gap. This documentation correction launches no measurements; a useful comparison
+still needs a selected question, targets, workload and execution authorization.
+Descriptive comparisons remain available, performance policy stays disabled,
+calibration stays deferred and the upstream investigation stays paused.
+Completed runtime cases remain closed.
+
+## Recent delivery and validation
+
+[Maintainer first-run release readiness](plans/maintainer-first-run.md)
+merged at `98dd03a`, after the workflows and storage fix at `e9431ee`. It connects
+a fresh checkout to a clearly simulated FRR example, concise verified results and the
 existing own-input preparation path, with explicit clean-checkout CI coverage.
 It changes onboarding and delivery; completed runtime cases remain closed,
 performance policy disabled, upstream investigation paused and calibration deferred.
 
-The operator selected the [artifact-storage recovery follow-up](plans/artifact-storage.md#recovery-registration-follow-up--2026-11-05)
-after merging the maintainer workflows into master at `4fdfe9b`. It completes
+[Artifact-storage recovery](plans/artifact-storage.md#recovery-registration-follow-up--2026-11-05)
+merged at `e9431ee`, after the maintainer workflows merged at `4fdfe9b`. It completes
 the preserved recovery edits with final-path registration under the store lock,
 retained partial registrations and interruption/GC tests, on a separate branch
 and PR. Existing runtime cases remain closed and deployed pins stay unchanged.
 
-The operator selected [merge readiness](plans/milestone-a-merge-readiness.md):
-close hosted CI environment assumptions, review the accumulated branch and merge
-`milestone-a-newcomer` into `master` after green PR checks. Completed functional
-cases remain closed; the six concurrent engine edits are preserved separately.
+[Merge readiness](plans/milestone-a-merge-readiness.md) completed at `4fdfe9b`:
+hosted CI environment assumptions were fixed and the accumulated
+`milestone-a-newcomer` branch merged into `master` after green PR checks.
+Completed functional cases remain closed; the six concurrent engine edits
+are preserved separately.
 
 The operator selected and completed [FRR combined-controller functional validation](plans/frr-controller-runtime-validation.md)
 after controlled localization. Five public `step --execute` trials exercised
@@ -153,9 +171,10 @@ codes for passed assertions, observed failure and inconclusive evidence in
 verified reports. It leaves integrity/status exits and reproduction unchanged
 and requires no new runtime work.
 
-Make bgperf2 a performance tester that daemon developers can use to reproduce
-problems, test their own fixes and investigate regressions. Reuse existing
-batch/scenario inputs, repetitions, ordering, measurement artifacts, provenance,
+Make bgperf2 useful for people comparing BGP performance. Advanced workflows
+also let daemon developers reproduce problems, test fixes and investigate
+regressions. Reuse existing batch/scenario inputs, repetitions, ordering,
+measurement artifacts, provenance,
 the hashed Python bootstrap and quality gates. Add contracts and testable
 boundaries incrementally while keeping current CLI and output compatibility.
 
@@ -163,7 +182,7 @@ The operator selected descriptive comparisons as the delivered performance
 workflow and deferred formal reliable-10%-slowdown calibration. It is not a
 release blocker. Performance policy remains disabled and performance bisection
 deferred; deterministic correctness bisection remains available. Further work
-should address concrete maintainer reproduction/fix/usability needs. A future
+should address concrete comparison or usability needs identified through use. A future
 calibration effort requires one bounded, separately approved campaign with
 predeclared success/stop criteria on a host with predictable capacity. See the
 [authoritative decision](plans/performance-testing-development-plan.md#operator-decision-descriptive-comparisons-first--2026-10-31).

@@ -543,9 +543,11 @@ default), which bgperf2 then cannot clean up; `sudo rm -rf /var/tmp/bgperf2` whe
 The [public roadmap](docs/roadmap.md) is the authoritative index of active engine
 plans and deferred ideas. Detailed plans live in `docs/plans/`; keep their
 statuses, acceptance checks, implementation decisions and commit references with
-the code. Read the relevant plan before implementation. The current priority is
-portable developer performance testing; policy, IPv6 and other workload expansion
-remain deferred until explicitly selected.
+the code. Read the relevant plan before implementation. The current direction is
+accessible performance comparisons for a general BGP audience, with maintainer
+workflows as advanced options. Feature expansion is paused pending a concrete
+need from use of the existing comparison workflow; policy, IPv6 and other
+workload expansion remain deferred until explicitly selected.
 
 Current measurement contracts and invariants remain in this repository.
 Downstream projects own their deployments, campaigns, research and evidence;

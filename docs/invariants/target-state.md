@@ -7,6 +7,7 @@ The per-daemon `get_neighbors_state` wart, the table witness, and the delivery m
 `holo.py` maps native Adj-RIB-In pre/post-policy counts without a best-path witness.
 `zebra_rs.py` exposes only the native pre-policy Adj-RIB-In snapshot.
 `bio_routing.py` declares neighbor prefix observations unavailable in the selected service.
+`maghemite.py` withholds the selected source's declared but unupdated prefix atomics.
 
 Bio-Routing's library metric uses current RouteCount, but the selected cmd/bio-rd
 never registers that collector; only the example does. ListSessions also returns

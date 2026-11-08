@@ -40,6 +40,7 @@ BGPERF_PROCESSES = frozenset((
     'holod', 'grpcurl',
     'zebra-rs', 'vtyctl', 'bgperf-z-wait',
     'bio-rd', 'bgperf-bio-http',
+    'mgd', 'bgperf-mg-http',
     'openbgpd', 'bgpd.openbsd', 'bgpctl', 'bgplgd', 'exabgp', 'bgpdump2',
     'flockd', 'flock',
     # the purpose-built monitor (Phase 7)

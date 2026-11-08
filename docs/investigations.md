@@ -423,6 +423,14 @@ The packages preserve:
   collector and its session RPC is unimplemented; target neighbor prefix counts
   are explicitly unavailable in the capability record. A raw scrape is only
   diagnostic evidence and cannot supply missing route gauges.
+  Maghemite also declares prefix gauges unavailable (its selected API prefix
+  atomics are not updated). Its supplemental native samples read the router list
+  and default-ASN 1000 neighbor state using the fixed v13 version header. The
+  same owned ID/name/image/attempt rechecks, two-second HTTP deadlines, 8 MiB
+  transfer/64 KiB capture limits and shared 20-second collection budget apply.
+  These post-worker samples expose no authentication configuration, perform no
+  mutations, and cannot turn API zero counters into prefix witnesses. Nondefault
+  ASNs may yield an unavailable sample; this is explicitly a default-ASN fixture.
 - Preserved CSV/event material before final graph/provenance collectors. The
   `raw-samples.csv` file is the retained legacy graph series after its existing
   assurance slicing, not every observed poll. `raw-samples.metadata.json` states

@@ -140,7 +140,7 @@ functional pair and verifies its bundled evidence/prose without statistical
 performance decisions. Read `docs/investigations.md` before changing those
 contracts or their trust/accounting boundaries. Read `docs/recipes.md`
 before changing its recipe/result schemas or status meanings. It currently
-supports the documented synthetic IPv4 `bird`, `frr_c`, `openbgp`, `rustybgp`, `rustbgpd`, `holo`, `zebra-rs` or `bio-routing` target,
+supports the documented synthetic IPv4 `bird`, `frr_c`, `openbgp`, `rustybgp`, `rustbgpd`, `holo`, `zebra-rs`, `bio-routing` or `maghemite` target,
 with BIRD generators and sink observer; recipe
 execution requires the explicit `run` operation. Declared identities are not verified images or
 host qualification, and experiment status is separate from reproduction outcome.
@@ -167,6 +167,9 @@ It also governs Bio-Routing's pinned Go source build and native YAML. Its select
 service does not register the library's BGP metric collector and ListSessions is
 unimplemented. Version, received/accepted and selected-path counts remain
 unavailable; never infer them from requested tags or unused API/library code.
+The plan also governs Maghemite's frozen source build, native versioned local
+API and explicit unavailable prefix gauges. Source/API implementation is not
+proof of Linux build or native route qualification; preserve those separate gates.
 
 `recipe_assertions.py` evaluates named observable correctness witnesses against
 verified packages. `recipe_comparison.py` freezes and executes explicit serial

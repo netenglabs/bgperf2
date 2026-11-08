@@ -42,7 +42,7 @@ _REVISION = re.compile(r'[0-9a-f]{40}\Z')
 _IMAGE = re.compile(r'(?:sha256:[0-9a-f]{64}|[a-zA-Z0-9][a-zA-Z0-9._:/-]*@sha256:[0-9a-f]{64})\Z')
 _KEY = re.compile(r'[0-9a-f]{16}\Z')
 _TEST_REQUIRED = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
-TARGET_ADAPTERS = ('bird', 'frr_c', 'openbgp', 'rustybgp', 'rustbgpd', 'holo', 'zebra-rs', 'bio-routing')
+TARGET_ADAPTERS = ('bird', 'frr_c', 'openbgp', 'rustybgp', 'rustbgpd', 'holo', 'zebra-rs', 'bio-routing', 'maghemite')
 _TEST_OPTIONAL = ('prefix_scope', 'repetitions', 'order', 'seed', 'monitor', 'pin')
 _TARGET_KEYS = ('name', 'tester_type', 'version', 'image', 'label', 'threads')
 
@@ -298,7 +298,8 @@ def _roles(roles, target_adapter='bird'):
 def require_crash_witness(adapter, expected_outcome):
     if adapter != 'bird' and expected_outcome == 'target_crash':
         label = {'frr_c': 'FRR', 'openbgp': 'OpenBGPD', 'rustybgp': 'RustyBGP',
-                 'rustbgpd': 'rustbgpd', 'holo': 'Holo', 'zebra-rs': 'zebra-rs', 'bio-routing': 'Bio-Routing'}[adapter]
+                 'rustbgpd': 'rustbgpd', 'holo': 'Holo', 'zebra-rs': 'zebra-rs',
+                 'bio-routing': 'Bio-Routing', 'maghemite': 'Maghemite'}[adapter]
         raise ContractError(f'{label} target_crash reproduction is unsupported; use observable functional assertions')
 
 

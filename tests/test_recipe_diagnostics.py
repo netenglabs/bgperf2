@@ -286,6 +286,34 @@ def test_bio_native_metrics_reuse_owned_deadline_and_capture_contract(tmp_path, 
     assert result['memory']['target']['ending_bytes'] == 50
 
 
+@pytest.mark.parametrize('drift', [False, True])
+def test_maghemite_native_samples_use_versioned_owned_read_only_api(tmp_path, drift):
+    from maghemite import Maghemite, MaghemiteTarget
+    baseline, calls = zebra_fixture(drift=drift)
+    def command(argv, **kwargs):
+        result = baseline(argv, **kwargs)
+        if 'inspect' in argv:
+            value = json.loads(result['text'])
+            value[0]['Name'] = '/attempt_bgperf_maghemite_target'
+            result['text'] = json.dumps(value)
+        return result
+    result = diagnostics.collect_diagnostics(tmp_path, 'attempt', {}, command=command,
+        memory_reader=lambda pid: {}, target_adapter='maghemite')
+    assert result['capabilities']['target_neighbor_prefix_counts'] is False
+    assert 'default-ASN 1000' in result['containers'][0]['native']['scope']
+    executions = [argv for argv in calls if 'exec' in argv]
+    if drift:
+        assert result['status'] == 'partial' and not executions
+    else:
+        assert result['status'] == 'collected' and len(executions) == 2
+        for argv in executions:
+            assert argv[argv.index('exec') + 2] == Maghemite.HTTP_BINARY
+            assert 'api-version: ' + MaghemiteTarget.API_VERSION in argv
+            assert argv[argv.index('--max-time') + 1] == '2'
+            assert argv[-1].startswith(MaghemiteTarget.API)
+            assert '-X' not in argv and '--data-binary' not in argv
+
+
 def live_client(present=True, usage=100):
     return SimpleNamespace(stats=lambda *a, **k: {'memory_stats': {'usage': usage}},
         top=lambda *a, **k: {'Titles': ['PID', 'COMMAND'],

@@ -39,6 +39,14 @@ BIO_NATIVE_COMMANDS = (
                  'http://127.0.0.1:55667/metrics')),
 )
 
+MAGHEMITE_NATIVE_COMMANDS = tuple(
+    (name, ('/usr/local/bin/bgperf-mg-http', '--fail', '--silent', '--show-error',
+            '--max-time', '2', '--max-filesize', '8388608', '-H', 'api-version: 13.0.0',
+            'http://127.0.0.1:4676' + path))
+    for name, path in (('routers', '/bgp/config/routers'),
+                       ('sample-peers', '/bgp/status/neighbors?asn=1000'))
+)
+
 
 def collect_native(work, attempt, item, probe, errors, *, commands, command_prefix=(),
                    scope='fixed engine-owned queries'):
@@ -158,7 +166,8 @@ def stage(work, name, *, status='entered', reason=None):
 
 
 NON_BIRD_TARGET_SUFFIXES = ('_frrouting_compiled_target', '_openbgp_target', '_rustybgp_target',
-                           '_rustbgpd_target', '_holo_target', '_zebra_rs_target', '_bio_routing_target')
+                           '_rustbgpd_target', '_holo_target', '_zebra_rs_target', '_bio_routing_target',
+                           '_maghemite_target')
 UNSUPPORTED_DAEMON_WITNESS = 'Non-BIRD daemon process presence and exit-status witnesses are unsupported; container state does not diagnose the daemon.'
 
 
@@ -359,6 +368,11 @@ def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memor
         report['capabilities']['target_neighbor_prefix_counts_reason'] = (
             'Selected bio-rd does not register BGP metrics; ListSessions is unimplemented. '
             'Received, accepted and selected-path observations are unavailable.')
+    elif target_adapter == 'maghemite':
+        report['capabilities']['target_neighbor_prefix_counts'] = False
+        report['capabilities']['target_neighbor_prefix_counts_reason'] = (
+            'Selected mgd declares/reads prefix atomics without updating them. '
+            'Received, accepted and selected-path observations are unavailable.')
     if mode == 'none':
         report.update(status='disabled', missing=['Optional runtime diagnostics were explicitly disabled.'])
         write_json(work / 'diagnostics.json', report)
@@ -440,6 +454,11 @@ def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memor
         for item in report['containers']:
             if item['name'].endswith('_bgperf_bio_routing_target'):
                 collect_native(work, attempt, item, probe, report['errors'], commands=BIO_NATIVE_COMMANDS)
+    elif target_adapter == 'maghemite':
+        for item in report['containers']:
+            if item['name'].endswith('_bgperf_maghemite_target'):
+                collect_native(work, attempt, item, probe, report['errors'],
+                    commands=MAGHEMITE_NATIVE_COMMANDS, scope='fixed default-ASN 1000 API samples')
     live_path = work / 'live-diagnostics.json'
     if live_path.is_file():
         try:

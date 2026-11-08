@@ -38,7 +38,7 @@ network:
   source (`frr_c`), OpenBGPD (`openbgp`), RustyBGP (`rustybgp`, routes and
   neighbors only; it lacks some of the policy bgperf2 uses), rustbgpd
   (`rustbgpd`), Holo (`holo`), zebra-rs (`zebra-rs`) and Bio-Routing
-  (`bio-routing`), with permit-all IPv4 loading; see
+  (`bio-routing`) and Maghemite (`maghemite`), with permit-all IPv4 loading; see
   [adapter scope](docs/plans/new-daemon-adapters.md). Flock (`flock`) and the
   commercial Arista cEOS (`eos`), Juniper cRPD (`junos`) and Nokia SR Linux
   (`srlinux`) are also selectable.

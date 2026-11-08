@@ -289,3 +289,53 @@ Source inspection identifies the missing collector registration. Remove the
 unused speculative parser and periodic HTTP polling, explicitly declare the
 native prefix-counter gap, and retain a diagnostic original's raw scrape to
 verify that limit. Preserve the accepted sink original and all prior failures.
+
+The corrected observation profile landed at `62bc7e2` after clean final review
+and 3,391 native tests (one optional skip). Its fresh native diagnostic original
+passed all six route assertions with exact 200-prefix delivery, verified cleanup
+and package integrity. The complete, untruncated 12,524-byte scrape contains
+Go/gRPC families and no bio_bgp metric lines. This verifies the explicit native
+prefix-gauge limit; no per-second HTTP polling or invented counters remain.
+
+## Next adapter: Maghemite frozen source
+
+First prove a normal Linux optimized build from
+`277f4368d7b6e6c75bf339db132f8de1ac9b019a`, keeping tracked Cargo.lock and
+Rust 1.97.1. Use the already pinned Rust/Debian digests, default upstream feature
+set and explicit RUSTUP_TOOLCHAIN=1.97.1 (no source-file-triggered compiler switch),
+and `cargo build --locked --release -p mgd`; do not patch platform gating or
+substitute a moving HEAD. Upstream gates its production lower-half execution
+on illumos, and CI also builds a no-default-feature macOS profile. Neither fact
+alone proves Linux compatibility or authorizes a substitute binary. Preserve
+native build failures, source ID, Cargo/toolchain/license files, resolved
+dependencies, compiler/package inventory and observed mgd version. The native
+package version is 0.1.0 and does not attest a source commit by itself.
+
+If the ordinary build works, run mgd with an owned fresh database, loopback
+admin API and an IPv4 BGP dispatcher. Keep the native local MGS discovery
+failure visible; do not provide a fake hardware service or patch it away.
+Configure ordinary IPv4 peers via the selected source's v13 API, using explicit
+`api-version: 13.0.0` (the pinned Omicron dependency defines that header), native
+NoFiltering import/export policies, configured transport addresses distinct
+from router IDs, and no IPv6/unnumbered/external data-plane setup. Use fixed
+router and bulk peer request files, bounded startup readiness and checked 204
+configuration responses; no stale file glob may add unrequested neighbors.
+Retain native requests, responses and logs. CLI timer defaults are 6s hold,
+2s keepalive, 5s connect retry, 0s idle/delay-open and 100ms clock resolution;
+record those explicit settings, plus normal first-AS validation and source IP.
+
+Do not mistake declared API counters for gauges: at this source the
+prefixes_imported/prefixes_advertised atomics have declarations/reads but no
+updates. Received, accepted and selected-route observations remain unavailable;
+do not poll a full RIB merely to produce a count or fabricate counters. Existing
+independent sink/offering assertions and full-assurance convergence remain the
+route oracle. Add bounded optional native API diagnostic snapshots for router/
+default-ASN peer state, marked post-worker, with no auth/config dump or verdict.
+
+Use the existing public build/verify/target/recipe registrations, early
+unsupported-control refusals, process accounting and pure tests. Review and run
+required checks before commit, then build/verify/record the immutable image and
+run a fresh six-assertion exact-prefix original. Linux compilation, runtime API,
+session behavior and route delivery are separate gates; retain failures and
+diagnose before any retry. A proven incompatible deployment requiring different
+hardware or a substantive scope change needs the operator's decision.

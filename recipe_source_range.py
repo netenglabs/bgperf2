@@ -433,8 +433,8 @@ def prepare_range(recipe, *, source_root, good, bad, toolchain_image, runtime_im
     """Create one isolated local clone and clean per-revision build plans."""
     recipes.validate_recipe(recipe)
     adapter = recipe['roles']['target']['adapter']
-    if adapter == 'frr_c' and predicate == 'target_crash':
-        raise recipes.ContractError('FRR target_crash source ranges are unsupported')
+    recipes.require_crash_witness(adapter, predicate)
+    targets.require_source_adapter(adapter)
     recipes._match(good, recipes._REVISION, 'good', 'a full Git commit')
     recipes._match(bad, recipes._REVISION, 'bad', 'a full Git commit')
     targets._image(toolchain_image, 'toolchain_image')

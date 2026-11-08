@@ -306,6 +306,12 @@ an experiment or publication.
 
 ## Existing behavior and contribution checks
 
+The [supplied-daemon admission plan](plans/supplied-daemon-admission.md) extends
+bounded synthetic recipes and exact-prefix assertions to the existing OpenBGPD
+and RustyBGP adapters. Contract implementation and selected real-image
+qualification are separate gates; it does not add daemon source builders or
+qualify performance measurements.
+
 Use the [README](../README.md) for supported commands and examples,
 [measurement definitions](measurement-dictionary.md) for current output semantics,
 and [environment guide](python-environment.md) for bootstrap, local hooks and CI.

@@ -42,7 +42,7 @@ _REVISION = re.compile(r'[0-9a-f]{40}\Z')
 _IMAGE = re.compile(r'(?:sha256:[0-9a-f]{64}|[a-zA-Z0-9][a-zA-Z0-9._:/-]*@sha256:[0-9a-f]{64})\Z')
 _KEY = re.compile(r'[0-9a-f]{16}\Z')
 _TEST_REQUIRED = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
-TARGET_ADAPTERS = ('bird', 'frr_c')
+TARGET_ADAPTERS = ('bird', 'frr_c', 'openbgp', 'rustybgp')
 _TEST_OPTIONAL = ('prefix_scope', 'repetitions', 'order', 'seed', 'monitor', 'pin')
 _TARGET_KEYS = ('name', 'tester_type', 'version', 'image', 'label', 'threads')
 
@@ -232,7 +232,7 @@ def _source_tests(text):
             if target.get('threads') is not None:
                 _integer(target['threads'], f'{tw}.threads', 1)
                 if target['name'] != 'bird':
-                    raise ContractError(f'{tw}.threads: FRR target thread controls are unsupported')
+                    raise ContractError(f'{tw}.threads: target thread controls are supported only for BIRD')
             expanded = expand_target_versions([target])[0]
             run_name = expanded.get('label') or (expanded['name'] + ' ' + expanded['version']
                                                 if expanded.get('version') else expanded['name'])
@@ -295,14 +295,19 @@ def _roles(roles, target_adapter='bird'):
                'an immutable image ID (sha256:<64 hex>) or repository@sha256:<64 hex>')
 
 
+def require_crash_witness(adapter, expected_outcome):
+    if adapter != 'bird' and expected_outcome == 'target_crash':
+        label = {'frr_c': 'FRR', 'openbgp': 'OpenBGPD', 'rustybgp': 'RustyBGP'}[adapter]
+        raise ContractError(f'{label} target_crash reproduction is unsupported; use observable functional assertions')
+
+
 def _recipe(text, test_name, cell_key, engine_revision, roles, question, expected_outcome):
     _match(engine_revision, _REVISION, 'engine.revision', 'a full 40-character lowercase Git revision')
     _text(question, 'reproduction.question')
     _choice(expected_outcome, EXPECTED_OUTCOMES, 'reproduction.expected_outcome')
     test, cell, raw_target, resolved = _select(text, test_name, cell_key)
     _roles(roles, resolved['target']['name'])
-    if resolved['target']['name'] == 'frr_c' and expected_outcome == 'target_crash':
-        raise ContractError('FRR target_crash reproduction is unsupported; use observable functional assertions')
+    require_crash_witness(resolved['target']['name'], expected_outcome)
     if cell['target'].get('image') is not None:
         _same(roles['target']['image'], cell['target']['image'], 'roles.target.image')
     return {

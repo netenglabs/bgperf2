@@ -26,7 +26,7 @@ remains satisfied; create the separate artifact directory before exporting.
 
 ## Export one cell
 
-The supported workload is synthetic IPv4 with a BIRD or `frr_c` target, BIRD
+The supported workload is synthetic IPv4 with a `bird`, `frr_c`, `openbgp` or `rustybgp` target, BIRD
 generator and sink observer, with disjoint prefixes and no policy filter or
 additional receivers. Scenario files, Mako, MRT, hooks, local build instructions,
 other adapters and workload extensions are refused. These limits keep downloaded
@@ -39,6 +39,11 @@ its modeled public CLI walkthrough. The [FRR source workflow](frr-source-workflo
 adds explicit local builds and correctness revision searches. FRR target threads
 and `target_crash` remain unsupported. BIRD defaults and existing
 recipe identities are unchanged.
+
+OpenBGPD and RustyBGP use supplied immutable images and their existing adapters.
+Their local-source builders, revision searches, target threads and crash
+witnesses are unsupported. See [supplied-daemon admission](plans/supplied-daemon-admission.md)
+for qualification scope; contract support alone does not establish a live result.
 
 An optional test-level `pin` uses the existing `bench` CPU layout syntax:
 
@@ -232,7 +237,7 @@ After the OS prerequisites, locked environment and selected exact images are
 available, use one clean checkout at the recipe's full engine revision. Running
 a recipe executes containers with the current user's Docker authority. Read the
 recipe, trust the selected images and choose an otherwise idle suitable Linux
-host before execution. Supported targets are BIRD and `frr_c`,
+host before execution. Supported targets are `bird`, `frr_c`, `openbgp` and `rustybgp`,
 with BIRD generators and sink observer.
 The public fixture's fake image pins cannot run.
 

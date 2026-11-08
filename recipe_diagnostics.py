@@ -90,8 +90,12 @@ def stage(work, name, *, status='entered', reason=None):
     write_json(path, document)
 
 
+NON_BIRD_TARGET_SUFFIXES = ('_frrouting_compiled_target', '_openbgp_target', '_rustybgp_target')
+UNSUPPORTED_DAEMON_WITNESS = 'Non-BIRD daemon process presence and exit-status witnesses are unsupported; container state does not diagnose the daemon.'
+
+
 def role_for_name(name):
-    if name.endswith(('_bird_target', '_frrouting_compiled_target')):
+    if name.endswith(('_bird_target', *NON_BIRD_TARGET_SUFFIXES)):
         return 'target'
     if name.endswith('_monitor'):
         return 'observer'
@@ -225,7 +229,7 @@ def live_sample(client, owned, previous, *, expected, exit_reader=None, target_a
         except Exception as exc:
             sample['errors'].append('memory: ' + type(exc).__name__)
         if (sample['role'] == 'target' and target_adapter == 'bird'
-                and not name.endswith('_frrouting_compiled_target')):
+                and not name.endswith(NON_BIRD_TARGET_SUFFIXES)):
             try:
                 processes = client.top(identifier, ps_args='-eo pid,comm')
                 titles, rows = processes.get('Titles', []), processes.get('Processes', [])
@@ -258,9 +262,9 @@ def live_sample(client, owned, previous, *, expected, exit_reader=None, target_a
         del samples[:removed]
     previous['schema'] = SCHEMA
     previous['instrumentation'] = 'optional Docker stats and fixed BIRD process-list probes; observation overhead is uncalibrated'
-    if target_adapter != 'bird' or any(sample['name'].endswith('_frrouting_compiled_target') for sample in samples):
+    if target_adapter != 'bird' or any(sample['name'].endswith(NON_BIRD_TARGET_SUFFIXES) for sample in samples):
         previous['instrumentation'] = 'optional Docker stats; observation overhead is uncalibrated'
-        previous['unsupported'] = ['FRR daemon process presence and exit-status witnesses are unsupported; container state does not diagnose bgpd.']
+        previous['unsupported'] = [UNSUPPORTED_DAEMON_WITNESS]
     return failure
 
 
@@ -281,7 +285,7 @@ def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memor
               'privileged_artifacts': {'cores': 'not_requested', 'kernel_journal': 'not_requested'}}
     if target_adapter != 'bird':
         report['capabilities'].update(bird_process_presence=False, bird_daemon_exit=False)
-        report['unsupported'] = ['FRR daemon process presence and exit-status witnesses are unsupported; container state does not diagnose bgpd.']
+        report['unsupported'] = [UNSUPPORTED_DAEMON_WITNESS]
     if mode == 'none':
         report.update(status='disabled', missing=['Optional runtime diagnostics were explicitly disabled.'])
         write_json(work / 'diagnostics.json', report)
@@ -318,9 +322,9 @@ def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memor
                 if labels.get('bgperf2.recipe.attempt') != attempt or inspected.get('Id') != identifier:
                     raise ValueError('Diagnostic ownership/ID recheck failed; foreign resource retained')
                 name = inspected.get('Name', '').lstrip('/')
-                if name.endswith('_frrouting_compiled_target'):
+                if name.endswith(NON_BIRD_TARGET_SUFFIXES):
                     report['capabilities'].update(bird_process_presence=False, bird_daemon_exit=False)
-                    report['unsupported'] = ['FRR daemon process presence and exit-status witnesses are unsupported; container state does not diagnose bgpd.']
+                    report['unsupported'] = [UNSUPPORTED_DAEMON_WITNESS]
                 filtered = {key: state.get(key) for key in ('Status', 'Running', 'ExitCode', 'OOMKilled', 'Error', 'StartedAt', 'FinishedAt')}
                 item = {'id': identifier, 'name': name, 'role': role_for_name(name),
                         'image_id': inspected.get('Image'), 'state': filtered,

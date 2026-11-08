@@ -6,7 +6,7 @@ walkthrough, start with the [maintainer workflow](maintainer-workflow.md).
 Use one immutable [recipe](recipes.md), with separate target/build identity
 records for the baseline and candidate. The recipe's workload, generator,
 observer, engine revision, completion contract and reproduction question stay
-fixed. Supported synthetic IPv4 targets are BIRD and `frr_c`, with
+fixed. Supported synthetic IPv4 targets are `bird`, `frr_c`, `openbgp` and `rustybgp`, with
 BIRD generators and sink observer. Both target selections must use the recipe's
 adapter. See the [FRR guide](frr-maintainer-workflow.md) for compatible supplied
 images and conservative container diagnostics. The [FRR source workflow](frr-source-workflow.md)
@@ -14,6 +14,10 @@ adds local builds and correctness revision search. Target threads and target-cra
 reproduction remain BIRD-only. This is one
 functional investigation; [descriptive comparisons](comparisons.md) are separate
 and calibrated performance decisions remain disabled.
+
+OpenBGPD and RustyBGP accept supplied images only. Their container health and
+memory diagnostics do not attest daemon-process liveness or exit status;
+local-source builds and revision searches refuse before source/host probes.
 
 ## Optional received-prefix correctness
 

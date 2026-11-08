@@ -140,7 +140,7 @@ functional pair and verifies its bundled evidence/prose without statistical
 performance decisions. Read `docs/investigations.md` before changing those
 contracts or their trust/accounting boundaries. Read `docs/recipes.md`
 before changing its recipe/result schemas or status meanings. It currently
-supports the documented synthetic IPv4 BIRD or `frr_c` target,
+supports the documented synthetic IPv4 `bird`, `frr_c`, `openbgp` or `rustybgp` target,
 with BIRD generators and sink observer; recipe
 execution requires the explicit `run` operation. Declared identities are not verified images or
 host qualification, and experiment status is separate from reproduction outcome.
@@ -151,6 +151,10 @@ existing compiled adapter and container names. Daemon-crash witnesses and target
 Read `docs/frr-source-workflow.md` and `docs/plans/frr-source-workflow.md` for the
 `frr-local/v1` trusted local build and correctness revision-search extension.
 `scripts/frr_workflow_smoke.py` exercises FRR contracts with simulated runtimes.
+
+Read `docs/plans/supplied-daemon-admission.md` for supplied-image OpenBGPD and
+RustyBGP recipe admission. Their existing adapters own configuration/startup;
+local-source builds and revision search remain restricted to BIRD/FRR.
 
 `recipe_assertions.py` evaluates named observable correctness witnesses against
 verified packages. `recipe_comparison.py` freezes and executes explicit serial

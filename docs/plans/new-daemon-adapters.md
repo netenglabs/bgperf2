@@ -28,8 +28,15 @@ of binary-to-source correspondence. Preserve upstream licenses and source ID.
 
 The engine wrapper supplies root execution, iproute2 and its normal idle shell
 for the existing container ABI, resets startup and disables inherited health
-probes. It does not rebuild or replace upstream binaries. The adapter writes
-ordinary eBGP IPv4 neighbors with explicit permit-all import/export policies
+probes. It does not rebuild or replace upstream binaries.
+The wrapper must also transfer `/var/lib/rustbgpd` from the release's UID 999
+to the effective root UID and retain mode 0755: native startup rejects a control
+socket parent owned by a different UID. The first bounded admission exposed
+this packaging mismatch and timed out with verified cleanup; it is not a route
+correctness or performance outcome. Preserve that original and use a fresh
+attempt after the reviewed wrapper fix.
+
+The adapter writes ordinary eBGP IPv4 neighbors with explicit permit-all import/export policies
 and uses the local operator Unix socket. No external API credentials or host
 network service is needed. Forward daemon logs into the mounted work directory.
 

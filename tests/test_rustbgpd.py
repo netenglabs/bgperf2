@@ -62,6 +62,7 @@ def test_release_wrapper_preserves_binary_and_disables_background_probes():
     recipe = RustBGPD.render_dockerfile('0.81.0')
     assert recipe.startswith('FROM ' + RustBGPD.RELEASE_IMAGE + '\n')
     assert 'USER root' in recipe and 'iproute2' in recipe
+    assert 'chown root:root /var/lib/rustbgpd && chmod 0755 /var/lib/rustbgpd' in recipe
     assert 'ENTRYPOINT []' in recipe and 'HEALTHCHECK NONE' in recipe
     assert 'cargo' not in recipe and 'COPY' not in recipe
     with pytest.raises(ValueError):

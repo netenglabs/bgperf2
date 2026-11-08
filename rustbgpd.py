@@ -80,6 +80,7 @@ class RustBGPD(Container):
         cls.dockerfile = f'''FROM {ref}
 USER root
 RUN apt-get update && apt-get install -qy --no-install-recommends iproute2 && rm -rf /var/lib/apt/lists/*
+RUN chown root:root /var/lib/rustbgpd && chmod 0755 /var/lib/rustbgpd
 ENTRYPOINT []
 HEALTHCHECK NONE
 CMD ["/bin/sh"]

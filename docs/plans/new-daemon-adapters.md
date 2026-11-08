@@ -182,3 +182,25 @@ Write native `router.bgp.timer.adv-interval.ebgp: 1` in generated YAML. Retain
 the unchanged image and prefix oracle, preserve both failed originals, and use
 a fresh original after review/checks. This is a benchmark setting, not a claim
 about upstream default performance or a change to convergence guards.
+
+The one-second setting landed at `fb9c969` after clean review and the full
+3,311-test native gate (one optional skip). A fresh native original passed all
+six assertions, including exactly 200 expected prefixes with zero missing or
+unexpected, verified package integrity and empty cleanup. Both failed originals
+remain preserved. This qualifies only small functional loading at that setting;
+policy/attribute controls and timed/capacity qualification remain pending.
+
+### Zero-observer convergence correction
+
+The diagnostic originals additionally exposed a legacy convergence bug: a
+completed target checkpoint advances stability while the observer is zero.
+The ordinary gate can converge that zero series before the no-progress branch;
+the latter also wrongly requires the stability count to remain zero. Independent
+prefix assertions prevented admission. Correct this in a separate change:
+require positive observer count for every convergence verdict and apply the
+existing no-progress deadline regardless of target-driven zero-count stability.
+No duration, prefix oracle, positive-route assurance or MRT regression rule
+changes. Regression tests reproduce both the realistic target-only checkpoint
+and contradictory observer-checkpoint input, plus later positive delivery.
+Existing recorded MRT replay tests must remain passing. Retain original rows;
+never rewrite historical failures as if the corrected engine produced them.

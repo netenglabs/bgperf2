@@ -95,6 +95,41 @@ def test_no_progress_deadline_not_tripped_early():
     assert status == ConvergenceTracker.CONTINUE
 
 
+@pytest.mark.parametrize('checked', [False, True])
+def test_full_target_checkpoint_cannot_converge_a_zero_observer(checked):
+    """Receipt/selection at the target is not delivery to the observer."""
+    tracker = ConvergenceTracker()
+    tracker.note_neighbors_checkpoint()
+    for elapsed in range(1, NO_PROGRESS_DEADLINE_SECONDS + 1):
+        assert tracker.update(elapsed, recved=0, neighbors_checked=2,
+                              neighbors_received_full=2, checked=checked,
+                              offering_complete=True) == tracker.CONTINUE
+    # A real observer never reports checked=True for zero routes; even a
+    # contradictory checkpoint must not turn zero delivery into convergence.
+    if not checked:
+        assert tracker.update(NO_PROGRESS_DEADLINE_SECONDS + 1, 0, 2, 2, False,
+                              offering_complete=True) == tracker.FAILED
+        assert 'stuck received count 0' in tracker.fail_msg
+    else:
+        for elapsed in range(NO_PROGRESS_DEADLINE_SECONDS + 1, STUCK_SAMPLES + 2):
+            status = tracker.update(elapsed, 0, 2, 2, True, offering_complete=True)
+            assert status != tracker.CONVERGED
+            if status == tracker.FAILED:
+                break
+        assert status == tracker.FAILED
+
+
+def test_target_checkpoint_with_zero_then_real_delivery_can_converge():
+    tracker = ConvergenceTracker()
+    tracker.note_neighbors_checkpoint()
+    for elapsed in range(1, 10):
+        assert tracker.update(elapsed, 0, 2, 2, False) == tracker.CONTINUE
+    assert tracker.update(10, 200, 2, 2, True) == tracker.CONTINUE
+    for elapsed in range(11, 10 + ASSURANCE_SAMPLES_AFTER_CHECKPOINT):
+        assert tracker.update(elapsed, 200, 2, 2, True) == tracker.CONTINUE
+    assert tracker.update(10 + ASSURANCE_SAMPLES_AFTER_CHECKPOINT, 200, 2, 2, True) == tracker.CONVERGED
+
+
 def test_fails_when_the_count_stops_moving_for_too_long():
     t = ConvergenceTracker()
     t.update(1, 1000, 5, 5, False)

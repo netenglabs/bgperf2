@@ -94,6 +94,20 @@ and `summary.py` published `0 of 3 passes observed`; after it, 5 of 5 single run
   decline in what the target exports; it is the absence of the session every published timing is
   read from, which the target-side witness cannot see. Churn's "a collapsed count is not a
   withdrawal", from the other side of convergence.
+  This also applies before the observer has ever received a route: a target's
+  completed receive checkpoint can otherwise open the stability branch on an
+  all-zero observer series. The positive-count guard is unconditional at the
+  convergence gate. Until the observer checkpoints, the existing 15-second
+  no-progress deadline also applies when target receipt has advanced the
+  stability counter; that counter must not bypass the deadline. Native zebra-rs
+  admission exposed this with routes queued behind its advertisement timer.
+  Exact-prefix assertions rejected those originals independently; their legacy
+  completed rows remain historical evidence, not successful delivery results.
+  The 15-second bound is an engine execution policy, not proof that a daemon
+  with a longer legitimate advertisement delay is defective. Such settings need
+  explicit normalization or a separately selected observation policy; target
+  receipt alone cannot silently extend the no-delivery deadline. The selected
+  zebra-rs adapter uses the documented one-second interval, matching FRR.
 - **The convergence gate additionally requires the sample's own `checked` flag.** A target holding
   its whole table is exactly what a *broken monitor session* looks like from the target's side, so
   without it this gate would report CONVERGED for a run whose monitor sat at zero -- the case the

@@ -596,6 +596,10 @@ class ConvergenceTracker(object):
                           or self.offering_complete_samples
                           >= self.assurance_samples)
         if ((self.neighbors_checkpoint or self.recved_checkpoint)
+                # Target receipt can complete while export is still buffered.
+                # Stability at zero is no observer delivery, even when the
+                # target checkpoint opened this branch before no-progress.
+                and recved > 0
                 and self.last_recved_count >= self.assurance_samples
                 and offering_holds
                 and (dropped <= DROP_FRACTION
@@ -613,7 +617,6 @@ class ConvergenceTracker(object):
 
         if (elapsed_seconds > NO_PROGRESS_DEADLINE_SECONDS
                 and not self.recved_checkpoint
-                and self.last_recved_count == 0
                 and recved == 0):
             # Nothing has arrived at all; trip the stuck check immediately
             # rather than waiting out STUCK_SAMPLES.

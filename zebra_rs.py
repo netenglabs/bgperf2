@@ -102,6 +102,10 @@ class ZebraRSTarget(ZebraRS, Target):
         config = {'policy': [{'name': 'BGPERF-PERMIT', 'entry': [{'number': 10, 'action': 'permit'}]}],
                   'router': {'bgp': {
                       'global': {'as': self.conf['as'], 'router-id': str(self.conf['router-id'])},
+                      # Match the FRR adapter's explicit eBGP advertisement
+                      # interval. Upstream's 30s default exceeds the existing
+                      # no-progress guard; do not weaken that guard instead.
+                      'timer': {'adv-interval': {'ebgp': 1}},
                       'neighbor': [{'remote-address': str(peer['router-id']), 'remote-as': peer['as'],
                                     'enabled': True, 'afi-safi': [{'name': 'ipv4', 'enabled': True,
                                       'policy': {'in': 'BGPERF-PERMIT', 'out': 'BGPERF-PERMIT'}}]}

@@ -52,6 +52,7 @@ def test_config_explicitly_permits_ipv4_for_every_session(tmp_path):
     config = yaml.safe_load((tmp_path / target.CONFIG_FILE_NAME).read_text())
     assert config['policy'][0]['entry'] == [{'number': 10, 'action': 'permit'}]
     bgp = config['router']['bgp']
+    assert bgp['timer'] == {'adv-interval': {'ebgp': 1}}
     assert bgp['global'] == {'as': 64512, 'router-id': '10.0.0.1'}
     assert {peer['remote-address'] for peer in bgp['neighbor']} == {'10.0.0.2', '10.0.0.3', '10.0.0.4'}
     for peer in bgp['neighbor']:

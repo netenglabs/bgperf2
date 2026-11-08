@@ -166,3 +166,19 @@ configuration. None changes assertion, convergence, memory or crash meanings.
 Focused tests cover ownership drift, disabled/other adapters, baseline ordering,
 partial output/failure, and shared deadline exhaustion. A fresh native diagnostic
 original with the same image and exact-prefix oracle follows review and checks.
+
+The fresh native diagnostic original exercised all six snapshots. The sample
+path was selected, the native connected route and kernel lookup were valid,
+and the summary held 200 prefixes in the observer's Adj-RIB-Out. The sink
+received only End-of-RIB before the original ended. Upstream's `AdvInterval`
+defaults eBGP to 30 seconds and buffers advertisements; the existing engine
+no-progress deadline is 15 seconds. This supports a timer mismatch, not a
+proven next-hop failure or wire export defect. Packaged version metadata reports
+unknown source commit and dirty=true, so source correspondence remains limited.
+
+The operator selected a documented one-second eBGP advertisement interval,
+matching the existing FRR adapter, rather than a longer no-progress allowance.
+Write native `router.bgp.timer.adv-interval.ebgp: 1` in generated YAML. Retain
+the unchanged image and prefix oracle, preserve both failed originals, and use
+a fresh original after review/checks. This is a benchmark setting, not a claim
+about upstream default performance or a change to convergence guards.

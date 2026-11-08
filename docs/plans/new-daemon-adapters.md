@@ -339,3 +339,23 @@ run a fresh six-assertion exact-prefix original. Linux compilation, runtime API,
 session behavior and route delivery are separate gates; retain failures and
 diagnose before any retry. A proven incompatible deployment requiring different
 hardware or a substantive scope change needs the operator's decision.
+
+Implemented at `2f4848b`; final review is ready with the explicitly scoped
+default-ASN diagnostic followup, and 3,442 native tests passed (one optional
+skip). The normal default-feature Linux build succeeded without an upstream
+patch or alternate profile. Retained source ID is the selected commit and
+observed compiler is Rust 1.97.1. Native mgd reports package version 0.1.0 and
+its binary instrumentation is clean. The first verifier invocation additionally
+failed tag/banner matching because the implementation put a raw source commit
+in the release-version catalog. Preserve that failed verification log.
+
+Correct the catalog to empty: no published releases were selected for this
+daemon. Full source commits remain explicitly selectable through the existing
+raw-ref build interface, which already documents that a source SHA need not
+appear in a package-version banner. Do not append a requested commit to the
+daemon version or waive a real release mismatch. The native package banner and
+instrumentation remain checked; the banner does not verify binary-to-commit
+correspondence. Retain and verify build source/toolchain/lock metadata and
+immutable binary/image identities separately, preserving that limitation.
+The built Dockerfile/binary are unchanged by this catalog correction. Re-run
+verification after review/checks before any route original.

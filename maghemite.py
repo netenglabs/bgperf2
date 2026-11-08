@@ -14,7 +14,9 @@ class Maghemite(Container):
     DAEMON_BINARY = '/usr/local/sbin/mgd'
     HTTP_BINARY = '/usr/local/bin/bgperf-mg-http'
     DEFAULT_REF = '277f4368d7b6e6c75bf339db132f8de1ac9b019a'
-    VERSIONS = (DEFAULT_REF,)
+    # There is no published release catalog. A raw source commit is selectable,
+    # but is not a release version that the daemon's package banner can attest.
+    VERSIONS = ()
     BUILDER_IMAGE = 'rust@sha256:b1b3c9c0d921d7fa0a6d1f9ec7e4eab87f8c8ec97644c3d791450f131dec813f'
     RUNTIME_IMAGE = 'debian@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2'
 

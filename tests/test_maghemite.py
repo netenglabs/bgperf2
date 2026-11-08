@@ -6,6 +6,7 @@ import subprocess
 import pytest
 
 import base
+import bgperf2
 import contention
 from maghemite import Maghemite, MaghemiteTarget
 
@@ -107,6 +108,14 @@ def test_normal_source_build_is_locked_and_keeps_default_features():
     for value in ('0.1.0', 'latest', '277f4368d7b6', 'main\nRUN bad'):
         with pytest.raises(ValueError):
             Maghemite.resolve_ref(value)
+
+
+def test_source_commit_is_selectable_without_claiming_a_native_release_banner():
+    ref = Maghemite.DEFAULT_REF
+    assert Maghemite.image_tag(ref) == 'bgperf/maghemite:' + ref
+    assert Maghemite.resolve_ref(ref) == ref
+    assert not bgperf2.expect_version_in_banner(Maghemite, ref)
+    assert not bgperf2.version_matches('mgd 0.1.0', ref, ref)
 
 
 @pytest.mark.parametrize('banner,valid', [('mgd 0.1.0', True), ('mgd 0.1.0-dev', True),

@@ -26,7 +26,7 @@ remains satisfied; create the separate artifact directory before exporting.
 
 ## Export one cell
 
-The supported workload is synthetic IPv4 with a `bird`, `frr_c`, `openbgp` or `rustybgp` target, BIRD
+The supported workload is synthetic IPv4 with a `bird`, `frr_c`, `openbgp`, `rustybgp` or `rustbgpd` target, BIRD
 generator and sink observer, with disjoint prefixes and no policy filter or
 additional receivers. Scenario files, Mako, MRT, hooks, local build instructions,
 other adapters and workload extensions are refused. These limits keep downloaded
@@ -237,7 +237,7 @@ After the OS prerequisites, locked environment and selected exact images are
 available, use one clean checkout at the recipe's full engine revision. Running
 a recipe executes containers with the current user's Docker authority. Read the
 recipe, trust the selected images and choose an otherwise idle suitable Linux
-host before execution. Supported targets are `bird`, `frr_c`, `openbgp` and `rustybgp`,
+host before execution. Supported targets are `bird`, `frr_c`, `openbgp`, `rustybgp` and `rustbgpd`,
 with BIRD generators and sink observer.
 The public fixture's fake image pins cannot run.
 

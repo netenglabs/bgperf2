@@ -306,6 +306,11 @@ an experiment or publication.
 
 ## Existing behavior and contribution checks
 
+The selected [new-daemon adapter plan](plans/new-daemon-adapters.md) starts with
+rustbgpd's supplied-release wrapper, ordinary IPv4 target and bounded recipes.
+Other candidate interfaces and runtime qualification remain pending; integration
+does not establish correctness or performance qualification by itself.
+
 The [supplied-daemon admission plan](plans/supplied-daemon-admission.md) extends
 bounded synthetic recipes and exact-prefix assertions to the existing OpenBGPD
 and RustyBGP adapters. Contract implementation and selected real-image

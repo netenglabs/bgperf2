@@ -29,6 +29,7 @@ def bench(runtime, args):
     # Here as well as in `batch()`, because a single `bench` can be stopped
     # too. Idempotent: re-installing a handler replaces it with itself.
     runtime.install_stop_handlers()
+    runtime.check_target_workload(args)
 
     output_stats = {}
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)

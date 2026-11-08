@@ -140,7 +140,7 @@ functional pair and verifies its bundled evidence/prose without statistical
 performance decisions. Read `docs/investigations.md` before changing those
 contracts or their trust/accounting boundaries. Read `docs/recipes.md`
 before changing its recipe/result schemas or status meanings. It currently
-supports the documented synthetic IPv4 `bird`, `frr_c`, `openbgp` or `rustybgp` target,
+supports the documented synthetic IPv4 `bird`, `frr_c`, `openbgp`, `rustybgp` or `rustbgpd` target,
 with BIRD generators and sink observer; recipe
 execution requires the explicit `run` operation. Declared identities are not verified images or
 host qualification, and experiment status is separate from reproduction outcome.
@@ -155,6 +155,10 @@ Read `docs/frr-source-workflow.md` and `docs/plans/frr-source-workflow.md` for t
 Read `docs/plans/supplied-daemon-admission.md` for supplied-image OpenBGPD and
 RustyBGP recipe admission. Their existing adapters own configuration/startup;
 local-source builds and revision search remain restricted to BIRD/FRR.
+
+Read `docs/plans/new-daemon-adapters.md` for rustbgpd's supplied-release wrapper,
+permit-all IPv4 scope and accepted-prefix-only counter. It is distinct from
+RustyBGP. Unsupported filters, thread overrides and custom files refuse early.
 
 `recipe_assertions.py` evaluates named observable correctness witnesses against
 verified packages. `recipe_comparison.py` freezes and executes explicit serial

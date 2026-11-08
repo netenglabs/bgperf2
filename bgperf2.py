@@ -57,6 +57,7 @@ from bird import BIRD, BIRDTarget
 from frr import FRRoutingTarget
 from frr_compiled import FRRoutingCompiled, FRRoutingCompiledTarget
 from rustybgp import RustyBGP, RustyBGPTarget
+from rustbgpd import RustBGPD, RustBGPDTarget
 from openbgp import OpenBGP, OpenBGPTarget
 from flock import Flock, FlockTarget
 from srlinux import SRLinux, SRLinuxTarget
@@ -108,6 +109,7 @@ BUILDABLE_IMAGES = {
     'gobgp': GoBGP,
     'bird': BIRD,
     'rustybgp': RustyBGP,
+    'rustbgpd': RustBGPD,
     'openbgp': OpenBGP,
     'flock': Flock,
     'frr_c': FRRoutingCompiled,
@@ -119,7 +121,7 @@ BUILDABLE_IMAGES = {
 
 # What `prepare` builds, in order. Flock and the commercial NOSes are left out:
 # they are downloaded rather than compiled.
-PREPARE_IMAGES = ['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'rustybgp',
+PREPARE_IMAGES = ['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'rustybgp', 'rustbgpd',
                   'openbgp', 'frr_c', 'bgpdump2', 'sink']
 
 # Targets `bench -t` accepts. The class both selects the daemon's behaviour and
@@ -187,6 +189,7 @@ TARGET_CLASSES = {
     'bird': BIRDTarget,
     'frr_c': FRRoutingCompiledTarget,
     'rustybgp': RustyBGPTarget,
+    'rustbgpd': RustBGPDTarget,
     'openbgp': OpenBGPTarget,
     'flock': FlockTarget,
     'srlinux': SRLinuxTarget,
@@ -4215,6 +4218,9 @@ def check_batch_test(test):
         if not isinstance(target, dict) or not target.get('name'):
             sys.exit("test '{0}': every target needs a `name`, got {1!r}".format(
                 test['name'], target))
+        for selected_filter in test['filter_test']:
+            check_target_workload(argparse.Namespace(**dict(
+                target, target=target['name'], filter_test=selected_filter)))
         # Every generator check below exempts a scenario target: it never
         # reaches `gen_conf()`, so its generator is inert and none of the
         # advice these print would change what runs.
@@ -5850,7 +5856,20 @@ def check_generator_matches_workload(args):
             '--mrt-file was given'.format(tester))
 
 
+def check_target_workload(args):
+    """Reject unsupported rustbgpd controls before config writes or teardown."""
+    if getattr(args, 'target', None) != 'rustbgpd':
+        return
+    if (getattr(args, 'filter_test', None) not in (None, 'None')
+            or getattr(args, 'threads', None) is not None
+            or getattr(args, 'file', None)
+            or getattr(args, 'target_config_file', None)):
+        sys.exit('rustbgpd supports permit-all IPv4 loading without filters, '
+                 'thread overrides or custom configuration/scenario files')
+
+
 def config(args):
+    check_target_workload(args)
     try:
         refuse_single_table(getattr(args, 'single_table', False),
                             '-s/--single-table')

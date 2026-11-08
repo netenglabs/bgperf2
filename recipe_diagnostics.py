@@ -19,6 +19,67 @@ MAX_CONTAINERS = 128
 COLLECTION_SECONDS = 20
 LIVE_SAMPLE_LIMIT = 128
 
+# Fixed read-only samples, deliberately not full RIB/configuration dumps. These
+# addresses describe the default synthetic fixture, not arbitrary recipe input.
+ZEBRA_NATIVE_COMMANDS = tuple(
+    (name, ('/usr/bin/vtyctl', '--vty-socket', 'unix:/run/bgperf-zebra.vty',
+            'show', '--json', query))
+    for name, query in (
+        ('version', 'show version'), ('summary', 'show bgp summary'),
+        ('sample-path', 'show bgp ipv4 100.0.0.0/32'),
+        ('sample-connected', 'show ip route 10.10.0.0/16'))
+) + (
+    ('sample-kernel-route', ('/usr/sbin/ip', '-json', 'route', 'get', '10.10.0.3')),
+    ('addresses', ('/usr/sbin/ip', '-json', 'address', 'show')),
+)
+
+
+def collect_zebra_native(work, attempt, item, probe, errors):
+    """Post-worker snapshots only; no convergence, acceptance or memory verdict."""
+    item['native'] = {'scope': 'post-worker, after baseline memory/log collection; '
+                      'fixed default-synthetic address samples, not exhaustive or convergence-time',
+                      'queries': []}
+    for name, argv in ZEBRA_NATIVE_COMMANDS:
+        record = {'name': name, 'status': 'unavailable', 'path': None,
+                  'argv': list(argv)}
+        item['native']['queries'].append(record)
+        try:
+            # Repeat the ownership and identity check immediately before each
+            # exec. An immutable ID avoids following a replaced container name.
+            inspection = json.loads(probe(['container', 'inspect', item['id']])['text'])
+            if not isinstance(inspection, list) or len(inspection) != 1:
+                raise ValueError('Native diagnostic ownership recheck malformed')
+            inspected = inspection[0]
+            if (not isinstance(inspected, dict)
+                    or inspected.get('Id') != item['id']
+                    or inspected.get('Name') != '/' + item['name']
+                    or inspected.get('Image') != item['image_id']
+                    or inspected.get('Config', {}).get('Labels', {}).get('bgperf2.recipe.attempt') != attempt):
+                raise ValueError('Native diagnostic ownership/identity recheck failed')
+        except (OSError, ValueError, TypeError, AttributeError, KeyError, preflight.ProbeError) as exc:
+            record['error'] = str(exc)
+            errors.append(f'{item["id"]}: native {name}: {exc}')
+            break
+        try:
+            result = probe(['exec', item['id'], '/usr/local/bin/bgperf-z-wait',
+                            '--kill-after=0.5', '2', *argv], raw=True)
+            relative = f'diagnostic-native/{item["id"]}-{name}.txt'
+            path = work / relative
+            path.parent.mkdir(exist_ok=True)
+            path.write_text(result['text'])
+            exit_code = result.get('exit_code', 0)
+            record.update(status='failed' if exit_code else ('truncated' if result['truncated'] else 'captured'),
+                          path=relative, truncated=result['truncated'],
+                          captured_bytes=result['captured_bytes'], exit_code=exit_code)
+            if result['truncated'] or exit_code:
+                errors.append(f'{item["id"]}: native {name}: '
+                              f'exit={exit_code}, truncated={result["truncated"]}')
+        except (OSError, ValueError, TypeError, AttributeError, KeyError, preflight.ProbeError) as exc:
+            record['error'] = str(exc)
+            errors.append(f'{item["id"]}: native {name}: {exc}')
+            # Independent queries may still answer. Each repeats ownership and
+            # checks the remaining collection budget before another exec.
+
 
 def host_snapshot():
     """Read minimal host identity before execution, without Docker or subprocesses."""
@@ -103,7 +164,7 @@ def role_for_name(name):
     return 'generator'
 
 
-def bounded_probe(argv, *, env, timeout=3, max_bytes=MAX_BYTES):
+def bounded_probe(argv, *, env, timeout=3, max_bytes=MAX_BYTES, allow_nonzero=False):
     """Stop a read-only CLI client on deadline/output limit, retaining bounded bytes."""
     deadline = time.monotonic() + timeout
     output = bytearray()
@@ -136,11 +197,11 @@ def bounded_probe(argv, *, env, timeout=3, max_bytes=MAX_BYTES):
             except ProcessLookupError:
                 pass
         process.wait(timeout=max(0.01, deadline - time.monotonic()))
-        if process.returncode and not truncated:
+        if process.returncode and not truncated and not allow_nonzero:
             raise preflight.ProbeError(f'Diagnostic command exited {process.returncode}: '
                                        + output.decode('utf-8', errors='replace')[-1000:])
         return {'text': output.decode('utf-8', errors='replace'),
-                'truncated': truncated, 'captured_bytes': len(output)}
+                'truncated': truncated, 'captured_bytes': len(output), 'exit_code': process.returncode}
     finally:
         try:
             os.killpg(process.pid, signal.SIGKILL)
@@ -293,12 +354,13 @@ def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memor
         return report
     deadline = time.monotonic() + COLLECTION_SECONDS
     prefix = ['docker', '--host', env.get('DOCKER_HOST', 'unix:///var/run/docker.sock')]
-    def probe(args):
+    def probe(args, *, raw=False):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise preflight.ProbeError('Overall diagnostic collection budget expired')
-        result = command(prefix + args, env=env, timeout=min(3, remaining), max_bytes=MAX_BYTES)
-        if result.get('truncated') and 'logs' not in args:
+        options = {'allow_nonzero': True} if raw else {}
+        result = command(prefix + args, env=env, timeout=min(3, remaining), max_bytes=MAX_BYTES, **options)
+        if result.get('truncated') and 'logs' not in args and not raw:
             raise preflight.ProbeError('Structured diagnostic output exceeded its byte budget')
         return result
     try:
@@ -354,6 +416,12 @@ def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memor
     for item in report['containers']:
         if item['role'] == 'target':
             report['memory']['target'] = item['memory']
+    # Keep baseline evidence for every role before spending the remaining shared
+    # collection budget on supplemental native CLI work.
+    if target_adapter == 'zebra-rs':
+        for item in report['containers']:
+            if item['name'].endswith('_bgperf_zebra_rs_target'):
+                collect_zebra_native(work, attempt, item, probe, report['errors'])
     live_path = work / 'live-diagnostics.json'
     if live_path.is_file():
         try:

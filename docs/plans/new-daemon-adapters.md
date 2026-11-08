@@ -149,3 +149,20 @@ process explicitly, without allowlisting unrelated timeout commands.
 Apply the same public registration, capability/refusal, diagnostics, process
 accounting, pure-test/review/build-verification and fresh exact-prefix native
 admission gates above. No local source builder or BIRD-only witness is added.
+
+Implemented at `e78e56c`. The first native original received both generator
+checkpoints but exported zero of the expected 200 prefixes. Independent count
+and identity assertions failed; the legacy completed stats row is insufficient
+for admission. Cleanup and artifact verification succeeded. The retained logs
+cannot establish path eligibility or next-hop state. Preserve that original;
+do not bypass next-hop validation or claim an upstream cause without evidence.
+
+The next diagnostic change extends the existing bounded collector with fixed,
+read-only zebra-rs native snapshots, collected after all roles' baseline memory
+and logs. Every exec repeats immutable ID/name/image/attempt ownership checks,
+uses an in-container deadline, and shares the existing overall/output bounds.
+Queries sample default synthetic addresses and do not dump the full RIB or
+configuration. None changes assertion, convergence, memory or crash meanings.
+Focused tests cover ownership drift, disabled/other adapters, baseline ordering,
+partial output/failure, and shared deadline exhaustion. A fresh native diagnostic
+original with the same image and exact-prefix oracle follows review and checks.

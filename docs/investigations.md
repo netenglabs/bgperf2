@@ -398,6 +398,20 @@ The packages preserve:
   Final collection has a 20-second probe budget plus bounded client termination,
   up to 128 owned containers,
   64 KiB per probe and a requested tail of 200 log lines.
+  With a zebra-rs target, remaining collection budget also permits fixed native
+  snapshots after baseline state, logs and memory for every role: version,
+  BGP summary, one default-synthetic path (`100.0.0.0/32`), one connected prefix
+  (`10.10.0.0/16`), kernel lookup of `10.10.0.3`, and namespace addresses.
+  Each native exec rechecks the immutable owned container ID, name, image and
+  attempt label, uses a two-second in-container deadline (0.5-second kill grace),
+  and shares the existing 20-second collection budget and 64 KiB output bound.
+  `diagnostic-native/*.txt` retains raw output with per-query status, errors and
+  truncation in `diagnostics.json`. Missing queries remain unavailable. These
+  fixed address samples are not exhaustive for arbitrary recipes. They run
+  after the worker and baseline memory observations, before cleanup; they are
+  not convergence-time observations and change no measurement or assertion.
+  No full RIB, running configuration, neighbor authentication or environment
+  dump is requested. `none` disables these queries too.
 - Preserved CSV/event material before final graph/provenance collectors. The
   `raw-samples.csv` file is the retained legacy graph series after its existing
   assurance slicing, not every observed poll. `raw-samples.metadata.json` states

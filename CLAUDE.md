@@ -140,7 +140,7 @@ functional pair and verifies its bundled evidence/prose without statistical
 performance decisions. Read `docs/investigations.md` before changing those
 contracts or their trust/accounting boundaries. Read `docs/recipes.md`
 before changing its recipe/result schemas or status meanings. It currently
-supports the documented synthetic IPv4 `bird`, `frr_c`, `openbgp`, `rustybgp`, `rustbgpd`, `holo` or `zebra-rs` target,
+supports the documented synthetic IPv4 `bird`, `frr_c`, `openbgp`, `rustybgp`, `rustbgpd`, `holo`, `zebra-rs` or `bio-routing` target,
 with BIRD generators and sink observer; recipe
 execution requires the explicit `run` operation. Declared identities are not verified images or
 host qualification, and experiment status is separate from reproduction outcome.
@@ -163,6 +163,9 @@ The same plan governs Holo's locked source build and transactional native gRPC
 adapter. Preserve the difference between installed/accepted and selected routes.
 It also governs zebra-rs's checksummed official packages, native YAML/VTY
 adapter and received-only Adj-RIB-In observation.
+It also governs Bio-Routing's pinned Go source build, native YAML and implemented
+Prometheus received-path snapshots. Native version and accepted/selected counts
+remain unavailable; never infer them from requested tags or unused RPC schemas.
 
 `recipe_assertions.py` evaluates named observable correctness witnesses against
 verified packages. `recipe_comparison.py` freezes and executes explicit serial

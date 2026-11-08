@@ -204,3 +204,52 @@ changes. Regression tests reproduce both the realistic target-only checkpoint
 and contradictory observer-checkpoint input, plus later positive delivery.
 Existing recorded MRT replay tests must remain passing. Retain original rows;
 never rewrite historical failures as if the corrected engine produced them.
+
+## Next adapter: Bio-Routing 0.1.10
+
+Build source `f422dbad63bd7977e94a16aa0718fb9876df23ee` with a digest-pinned
+Go 1.25.14 builder, the tracked go.mod/go.sum and `-mod=readonly`, optimized
+ordinary Go build settings and CGO disabled. Retain source ID, module files,
+license, compiler/module inventory and actual `go version -m` binary build
+metadata. Use the same digest-pinned Debian runtime as other new adapters.
+The service has no native version flag: explicitly retain UNKNOWN rather than
+manufacture a requested version banner. Binary/source records remain required.
+
+Write native YAML for ordinary IPv4 eBGP and explicit permit-all import/export
+policy, using the configured local interface address rather than the router ID
+when those differ. Retain upstream default logging and next-hop semantics.
+Do not use the advertised ListSessions RPC: its implementation returns not
+implemented. Read implemented loopback Prometheus metrics through a bounded
+native HTTP client instead. Register a benchmark-specific client alias for
+process accounting; do not allowlist generic curl or an interpreter.
+
+At the selected source, `bio_bgp_route_received_count` is labelled a counter
+but generated from the current Adj-RIB-In RouteCount before import validation.
+Expose it only as received paths for established IPv4 peers in VRF `main`.
+Accepted/rejected descriptors are not emitted; accepted and best-path witnesses
+stay unavailable. Validate labels, duplicate/context conflicts and finite
+nonnegative integral values; missing/stale/malformed observations are read
+failures, never zero or successful checkpoints. HTTP reads need deadlines,
+response bounds and checked command exit status.
+The runtime is Debian 13 (trixie), verified natively from the selected digest.
+Require curl >=8.4.0 at build time and retain its actual version: the
+[curl manual](https://curl.se/docs/manpage.html#--max-filesize) documents that
+older clients do not enforce the size bound on bodies without Content-Length.
+Thus old or incompatible clients refuse preparation instead of weakening the
+streaming bound. Bio-Routing peer endpoints use native local-address with CIDR
+stripped; router IDs remain distinct. Existing rustbgpd/Holo/zebra-rs adapters'
+peer/router-ID distinction needs a separate reviewed correction for overridden
+monitor addresses; default-address native qualifications remain scoped as run.
+
+Apply existing registration, early unsupported-control refusals, pure parser/
+configuration/build/dispatch tests, required review/native checks, immutable
+image recording and fresh independent exact-prefix admission. No upstream
+semantic patch, arbitrary scenario/config passthrough or new source-range
+builder is included. Large-load sampling cost and policy controls remain
+unqualified until their separate planned checks.
+
+Implementation additionally closes the shared permit-all refusal gap for all
+new adapters: nonzero AS-path, prefix, community and extended-community filter
+counts must refuse at bench/config/batch entry points before teardown, alongside
+the existing policy/thread/custom-file refusals. Ignoring a requested filter
+would silently change the declared workload.

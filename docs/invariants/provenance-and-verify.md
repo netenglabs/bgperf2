@@ -12,7 +12,7 @@ source/build trust boundary.
 `RECIPE_LABEL_KEY`, `recipe_hash()`, `img_recipe_label()`, `Container.current_recipe_hash()`,
 `Container.override_buildargs()`, `Container.recipe_status()`), `bgperf2.py` (`verify`, `doctor`,
 `images`, `prepare`, `checkable_versions()`), and every module carrying a version command: `bird.py`,
-`gobgp.py`, `rustybgp.py`, `rustbgpd.py`, `holo.py`, `zebra_rs.py`, `openbgp.py`, `frr.py`, `frr_compiled.py`, `bgpdump2.py`, `exabgp.py`, `junos.py`,
+`gobgp.py`, `rustybgp.py`, `rustbgpd.py`, `holo.py`, `zebra_rs.py`, `bio_routing.py`, `openbgp.py`, `frr.py`, `frr_compiled.py`, `bgpdump2.py`, `exabgp.py`, `junos.py`,
 `eos.py`, `srlinux.py`, `flock.py`, `monitor.py`, `tester.py`, `mrt_tester.py`, `sink.py`
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.

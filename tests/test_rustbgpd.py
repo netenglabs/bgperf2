@@ -93,9 +93,11 @@ def test_version_parser_on_actual_target_mro(tmp_path, monkeypatch, banner, vali
 
 
 @pytest.mark.parametrize('fields', [dict(filter_test='transit'), dict(threads=4),
-    dict(file='/must-not-read'), dict(target_config_file='/must-not-read')])
+    dict(file='/must-not-read'), dict(target_config_file='/must-not-read'),
+    dict(as_path_list_num=1), dict(prefix_list_num=1), dict(community_list_num=1),
+    dict(ext_community_list_num=1)])
 @pytest.mark.parametrize('entrypoint', ['bench', 'config', 'batch'])
-@pytest.mark.parametrize('adapter', ['rustbgpd', 'holo', 'zebra-rs'])
+@pytest.mark.parametrize('adapter', ['rustbgpd', 'holo', 'zebra-rs', 'bio-routing'])
 def test_unsupported_controls_refuse_before_runtime_or_files(fields, entrypoint, adapter, tmp_path):
     if entrypoint == 'batch':
         test = dict(name='unsupported', neighbors=[1], prefixes=[1], filter_test=[None],

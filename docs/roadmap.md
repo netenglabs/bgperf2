@@ -308,8 +308,8 @@ an experiment or publication.
 
 The selected [new-daemon adapter plan](plans/new-daemon-adapters.md) starts with
 rustbgpd's supplied-release wrapper, ordinary IPv4 target and bounded recipes.
-rustbgpd and Holo now have selected small native exact-prefix qualification;
-zebra-rs is the next integration. Other candidate interfaces and broader runtime
+rustbgpd, Holo and zebra-rs now have selected small native exact-prefix qualification;
+Bio-Routing is the next integration. Other candidate interfaces and broader runtime
 qualification remain pending. Integration alone does not qualify performance.
 
 The [supplied-daemon admission plan](plans/supplied-daemon-admission.md) extends

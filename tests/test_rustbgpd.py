@@ -95,22 +95,23 @@ def test_version_parser_on_actual_target_mro(tmp_path, monkeypatch, banner, vali
 @pytest.mark.parametrize('fields', [dict(filter_test='transit'), dict(threads=4),
     dict(file='/must-not-read'), dict(target_config_file='/must-not-read')])
 @pytest.mark.parametrize('entrypoint', ['bench', 'config', 'batch'])
-def test_unsupported_controls_refuse_before_runtime_or_files(fields, entrypoint, tmp_path):
+@pytest.mark.parametrize('adapter', ['rustbgpd', 'holo'])
+def test_unsupported_controls_refuse_before_runtime_or_files(fields, entrypoint, adapter, tmp_path):
     if entrypoint == 'batch':
         test = dict(name='unsupported', neighbors=[1], prefixes=[1], filter_test=[None],
-                    targets=[dict(name='rustbgpd', **{k: v for k, v in fields.items() if k != 'filter_test'})])
+                    targets=[dict(name=adapter, **{k: v for k, v in fields.items() if k != 'filter_test'})])
         if 'filter_test' in fields:
             test['filter_test'] = [fields['filter_test']]
-        with pytest.raises(SystemExit, match='rustbgpd supports'):
+        with pytest.raises(SystemExit, match=adapter + ' supports'):
             bgperf2.check_batch_test(test)
     elif entrypoint == 'config':
-        with pytest.raises(SystemExit, match='rustbgpd supports'):
-            bgperf2.config(Namespace(target='rustbgpd', **fields))
+        with pytest.raises(SystemExit, match=adapter + ' supports'):
+            bgperf2.config(Namespace(target=adapter, **fields))
     else:
         from test_run_lifecycle import fake_run
         runtime, args, calls, _ = fake_run(tmp_path)
-        args.target = 'rustbgpd'
+        args.target = adapter
         vars(args).update(fields)
-        with pytest.raises(SystemExit, match='rustbgpd supports'):
+        with pytest.raises(SystemExit, match=adapter + ' supports'):
             run_lifecycle.bench(runtime, args)
         assert calls == ['install_stop_handlers']

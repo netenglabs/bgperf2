@@ -1,7 +1,8 @@
 # New daemon adapters for characterization
 
-Selected 2026-11-07. Status: rustbgpd implementation in progress; other entrants
-await their separate compatibility/integration checks.
+Selected 2026-11-07. Status: rustbgpd implemented at `0041e27`, with the native
+ownership fix at `40a312e`; selected small live admission passed. Holo is next;
+other entrants await their separate compatibility/integration checks.
 
 ## Purpose and ownership
 
@@ -64,3 +65,39 @@ read failures, never zeros or successful checkpoints.
 
 Other candidates follow the same process after their interfaces are inspected.
 New policy/attribute workloads and verdict semantics are separate changes.
+
+## Next adapter: Holo 0.9.0
+
+Source selection is `947daeb2811b0cb90f457458f35c3b1a3c989b6b`. Its release
+has no binary assets and upstream container CI publishes moving latest tags.
+Build the selected source with its tracked Cargo.lock, `--locked --release`,
+and exact builder/runtime/client image digests. Preserve lock, proto, license
+and observed source ID in the runtime image. Do not substitute upstream HEAD.
+Retain compiler, resolved dependency tree and builder package inventory too.
+Debian package repositories remain mutable; recorded package versions and
+frozen binaries do not establish a bit-identical source rebuild.
+
+Holo separates daemon bootstrap TOML from transactional YANG configuration.
+Use its exact-source `holo.proto` and generic grpcurl 1.9.3, with native gRPC
+bound to container loopback and gNMI disabled. Startup must wait boundedly for
+capabilities and commit the explicit permit-all IPv4 configuration before the
+ordinary observer/generator lifecycle proceeds. Retain bootstrap, request,
+commit outcome and daemon logs. No host service or external credentials.
+Refresh generated YANG after Docker attachment resolves the actual benchmark
+interface, before daemon startup; the constructor's default eth0 is not a
+network identity. Capabilities probes are bounded at one second, startup Commit
+at ten seconds and operational Get at five seconds. Native calibration still
+must assess API sampling cost under load; those bounds do not qualify timing.
+
+The native neighbor state provides `prefixes.received` from Adj-RIB-In
+pre-policy and `prefixes.installed` from Adj-RIB-In post-policy. The latter is
+accepted paths, not selected best paths. Read both for established IPv4
+neighbors through one bounded Get request; malformed/unavailable counts refuse,
+and no independent table/best-path witness is inferred. Preserve normal
+interface/next-hop resolution behavior; do not invent a synthetic next-hop
+bypass to make an admission pass.
+
+Reuse the rustbgpd acceptance checks above: public build/verify/dispatch and
+bounded recipes, early unsupported-control refusals, explicit diagnostics and
+process accounting, pure tests, required review and a fresh native exact-prefix
+admission. This plan does not itself qualify the implementation or runtime.

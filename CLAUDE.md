@@ -140,7 +140,7 @@ functional pair and verifies its bundled evidence/prose without statistical
 performance decisions. Read `docs/investigations.md` before changing those
 contracts or their trust/accounting boundaries. Read `docs/recipes.md`
 before changing its recipe/result schemas or status meanings. It currently
-supports the documented synthetic IPv4 `bird`, `frr_c`, `openbgp`, `rustybgp` or `rustbgpd` target,
+supports the documented synthetic IPv4 `bird`, `frr_c`, `openbgp`, `rustybgp`, `rustbgpd` or `holo` target,
 with BIRD generators and sink observer; recipe
 execution requires the explicit `run` operation. Declared identities are not verified images or
 host qualification, and experiment status is separate from reproduction outcome.
@@ -159,6 +159,8 @@ local-source builds and revision search remain restricted to BIRD/FRR.
 Read `docs/plans/new-daemon-adapters.md` for rustbgpd's supplied-release wrapper,
 permit-all IPv4 scope and accepted-prefix-only counter. It is distinct from
 RustyBGP. Unsupported filters, thread overrides and custom files refuse early.
+The same plan governs Holo's locked source build and transactional native gRPC
+adapter. Preserve the difference between installed/accepted and selected routes.
 
 `recipe_assertions.py` evaluates named observable correctness witnesses against
 verified packages. `recipe_comparison.py` freezes and executes explicit serial

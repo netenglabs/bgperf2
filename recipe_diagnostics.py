@@ -91,7 +91,7 @@ def stage(work, name, *, status='entered', reason=None):
 
 
 NON_BIRD_TARGET_SUFFIXES = ('_frrouting_compiled_target', '_openbgp_target', '_rustybgp_target',
-                           '_rustbgpd_target')
+                           '_rustbgpd_target', '_holo_target')
 UNSUPPORTED_DAEMON_WITNESS = 'Non-BIRD daemon process presence and exit-status witnesses are unsupported; container state does not diagnose the daemon.'
 
 

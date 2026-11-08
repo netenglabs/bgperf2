@@ -58,6 +58,7 @@ from frr import FRRoutingTarget
 from frr_compiled import FRRoutingCompiled, FRRoutingCompiledTarget
 from rustybgp import RustyBGP, RustyBGPTarget
 from rustbgpd import RustBGPD, RustBGPDTarget
+from holo import Holo, HoloTarget
 from openbgp import OpenBGP, OpenBGPTarget
 from flock import Flock, FlockTarget
 from srlinux import SRLinux, SRLinuxTarget
@@ -110,6 +111,7 @@ BUILDABLE_IMAGES = {
     'bird': BIRD,
     'rustybgp': RustyBGP,
     'rustbgpd': RustBGPD,
+    'holo': Holo,
     'openbgp': OpenBGP,
     'flock': Flock,
     'frr_c': FRRoutingCompiled,
@@ -121,7 +123,7 @@ BUILDABLE_IMAGES = {
 
 # What `prepare` builds, in order. Flock and the commercial NOSes are left out:
 # they are downloaded rather than compiled.
-PREPARE_IMAGES = ['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'rustybgp', 'rustbgpd',
+PREPARE_IMAGES = ['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'rustybgp', 'rustbgpd', 'holo',
                   'openbgp', 'frr_c', 'bgpdump2', 'sink']
 
 # Targets `bench -t` accepts. The class both selects the daemon's behaviour and
@@ -190,6 +192,7 @@ TARGET_CLASSES = {
     'frr_c': FRRoutingCompiledTarget,
     'rustybgp': RustyBGPTarget,
     'rustbgpd': RustBGPDTarget,
+    'holo': HoloTarget,
     'openbgp': OpenBGPTarget,
     'flock': FlockTarget,
     'srlinux': SRLinuxTarget,
@@ -5857,14 +5860,15 @@ def check_generator_matches_workload(args):
 
 
 def check_target_workload(args):
-    """Reject unsupported rustbgpd controls before config writes or teardown."""
-    if getattr(args, 'target', None) != 'rustbgpd':
+    """Reject unsupported adapter controls before config writes or teardown."""
+    target = getattr(args, 'target', None)
+    if target not in ('rustbgpd', 'holo'):
         return
     if (getattr(args, 'filter_test', None) not in (None, 'None')
             or getattr(args, 'threads', None) is not None
             or getattr(args, 'file', None)
             or getattr(args, 'target_config_file', None)):
-        sys.exit('rustbgpd supports permit-all IPv4 loading without filters, '
+        sys.exit(f'{target} supports permit-all IPv4 loading without filters, '
                  'thread overrides or custom configuration/scenario files')
 
 

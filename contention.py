@@ -37,6 +37,7 @@ BGPERF_PROCESSES = frozenset((
     'bgpd', 'zebra', 'staticd', 'watchfrr', 'mgmtd', 'vtysh', 'watchquagga',
     # other open-source targets and the load generators
     'gobgpd', 'gobgp', 'bird', 'birdc', 'rustybgpd', 'rustybgp', 'rustbgpd', 'rbgp',
+    'holod', 'grpcurl',
     'openbgpd', 'bgpd.openbsd', 'bgpctl', 'bgplgd', 'exabgp', 'bgpdump2',
     'flockd', 'flock',
     # the purpose-built monitor (Phase 7)

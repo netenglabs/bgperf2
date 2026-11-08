@@ -96,6 +96,7 @@ def test_yaml_policy_covers_all_sessions_and_uses_local_address(tmp_path):
     assert group['ipv4'] == {} and 'ipv6' not in group
     assert group['passive'] is False and 'route_server_client' not in group
     assert {p['peer_address'] for p in group['neighbors']} == {'10.0.0.2', '10.0.0.3', '10.0.0.4'}
+    assert all(p['advertise_ipv4_multiprotocol'] is True for p in group['neighbors'])
     assert '-config.file /root/config/bio-rd.yaml' in target.get_startup_cmd()
 
 

@@ -148,7 +148,8 @@ class BioRoutingTarget(BioRouting, Target):
             raise ValueError('Bio-Routing supports permit-all IPv4 loading without thread overrides')
         local = str(ipaddress.IPv4Interface(self.conf.get('local-address', self.conf['router-id'])).ip)
         neighbors = [{'peer_address': str(ipaddress.IPv4Interface(
-                          peer.get('local-address', peer['router-id'])).ip), 'peer_as': peer['as']}
+                          peer.get('local-address', peer['router-id'])).ip), 'peer_as': peer['as'],
+                      'advertise_ipv4_multiprotocol': True}
                      for peer in self.scenario_neighbors()]
         policy = 'BGPERF-PERMIT'
         config = {'routing_options': {'autonomous_system': self.conf['as'],

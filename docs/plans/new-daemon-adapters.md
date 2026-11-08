@@ -253,3 +253,20 @@ new adapters: nonzero AS-path, prefix, community and extended-community filter
 counts must refuse at bench/config/batch entry points before teardown, alongside
 the existing policy/thread/custom-file refusals. Ignoring a requested filter
 would silently change the declared workload.
+
+Implemented at `e965216`, clean final review and 3,423 native tests (one optional
+skip). The pinned image built successfully; binary instrumentation verification
+passed with explicit unavailable daemon version. Actual retained Go metadata
+reports selected commit, vcs.modified=false, Go 1.25.14 and CGO disabled; curl
+8.14.1 meets the enforced streaming-bound requirement.
+
+The first native original failed before generator injection: both BIRD peers
+reported Required capability missing (NOTIFICATION 2/7), and bio-rd logged that
+notification as an invalid subcode. The existing corrected engine reported
+FAILED with zero observer delivery and verified owned cleanup. Upstream's
+native `advertise_ipv4_multiprotocol` neighbor option defaults false; its peer
+builder includes the IPv4 multiprotocol capability only when explicitly enabled.
+Enable that option for every configured neighbor, preserving ordinary IPv4
+loading, image, independent prefix oracle and all guards. Review and test this
+configuration correction before a fresh original; retain the failed original.
+Do not weaken the BIRD capability requirements or modify upstream wire behavior.

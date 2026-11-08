@@ -254,6 +254,38 @@ def test_bounded_probe_can_retain_nonzero_native_output():
     assert result['text'] == 'failed native output\n'
 
 
+@pytest.mark.parametrize('drift', [False, True])
+def test_bio_native_metrics_reuse_owned_deadline_and_capture_contract(tmp_path, drift):
+    from bio_routing import BioRouting
+    baseline, calls = zebra_fixture(drift=drift)
+    def command(argv, **kwargs):
+        result = baseline(argv, **kwargs)
+        if 'inspect' in argv:
+            value = json.loads(result['text'])
+            value[0]['Name'] = '/attempt_bgperf_bio_routing_target'
+            result['text'] = json.dumps(value)
+        return result
+    result = diagnostics.collect_diagnostics(tmp_path, 'attempt', {}, command=command,
+        memory_reader=lambda pid: {'ending_bytes': 50}, target_adapter='bio-routing')
+    queries = result['containers'][0]['native']['queries']
+    assert len(queries) == 1
+    assert result['capabilities']['target_neighbor_prefix_counts'] is False
+    assert 'unavailable' in result['capabilities']['target_neighbor_prefix_counts_reason']
+    if drift:
+        assert result['status'] == 'partial'
+        assert not any('exec' in argv for argv in calls)
+    else:
+        assert result['status'] == 'collected'
+        argv, = [argv for argv in calls if 'exec' in argv]
+        index = argv.index('exec')
+        assert argv[index + 1:index + 3] == [CID, BioRouting.HTTP_BINARY]
+        assert argv[argv.index('--max-time') + 1] == '2'
+        assert argv[argv.index('--max-filesize') + 1] == '8388608'
+        assert queries[0]['status'] == 'captured'
+        assert (tmp_path / queries[0]['path']).read_text() == '{"native":true}'
+    assert result['memory']['target']['ending_bytes'] == 50
+
+
 def live_client(present=True, usage=100):
     return SimpleNamespace(stats=lambda *a, **k: {'memory_stats': {'usage': usage}},
         top=lambda *a, **k: {'Titles': ['PID', 'COMMAND'],

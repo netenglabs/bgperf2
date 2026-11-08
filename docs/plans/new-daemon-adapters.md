@@ -2,8 +2,10 @@
 
 Selected 2026-11-07. Status: rustbgpd implemented at `0041e27`, with the native
 ownership fix at `40a312e`; selected small live admission passed. Holo at
-`9159d81`/`4c6487c` also passed its first small native admission. zebra-rs is
-next; Bio-Routing and Maghemite await separate integration checks.
+`9159d81`/`4c6487c` also passed its first small native admission. zebra-rs passed
+with the explicit one-second timer at `fb9c969`. Bio-Routing's independent sink
+admission passed after `edd5b62`; native prefix gauges remain unavailable.
+Maghemite awaits separate deployment/integration checks.
 
 ## Purpose and ownership
 
@@ -219,17 +221,21 @@ Write native YAML for ordinary IPv4 eBGP and explicit permit-all import/export
 policy, using the configured local interface address rather than the router ID
 when those differ. Retain upstream default logging and next-hop semantics.
 Do not use the advertised ListSessions RPC: its implementation returns not
-implemented. Read implemented loopback Prometheus metrics through a bounded
-native HTTP client instead. Register a benchmark-specific client alias for
+implemented. The library contains a Prometheus BGP collector, but cmd/bio-rd
+does not register it (only examples/bgp does). Return empty neighbor observation
+mappings; do not manufacture zeros or keep polling generic process/gRPC metrics
+as if they could establish target delivery. Independent sink/offer witnesses
+retain the existing full-assurance convergence path. A bounded post-worker HTTP
+scrape may document the exposed metrics. Register a benchmark-specific client alias for
 process accounting; do not allowlist generic curl or an interpreter.
 
 At the selected source, `bio_bgp_route_received_count` is labelled a counter
 but generated from the current Adj-RIB-In RouteCount before import validation.
-Expose it only as received paths for established IPv4 peers in VRF `main`.
-Accepted/rejected descriptors are not emitted; accepted and best-path witnesses
-stay unavailable. Validate labels, duplicate/context conflicts and finite
-nonnegative integral values; missing/stale/malformed observations are read
-failures, never zero or successful checkpoints. HTTP reads need deadlines,
+It would attest only received paths if a service registered it. This selected
+standalone executable does not, so received, accepted and selected-path witnesses
+all stay unavailable. Do not patch the upstream service to create observations
+merely to pass admission or mistake example/library code for exposed behavior.
+Supplemental diagnostic HTTP reads need deadlines,
 response bounds and checked command exit status.
 The runtime is Debian 13 (trixie), verified natively from the selected digest.
 Require curl >=8.4.0 at build time and retain its actual version: the
@@ -270,3 +276,16 @@ Enable that option for every configured neighbor, preserving ordinary IPv4
 loading, image, independent prefix oracle and all guards. Review and test this
 configuration correction before a fresh original; retain the failed original.
 Do not weaken the BIRD capability requirements or modify upstream wire behavior.
+
+The corrected native original passed all six independent assertions (exactly
+200 expected prefixes, no missing/unexpected, verified cleanup and package).
+Its retained console still reports no completed target receive checkpoints.
+Therefore the independent route pass does not qualify the HTTP counter mapping.
+Extend the existing owned bounded supplemental native collector with one raw
+loopback metrics scrape, using the same post-worker/baseline ordering and shared
+deadline/byte budget. Reuse ownership/failure handling, with the native HTTP
+client's own two-second/8 MiB transfer bound and parent 64 KiB capture limit.
+Source inspection identifies the missing collector registration. Remove the
+unused speculative parser and periodic HTTP polling, explicitly declare the
+native prefix-counter gap, and retain a diagnostic original's raw scrape to
+verify that limit. Preserve the accepted sink original and all prior failures.

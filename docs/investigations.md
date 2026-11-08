@@ -412,6 +412,17 @@ The packages preserve:
   not convergence-time observations and change no measurement or assertion.
   No full RIB, running configuration, neighbor authentication or environment
   dump is requested. `none` disables these queries too.
+  With a Bio-Routing target, the same owned supplemental collector retains a
+  raw loopback metrics scrape using its benchmark-specific HTTP client, a
+  two-second native deadline, 8 MiB transfer limit and 64 KiB parent capture limit. This diagnostic
+  is after the worker and baseline memory/log observations, shares the 20-second
+  collection budget, and changes no assertion or target-counter interpretation.
+  The immutable owned ID/name/image/attempt checks repeat before the exec;
+  failed/partial scrapes retain explicit status and available raw output.
+  The selected standalone service does not register its library's BGP metric
+  collector and its session RPC is unimplemented; target neighbor prefix counts
+  are explicitly unavailable in the capability record. A raw scrape is only
+  diagnostic evidence and cannot supply missing route gauges.
 - Preserved CSV/event material before final graph/provenance collectors. The
   `raw-samples.csv` file is the retained legacy graph series after its existing
   assurance slicing, not every observed poll. `raw-samples.metadata.json` states

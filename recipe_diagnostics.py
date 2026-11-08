@@ -33,13 +33,20 @@ ZEBRA_NATIVE_COMMANDS = tuple(
     ('addresses', ('/usr/sbin/ip', '-json', 'address', 'show')),
 )
 
+BIO_NATIVE_COMMANDS = (
+    ('metrics', ('/usr/local/bin/bgperf-bio-http', '--fail', '--silent', '--show-error',
+                 '--max-time', '2', '--max-filesize', '8388608',
+                 'http://127.0.0.1:55667/metrics')),
+)
 
-def collect_zebra_native(work, attempt, item, probe, errors):
+
+def collect_native(work, attempt, item, probe, errors, *, commands, command_prefix=(),
+                   scope='fixed engine-owned queries'):
     """Post-worker snapshots only; no convergence, acceptance or memory verdict."""
     item['native'] = {'scope': 'post-worker, after baseline memory/log collection; '
-                      'fixed default-synthetic address samples, not exhaustive or convergence-time',
+                      + scope + '; not exhaustive or convergence-time',
                       'queries': []}
-    for name, argv in ZEBRA_NATIVE_COMMANDS:
+    for name, argv in commands:
         record = {'name': name, 'status': 'unavailable', 'path': None,
                   'argv': list(argv)}
         item['native']['queries'].append(record)
@@ -61,8 +68,7 @@ def collect_zebra_native(work, attempt, item, probe, errors):
             errors.append(f'{item["id"]}: native {name}: {exc}')
             break
         try:
-            result = probe(['exec', item['id'], '/usr/local/bin/bgperf-z-wait',
-                            '--kill-after=0.5', '2', *argv], raw=True)
+            result = probe(['exec', item['id'], *command_prefix, *argv], raw=True)
             relative = f'diagnostic-native/{item["id"]}-{name}.txt'
             path = work / relative
             path.parent.mkdir(exist_ok=True)
@@ -348,6 +354,11 @@ def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memor
     if target_adapter != 'bird':
         report['capabilities'].update(bird_process_presence=False, bird_daemon_exit=False)
         report['unsupported'] = [UNSUPPORTED_DAEMON_WITNESS]
+    if target_adapter == 'bio-routing':
+        report['capabilities']['target_neighbor_prefix_counts'] = False
+        report['capabilities']['target_neighbor_prefix_counts_reason'] = (
+            'Selected bio-rd does not register BGP metrics; ListSessions is unimplemented. '
+            'Received, accepted and selected-path observations are unavailable.')
     if mode == 'none':
         report.update(status='disabled', missing=['Optional runtime diagnostics were explicitly disabled.'])
         write_json(work / 'diagnostics.json', report)
@@ -421,7 +432,14 @@ def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memor
     if target_adapter == 'zebra-rs':
         for item in report['containers']:
             if item['name'].endswith('_bgperf_zebra_rs_target'):
-                collect_zebra_native(work, attempt, item, probe, report['errors'])
+                collect_native(work, attempt, item, probe, report['errors'],
+                    commands=ZEBRA_NATIVE_COMMANDS,
+                    command_prefix=('/usr/local/bin/bgperf-z-wait', '--kill-after=0.5', '2'),
+                    scope='fixed default-synthetic address samples')
+    elif target_adapter == 'bio-routing':
+        for item in report['containers']:
+            if item['name'].endswith('_bgperf_bio_routing_target'):
+                collect_native(work, attempt, item, probe, report['errors'], commands=BIO_NATIVE_COMMANDS)
     live_path = work / 'live-diagnostics.json'
     if live_path.is_file():
         try:

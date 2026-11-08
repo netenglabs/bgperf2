@@ -1,93 +1,11 @@
 # Copyright (C) 2026 bgperf2 contributors. Apache-2.0.
-"""Bio-Routing IPv4 loading using native YAML and implemented HTTP metrics."""
-from decimal import Decimal, InvalidOperation
+"""Bio-Routing native IPv4 loading; selected service exposes no prefix gauges."""
 import ipaddress
-import json
 import re
 
 import yaml
 
-from base import Container, Target, decode_cli_output, dckr
-
-
-class BioNeighborReadError(RuntimeError):
-    """The native metrics did not attest a current received-prefix count."""
-
-
-LABEL = re.compile(r'([A-Za-z_][A-Za-z_0-9]*)="((?:[^"\\\n]|\\["\\n])*)"')
-STATE = 'bio_bgp_state'
-ROUTES = 'bio_bgp_route_received_count'
-
-
-def neighbor_counts(text):
-    """Stored pre-policy paths, despite upstream's Prometheus CounterValue type.
-
-    Source f422dbad's metricsForFamily reads adjRIBIn.RouteCount(). Neither
-    accepted routes nor selected best paths are attested. ListSessions is not
-    implemented and its advertised fields cannot substitute for observations.
-    """
-    states, routes = {}, {}
-    try:
-        for line in text.splitlines():
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            if not any(line.startswith(name + '{') for name in (STATE, ROUTES)):
-                if line.split('{', 1)[0].split()[0] in (STATE, ROUTES):
-                    raise ValueError('Selected metric has no labels')
-                continue
-            match = re.fullmatch(r'([^{}\s]+)\{(.*)\}\s+([^\s]+)', line)
-            if not match:
-                raise ValueError('Malformed selected metric')
-            metric, raw_labels, raw_value = match.groups()
-            labels, offset = {}, 0
-            while offset < len(raw_labels):
-                label = LABEL.match(raw_labels, offset)
-                if label is None or label[1] in labels:
-                    raise ValueError('Malformed or duplicate metric label')
-                labels[label[1]] = json.loads('"' + label[2] + '"')
-                offset = label.end()
-                if offset < len(raw_labels):
-                    if raw_labels[offset] != ',' or offset + 1 == len(raw_labels):
-                        raise ValueError('Malformed metric label separator')
-                    offset += 1
-            expected = {'peer_ip', 'local_asn', 'peer_asn', 'vrf'}
-            if metric == ROUTES:
-                expected |= {'afi', 'safi'}
-            if set(labels) != expected:
-                raise ValueError('Unexpected native metric labels')
-            value = Decimal(raw_value)
-            if not value.is_finite() or value < 0 or value > 2 ** 53 or value != value.to_integral_value():
-                raise ValueError('Invalid or imprecise metric count')
-            address = ipaddress.ip_address(labels['peer_ip'])
-            if labels['vrf'] != 'main' or address.version != 4:
-                continue
-            if any(not re.fullmatch(r'[0-9]+', labels[key])
-                   or not 0 < int(labels[key]) <= 4294967295 for key in ('local_asn', 'peer_asn')):
-                raise ValueError('Invalid ASN labels')
-            key = (str(address), int(labels['local_asn']), int(labels['peer_asn']))
-            if metric == STATE:
-                if key in states or value > 6:
-                    raise ValueError('Duplicate or invalid session state')
-                states[key] = int(value)
-            elif labels['afi'] == '1' and labels['safi'] == '1':
-                if key in routes:
-                    raise ValueError('Duplicate IPv4 route count')
-                routes[key] = int(value)
-        received, seen = {}, set()
-        for key, state in states.items():
-            if key[0] in seen:
-                raise ValueError('Conflicting peer ASN contexts')
-            seen.add(key[0])
-            if state == 6:
-                if key not in routes:
-                    raise ValueError('Established peer has no IPv4 route observation')
-                received[key[0]] = routes[key]
-        if any(key not in states for key in routes):
-            raise ValueError('Route count has no matching session state')
-        return received, {}
-    except (ValueError, TypeError, InvalidOperation) as exc:
-        raise BioNeighborReadError('Invalid or unavailable Bio-Routing IPv4 metrics') from exc
+from base import Container, Target
 
 
 class BioRouting(Container):
@@ -168,10 +86,8 @@ class BioRoutingTarget(BioRouting, Target):
                 f'> {self.guest_dir}/bio-rd.log 2>&1')
 
     def get_neighbors_state(self):
-        command = [self.HTTP_BINARY, '--fail', '--silent', '--show-error', '--max-time', '5',
-                   '--max-filesize', '8388608', 'http://127.0.0.1:55667/metrics']
-        executable = dckr.exec_create(container=self.name, cmd=command)
-        raw = dckr.exec_start(executable['Id'], stream=False, detach=False)
-        if dckr.exec_inspect(executable['Id']).get('ExitCode') != 0:
-            raise BioNeighborReadError('Bio-Routing metrics HTTP request failed or exceeded its deadline')
-        return neighbor_counts(decode_cli_output(raw, container=self.name, cmd=command))
+        # At f422dbad, cmd/bio-rd never registers the library's BGP Prometheus
+        # collector (only examples/bgp does), and ListSessions is unimplemented.
+        # No prefix observation exists: empty mappings, never per-peer zeros,
+        # cumulative UPDATE counts, or a patched daemon to manufacture gauges.
+        return {}, {}

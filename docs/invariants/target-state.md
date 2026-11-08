@@ -6,11 +6,12 @@ The per-daemon `get_neighbors_state` wart, the table witness, and the delivery m
 `rustbgpd.py` supplies accepted-prefix-only neighbor observations.
 `holo.py` maps native Adj-RIB-In pre/post-policy counts without a best-path witness.
 `zebra_rs.py` exposes only the native pre-policy Adj-RIB-In snapshot.
-`bio_routing.py` exposes only the implemented native Prometheus Adj-RIB-In snapshot.
+`bio_routing.py` declares neighbor prefix observations unavailable in the selected service.
 
-Bio-Routing labels that metric as a counter upstream but backs it with current
-RouteCount; accepted and selected counts are unavailable. Declared but
-unimplemented session RPCs are not witnesses.
+Bio-Routing's library metric uses current RouteCount, but the selected cmd/bio-rd
+never registers that collector; only the example does. ListSessions also returns
+unimplemented. Empty observation mappings attest to no count; neither zeros nor
+generic gRPC/Go metrics may stand in for received/accepted/selected route gauges.
 
 The `rustbgpd.py` adapter is also governed here. Its `rbgp` JSON field named
 `prefixes_received` is an accepted-route gauge, so only accepted counts are

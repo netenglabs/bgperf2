@@ -163,9 +163,10 @@ The same plan governs Holo's locked source build and transactional native gRPC
 adapter. Preserve the difference between installed/accepted and selected routes.
 It also governs zebra-rs's checksummed official packages, native YAML/VTY
 adapter and received-only Adj-RIB-In observation.
-It also governs Bio-Routing's pinned Go source build, native YAML and implemented
-Prometheus received-path snapshots. Native version and accepted/selected counts
-remain unavailable; never infer them from requested tags or unused RPC schemas.
+It also governs Bio-Routing's pinned Go source build and native YAML. Its selected
+service does not register the library's BGP metric collector and ListSessions is
+unimplemented. Version, received/accepted and selected-path counts remain
+unavailable; never infer them from requested tags or unused API/library code.
 
 `recipe_assertions.py` evaluates named observable correctness witnesses against
 verified packages. `recipe_comparison.py` freezes and executes explicit serial

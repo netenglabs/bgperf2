@@ -76,6 +76,10 @@ and observed source ID in the runtime image. Do not substitute upstream HEAD.
 Retain compiler, resolved dependency tree and builder package inventory too.
 Debian package repositories remain mutable; recorded package versions and
 frozen binaries do not establish a bit-identical source rebuild.
+The first native build exposed missing Protobuf well-known include files under
+the minimal package installation. Install `libprotobuf-dev` explicitly alongside
+`protobuf-compiler`; do not depend on recommended packages being installed.
+Retain that original build failure. No Holo route worker ran at this checkpoint.
 
 Holo separates daemon bootstrap TOML from transactional YANG configuration.
 Use its exact-source `holo.proto` and generic grpcurl 1.9.3, with native gRPC

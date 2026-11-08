@@ -81,7 +81,7 @@ class Holo(Container):
         ref = cls.resolve_ref(checkout or version)
         cls.dockerfile = f'''FROM {cls.CLIENT_IMAGE} AS client
 FROM {cls.BUILDER_IMAGE} AS build
-RUN apt-get update && apt-get install -qy --no-install-recommends build-essential cmake libpcre2-dev protobuf-compiler ca-certificates git
+RUN apt-get update && apt-get install -qy --no-install-recommends build-essential cmake libpcre2-dev protobuf-compiler libprotobuf-dev ca-certificates git
 RUN git clone https://github.com/holo-routing/holo.git /src && cd /src && git checkout {ref} && git rev-parse HEAD > /tmp/holo-source-id
 WORKDIR /src
 RUN dpkg-query -W > /tmp/holo-build-packages.txt && rustc --version --verbose > /tmp/holo-rustc.txt && cargo tree --locked -p holo-daemon > /tmp/holo-dependencies.txt && GIT_HASH="$(git rev-parse HEAD)" cargo build --locked --release -p holo-daemon

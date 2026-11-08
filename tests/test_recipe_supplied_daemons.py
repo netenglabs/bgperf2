@@ -16,7 +16,7 @@ import recipe_targets as targets
 import recipe_worker as worker
 
 
-ADAPTERS = ('openbgp', 'rustybgp', 'rustbgpd', 'holo')
+ADAPTERS = ('openbgp', 'rustybgp', 'rustbgpd', 'holo', 'zebra-rs')
 IMAGE = 'sha256:' + '9' * 64
 
 

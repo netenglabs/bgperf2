@@ -5,6 +5,7 @@ The per-daemon `get_neighbors_state` wart, the table witness, and the delivery m
 **Read this before editing:** `run_lifecycle.py` (run orchestration), `bgperf2.py` (the monitor poll), `base.py` (`Target.sample_target_state()`), `frr.py`, `frr_compiled.py`, `bird.py`, `gobgp.py`, `measurements.py` (`target_table_section()`, `delivery_metrics()`)
 `rustbgpd.py` supplies accepted-prefix-only neighbor observations.
 `holo.py` maps native Adj-RIB-In pre/post-policy counts without a best-path witness.
+`zebra_rs.py` exposes only the native pre-policy Adj-RIB-In snapshot.
 
 The `rustbgpd.py` adapter is also governed here. Its `rbgp` JSON field named
 `prefixes_received` is an accepted-route gauge, so only accepted counts are

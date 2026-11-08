@@ -1,8 +1,9 @@
 # New daemon adapters for characterization
 
 Selected 2026-11-07. Status: rustbgpd implemented at `0041e27`, with the native
-ownership fix at `40a312e`; selected small live admission passed. Holo is next;
-other entrants await their separate compatibility/integration checks.
+ownership fix at `40a312e`; selected small live admission passed. Holo at
+`9159d81`/`4c6487c` also passed its first small native admission. zebra-rs is
+next; Bio-Routing and Maghemite await separate integration checks.
 
 ## Purpose and ownership
 
@@ -105,3 +106,46 @@ Reuse the rustbgpd acceptance checks above: public build/verify/dispatch and
 bounded recipes, early unsupported-control refusals, explicit diagnostics and
 process accounting, pure tests, required review and a fresh native exact-prefix
 admission. This plan does not itself qualify the implementation or runtime.
+
+Selected native validation completed on 2026-11-08: the exact-source optimized
+image built after the explicit Protobuf-header fix, reported the selected full
+commit and passed instrumentation verification. Its first bounded two-peer,
+100-prefix-per-peer original passed all six existing assertions, including
+the independent exact 200-prefix sink snapshot with no missing/unexpected
+prefixes and verified cleanup. Native target checkpoints also exercised its
+gRPC reader. This qualifies that small integration scope only; attribute/policy
+controls, large-load sampling cost and performance remain unqualified.
+
+## Next adapter: zebra-rs 26.11.1
+
+Repackage the official resolute release archives in a digest-pinned Debian
+runtime, verifying the published package SHA-256 before extraction. Preserve
+the package's schema/assets, notices and original archive. No host installation,
+service activation or recommended Cradle/eBPF data plane is needed for ordinary
+BGP. The selected source tag resolves to
+`f05909af203f7caa954e874babad7af1dcc6db2a`; package identity is verified, while
+binary-to-source mapping remains a publisher claim.
+
+Release archive hashes: amd64
+`e829f2ebd6a4758d9c9f4560d8d5ecb0de811d8f13dd261c308e03096781b2ee`, arm64
+`803a2e9442aa0a9ae13365b42d814e608b1a234733446651d043964309a54af4`.
+Only catalogued, verified releases are selectable; do not guess hashes for
+another version or silently install a moving latest package.
+
+Write ordinary IPv4 neighbors and explicit permit-all inbound/outbound policy
+in native startup YAML. Use the package's `zebra-rs` daemon and `vtyctl` with
+an explicit container-local Unix endpoint. Retain the generated config/logs.
+The native `show bgp summary` JSON has per-family `pfx_rcvd` snapshots of
+pre-policy Adj-RIB-In (after protocol attribute checks). It does not attest
+accepted or selected paths. Its established `state` field is the decimal count
+string, not the word Established; require consistency with the numeric count.
+Read only IPv4 Unicast, reject malformed/duplicate observations, and bound each
+CLI request with a checked exit status. Native load still needs calibration.
+Build-time version invocations check both packaged binaries can load in the
+selected runtime; the public instrumentation/version verifier remains required.
+Use a benchmark-specific alias for the deadline helper and account for that
+process explicitly, without allowlisting unrelated timeout commands.
+
+Apply the same public registration, capability/refusal, diagnostics, process
+accounting, pure-test/review/build-verification and fresh exact-prefix native
+admission gates above. No local source builder or BIRD-only witness is added.

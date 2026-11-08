@@ -1,6 +1,6 @@
 # bgperf2 roadmap
 
-Updated 2026-11-05 UTC. This is the public index of engine development plans.
+Updated 2026-11-08 UTC. This is the public index of engine development plans.
 Everything needed to understand, use and contribute to bgperf2 belongs in this
 repository. Other projects can build campaigns and services on its documented
 CLI and versioned artifacts; none is required to use the engine.
@@ -308,8 +308,9 @@ an experiment or publication.
 
 The selected [new-daemon adapter plan](plans/new-daemon-adapters.md) starts with
 rustbgpd's supplied-release wrapper, ordinary IPv4 target and bounded recipes.
-Other candidate interfaces and runtime qualification remain pending; integration
-does not establish correctness or performance qualification by itself.
+rustbgpd and Holo now have selected small native exact-prefix qualification;
+zebra-rs is the next integration. Other candidate interfaces and broader runtime
+qualification remain pending. Integration alone does not qualify performance.
 
 The [supplied-daemon admission plan](plans/supplied-daemon-admission.md) extends
 bounded synthetic recipes and exact-prefix assertions to the existing OpenBGPD

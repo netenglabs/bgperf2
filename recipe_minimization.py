@@ -57,6 +57,8 @@ def validate_plan(plan):
     for dim in DIMENSIONS:
         recipes._integer(plan['minimum'][dim], 'minimum.' + dim, 1)
     recipes.validate_recipe(plan['recipe'])
+    if plan['recipe']['schema'] != recipes.RECIPE_SCHEMA:
+        raise recipes.ContractError('This workflow currently supports synthetic recipes only')
     original = shape(plan['recipe'])
     if any(plan['minimum'][dim] > original[dim] for dim in DIMENSIONS):
         raise recipes.ContractError('minimum must not exceed the original dimension')

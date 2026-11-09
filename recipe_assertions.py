@@ -21,7 +21,9 @@ MAX_JSON_BYTES = 8 * 1024 * 1024
 def _definitions(recipe, include_prefixes=False):
     resolved = recipe['resolved']
     sessions = resolved['neighbors']
-    total = sessions * resolved['prefixes_per_peer']
+    from recipe_prefixes import expected_count
+    from recipe_mrt import selected
+    total = expected_count(recipe)
     definitions = [
         ('sessions.ready', 'session_establishment', sessions, 'recorded_worker_budget'),
         ('injection.complete', 'injection_completion', sessions, 'recorded_worker_budget'),
@@ -30,9 +32,10 @@ def _definitions(recipe, include_prefixes=False):
         ('roles.healthy', 'observed_role_health', ['generator', 'observer', 'target'], 'pre_cleanup_snapshot'),
     ]
     if include_prefixes:
+        expected = ({'count': total, 'layout': 'declared_mrt_ipv4_prefix_set'} if selected(recipe) else
+                    {'first': '100.0.0.0/32', 'count': total, 'layout': 'contiguous_ipv4_host_routes'})
         definitions.append(('observer.prefixes', 'observer_prefix_identity',
-            {'first': '100.0.0.0/32', 'count': total, 'layout': 'contiguous_ipv4_host_routes'},
-            'post_measurement_snapshot'))
+                            expected, 'post_measurement_snapshot'))
     return definitions
 
 

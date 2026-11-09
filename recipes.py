@@ -340,6 +340,9 @@ def export_recipe(batch_path, test_name, cell_key, *, engine_revision, roles, qu
 
 def validate_recipe(document):
     """Re-resolve embedded source and verify the complete strict envelope."""
+    from recipe_mrt import selected, validate
+    if selected(document):
+        return validate(document)
     _keys(document, ('schema', 'engine', 'source', 'selection', 'legacy', 'resolved',
                      'roles', 'inputs', 'seeds', 'resources', 'completion', 'reproduction'))
     _choice(document['schema'], (RECIPE_SCHEMA,), 'schema')
@@ -461,6 +464,7 @@ def main(argv=None):
         export.add_argument('--' + flag, required=True)
     export.add_argument('--expected-outcome', choices=EXPECTED_OUTCOMES,
                         default='experiment_completed')
+    export.add_argument('--mrt-spec', help='bind a strict MRT workload to the selected topology cell')
     export.add_argument('-o', '--output')
     for name in ('validate', 'inspect', 'result-validate', 'result-verify', 'plan', 'check',
                  'prepare', 'run', 'target-image', 'target-validate', 'target-source-plan',
@@ -587,6 +591,9 @@ def main(argv=None):
             document = export_recipe(args.batch, args.test, args.cell,
                                      engine_revision=args.engine_revision, roles=roles,
                                      question=args.question, expected_outcome=args.expected_outcome)
+            if args.mrt_spec:
+                from recipe_mrt import bind
+                document = bind(document, read_document(args.mrt_spec))
             _write_document(document, args.output)
         elif args.command == 'result-verify':
             from recipe_results import verify_result_package
@@ -737,7 +744,7 @@ def main(argv=None):
                 _write_document({'valid': True, 'schema': RESULT_SCHEMA})
             else:
                 validate_recipe(document)
-                _write_document({'valid': True, 'schema': RECIPE_SCHEMA,
+                _write_document({'valid': True, 'schema': document['schema'],
                                  'recipe_sha256': recipe_sha256(document)})
     except (ValueError, OSError, UnicodeError, RecursionError) as exc:
         print(f'{args.command}: {exc}', file=sys.stderr)

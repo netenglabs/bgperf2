@@ -28,10 +28,13 @@ remains satisfied; create the separate artifact directory before exporting.
 
 The supported workload is synthetic IPv4 with a `bird`, `frr_c`, `openbgp`, `rustybgp`, `rustbgpd`, `holo`, `zebra-rs`, `bio-routing` or `maghemite` target, BIRD
 generator and sink observer, with disjoint prefixes and no policy filter or
-additional receivers. Scenario files, Mako, MRT, hooks, local build instructions,
+additional receivers. Scenario files, Mako, hooks, local build instructions,
 other adapters and workload extensions are refused. These limits keep downloaded
 recipes declarative and prevent unsupported fields from silently changing what
 runs.
+
+The opt-in [MRT recipe variant](mrt-recipes.md) binds a separate strict workload
+to this topology source; ordinary synthetic exports remain unchanged.
 
 The selected source target determines the adapter; role identities must match it.
 See the [FRR guide](frr-maintainer-workflow.md) for adapter-compatible images and

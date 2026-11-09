@@ -334,6 +334,8 @@ def plan_source_build(recipe, source_root, revision, *, toolchain_image, runtime
                       configure_flags=()):
     """Inspect local source and emit identities; never execute code or Docker."""
     recipes.validate_recipe(recipe)
+    if recipe['schema'] != recipes.RECIPE_SCHEMA:
+        raise recipes.ContractError('This workflow currently supports synthetic recipes only')
     adapter = recipe['roles']['target']['adapter']
     require_source_adapter(adapter)
     _image(toolchain_image, 'toolchain_image'); _image(runtime_image, 'runtime_image')
@@ -368,6 +370,8 @@ def validate_build_plan(plan):
                         'configure_flags', 'build_recipe', 'network', 'requirements', 'limits'))
     recipes._choice(plan['schema'], (BUILD_SCHEMA,), 'schema')
     recipes.validate_recipe(plan['recipe'])
+    if plan['recipe']['schema'] != recipes.RECIPE_SCHEMA:
+        raise recipes.ContractError('This workflow currently supports synthetic recipes only')
     adapter = plan['recipe']['roles']['target']['adapter']
     require_source_adapter(adapter)
     if recipes.recipe_sha256(plan['recipe']) != plan['recipe_sha256']:

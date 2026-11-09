@@ -21,12 +21,17 @@ SOCKET_NAME = 'prefixes.sock'
 
 
 def expected_count(recipe):
+    from recipe_mrt import selected
+    if selected(recipe):
+        return len(recipe['mrt']['expected_prefixes'])
     return recipe['resolved']['neighbors'] * recipe['resolved']['prefixes_per_peer']
 
 
 def capture_limits(recipe):
     """Small-case resource bounds and evidence bytes remain unchanged."""
-    if expected_count(recipe) <= SMALL_MAX_PREFIXES:
+    from recipe_mrt import selected
+    offered = sum(peer['prefixes'] for peer in recipe['mrt']['peers']) if selected(recipe) else 0
+    if max(expected_count(recipe), offered) <= SMALL_MAX_PREFIXES:
         return SMALL_MAX_PREFIXES, MAX_BYTES, CAPTURE_SECONDS
     return MAX_PREFIXES, LARGE_MAX_BYTES, LARGE_CAPTURE_SECONDS
 
@@ -118,8 +123,10 @@ def inspect(receipt, recipe):
             raise ValueError('Noncanonical or duplicate IPv4 prefix')
         observed.add(value)
     origin = int(ipaddress.IPv4Address('100.0.0.0'))
-    expected = {str(ipaddress.IPv4Address(origin + i)) + '/32'
-                for i in range(expected_count(recipe))}
+    from recipe_mrt import selected
+    expected = (set(recipe['mrt']['expected_prefixes']) if selected(recipe) else
+                {str(ipaddress.IPv4Address(origin + i)) + '/32'
+                 for i in range(expected_count(recipe))})
     missing, unexpected = expected - observed, observed - expected
     return {'expected_count': len(expected), 'observed_count': len(observed),
             'missing_count': len(missing), 'unexpected_count': len(unexpected),

@@ -123,6 +123,9 @@ def execute(document, work, attempt, engine, *, target=None):
         argv += ['--threads', str(resolved['target']['threads'])]
     if 'pin' in resolved:
         argv += ['--pin', resolved['pin']]
+    from recipe_mrt import selected as mrt_selected
+    if mrt_selected(document):
+        argv += ['-g', 'bgpdump2', '--mrt-file', document['mrt']['input']['path']]
     args = parser.parse_args(argv)
     # Copy the runtime namespace; compatibility wrappers needing shared globals
     # are rebound below so every bench dependency receives this scoped object.
@@ -134,6 +137,17 @@ def execute(document, work, attempt, engine, *, target=None):
         capture_prefixes=options.get('observer_prefixes', False),
         prefix_limit=selected_prefix_limit if selected_prefix_limit > SMALL_MAX_PREFIXES else None)}
     runtime.BIRDTester = scoped_adapter(engine.BIRDTester, roles['generator']['image'], attempt, role='generator', work=work)
+    if mrt_selected(document):
+        from recipe_mrt import adapter, generated_scenario, verify_input
+        _write(work / 'mrt-input-before.json', verify_input(document))
+        from bgpdump2 import Bgpdump2Tester
+        fixed = adapter(scoped_adapter(Bgpdump2Tester, roles['generator']['image'],
+                                     attempt, role='generator', work=work), document)
+        runtime.scenario_mrt_tester_class = lambda tester: fixed
+        import yaml
+        runtime.gen_conf = lambda args: generated_scenario(engine, args, document)
+        runtime.render_scenario = yaml.safe_load
+        runtime.Template = lambda text: types.SimpleNamespace(render=lambda: text)
     runtime.target_image = lambda *args: roles['target']['image']
     runtime.remove_target_containers = lambda: None
     runtime.remove_old_containers = lambda: None
@@ -195,11 +209,19 @@ def execute(document, work, attempt, engine, *, target=None):
     if engine.dckr.networks(names=[attempt + '-br']):
         raise RuntimeError('Attempt network already exists; refusing reuse')
     engine.capture_tool_revision()
-    row = run_lifecycle.bench(runtime, args)
-    if options.get('observer_prefixes', False):
-        from recipe_prefixes import capture, SOCKET_NAME
-        _write(work / 'observer-prefixes.json',
-               capture(work / attempt / 'monitor' / SOCKET_NAME, document))
+    try:
+        row = run_lifecycle.bench(runtime, args)
+        if options.get('observer_prefixes', False):
+            from recipe_prefixes import capture, SOCKET_NAME
+            _write(work / 'observer-prefixes.json',
+                   capture(work / attempt / 'monitor' / SOCKET_NAME, document))
+    finally:
+        if mrt_selected(document):
+            try:
+                _write(work / 'mrt-input-after.json', verify_input(document))
+            except (OSError, ValueError, RuntimeError) as exc:
+                _write(work / 'mrt-input-after.json', {'status': 'failed', 'reason': str(exc)})
+                raise
     stage(work, 'collection', reason='Existing lifecycle returned; preserve the stats row before final diagnostics.')
     # Successful process exit alone is never an experiment completion witness.
     if not row:

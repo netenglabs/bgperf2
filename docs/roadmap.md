@@ -9,8 +9,10 @@ CLI and versioned artifacts; none is required to use the engine.
 
 Exact-input MRT preparation now selects a bounded, offline
 [source-peer/RIB inventory](plans/mrt-input-inventory.md). It establishes consumed
-file identity and encoded peer facts only. Fixed peer selection, exported-route
-expectations and native MRT recipe qualification remain separate unfinished work.
+file identity and encoded peer facts only. The selected [input-bound MRT recipe extension](plans/mrt-recipes.md) reuses
+the bounded runner with fixed peers, read-only whole-input identity and declared
+exact prefix expectations. Implementation and native qualification remain
+unfinished; expected export policy is never inferred from a target result.
 
 The operator selected [merge readiness](plans/milestone-a-merge-readiness.md):
 close hosted CI environment assumptions, review the accumulated branch and merge

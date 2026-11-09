@@ -87,3 +87,31 @@ measured; mismatches must not silently change expectations or daemon settings.
 Comparisons, minimization, investigations and local source builders currently
 refuse this schema. Use explicit bounded originals; modeled tests and successful
 export alone authorize neither a native worker nor a performance conclusion.
+
+## Injector attribute grouping
+
+The unmodified upstream injector can reuse a shorter attribute block for a
+later, longer block because its attribute cache uses populated longest-prefix
+lookup. This can erase trailing communities while preserving prefix counts.
+Exact route-set equality alone cannot detect that transformation. The small
+community control is required before relying on community export expectations.
+
+The opt-in `FULL_40_HEX_COMMIT-pa-exact-v1` bgpdump2 build profile changes the
+single cache lookup to upstream's existing `ptree_search_exact`. It requires the
+exact old source statement, checks the replacement, and fails on drift. For
+example, build only the selected new tag through:
+
+```sh
+venv/bin/python bgperf2.py update bgpdump2 \
+  --versions a0191842fedf001abbda6364ab5c70d3f1c0788d-pa-exact-v1
+```
+
+Ordinary refs/default recipes remain unpatched. A profile is not an upstream
+release. The retained source commit remains upstream's commit, with an explicit
+local one-call patch; queried versions include `[pa-exact-v1]`. Preserve the
+recipe, complete upstream commit, actual source diff, patch identity, image ID,
+binary hash and build logs. The image marker is a build record, not independent
+binary-to-source proof. Existing images/results stay intact, and fresh native
+qualification is necessary before adopting the corrected generator. This fixes
+only the identified grouping defect; it does not qualify every BGP attribute,
+remove next-hop-self or expand the injector's supported attribute set.

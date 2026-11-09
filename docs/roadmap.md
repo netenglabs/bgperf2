@@ -14,6 +14,11 @@ the bounded runner with fixed peers, read-only whole-input identity and declared
 exact prefix expectations. Implementation and native qualification remain
 unfinished; expected export policy is never inferred from a target result.
 
+The MRT community control exposed a candidate injector attribute-grouping defect.
+The selected [exact-attribute build profile](plans/bgpdump2-exact-attributes.md)
+keeps unpatched builds intact and requires a separately identified source fix
+and fresh native qualification before further attribute claims.
+
 The operator selected [merge readiness](plans/milestone-a-merge-readiness.md):
 close hosted CI environment assumptions, review the accumulated branch and merge
 `milestone-a-newcomer` into `master` after green PR checks. Completed functional

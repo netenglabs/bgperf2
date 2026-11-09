@@ -372,6 +372,11 @@ class Bgpdump2(Container):
     # anything added to the recipe is missing from every image already built.
     VERSION_CLONE = '/root/bgpdump2'
 
+    @classmethod
+    def resolve_ref(cls, version):
+        from bgpdump2_patch import patched_ref
+        return patched_ref(version) or super().resolve_ref(version)
+
     def __init__(self, host_dir, conf, image='bgperf/bgpdump2'):
         super(Bgpdump2, self).__init__(self.CONTAINER_NAME, image, host_dir, self.GUEST_DIR, conf)
 
@@ -381,7 +386,9 @@ class Bgpdump2(Container):
         # message would otherwise have to be told apart from the version banner.
         return ['sh', '-c',
                 '{0} -V; echo "commit: $(git -C {1} rev-parse --short HEAD '
-                '2>/dev/null)"'.format(self.DAEMON_BINARY, self.VERSION_CLONE)]
+                '2>/dev/null)"; if test -f /root/bgperf-bgpdump2-patch; then '
+                'printf "bgperf-patch: "; cat /root/bgperf-bgpdump2-patch; fi'.format(
+                    self.DAEMON_BINARY, self.VERSION_CLONE)]
 
     def exec_version_cmd(self):
         '''`2.0.14 (a019184)`, or an explicit note when the commit is gone.
@@ -399,16 +406,34 @@ class Bgpdump2(Container):
                 'unexpected output from `{0}`: {1!r}'.format(
                     self.get_version_cmd(), ret))
         commit = re.search(r'^commit:\s*([0-9a-f]{7,40})\s*$', ret, re.M)
+        from bgpdump2_patch import PATCH, patched_ref
+        expected_source = patched_ref(str(getattr(self, 'image', '')).rpartition(':')[-1])
         # Said out loud rather than left off: 2.0.14 with no commit beside it
         # looks like a precise version and is not one.
-        return '{0} ({1})'.format(
+        identity = '{0} ({1})'.format(
             m.group(1), commit.group(1) if commit else 'commit unknown')
+        if 'bgperf-patch:' in ret:
+            patches = re.findall(r'^bgperf-patch:\s*([^\n]*)$', ret, re.M)
+            if patches != [PATCH]:
+                raise VersionUnavailable('Unrecognized or ambiguous bgpdump2 patch marker')
+            identity += ' [' + PATCH + ']'
+        elif expected_source:
+            raise VersionUnavailable('bgpdump2 patch-profile image has no patch marker')
+        if expected_source and (commit is None or not expected_source.startswith(commit.group(1))):
+            raise VersionUnavailable('bgpdump2 patch-profile source commit does not match its tag')
+        return identity
 
 
     @classmethod
     def build_image(cls, force=False, tag=None, checkout=None, nocache=False, version=None):
         tag = tag or cls.image_tag()
         checkout = checkout or cls.build_vars(version)['ref']
+        from bgpdump2_patch import MARKER, PATCH, patched_ref, patch_command
+        profile_ref = patched_ref(version)
+        if profile_ref and checkout != profile_ref:
+            raise ValueError('bgpdump2 patch profile checkout must match its full source commit')
+        if profile_ref and tag != cls.image_tag(version):
+            raise ValueError('bgpdump2 patch profile requires its explicit versioned image tag')
         cls.dockerfile = '''
 FROM ubuntu:20.04
 WORKDIR /root
@@ -439,6 +464,14 @@ RUN touch /root/mrt_file
 
 ENTRYPOINT ["/bin/bash"]
 '''.format(checkout)
+        if profile_ref:
+            import shlex
+            insertion = ('    && ' + patch_command() + ' \\\n'
+                         + "    && printf '%s\\n' " + shlex.quote(PATCH) + ' > ' + MARKER + ' \\\n')
+            self_step = '    && autoreconf -fi'
+            if cls.dockerfile.count(self_step) != 1:
+                raise ValueError('Unexpected bgpdump2 recipe shape; patch refused')
+            cls.dockerfile = cls.dockerfile.replace(self_step, insertion + self_step)
         super(Bgpdump2, cls).build_image(force, tag, nocache=nocache)
 
 

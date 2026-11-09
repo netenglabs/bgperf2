@@ -1,11 +1,16 @@
 # bgperf2 roadmap
 
-Updated 2026-11-08 UTC. This is the public index of engine development plans.
+Updated 2026-11-09 UTC. This is the public index of engine development plans.
 Everything needed to understand, use and contribute to bgperf2 belongs in this
 repository. Other projects can build campaigns and services on its documented
 CLI and versioned artifacts; none is required to use the engine.
 
 ## Current direction
+
+Exact-input MRT preparation now selects a bounded, offline
+[source-peer/RIB inventory](plans/mrt-input-inventory.md). It establishes consumed
+file identity and encoded peer facts only. Fixed peer selection, exported-route
+expectations and native MRT recipe qualification remain separate unfinished work.
 
 The operator selected [merge readiness](plans/milestone-a-merge-readiness.md):
 close hosted CI environment assumptions, review the accumulated branch and merge

@@ -1,5 +1,47 @@
 # MRT injection
 
+## Inspect an exact input before choosing source peers
+
+The standalone offline command inventories a consumed TABLE_DUMP_V2 file without
+Docker, downloads or BGP traffic:
+
+```sh
+venv/bin/python scripts/inspect_mrt.py \
+  --input /absolute/input.mrt \
+  --expected-bytes EXPECTED_SIZE --expected-sha256 EXPECTED_SHA256 \
+  --output /absolute/fresh-inventory.json
+```
+
+Use an existing canonical absolute regular file and its independently selected
+expected size/hash. Inspection reads and hashes the entire file, rejects changes
+to its identity/metadata and creates an exclusive mode-0600 JSON output only
+after validation. It never replaces prior output. The fixed bounds are 16 GiB
+of input. Exit zero attests successful output writing; if writing or fsync
+fails, exit nonzero leaves any partial output for inspection. It is not a
+successful inventory. Keep that failure and use a fresh output identity rather
+than overwriting or treating the partial JSON as valid. Other fixed bounds are
+16 MiB per record, 4,096 peers and a default 1,800-second deadline;
+`--timeout-seconds` can lower that deadline. Memory grows with one record and
+peer counters, not with every prefix or attribute in the input.
+
+The result records the collector/view and each encoded peer's zero-based index,
+BGP ID, address, ASN and IPv4/IPv6 unicast RIB **entry** counts. These are encoded
+facts under [RFC 6396 sections 2 and 4.3](https://www.rfc-editor.org/rfc/rfc6396.html#section-4.3),
+not a source-peer selection, unique-prefix count or prediction of exported
+routes. Attribute bytes are opaque. Repeated prefixes in separate records are
+not deduplicated. Only one initial peer table followed by IPv4/IPv6 unicast RIB
+records is supported; ADD-PATH, multicast, generic RIB, other MRT types and
+truncation fail rather than producing a partial inventory.
+
+Run inspection on an idle host under the operator's normal preparation locks
+and resource guards. It does not authorize a route worker or add MRT support to
+the synthetic recipe interface. The
+[inventory plan](plans/mrt-input-inventory.md) tracks that separation; explicit
+fixed peer sets, expected route semantics and native replay qualification remain
+unfinished. The legacy injection workflow below retains its existing behavior.
+
+## Legacy injection workflow
+
 This feature requires the basic knowledge about how `bgperf2` works.
 Please refer to [this guide](https://github.com/osrg/bgperf/blob/master/docs/how_bgperf_works.md).
 

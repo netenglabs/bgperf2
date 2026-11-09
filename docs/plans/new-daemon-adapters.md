@@ -359,3 +359,13 @@ correspondence. Retain and verify build source/toolchain/lock metadata and
 immutable binary/image identities separately, preserving that limitation.
 The built Dockerfile/binary are unchanged by this catalog correction. Re-run
 verification after review/checks before any route original.
+
+The corrected verifier passed on the unchanged image. The first native route
+original then established all sessions and completed generator offering, but
+delivered zero of the 200 expected prefixes to the independent observer.
+Selected upstream `277f4368d7b6e6c75bf339db132f8de1ac9b019a` explicitly disables
+learned-route redistribution in `bgp/src/session.rs` and describes its current
+edge-router role; `bgp/src/router.rs` documents fanout for originated routes.
+This source is incompatible with the generator-to-target-to-observer transit
+workload. Build/API/session compatibility is not route-export admission. No
+upstream semantic patch, invented gauge or route-oracle relaxation is selected.

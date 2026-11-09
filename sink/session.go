@@ -52,6 +52,7 @@ type config struct {
 	coalesce, heartbeat time.Duration
 	hostname            string
 	snapshotSocket      string
+	snapshotMaxPrefixes int
 }
 
 // sessionError is how a session ends: the NOTIFICATION to send, if any, and

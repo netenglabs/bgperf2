@@ -68,15 +68,15 @@ def validate_assertions(spec, recipe):
     return spec
 
 
-def _load(root, relative, references):
+def _load(root, relative, references, *, max_bytes=MAX_JSON_BYTES):
     """Read only listed bytes, rechecking the digest after package verification."""
     if relative not in references:
         return None, f'{relative} was not collected.'
     try:
         with _regular_file(root, relative) as source:
-            data = source.read(MAX_JSON_BYTES + 1)
-        if len(data) > MAX_JSON_BYTES:
-            return None, f'{relative} exceeds the 8 MiB JSON inspection bound; raw evidence retained.'
+            data = source.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            return None, f'{relative} exceeds the {max_bytes // (1024 * 1024)} MiB JSON inspection bound; raw evidence retained.'
         if hashlib.sha256(data).hexdigest() != references[relative]['sha256']:
             raise recipes.ContractError(f'{relative}: evidence changed after verification')
         value = json.loads(data.decode('utf-8'), object_pairs_hook=recipes._pairs,
@@ -232,17 +232,21 @@ def evaluate_assertions(spec, recipe, result_path):
             else:
                 answer['reason'] = runtime_reason or 'No decisive existing engine completion outcome was recorded.'
         elif capability == 'observer_prefix_identity':
-            from recipe_prefixes import inspect, MAX_PREFIXES
+            from recipe_prefixes import inspect, capture_limits, SMALL_MAX_PREFIXES
             path = 'work/observer-prefixes.json'
             selection_path = 'work/observer-prefix-selection.json'
-            capture, capture_reason = _load(root, path, references)
+            max_prefixes, _, _ = capture_limits(recipe)
+            # Pretty-printed capture envelopes are larger than compact socket
+            # JSON. Only this explicitly selected large artifact gets the bound.
+            inspection_bytes = 256 * 1024 * 1024 if max_prefixes > SMALL_MAX_PREFIXES else MAX_JSON_BYTES
+            capture, capture_reason = _load(root, path, references, max_bytes=inspection_bytes)
             selection, selection_reason = _load(root, selection_path, references)
             answer['evidence'] = witnesses(path, selection_path, raw_path)
             try:
                 if capture is None or selection is None:
                     raise ValueError(capture_reason or selection_reason)
                 recipes._same(selection, {'recipe_sha256': recipes.recipe_sha256(recipe),
-                    'enabled': True, 'phase': 'post_measurement', 'max_prefixes': MAX_PREFIXES},
+                    'enabled': True, 'phase': 'post_measurement', 'max_prefixes': max_prefixes},
                     'observer prefix capture selection')
                 observed = inspect(capture, recipe)
                 if not events or capture['requested_ns'] < max(event.monotonic_s for event in events) * 1e9:
@@ -270,11 +274,15 @@ def evaluate_assertions(spec, recipe, result_path):
                 complete = (len(containers) == len(assertion['expected'])
                             and roles == set(assertion['expected']) and all(isinstance(state, dict)
                             and state.get('Running') is True and state.get('OOMKilled') is False
+                            and state.get('Paused') is not True and state.get('Status') != 'paused'
                             and state.get('Error') == '' for state in states))
                 if failed or complete:
                     answer.update(observed=[{'role': item.get('role'), 'state': item.get('state')} for item in containers],
                                   status='failed' if failed else 'passed',
                                   reason='Owned container states at final pre-cleanup collection; continuous and daemon-process health are unmeasured.')
+                elif any(isinstance(state, dict) and (state.get('Paused') is True
+                        or state.get('Status') == 'paused') for state in states):
+                    answer['reason'] = 'Paused roles cannot attest running health; controller/manual pause is not a native failure witness.'
             if answer['status'] == 'unmeasured':
                 answer['reason'] = diagnostic_reason or 'Complete final container health snapshots were not recorded.'
         if assertion['deadline']['kind'] in ('recorded_worker_budget', 'post_measurement_snapshot'):

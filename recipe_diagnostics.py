@@ -71,6 +71,13 @@ def collect_native(work, attempt, item, probe, errors, *, commands, command_pref
                     or inspected.get('Image') != item['image_id']
                     or inspected.get('Config', {}).get('Labels', {}).get('bgperf2.recipe.attempt') != attempt):
                 raise ValueError('Native diagnostic ownership/identity recheck failed')
+            state = inspected.get('State', {})
+            if state.get('Paused') is True or state.get('Status') == 'paused':
+                record['reason'] = 'Owned container is paused; native query unavailable and not executed.'
+                # The controller intentionally freezes route allocation before
+                # collecting an interrupted attempt. Do not turn that action
+                # into a native-query or harness failure.
+                continue
         except (OSError, ValueError, TypeError, AttributeError, KeyError, preflight.ProbeError) as exc:
             record['error'] = str(exc)
             errors.append(f'{item["id"]}: native {name}: {exc}')
@@ -413,7 +420,7 @@ def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memor
                 if name.endswith(NON_BIRD_TARGET_SUFFIXES):
                     report['capabilities'].update(bird_process_presence=False, bird_daemon_exit=False)
                     report['unsupported'] = [UNSUPPORTED_DAEMON_WITNESS]
-                filtered = {key: state.get(key) for key in ('Status', 'Running', 'ExitCode', 'OOMKilled', 'Error', 'StartedAt', 'FinishedAt')}
+                filtered = {key: state.get(key) for key in ('Status', 'Running', 'Paused', 'ExitCode', 'OOMKilled', 'Error', 'StartedAt', 'FinishedAt')}
                 item = {'id': identifier, 'name': name, 'role': role_for_name(name),
                         'image_id': inspected.get('Image'), 'state': filtered,
                         'memory': memory_record(reason='Container cgroup unavailable.'), 'log': None}

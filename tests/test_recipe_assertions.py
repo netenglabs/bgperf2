@@ -187,6 +187,14 @@ def test_partial_or_malformed_health_is_unmeasured(tmp_path, recipe, change):
     assert assertion['observed'] is None
 
 
+@pytest.mark.parametrize('pause', [{'Paused': True}, {'Status': 'paused'}])
+def test_controller_paused_role_never_attests_healthy(tmp_path, recipe, pause):
+    files = evidence(recipe)
+    files['diagnostics.json']['containers'][0]['state'].update(pause)
+    result = evaluate(tmp_path, recipe, files)
+    assert by_capability(result)['observed_role_health']['status'] == 'unmeasured'
+
+
 @pytest.mark.parametrize('change', ['duplicate', 'negative', 'bool_counter', 'inverted', 'no_origin', 'completion_without_start'])
 def test_bad_event_witnesses_are_retained_but_not_interpreted(tmp_path, recipe, change):
     files = evidence(recipe)

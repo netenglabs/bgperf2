@@ -58,7 +58,7 @@ class OwnedDocker:
 
 
 def scoped_adapter(adapter, image, prefix, *, role=None, work=None, capture_exit=False,
-                   capture_prefixes=False, target_adapter='bird'):
+                   capture_prefixes=False, target_adapter='bird', prefix_limit=None):
     """Preserve adapter behavior, replacing only binary and runtime name."""
     class Selected(adapter):
         @classmethod
@@ -77,6 +77,8 @@ def scoped_adapter(adapter, image, prefix, *, role=None, work=None, capture_exit
                 # be writable by the unprivileged host client across UID maps.
                 os.chmod(self.host_dir, 0o700)
                 self.prefix_snapshot_socket = self.guest_dir + '/' + SOCKET_NAME
+                if prefix_limit is not None:
+                    self.prefix_snapshot_max_prefixes = prefix_limit
 
         def wait_established(self, *args, **kwargs):
             if work is not None and role == 'observer':
@@ -126,8 +128,11 @@ def execute(document, work, attempt, engine, *, target=None):
     # are rebound below so every bench dependency receives this scoped object.
     runtime = types.SimpleNamespace(**vars(engine))
     runtime.TARGET_CLASSES = {target_adapter: scoped_adapter(engine.TARGET_CLASSES[target_adapter], roles['target']['image'], attempt, role='target', work=work, capture_exit=options.get('mode') == 'basic', target_adapter=target_adapter)}
+    from recipe_prefixes import capture_limits, SMALL_MAX_PREFIXES
+    selected_prefix_limit = capture_limits(document)[0]
     runtime.MONITOR_CLASSES = {'sink': scoped_adapter(engine.MONITOR_CLASSES['sink'], roles['observer']['image'], attempt, role='observer', work=work,
-        capture_prefixes=options.get('observer_prefixes', False))}
+        capture_prefixes=options.get('observer_prefixes', False),
+        prefix_limit=selected_prefix_limit if selected_prefix_limit > SMALL_MAX_PREFIXES else None)}
     runtime.BIRDTester = scoped_adapter(engine.BIRDTester, roles['generator']['image'], attempt, role='generator', work=work)
     runtime.target_image = lambda *args: roles['target']['image']
     runtime.remove_target_containers = lambda: None

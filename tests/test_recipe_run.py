@@ -244,12 +244,25 @@ def test_worker_supervision_preserves_partial_evidence(tmp_path, monkeypatch, fa
     monkeypatch.setattr(recipe_run.subprocess, 'Popen', lambda *a, **k: process)
     monkeypatch.setattr(recipe_run.os, 'killpg', killpg)
     monkeypatch.setattr(recipe_run, '_cleanup', lambda *a: [])
+    ordering = []
+    def quiesce(*args):
+        ordering.append('quiesce')
+        return {'errors': [], 'actions': []}
+    import recipe_diagnostics
+    collector = recipe_diagnostics.collect_diagnostics
+    def collect(*args, **kwargs):
+        ordering.append('collection')
+        return collector(*args, **kwargs)
+    monkeypatch.setattr(recipe_run, '_quiesce', quiesce)
+    monkeypatch.setattr(recipe_diagnostics, 'collect_diagnostics', collect)
     outcome = recipe_run.SubprocessBackend().execute(recipe(), work, 'attempt', 0.01)
     assert outcome['status'] == status
     assert outcome.get('exit_code') == exit_code
     assert (work / 'runtime.json').is_file()
     assert (work / 'console.log').is_file()
     assert killed and all(value == (3456, signal.SIGKILL) for value in killed)
+    assert ordering == (['quiesce', 'collection'] if failure != 'bad_worker' else ['collection'])
+    assert (work / 'owned-quiescence.json').exists() is (failure != 'bad_worker')
     budget = json.loads((work / 'execution-budget.json').read_text())
     assert budget['scope'] == 'worker' and budget['timeout_seconds'] == 0.01
     assert budget['elapsed_seconds'] >= 0
@@ -280,6 +293,72 @@ def test_worker_budget_excludes_collection_and_cleanup(tmp_path, monkeypatch):
     assert budget == {'schema': 'bgperf2/execution-budget/v1alpha1', 'scope': 'worker',
                       'started_monotonic_s': 10, 'ended_monotonic_s': 12,
                       'timeout_seconds': 3, 'elapsed_seconds': 2, 'completed_within_budget': True}
+
+
+def test_quiescence_prioritizes_target_and_rechecks_each_owned_id(monkeypatch):
+    target, generator, foreign = ('b'*64, 'a'*64, 'c'*64)
+    calls = []
+    def command(argv, **kwargs):
+        calls.append(argv)
+        assert 0 < kwargs['timeout'] <= 2
+        if 'ps' in argv:
+            return '\n'.join(json.dumps({'ID': identifier, 'Names': name}) for identifier, name in [
+                (generator, 'attempt_tester'), (foreign, 'attempt_other'), (target, 'attempt_bird_target')])
+        identifier = argv[-1]
+        if 'inspect' in argv:
+            return json.dumps([{'Id': identifier, 'Name': '/observed', 'Config': {'Labels': {
+                recipe_run.OWNER_LABEL: 'other' if identifier == foreign else 'attempt'}},
+                'State': {'Running': True, 'Paused': False, 'Status': 'running', 'ExitCode': 0}}])
+        assert argv[-3:] == ['container', 'pause', identifier]
+        return identifier
+    monkeypatch.setattr(recipe_run.preflight, 'run_command', command)
+    report = recipe_run._quiesce('attempt', {})
+    pauses = [argv[-1] for argv in calls if 'pause' in argv]
+    assert pauses == [target, generator]
+    assert len(report['errors']) == 1 and 'ownership' in report['errors'][0]
+    assert all('rm' not in argv for argv in calls)
+    for identifier in pauses:
+        pause_index = next(index for index, argv in enumerate(calls) if argv[-2:] == ['pause', identifier])
+        assert calls[pause_index-1][-3:] == ['container', 'inspect', identifier]
+
+
+def test_worker_published_inconclusive_does_not_trigger_controller_quiescence(tmp_path, monkeypatch):
+    class Process:
+        pid = 34
+        returncode = 0
+        def wait(self, timeout):
+            recipe_run._write(tmp_path/'runtime.json', {'status': 'inconclusive', 'reason': 'Engine returned no stats row.'})
+        def poll(self): return 0
+    monkeypatch.setattr(recipe_run.subprocess, 'Popen', lambda *a, **k: Process())
+    monkeypatch.setattr(recipe_run.os, 'killpg', lambda *a: None)
+    monkeypatch.setattr(recipe_run, '_cleanup', lambda *a: [])
+    monkeypatch.setattr(recipe_run, '_quiesce', lambda *a: pytest.fail('Normal worker exit must retain live diagnostics'))
+    outcome = recipe_run.SubprocessBackend().execute(recipe(), tmp_path, 'attempt', 30)
+    assert outcome['status'] == 'inconclusive'
+    assert not (tmp_path/'owned-quiescence.json').exists()
+
+
+@pytest.mark.parametrize('failure', ['malformed_id', 'bad_listing', 'deadline', 'pause_failure'])
+def test_quiescence_uncertainty_is_retained_without_removal(monkeypatch, failure):
+    identifier = 'a'*64
+    calls = []
+    def command(argv, **kwargs):
+        calls.append(argv)
+        if 'ps' in argv:
+            if failure == 'bad_listing': return 'not-json'
+            return json.dumps({'ID': 'bad' if failure == 'malformed_id' else identifier, 'Names': 'attempt_bird_target'})
+        if 'inspect' in argv:
+            return json.dumps([{'Id': identifier, 'Config': {'Labels': {recipe_run.OWNER_LABEL: 'attempt'}},
+                                'State': {'Running': True, 'Paused': False}}])
+        raise recipe_run.preflight.ProbeError('pause failed')
+    monkeypatch.setattr(recipe_run.preflight, 'run_command', command)
+    if failure == 'deadline':
+        clock = iter([0, 16])
+        monkeypatch.setattr(recipe_run.time, 'monotonic', lambda: next(clock))
+    report = recipe_run._quiesce('attempt', {})
+    assert report['errors']
+    assert all('rm' not in argv for argv in calls)
+    if failure != 'pause_failure': assert all('pause' not in argv for argv in calls)
 
 
 def test_cleanup_discovers_ids_and_rechecks_labels(monkeypatch):
@@ -335,6 +414,7 @@ def test_worker_returning_after_observed_budget_is_inconclusive(tmp_path, monkey
     monkeypatch.setattr(recipe_run.subprocess, 'Popen', lambda *a, **k: Process())
     monkeypatch.setattr(recipe_run.os, 'killpg', lambda *a: None)
     monkeypatch.setattr(recipe_run, '_cleanup', lambda *a: [])
+    monkeypatch.setattr(recipe_run, '_quiesce', lambda *a: {'errors': [], 'actions': []})
     import recipe_diagnostics
     monkeypatch.setattr(recipe_diagnostics, 'stage', lambda *a, **k: None)
     monkeypatch.setattr(recipe_diagnostics, 'collect_diagnostics', lambda *a, **k: {'errors': []})

@@ -307,6 +307,18 @@ worker yields `interrupted` (130 or 143). Cleanup failures yield `harness_failed
 (exit 3) with details, retaining evidence. A hard kill, disk failure or power loss
 can prevent packaging or cleanup; there is no automatic retry or recovery claim.
 
+After a worker interruption or budget expiry, the controller pauses this
+attempt's labelled containers before slower diagnostics, prioritizing the
+target. It rechecks each full immutable ID and ownership label immediately
+before acting, records bounded actions/errors in `work/owned-quiescence.json`,
+and leaves removal to the existing final cleanup. This stops continued route
+allocation while preserving PID/cgroup/log evidence. A controller pause is
+explicit in diagnostic state and is not a native daemon crash or a healthy
+running-role witness. Post-stop native queries may be unavailable; they never
+become fabricated zero counts or successful correctness evidence. Normal
+completion is unchanged. Quiescence uncertainty remains a harness failure with
+its original pre-collection status retained where applicable.
+
 An existing engine stats row determines `completed` (0) or
 `experiment_failed` (4); a missing row is inconclusive and worker exceptions are
 harness failures. Bounded diagnostic collection/cleanup failures report harness

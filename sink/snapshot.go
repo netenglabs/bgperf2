@@ -18,6 +18,24 @@ import (
 
 const snapshotSchema = "bgperf2/observer-prefixes/v1alpha1"
 const maxSnapshotPrefixes = 100000
+const largeMaxSnapshotPrefixes = 5000000
+
+func validateSnapshotLimit(socket string, limit int) error {
+	if limit < 1 || limit > largeMaxSnapshotPrefixes {
+		return fmt.Errorf("snapshot prefix limit must be between 1 and %d", largeMaxSnapshotPrefixes)
+	}
+	if socket == "" && limit != maxSnapshotPrefixes {
+		return fmt.Errorf("nondefault snapshot prefix limit requires -snapshot-socket")
+	}
+	return nil
+}
+
+func (s *sink) snapshotLimit() int {
+	if s.cfg.snapshotMaxPrefixes == 0 {
+		return maxSnapshotPrefixes
+	}
+	return s.cfg.snapshotMaxPrefixes
+}
 
 type prefixSnapshot struct {
 	Schema        string   `json:"schema"`
@@ -45,9 +63,10 @@ func (s *sink) prefixSnapshot() prefixSnapshot {
 	default:
 		r.ConnectionID, r.Updates = s.active.id, s.snapshotUpdates
 		r.AcceptedCount = s.snapshotTable.accepted
-		if r.AcceptedCount > maxSnapshotPrefixes || len(s.snapshotTable.held) > maxSnapshotPrefixes {
+		limit := s.snapshotLimit()
+		if r.AcceptedCount > limit || len(s.snapshotTable.held) > limit {
 			// Bound scanning as well as copying: rejected entries are held too.
-			reason := fmt.Sprintf("Table exceeds the %d held/accepted-prefix snapshot limit.", maxSnapshotPrefixes)
+			reason := fmt.Sprintf("Table exceeds the %d held/accepted-prefix snapshot limit.", limit)
 			r.Reason = &reason
 		} else {
 			keys = make([]prefixKey, 0, r.AcceptedCount)
@@ -99,13 +118,17 @@ func listenSnapshots(path string) (*net.UnixListener, error) {
 
 func (s *sink) serveSnapshots(ln *net.UnixListener) {
 	// A single accept loop bounds simultaneous table copies and response
-	// allocations. A reader that stops reading occupies it for at most 2s.
+	// allocations. Larger capture is explicit; default readers keep 2s.
 	for {
 		connection, err := ln.AcceptUnix()
 		if err != nil {
 			return
 		}
-		connection.SetWriteDeadline(time.Now().Add(2 * time.Second))
+		budget := 2 * time.Second
+		if s.snapshotLimit() > maxSnapshotPrefixes {
+			budget = 30 * time.Second
+		}
+		connection.SetWriteDeadline(time.Now().Add(budget))
 		json.NewEncoder(connection).Encode(s.prefixSnapshot())
 		connection.Close()
 	}

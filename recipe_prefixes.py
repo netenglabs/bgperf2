@@ -11,9 +11,12 @@ import recipes
 
 SCHEMA = 'bgperf2/observer-prefixes/v1alpha1'
 CAPTURE_SCHEMA = 'bgperf2/observer-prefix-capture/v1alpha1'
-MAX_PREFIXES = 100_000
+SMALL_MAX_PREFIXES = 100_000
+MAX_PREFIXES = 5_000_000
 MAX_BYTES = 4 * 1024 * 1024
 CAPTURE_SECONDS = 3
+LARGE_MAX_BYTES = 128 * 1024 * 1024
+LARGE_CAPTURE_SECONDS = 30
 SOCKET_NAME = 'prefixes.sock'
 
 
@@ -21,11 +24,18 @@ def expected_count(recipe):
     return recipe['resolved']['neighbors'] * recipe['resolved']['prefixes_per_peer']
 
 
+def capture_limits(recipe):
+    """Small-case resource bounds and evidence bytes remain unchanged."""
+    if expected_count(recipe) <= SMALL_MAX_PREFIXES:
+        return SMALL_MAX_PREFIXES, MAX_BYTES, CAPTURE_SECONDS
+    return MAX_PREFIXES, LARGE_MAX_BYTES, LARGE_CAPTURE_SECONDS
+
+
 def validate_selection(recipe, enabled):
     if type(enabled) is not bool:
         raise recipes.ContractError('observer_prefixes must be boolean')
     if enabled and expected_count(recipe) > MAX_PREFIXES:
-        raise recipes.ContractError('Observer prefix capture supports at most 100000 expected prefixes')
+        raise recipes.ContractError(f'Observer prefix capture supports at most {MAX_PREFIXES} expected prefixes')
 
 
 def capture(path, recipe, *, clock=time.monotonic_ns):
@@ -34,10 +44,11 @@ def capture(path, recipe, *, clock=time.monotonic_ns):
     receipt = {'schema': CAPTURE_SCHEMA, 'recipe_sha256': recipes.recipe_sha256(recipe),
                'phase': 'post_measurement', 'requested_ns': start, 'completed_ns': None,
                'status': 'unavailable', 'snapshot': None, 'reason': None}
-    deadline = time.monotonic() + CAPTURE_SECONDS
+    _, max_bytes, seconds = capture_limits(recipe)
+    deadline = time.monotonic() + seconds
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(CAPTURE_SECONDS)
+            client.settimeout(seconds)
             # Linux is already a runner prerequisite. A directory descriptor
             # avoids sockaddr_un's short pathname limit for deep work roots
             # without chdir(), symlinks, alternate sockets or changing evidence.
@@ -53,12 +64,12 @@ def capture(path, recipe, *, clock=time.monotonic_ns):
                 if remaining <= 0:
                     raise TimeoutError('Prefix snapshot deadline expired')
                 client.settimeout(remaining)
-                block = client.recv(min(65536, MAX_BYTES + 1 - len(chunks)))
+                block = client.recv(min(65536, max_bytes + 1 - len(chunks)))
                 if not block:
                     break
                 chunks.extend(block)
-                if len(chunks) > MAX_BYTES:
-                    raise ValueError('Prefix snapshot exceeds 4 MiB bound')
+                if len(chunks) > max_bytes:
+                    raise ValueError(f'Prefix snapshot exceeds {max_bytes // (1024 * 1024)} MiB bound')
         value = json.loads(chunks, object_pairs_hook=recipes._pairs,
                            parse_constant=recipes._nonfinite)
         receipt.update(status='collected', snapshot=value)
@@ -70,6 +81,7 @@ def capture(path, recipe, *, clock=time.monotonic_ns):
 
 def inspect(receipt, recipe):
     """Return exact set differences only for complete, well-formed snapshots."""
+    max_prefixes, _, seconds = capture_limits(recipe)
     recipes._keys(receipt, ('schema', 'recipe_sha256', 'phase', 'requested_ns',
                            'completed_ns', 'status', 'snapshot', 'reason'), where='prefix capture')
     recipes._same(receipt['schema'], CAPTURE_SCHEMA, 'prefix capture schema')
@@ -91,10 +103,10 @@ def inspect(receipt, recipe):
     start, end = receipt['requested_ns'], receipt['completed_ns']
     if (type(start) is not int or type(end) is not int or start <= 0
             or not start <= snap['monotonic_ns'] <= end
-            or end - start > CAPTURE_SECONDS * 1_000_000_000):
+            or end - start > seconds * 1_000_000_000):
         raise ValueError('Prefix snapshot is outside its bounded request interval')
     values = snap['prefixes']
-    if (not isinstance(values, list) or len(values) > MAX_PREFIXES
+    if (not isinstance(values, list) or len(values) > max_prefixes
             or snap['accepted_count'] != len(values) or expected_count(recipe) > MAX_PREFIXES):
         raise ValueError('Prefix snapshot count/capacity is inconsistent')
     observed = set()

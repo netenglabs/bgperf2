@@ -85,6 +85,40 @@ func TestSnapshotLimitIncludesRejectedHeldEntries(t *testing.T) {
 	}
 }
 
+func TestExplicitLargerSnapshotRetainsEveryPrefix(t *testing.T) {
+	s := snapshotSink()
+	s.cfg.snapshotMaxPrefixes = 200000
+	for i := 0; i <= maxSnapshotPrefixes; i++ {
+		s.snapshotTable.held[prefixKey(uint64(i)<<8|32)] = false
+	}
+	s.snapshotTable.accepted = maxSnapshotPrefixes + 1
+	r := s.prefixSnapshot()
+	if r.Status != "complete" || r.AcceptedCount != 100001 || len(r.Prefixes) != 100001 ||
+		r.Prefixes[0] != "0.0.0.0/32" || r.Prefixes[100000] != "0.1.134.160/32" {
+		t.Fatalf("incomplete larger snapshot: status=%s count=%d len=%d", r.Status, r.AcceptedCount, len(r.Prefixes))
+	}
+	// Returning to the default bound cannot expose a truncated success.
+	s.cfg.snapshotMaxPrefixes = maxSnapshotPrefixes
+	if got := s.prefixSnapshot(); got.Status != "unavailable" || len(got.Prefixes) != 0 {
+		t.Fatal("default snapshot accepted oversized evidence")
+	}
+}
+
+func TestSnapshotCapacityRequiresExplicitSocketAndBound(t *testing.T) {
+	for _, limit := range []int{0, -1, largeMaxSnapshotPrefixes + 1} {
+		if validateSnapshotLimit("enabled", limit) == nil {
+			t.Fatalf("accepted invalid snapshot limit %d", limit)
+		}
+	}
+	if validateSnapshotLimit("", largeMaxSnapshotPrefixes) == nil {
+		t.Fatal("large snapshot limit without a socket")
+	}
+	if validateSnapshotLimit("enabled", largeMaxSnapshotPrefixes) != nil ||
+		validateSnapshotLimit("", maxSnapshotPrefixes) != nil {
+		t.Fatal("valid selected/default snapshot limit rejected")
+	}
+}
+
 func TestSnapshotSocket(t *testing.T) {
 	directory := t.TempDir()
 	if err := os.Chmod(directory, 0o700); err != nil {

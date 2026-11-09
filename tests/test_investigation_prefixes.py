@@ -43,7 +43,7 @@ def package(root, recipe, image, *, capture='correct', status='completed', large
     if capture != 'legacy':
         files['observer-prefix-selection.json'] = {
             'recipe_sha256': recipes.recipe_sha256(recipe), 'enabled': True,
-            'phase': 'post_measurement', 'max_prefixes': recipe_prefixes.MAX_PREFIXES}
+            'phase': 'post_measurement', 'max_prefixes': recipe_prefixes.capture_limits(recipe)[0]}
         if capture != 'missing':
             receipt = captured(recipe)
             if capture == 'wrong':
@@ -247,7 +247,7 @@ def test_controller_forwards_capture_symmetrically_and_preserves_default_runner_
 def test_oversize_capture_is_refused_before_precheck_or_output_creation(tmp_path, recipe, monkeypatch):
     monkeypatch.setattr(recipe_prefixes, 'MAX_PREFIXES', 1)
     targets = [supplied_target(recipe, image) for image in (BASE, CANDIDATE)]
-    with pytest.raises(recipes.ContractError, match='100000'):
+    with pytest.raises(recipes.ContractError, match='at most 1'):
         investigation.run_investigation(recipe, baseline_target=targets[0], candidate_target=targets[1],
             workdir=tmp_path / 'work', results_dir=tmp_path / 'results', observer_prefixes=True,
             check=lambda *a, **k: pytest.fail('Unsupported selection reached prerequisites'),

@@ -254,6 +254,32 @@ def test_bounded_probe_can_retain_nonzero_native_output():
     assert result['text'] == 'failed native output\n'
 
 
+@pytest.mark.parametrize('adapter,suffix', [
+    ('zebra-rs', '_bgperf_zebra_rs_target'),
+    ('bio-routing', '_bgperf_bio_routing_target'),
+    ('maghemite', '_bgperf_maghemite_target'),
+])
+def test_controller_paused_native_queries_are_unavailable_not_harness_failures(tmp_path, adapter, suffix):
+    baseline, calls = zebra_fixture()
+    def command(argv, **kwargs):
+        assert 'exec' not in argv, 'Paused target must not receive native exec queries'
+        result = baseline(argv, **kwargs)
+        if 'inspect' in argv:
+            inspected = json.loads(result['text'])
+            inspected[0]['Name'] = '/attempt' + suffix
+            inspected[0]['State'].update(Paused=True, Status='paused')
+            result['text'] = json.dumps(inspected)
+        return result
+    result = diagnostics.collect_diagnostics(tmp_path, 'attempt', {}, command=command,
+        memory_reader=lambda pid: {'ending_bytes': 123}, target_adapter=adapter)
+    assert result['status'] == 'collected' and result['errors'] == []
+    target = result['containers'][0]
+    assert target['state']['Paused'] is True and target['memory']['ending_bytes'] == 123
+    assert target['log']['path']
+    assert all(query['status'] == 'unavailable' and query['path'] is None
+               and 'paused' in query['reason'] for query in target['native']['queries'])
+
+
 @pytest.mark.parametrize('drift', [False, True])
 def test_bio_native_metrics_reuse_owned_deadline_and_capture_contract(tmp_path, drift):
     from bio_routing import BioRouting

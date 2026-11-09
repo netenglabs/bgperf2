@@ -5,6 +5,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
@@ -82,6 +83,57 @@ def _cleanup(attempt_id, env):
     return errors
 
 
+def _quiesce(attempt_id, env):
+    """Freeze owned route allocation before collecting an interrupted attempt.
+
+    Pausing preserves PID/cgroup/log evidence and is a controller action, not
+    a native daemon crash. Final removal remains exclusively in _cleanup().
+    """
+    prefix = ['docker', '--host', env.get('DOCKER_HOST', 'unix:///var/run/docker.sock')]
+    report = {'schema': 'bgperf2/owned-quiescence/v1alpha1', 'attempt_id': attempt_id,
+              'reason': 'Worker interrupted or exceeded budget; pause owned route allocation before diagnostics.',
+              'actions': [], 'errors': []}
+    deadline = time.monotonic() + 15
+    def command(args):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise preflight.ProbeError('Owned quiescence deadline exceeded')
+        return preflight.run_command(prefix + args, env=env, timeout=min(2, remaining))
+    try:
+        raw = command(['ps', '-a', '--no-trunc', '--filter', f'label={OWNER_LABEL}={attempt_id}',
+                       '--format', '{{json .}}'])
+        entries = [json.loads(line) for line in raw.splitlines()]
+        if len(entries) > 128:
+            raise ValueError('Owned quiescence container bound exceeded')
+        # Listing names are only priority hints. Every immutable ID and label
+        # is re-inspected immediately before its pause; names authorize nothing.
+        entries.sort(key=lambda item: not str(item.get('Names', '')).endswith('_target'))
+        for item in entries:
+            identifier = item.get('ID')
+            if not isinstance(identifier, str) or not re.fullmatch('[0-9a-f]{64}', identifier):
+                report['errors'].append('Invalid full container ID; no action taken')
+                continue
+            try:
+                observed = json.loads(command(['container', 'inspect', identifier]))[0]
+                if (observed.get('Id') != identifier
+                        or (observed.get('Config', {}).get('Labels') or {}).get(OWNER_LABEL) != attempt_id):
+                    raise ValueError('Quiescence ownership/ID changed; resource retained')
+                state = observed['State']
+                action = {'id': identifier, 'name': observed.get('Name'), 'before': {
+                    key: state.get(key) for key in ('Running', 'Paused', 'Status', 'ExitCode', 'OOMKilled')}}
+                report['actions'].append(action)
+                if state.get('Running') is True and state.get('Paused') is not True:
+                    command(['container', 'pause', identifier])
+                    action['action'] = 'pause_requested'
+                else:
+                    action['action'] = 'already_inactive_or_paused'
+            except (preflight.ProbeError, OSError, ValueError, KeyError, TypeError, IndexError, AttributeError) as exc:
+                report['errors'].append(f'{identifier}: {exc}')
+    except (preflight.ProbeError, OSError, ValueError, KeyError, TypeError, IndexError, AttributeError) as exc:
+        report['errors'].append(str(exc))
+    return report
+
+
 class SubprocessBackend:
     def __init__(self, *, target=None, diagnostics='none', observer_prefixes=False):
         self.target, self.diagnostics = target, diagnostics
@@ -105,6 +157,7 @@ class SubprocessBackend:
         worker_end = None
         worker_elapsed = None
         within_budget = None
+        controller_halted_worker = False
         old = signal.signal(signal.SIGTERM, _stop)
         try:
             with (workdir / 'console.log').open('x') as log:
@@ -118,6 +171,7 @@ class SubprocessBackend:
                     worker_elapsed = worker_end - worker_start
                     within_budget = worker_elapsed <= timeout
                     if not within_budget:
+                        controller_halted_worker = True
                         # wait() can return after its deadline when the parent
                         # is descheduled; successful exit cannot extend budget.
                         outcome = {'status': 'inconclusive',
@@ -129,12 +183,14 @@ class SubprocessBackend:
                         if process.returncode and outcome.get('status') == 'completed':
                             outcome = {'status': 'harness_failed', 'reason': f'Worker exited {process.returncode} after terminal evidence.'}
                 except subprocess.TimeoutExpired:
+                    controller_halted_worker = True
                     worker_end = time.monotonic()
                     worker_elapsed = worker_end - worker_start
                     within_budget = False
                     _kill(process)
                     outcome = {'status': 'inconclusive', 'reason': f'Attempt exceeded its {timeout:g}s wall-clock budget; worker group stopped.'}
         except (KeyboardInterrupt, SystemExit) as exc:
+            controller_halted_worker = True
             if process is not None and process.poll() is None:
                 _kill(process)
             code = exc.code if isinstance(exc, SystemExit) and exc.code in (130, 143) else 130
@@ -179,6 +235,13 @@ class SubprocessBackend:
                             process.wait(timeout=10)
                         except subprocess.TimeoutExpired:
                             stop_errors.append('Worker could not be reaped after SIGKILL; inspect host before further execution.')
+                if controller_halted_worker:
+                    try:
+                        quiescence = _quiesce(attempt_id, env)
+                        stop_errors.extend('Owned quiescence: ' + error for error in quiescence['errors'])
+                        _write(workdir / 'owned-quiescence.json', quiescence)
+                    except Exception as exc:
+                        stop_errors.append(f'Owned quiescence failed: {exc}')
                 record_stage('collection', reason='Worker stopped; collect owned diagnostics before removing resources.')
                 try:
                     adapter_options = ({'target_adapter': document['roles']['target']['adapter']}
@@ -281,9 +344,10 @@ def run_recipe(document, *, workdir, results_dir, timeout=300, target=None,
             'recipe_sha256': recipes.recipe_sha256(document), 'roles': roles,
             'diagnostics': diagnostics, 'instrumentation': target['provenance']['instrumentation']})
         if observer_prefixes:
+            from recipe_prefixes import capture_limits
             _write(work / 'observer-prefix-selection.json', {
                 'recipe_sha256': recipes.recipe_sha256(document), 'enabled': True,
-                'phase': 'post_measurement', 'max_prefixes': 100_000})
+                'phase': 'post_measurement', 'max_prefixes': capture_limits(document)[0]})
         attempt = 'bgperf_recipe_' + uuid.uuid4().hex
         try:
             outcome = (backend or SubprocessBackend(target=target, diagnostics=diagnostics,

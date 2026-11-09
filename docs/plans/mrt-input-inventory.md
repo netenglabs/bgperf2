@@ -30,3 +30,12 @@ module, with 21 focused checks passed before review. It retains explicit
 unsupported forms and opaque-attribute limits; no native MRT inspection or
 replay is qualified by these modeled checks. Native preparation must bind the
 committed implementation and preserve both failures and successes.
+
+Next add explicitly selected encoded-attribute facts to this same streaming
+inspection. Select peer indexes and ASNs to check, retaining input identity and
+all default opaque-attribute behavior when omitted. Count standard export-scope
+communities, checked ASNs in four-byte AS_PATH, AS sets/confederation segments,
+first-AS/attribute-presence facts and malformed known attributes. Keep bounded
+examples and per-peer counters rather than all routes. These are encoded facts,
+not a best-path/export model or expected set. Use them to determine whether the
+selected real input can support an unambiguous declared oracle before replay.

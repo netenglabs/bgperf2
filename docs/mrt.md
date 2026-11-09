@@ -40,6 +40,23 @@ the synthetic recipe interface. The
 fixed peer sets, expected route semantics and native replay qualification remain
 unfinished. The legacy injection workflow below retains its existing behavior.
 
+Optionally add `--attribute-peers 0,2 --check-asns 64512,64513` to inventory
+selected encoded IPv4 RIB attributes. Both flags are required together. The
+result adds per-peer entry counts for standard export-scope communities,
+checked ASNs in four-byte AS_PATH, AS sets/confederation segments, multiple
+sequence segments, first-AS differences and attribute-presence facts. A missing
+IPv4 NEXT_HOP attribute is not itself an error: MP_REACH can carry the next hop.
+The maximum encoded AS_SEQUENCE length is a separate value, null if no valid
+AS_PATH was classified; it is not an entry counter.
+Malformed known attributes have a separate count and at most five examples per
+peer; they do not become successful classifications. Other selected RIB entries
+still contribute their input count. Unknown attribute payloads remain opaque.
+This opt-in does not select routes, apply BGP policy, resolve overlap/best paths
+or produce an expected exported prefix set. Existing default inspections retain
+their opaque-attribute behavior. Peer/ASN selections and input/implementation
+identities are recorded; omitting a counter key means zero among well-formed
+entries. Malformed entries remain unknown for those classifications.
+
 ## Legacy injection workflow
 
 This feature requires the basic knowledge about how `bgperf2` works.

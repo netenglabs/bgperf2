@@ -57,13 +57,17 @@ def peer_table(payload):
     return collector, view, peers
 
 
-def rib_entries(payload, peers, subtype):
+def rib_entries(payload, peers, subtype, attributes=None):
     data = Cursor(payload)
     data.number(4)  # Sequence is encoded evidence, not an ordering assumption.
     bits = data.number(1)
     if bits > (32 if subtype == 2 else 128):
         raise ValueError('Invalid MRT prefix length')
-    data.take((bits + 7)//8)  # RFC 6396: unused trailing prefix bits are irrelevant.
+    encoded_prefix = bytes(data.take((bits + 7)//8))
+    prefix = None
+    if attributes is not None and subtype == 2:
+        address = ipaddress.IPv4Address(encoded_prefix + bytes(4-len(encoded_prefix)))
+        prefix = str(ipaddress.IPv4Network((address, bits), strict=False))
     count = data.number(2)
     seen = set()
     for _ in range(count):
@@ -72,14 +76,16 @@ def rib_entries(payload, peers, subtype):
             raise ValueError('Unknown or duplicate MRT peer index in RIB record')
         seen.add(index)
         data.number(4)  # Originated timestamp.
-        data.take(data.number(2))  # Attributes are opaque in this inventory.
+        encoded_attributes = data.take(data.number(2))
+        if attributes is not None and subtype == 2:
+            attributes.observe(index, prefix, encoded_attributes)
         key = 'ipv4_unicast_rib_entries' if subtype == 2 else 'ipv6_unicast_rib_entries'
         peers[index][key] += 1
     data.end()
 
 
 def inventory(stream, *, expected_size, expected_sha256, timeout_seconds=1800,
-              clock=time.monotonic, check=lambda: None):
+              clock=time.monotonic, check=lambda: None, attributes=None):
     """Read/hash one complete TABLE_DUMP_V2 input with bounded record storage."""
     if type(expected_size) is not int or not 0 < expected_size <= MAX_INPUT_BYTES:
         raise ValueError('Expected MRT size must be a positive integer at most 16 GiB')
@@ -119,10 +125,11 @@ def inventory(stream, *, expected_size, expected_sha256, timeout_seconds=1800,
             if records or peers is not None:
                 raise ValueError('Exactly one initial MRT peer table is required')
             collector, view, peers = peer_table(payload)
+            if attributes is not None: attributes.bind(peers)
         else:
             if peers is None:
                 raise ValueError('MRT RIB precedes its peer table')
-            rib_entries(payload, peers, subtype)
+            rib_entries(payload, peers, subtype, attributes)
             families['ipv4_unicast' if subtype == 2 else 'ipv6_unicast'] += 1
         records += 1
     if stream.read(1):
@@ -134,7 +141,7 @@ def inventory(stream, *, expected_size, expected_sha256, timeout_seconds=1800,
         raise ValueError('MRT input SHA-256 mismatch')
     if peers is None or not sum(families.values()):
         raise ValueError('MRT input has no unicast RIB records')
-    return dict(schema=SCHEMA, input=dict(bytes=consumed, sha256=digest.hexdigest()),
+    result = dict(schema=SCHEMA, input=dict(bytes=consumed, sha256=digest.hexdigest()),
                 collector_bgp_id=collector, view_name=view, peers=peers,
                 record_count=records, rib_records=families,
                 elapsed_seconds=clock()-started,
@@ -142,6 +149,10 @@ def inventory(stream, *, expected_size, expected_sha256, timeout_seconds=1800,
                         'Attributes are opaque; policy, AS paths and next hops are not validated.',
                         'Only one initial TABLE_DUMP_V2 peer table and IPv4/IPv6 unicast RIB subtypes are supported.',
                         'ADD-PATH, multicast, generic RIB and update streams are refused.'])
+    if attributes is not None:
+        result['attribute_inventory'] = attributes.result()
+        result['limits'][1] = 'Selected encoded attributes are inventoried; policy, best-path and export outcomes remain unvalidated.'
+    return result
 
 
 def inspect_file(path, **kwargs):

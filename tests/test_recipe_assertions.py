@@ -195,6 +195,36 @@ def test_controller_paused_role_never_attests_healthy(tmp_path, recipe, pause):
     assert by_capability(result)['observed_role_health']['status'] == 'unmeasured'
 
 
+@pytest.mark.parametrize('change, expected', [
+    ('complete', 'passed'), ('missing', 'unmeasured'), ('duplicate_id', 'unmeasured'),
+    ('stopped', 'failed'),
+])
+def test_mrt_health_requires_one_distinct_snapshot_per_peer(tmp_path, change, expected):
+    from mrt_controls import control
+    from recipe_mrt import bind
+    from test_recipes import source, export
+    batch, test = source(tmp_path, neighbors=[2], prefixes=[100])
+    recipe = export(batch, test)
+    _, spec = control('plain', '/source.mrt', target_asn=64515, observer_asn=64516, source_asn=64520)
+    spec['peers'] = [dict(index=i, asn=64520+i, prefixes=recipe['resolved']['prefixes_per_peer'])
+                     for i in range(recipe['resolved']['neighbors'])]
+    mrt = bind(recipe, spec)
+    files = evidence(mrt)
+    roles = ['target', 'observer'] + ['generator'] * len(spec['peers'])
+    containers = [{'role': role, 'id': f'{index:064x}',
+                   'state': {'Running': True, 'OOMKilled': False, 'Error': ''}}
+                  for index, role in enumerate(roles)]
+    if change == 'missing':
+        containers.pop()
+    elif change == 'duplicate_id':
+        containers[-1]['id'] = containers[-2]['id']
+    elif change == 'stopped':
+        containers[-1]['state']['Running'] = False
+    files['diagnostics.json']['containers'] = containers
+    result = evaluate(tmp_path, mrt, files)
+    assert by_capability(result)['observed_role_health']['status'] == expected
+
+
 @pytest.mark.parametrize('change', ['duplicate', 'negative', 'bool_counter', 'inverted', 'no_origin', 'completion_without_start'])
 def test_bad_event_witnesses_are_retained_but_not_interpreted(tmp_path, recipe, change):
     files = evidence(recipe)

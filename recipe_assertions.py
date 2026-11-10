@@ -8,6 +8,8 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
+from collections import Counter
 
 import recipes
 from measurements import EventKind, EventPhase, LifecycleEvent
@@ -288,15 +290,20 @@ def evaluate_assertions(spec, recipe, result_path):
             containers = diagnostic.get('containers') if diagnostic else None
             if isinstance(containers, list) and containers and all(isinstance(item, dict)
                     and isinstance(item.get('role'), str) for item in containers):
-                roles = {item.get('role') for item in containers}
+                roles = Counter(item['role'] for item in containers)
+                expected_roles = Counter(assertion['expected'])
                 states = [item.get('state') for item in containers]
                 failed = any(isinstance(state, dict) and (state.get('Running') is False
                              or state.get('OOMKilled') is True or (isinstance(state.get('Error'), str)
                              and bool(state['Error']))) for state in states)
-                # This supported BIRD recipe creates exactly one container per
-                # role; its generator hosts every configured session.
-                complete = (len(containers) == len(assertion['expected'])
-                            and roles == set(assertion['expected']) and all(isinstance(state, dict)
+                distinct = True
+                if 'mrt' in recipe:
+                    expected_roles['generator'] = len(recipe['mrt']['peers'])
+                    identifiers = [item.get('id') for item in containers]
+                    distinct = (all(isinstance(identifier, str) and re.fullmatch(r'[0-9a-f]{64}', identifier)
+                                    for identifier in identifiers)
+                                and len(set(identifiers)) == len(identifiers))
+                complete = (roles == expected_roles and distinct and all(isinstance(state, dict)
                             and state.get('Running') is True and state.get('OOMKilled') is False
                             and state.get('Paused') is not True and state.get('Status') != 'paused'
                             and state.get('Error') == '' for state in states))

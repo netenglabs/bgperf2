@@ -22,17 +22,20 @@ import (
 	"time"
 )
 
-const sinkVersion = "0.3.0"
+const sinkVersion = "0.4.0"
 
 // sourceHash is set at build time from the files compiled (see sink.py). An
 // image built some other way says so rather than reporting nothing.
 var sourceHash = "unknown"
 
+// Builds report whether they applied the source-bound dependency correction.
+var gobgpParserProfile = "unpatched"
+
 func gobgpVersion() string {
 	if info, ok := debug.ReadBuildInfo(); ok {
 		for _, d := range info.Deps {
 			if d.Path == "github.com/osrg/gobgp/v4" {
-				return d.Version
+				return d.Version + "+" + gobgpParserProfile
 			}
 		}
 	}

@@ -24,6 +24,8 @@ import re
 import time
 import tarfile
 
+import sink_gobgp_patch
+
 from base import *
 
 
@@ -154,6 +156,9 @@ class Sink(Container):
         tar_bytes = sink_source_tar()
         v['source_hash'] = sink_source_hash(tar_bytes)
         v['embedded_source'] = _embed(tar_bytes)
+        v['gobgp_patch_command'] = sink_gobgp_patch.build_dependency_command()
+        v['gobgp_modfile'] = sink_gobgp_patch.MODFILE
+        v['gobgp_profile'] = sink_gobgp_patch.PROFILE
         # The unit tests run in the build, so an image exists only if they
         # passed against the exact source it holds. They need no network, no
         # privileges and no Docker, which keeps the Python suite Docker-free.
@@ -163,8 +168,9 @@ WORKDIR /src
 # The source of sink/ in the bgperf2 repository, as a ustar archive, hash {source_hash}.
 {embedded_source}
 RUN base64 -d sink.tar.b64 | tar -x && rm sink.tar.b64
-RUN go mod download && go vet ./... && go test ./...
-RUN CGO_ENABLED=0 go build -trimpath -ldflags '-X main.sourceHash={source_hash}' -o /bgperf-sink .
+RUN go mod download && go mod verify && {gobgp_patch_command}
+RUN go vet -mod=readonly -modfile={gobgp_modfile} ./... && go test -mod=readonly -modfile={gobgp_modfile} ./...
+RUN CGO_ENABLED=0 go build -mod=readonly -modfile={gobgp_modfile} -trimpath -ldflags '-X main.sourceHash={source_hash} -X main.gobgpParserProfile={gobgp_profile}' -o /bgperf-sink .
 
 FROM {runtime_image}
 COPY --from=build /bgperf-sink /usr/local/bin/bgperf-sink

@@ -169,3 +169,30 @@ non-MRT recipes over the prior 8 MiB limit. All recipe schema, package integrity
 and canonical digest checks remain required. Other JSON evidence retains its
 existing limits; this does not broaden investigation/comparison workloads or
 change original experiment outcomes.
+
+
+An observer must accept valid unknown extended-community subtypes. Sink 0.3.0's
+GoBGP v4.9.0 parser can treat unknown EVPN subtype 249 as withdraw, losing a route
+that the target exported. The [0.4.0 correction](plans/sink-unknown-evpn.md)
+uses the explicit `unknown-ec-v1` dependency correction and reports that profile.
+It differs deliberately from the unpatched reference for this RFC 7606 defect.
+Original inputs and declared sets stay intact; native qualification and fresh
+instrument-bound originals remain necessary. Go vet/race tests use
+`scripts/sink_go_test.sh`, which applies the same guarded dependency copy as the build;
+a direct unpatched `go test` exposes the dependency's counterexample instead.
+
+Go forbids overlays of files inside GOMODCACHE. The maintained build therefore
+copies the verified pinned module into a fresh private directory, checks the
+copied source hash again, patches that copy, and uses a private `-modfile` with
+one explicit local replacement. Original project go.mod/go.sum and cached
+module bytes stay unchanged; copied attribution/license files remain intact.
+
+
+Additional controlled fixtures are `unknown-extended-community` (ordinary route,
+the original correctly sized unknown-EVPN community payload, and an unrelated
+unknown transitive type; all must transit) and `extended-community-length`
+(ordinary positive route and one malformed seven-byte attribute; only the
+ordinary route is expected). Both derive expectations from RFC 7606 section
+7.14 before target output. They qualify prefix behavior, not preserved exported
+attribute values. The unchanged basic attribute inventory is not a complete
+validator for the deliberately malformed extended-community fixture.

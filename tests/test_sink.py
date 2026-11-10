@@ -49,8 +49,9 @@ def test_recipe_embeds_the_archive_and_names_its_hash():
     archive = embedded_archive(dockerfile)
     assert archive == sink.sink_source_tar()
     h = sink.sink_source_hash(archive)
-    assert "-X main.sourceHash={0}'".format(h) in dockerfile
-    assert 'go test ./...' in dockerfile
+    assert "-X main.sourceHash={0} -X main.gobgpParserProfile=unknown-ec-v1'".format(h) in dockerfile
+    assert 'go test -mod=readonly -modfile=/tmp/bgperf-gobgp-unknown-ec-v1/go.mod ./...' in dockerfile
+    assert 'go mod verify' in dockerfile
 
 
 def test_chunked_embedding_reassembles(monkeypatch):

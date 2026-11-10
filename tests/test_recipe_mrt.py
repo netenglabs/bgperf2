@@ -25,7 +25,7 @@ def bound(tmp_path, case='plain'):
 
 
 @pytest.mark.parametrize('case', CASES)
-def test_fixed_controls_have_predeclared_sets_and_well_formed_source(tmp_path, case):
+def test_fixed_controls_have_predeclared_sets_and_inspectable_source(tmp_path, case):
     document = bound(tmp_path, case)
     assert recipes.validate_recipe(json.loads(json.dumps(document))) == document
     assert document['roles']['generator']['adapter'] == 'bgpdump2'
@@ -233,3 +233,14 @@ def test_cli_export_binds_workload_and_preserves_synthetic_default(tmp_path):
     synthetic = tmp_path/'synthetic.json'
     assert recipes.main(argv + ['--output', str(synthetic)]) == 0
     assert recipes.read_document(synthetic)['schema'] == recipes.RECIPE_SCHEMA
+
+
+
+def test_unknown_community_and_malformed_length_controls_are_distinct(tmp_path):
+    positive = bound(tmp_path, 'unknown-extended-community')
+    assert len(positive['mrt']['expected_prefixes']) == positive['mrt']['peers'][0]['prefixes'] == 3
+    assert bytes.fromhex('06f927110000000006f92af800000000') in Path(positive['mrt']['input']['path']).read_bytes()
+    other = tmp_path/'negative'; other.mkdir()
+    negative = bound(other, 'extended-community-length')
+    assert len(negative['mrt']['expected_prefixes']) == 1 and negative['mrt']['peers'][0]['prefixes'] == 2
+    assert bytes.fromhex('c0100706f90102030405') in Path(negative['mrt']['input']['path']).read_bytes()

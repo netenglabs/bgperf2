@@ -6,7 +6,8 @@ import struct
 
 from recipe_mrt import SPEC_SCHEMA
 
-CASES = ('plain', 'export-scope', 'as-loops', 'as-set', 'long-paths')
+CASES = ('plain', 'export-scope', 'as-loops', 'as-set', 'long-paths',
+         'unknown-extended-community', 'extended-community-length')
 
 
 def _attribute(code, payload, flags=0x40):
@@ -40,6 +41,10 @@ def control(case, input_path, *, target_asn, observer_asn, source_asn):
                    for n in (target_asn, observer_asn)]
     elif case == 'as-set':
         routes += [([_segment(2, [source_asn]), _segment(1, [source_asn])], (), False)]
+    elif case == 'unknown-extended-community':
+        routes += [(None, (), True), (None, (), True)]
+    elif case == 'extended-community-length':
+        routes += [(None, (), False)]
     elif case == 'long-paths':
         for length in (254, 255, 256, 257, 258, 260):
             path = [source_asn] * length
@@ -58,6 +63,12 @@ def control(case, input_path, *, target_asn, observer_asn, source_asn):
                       + _attribute(3, b'\xc0\x00\x02\x02'))
         if communities:
             attributes += _attribute(8, b''.join(n.to_bytes(4, 'big') for n in communities), 0xc0)
+        if case == 'unknown-extended-community' and ordinal:
+            encoded = (bytes.fromhex('0002b0790000045c0202000206f9232a06f927110000000006f92af800000000')
+                       if ordinal == 1 else bytes.fromhex('99fe010203040506'))
+            attributes += _attribute(16, encoded, 0xc0)
+        if case == 'extended-community-length' and ordinal:
+            attributes += _attribute(16, bytes.fromhex('06f90102030405'), 0xc0)
         body = (ordinal.to_bytes(4, 'big') + b'\x20' + address.packed + b'\x00\x01'
                 + b'\x00\x00' + (1).to_bytes(4, 'big')
                 + len(attributes).to_bytes(2, 'big') + attributes)
@@ -65,11 +76,15 @@ def control(case, input_path, *, target_asn, observer_asn, source_asn):
         if accepted:
             expected.append(str(address) + '/32')
     data = bytes(data)
+    description = ('Unknown correctly sized extended-community types/subtypes must transit (RFC 7606 section 7.14); no target output consulted.'
+                   if case == 'unknown-extended-community' else
+                   'Seven-byte extended-community attribute is malformed and withdrawn; ordinary positive route must transit (RFC 7606 section 7.14).'
+                   if case == 'extended-community-length' else None)
     return data, dict(schema=SPEC_SCHEMA,
         input=dict(path=str(input_path), bytes=len(data), sha256=hashlib.sha256(data).hexdigest()),
         peers=[dict(index=0, asn=source_asn, prefixes=len(routes))],
         target_asn=target_asn, observer_asn=observer_asn,
-        expected_prefixes=sorted(expected), expectation_description=(
+        expected_prefixes=sorted(expected), expectation_description=description or (
             'Predeclared ' + case + ' control: ordinary routes transit; export-scope communities, '
             'role-AS loops and AS_SET (RFC 9774 default) do not. Long paths use legal '
             'AS_SEQUENCE segments of at most 255 ASNs. No attribute capture or timing claim.'))

@@ -358,3 +358,7 @@ host operations, campaign scheduling, research programs and private evidence
 belong to their consuming projects and do not gate public contributions.
 
 Source-only [MRT prefix profile preparation](plans/mrt-prefix-profiles.md) derives bounded exact expectations before target output; see the [MRT guide](mrt-recipes.md).
+
+The [sink unknown-EVPN correction](plans/sink-unknown-evpn.md) is a separately
+versioned instrument fix with a source-bound dependency overlay and native
+qualification required before full-table timing use.

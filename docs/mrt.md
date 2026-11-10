@@ -155,3 +155,25 @@ Here, two testers are configured:
 
 ExaBGP testers accept the following options:
 - `high-perf`: True/False, to enable [ExaBGP High Performance mode](https://github.com/Exa-Networks/exabgp/wiki/High-Performance).
+
+
+## Inspect attributes for exact source prefixes
+
+The offline `scripts/inspect_mrt.py` attribute mode accepts optional
+`--attribute-prefixes 103.137.98.0/23` with `--attribute-peers` and `--check-asns`.
+Supply the existing complete input size/hash and fresh output arguments. It
+retains only exact canonical source-prefix matches for the selected peers, up to
+eight prefixes and sixteen peers. Duplicate selected peer/prefix entries refuse.
+Absent entries stay absent. `routes` records source attribute length/SHA-256,
+raw hex and existing decoded facts; hex/detailed facts are explicitly unavailable
+above 4096 bytes, while the complete attribute hash remains. This bounds detailed
+output without silently truncating a source attribute. Ordinary inventory output
+is unchanged when this option is omitted. These are consumed source bytes, not
+proof of the injector's wire output or a reason to remove a failed expected route.
+
+Prefix matching uses canonical network identity, ignoring unused NLRI padding
+bits as the existing reader does. Detailed entries separately retain original
+`source_nlri` prefix length, encoded prefix hex and whether unused bits were zero.
+This avoids describing normalized network text as the original source bytes.
+Duplicate selected peer/network entries across records still refuse. Existing
+counter and null/attribute-presence interpretation limits remain in the scope.

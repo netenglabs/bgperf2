@@ -21,6 +21,7 @@ def main(argv=None):
     parser.add_argument('--output', required=True)
     parser.add_argument('--attribute-peers', help='Comma-separated peer indexes for encoded IPv4 attribute facts')
     parser.add_argument('--check-asns', help='Comma-separated ASNs to count in selected four-byte AS_PATH entries')
+    parser.add_argument('--attribute-prefixes', help='Optional comma-separated exact canonical IPv4 prefixes; bounded raw attribute inspection')
     args = parser.parse_args(argv)
     output = Path(args.output)
     try:
@@ -28,12 +29,13 @@ def main(argv=None):
                 or output.exists() or output.is_symlink()):
             raise ValueError('Fresh absolute output in a canonical existing directory required')
         attributes = None
-        if args.attribute_peers is not None or args.check_asns is not None:
+        if any(v is not None for v in (args.attribute_peers, args.check_asns, args.attribute_prefixes)):
             if args.attribute_peers is None or args.check_asns is None:
                 raise ValueError('Both --attribute-peers and --check-asns are required together')
             from mrt_attributes import AttributeInventory
             attributes = AttributeInventory([int(p) for p in args.attribute_peers.split(',')],
-                                            [int(a) for a in args.check_asns.split(',')])
+                                            [int(a) for a in args.check_asns.split(',')],
+                                            args.attribute_prefixes.split(',') if args.attribute_prefixes is not None else None)
         value = inspect_file(args.input, expected_size=args.expected_bytes,
                              expected_sha256=args.expected_sha256,
                              timeout_seconds=args.timeout_seconds, attributes=attributes)

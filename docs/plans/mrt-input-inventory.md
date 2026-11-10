@@ -39,3 +39,20 @@ first-AS/attribute-presence facts and malformed known attributes. Keep bounded
 examples and per-peer counters rather than all routes. These are encoded facts,
 not a best-path/export model or expected set. Use them to determine whether the
 selected real input can support an unambiguous declared oracle before replay.
+
+
+Select bounded exact-prefix diagnostics after a full-table one-prefix mismatch.
+Extend optional attribute inventory with up to eight canonical IPv4 prefixes
+and sixteen source peers; retain the original opaque/default behavior. Capture
+raw source attribute bytes as hex and hash, plus existing decoded facts, for
+matching peer/prefix entries only. Reject duplicate selected entries, bound raw
+hex/detailed facts to 4096 bytes per entry, and explicitly report withheld facts
+or absent entries. Reuse complete input identity/deadline checks; no new parser,
+route oracle, injection or target policy is introduced. Review and test bounds,
+malformed/large raw data, exact prefix matching and default compatibility.
+
+Review followups: retain the original counter/MP_REACH interpretation scope and
+append the selected-prefix limitation. Preserve encoded source NLRI and its
+unused-bit status separately from canonical network matching through a small
+optional observer callback on the same reader. Test nonzero unused bits without
+calling them an invalid network or changing default inventory behavior.

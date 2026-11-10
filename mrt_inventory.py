@@ -68,6 +68,9 @@ def rib_entries(payload, peers, subtype, attributes=None):
     if attributes is not None and subtype == 2:
         address = ipaddress.IPv4Address(encoded_prefix + bytes(4-len(encoded_prefix)))
         prefix = str(ipaddress.IPv4Network((address, bits), strict=False))
+        observe_nlri = getattr(attributes, 'observe_nlri', None)
+        if observe_nlri is not None:
+            observe_nlri(prefix, bits, encoded_prefix)
     count = data.number(2)
     seen = set()
     for _ in range(count):

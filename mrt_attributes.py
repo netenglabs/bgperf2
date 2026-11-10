@@ -1,6 +1,8 @@
 # Copyright (C) 2026 bgperf2 contributors. Apache-2.0.
 """Selected encoded attribute facts; deliberately no BGP policy or path selection."""
 from collections import Counter
+import hashlib
+import ipaddress
 
 
 def decode_attributes(payload, check_asns):
@@ -57,17 +59,30 @@ def decode_attributes(payload, check_asns):
 
 
 class AttributeInventory:
-    def __init__(self, peer_indexes, check_asns):
+    def __init__(self, peer_indexes, check_asns, prefixes=None):
         if (not peer_indexes or len(peer_indexes) > 4096 or len(set(peer_indexes)) != len(peer_indexes)
                 or any(type(p) is not int or not 0 <= p < 4096 for p in peer_indexes)):
             raise ValueError('Unique selected peer indexes from 0 to 4095 required')
         if (not check_asns or len(check_asns) > 64 or len(set(check_asns)) != len(check_asns)
                 or any(type(a) is not int or not 1 <= a < 2**32 for a in check_asns)):
             raise ValueError('Unique checked ASNs from 1 to 4294967295 required')
+        if prefixes is not None:
+            if (not isinstance(prefixes, list) or not 1 <= len(prefixes) <= 8
+                    or len(peer_indexes) > 16 or any(not isinstance(p, str) for p in prefixes)
+                    or len(set(prefixes)) != len(prefixes)):
+                raise ValueError('Prefix inspection requires at most eight unique IPv4 prefixes and sixteen peers')
+            for prefix in prefixes:
+                if str(ipaddress.IPv4Network(prefix, strict=True)) != prefix:
+                    raise ValueError('Canonical IPv4 prefixes required')
+        self.prefixes = list(prefixes) if prefixes is not None else None
+        self.selected_entries = set()
+        self.source_nlri = None
         self.indexes, self.asns = list(peer_indexes), set(check_asns)
         self.rows = {p: dict(peer_index=p, entries=0, malformed_entries=0, counts=Counter(),
                             checked_asn_entries=Counter(), max_as_sequence_length=None,
                             examples=[]) for p in peer_indexes}
+        if self.prefixes is not None:
+            for row in self.rows.values(): row['routes'] = []
         self.peers = None
 
     def bind(self, peers):
@@ -75,9 +90,34 @@ class AttributeInventory:
             raise ValueError('Selected attribute peer index is absent')
         self.peers = peers
 
+    def observe_nlri(self, prefix, bits, encoded):
+        self.source_nlri = None
+        if self.prefixes is not None and prefix in self.prefixes:
+            canonical = ipaddress.IPv4Network(prefix).network_address.packed[:len(encoded)]
+            self.source_nlri = dict(prefix_length=bits, encoded_prefix_hex=encoded.hex(),
+                                    unused_bits_zero=encoded == canonical)
+
     def observe(self, index, prefix, attributes):
-        if index not in self.rows: return
-        row = self.rows[index]; row['entries'] += 1
+        if index not in self.rows or (self.prefixes is not None and prefix not in self.prefixes): return
+        row = self.rows[index]
+        if self.prefixes is not None:
+            key = (index, prefix)
+            if key in self.selected_entries:
+                raise ValueError('Duplicate selected peer/prefix diagnostic entry')
+            self.selected_entries.add(key)
+            route = dict(prefix=prefix, source_nlri=self.source_nlri, attributes_bytes=len(attributes),
+                         attributes_sha256=hashlib.sha256(attributes).hexdigest(),
+                         attributes_hex=bytes(attributes).hex() if len(attributes) <= 4096 else None,
+                         facts=None, facts_unavailable_reason=None)
+            if len(attributes) <= 4096:
+                try:
+                    route['facts'] = decode_attributes(attributes, self.asns)
+                except ValueError as exc:
+                    route['facts_unavailable_reason'] = str(exc)
+            else:
+                route['facts_unavailable_reason'] = 'Raw attribute hex and detailed facts withheld above 4096 bytes; full hash retained.'
+            row.setdefault('routes', []).append(route)
+        row['entries'] += 1
         try:
             facts = decode_attributes(attributes, self.asns)
         except ValueError as exc:
@@ -101,6 +141,13 @@ class AttributeInventory:
         for asn in facts['asns_present']: row['checked_asn_entries'][str(asn)] += 1
 
     def result(self):
-        return dict(peer_indexes=self.indexes, checked_asns=sorted(self.asns),
+        value = dict(peer_indexes=self.indexes, checked_asns=sorted(self.asns),
                     peers=[self.rows[p] for p in self.indexes],
                     scope='Encoded IPv4 RIB attribute facts only; no best-path, export, unique-prefix or expected-route inference. Absent counter keys mean zero among well-formed entries. The separate maximum covers well-formed AS_PATH entries and stays null if none were classified; lack of code 3 is not a mandatory-attribute failure because MP_REACH may carry the next hop.')
+
+        if self.prefixes is not None:
+            value['prefixes'] = self.prefixes
+            value['scope'] += (' Counters/entries cover only selected canonical source prefixes; missing entries are not manufactured. '
+                              'Raw source attributes and decoded facts do not establish injected wire bytes or target export. '
+                              'At most eight prefixes times sixteen peers; raw hex/detailed facts withheld above 4096 bytes.')
+        return value

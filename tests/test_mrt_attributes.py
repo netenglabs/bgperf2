@@ -112,3 +112,69 @@ def test_cli_selection_and_attribute_implementation_binding(tmp_path, extra, cod
         value = json.loads(output.read_text())
         assert len(value['attribute_implementation_sha256']) == 64
         assert value['attribute_inventory']['peers'][0]['checked_asn_entries'] == {'1000': 1}
+
+
+
+def test_exact_prefix_diagnostic_preserves_original_bytes_and_encoded_facts():
+    encoded = attributes(segment(2, [64512, 1000])) + attribute(99, b'unknown')
+    selected = AttributeInventory([0], [1000], ['192.0.2.0/24'])
+    data = table()+rib(attributes=encoded)+rib(bits=24, prefix=b'\xc6\x12\x00', attributes=b'bad')
+    value = inspect(data, attributes=selected)['attribute_inventory']
+    assert value['prefixes'] == ['192.0.2.0/24']
+    row = value['peers'][0]; assert row['entries'] == 1 and row['malformed_entries'] == 0
+    route = row['routes'][0]
+    assert route['attributes_hex'] == encoded.hex()
+    assert route['attributes_sha256'] == hashlib.sha256(encoded).hexdigest()
+    assert route['facts']['attribute_codes'] == [1, 2, 3, 8, 99]
+    assert route['facts']['asns_present'] == [1000]
+
+
+def test_diagnostic_absent_prefix_and_large_or_malformed_attributes_remain_honest():
+    selected = AttributeInventory([0], [1000], ['198.18.0.0/24'])
+    absent = inspect(table()+rib(), attributes=selected)['attribute_inventory']['peers'][0]
+    assert absent['entries'] == 0 and absent['routes'] == []
+    for encoded, reason in ((b'bad', 'Truncated'), (attribute(99, b'x'*4097), '4096')):
+        selected = AttributeInventory([0], [1000], ['192.0.2.0/24'])
+        row = inspect(table()+rib(attributes=encoded), attributes=selected)['attribute_inventory']['peers'][0]
+        route = row['routes'][0]
+        assert route['facts'] is None and reason in route['facts_unavailable_reason']
+        assert route['attributes_sha256'] == hashlib.sha256(encoded).hexdigest()
+        assert (route['attributes_hex'] is None) is (len(encoded) > 4096)
+
+
+@pytest.mark.parametrize('prefixes', [[], ['192.0.2.1/24'], ['192.0.2.0/24']*2, ['::/0'], [True],
+    [f'192.0.{i}.0/24' for i in range(9)]])
+def test_diagnostic_selection_is_canonical_and_bounded(prefixes):
+    with pytest.raises(ValueError): AttributeInventory([0], [1000], prefixes)
+
+
+def test_diagnostic_refuses_duplicate_entries_and_peer_bound():
+    with pytest.raises(ValueError): AttributeInventory(list(range(17)), [1000], ['192.0.2.0/24'])
+    selected = AttributeInventory([0], [1000], ['192.0.2.0/24'])
+    with pytest.raises(ValueError, match='Duplicate'):
+        inspect(table()+rib()+rib(), attributes=selected)
+
+
+def test_cli_prefix_diagnostic_requires_attribute_peers_and_binds_selected_prefix(tmp_path):
+    script = Path(__file__).resolve().parents[1]/'scripts/inspect_mrt.py'
+    spec = importlib.util.spec_from_file_location('mrt_prefix_cli', script)
+    cli = importlib.util.module_from_spec(spec); spec.loader.exec_module(cli)
+    data = table()+rib(attributes=attributes(segment(2, [64512])))
+    path = tmp_path/'input'; path.write_bytes(data); output = tmp_path/'result.json'
+    args = ['--input', str(path), '--expected-bytes', str(len(data)), '--expected-sha256',
+            hashlib.sha256(data).hexdigest(), '--output', str(output), '--attribute-prefixes', '192.0.2.0/24']
+    assert cli.main(args) == 2 and not output.exists()
+    assert cli.main(args+['--attribute-peers','0','--check-asns','1000']) == 0
+    assert json.loads(output.read_text())['attribute_inventory']['prefixes'] == ['192.0.2.0/24']
+
+
+
+def test_prefix_diagnostic_retains_original_nlri_padding_separately_from_matching():
+    selected = AttributeInventory([0], [1000], ['192.0.2.0/25'])
+    value = inspect(table()+rib(bits=25, prefix=b'\xc0\x00\x02\x7f',
+        attributes=attributes(segment(2, [64512]))), attributes=selected)['attribute_inventory']
+    route = value['peers'][0]['routes'][0]
+    assert route['prefix'] == '192.0.2.0/25'
+    assert route['source_nlri'] == dict(prefix_length=25, encoded_prefix_hex='c000027f', unused_bits_zero=False)
+    assert 'Absent counter keys mean zero among well-formed entries' in value['scope']
+    assert 'Counters/entries cover only selected canonical source prefixes' in value['scope']

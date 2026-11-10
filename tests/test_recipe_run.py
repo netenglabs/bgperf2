@@ -10,6 +10,25 @@ import recipe_run
 import recipe_worker
 
 
+@pytest.mark.parametrize('matching', [True, False])
+def test_pre_replay_gate_requires_attempt_bound_release(tmp_path, monkeypatch, matching):
+    attempt = 'bgperf_recipe_' + 'a'*32
+    def release_after_request(seconds):
+        ready = tmp_path / 'pre-replay-ready.json'
+        request = json.loads(ready.read_text())
+        assert request['attempt_id'] == attempt
+        if not matching:
+            request['attempt_id'] = 'bgperf_recipe_' + 'b'*32
+        (tmp_path / 'pre-replay-release.json').write_text(json.dumps(request))
+    monkeypatch.setattr(recipe_worker.time, 'sleep', release_after_request)
+    if matching:
+        recipe_worker.wait_for_replay_release(tmp_path, attempt)
+        assert json.loads((tmp_path/'stages.json').read_text())['current_stage'] == 'replay_released'
+    else:
+        with pytest.raises(ValueError, match='does not match the attempt'):
+            recipe_worker.wait_for_replay_release(tmp_path, attempt)
+
+
 @pytest.fixture(autouse=True)
 def isolated_recipe_lock(monkeypatch, tmp_path_factory):
     """Modeled backends must not contend with other checkouts' host locks."""

@@ -602,6 +602,10 @@ def bench(runtime, args):
         None if is_remote else target, m, testers, receiver_containers,
         repeat=args.repeat)
 
+    before_replay = getattr(runtime, 'before_replay', None)
+    if before_replay is not None:
+        before_replay()
+
     bench_clock_started_s = runtime.time.monotonic()
     lifecycle = runtime.MonitorEventRecorder(
         bench_clock_started_s, producer=m.name,

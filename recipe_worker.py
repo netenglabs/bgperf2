@@ -12,9 +12,29 @@ import sys
 import types
 import threading
 import tempfile
+import time
 
 from recipe_run import OWNER_LABEL, _write
 import recipes
+
+
+def wait_for_replay_release(work, attempt):
+    """Publish readiness and await the supervisor within the worker budget."""
+    from recipe_diagnostics import stage
+    request = work / 'pre-replay-ready.json'
+    release = work / 'pre-replay-release.json'
+    if os.path.lexists(request) or os.path.lexists(release):
+        raise ValueError('Pre-replay gate requires fresh request and release paths')
+    stage(work, 'pre_replay_quiet')
+    expected = {'schema': 'bgperf2/pre-replay/v1alpha1', 'attempt_id': attempt}
+    _write(request, expected)
+    while not os.path.lexists(release):
+        time.sleep(0.1)
+    if release.is_symlink() or not release.is_file() or release.stat().st_size > 1024:
+        raise ValueError('Invalid pre-replay release file')
+    if recipes.read_document(release) != expected:
+        raise ValueError('Pre-replay release does not match the attempt')
+    stage(work, 'replay_released')
 
 
 class OwnedDocker:
@@ -130,6 +150,8 @@ def execute(document, work, attempt, engine, *, target=None):
     # Copy the runtime namespace; compatibility wrappers needing shared globals
     # are rebound below so every bench dependency receives this scoped object.
     runtime = types.SimpleNamespace(**vars(engine))
+    if options.get('pre_replay_gate', False):
+        runtime.before_replay = lambda: wait_for_replay_release(work, attempt)
     runtime.TARGET_CLASSES = {target_adapter: scoped_adapter(engine.TARGET_CLASSES[target_adapter], roles['target']['image'], attempt, role='target', work=work, capture_exit=options.get('mode') == 'basic', target_adapter=target_adapter)}
     from recipe_prefixes import capture_limits, SMALL_MAX_PREFIXES
     selected_prefix_limit = capture_limits(document)[0]

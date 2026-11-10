@@ -193,3 +193,14 @@ ordinary route is expected). Both derive expectations from RFC 7606 section
 7.14 before target output. They qualify prefix behavior, not preserved exported
 attribute values. The unchanged basic attribute inventory is not a complete
 validator for the deliberately malformed extended-community fixture.
+
+## Pre-replay supervisor gate
+
+An MRT recipe supervisor may pass `recipes.py run --pre-replay-gate`.
+After container setup and observer session establishment, the worker publishes
+`pre-replay-ready.json` in the fresh attempt work directory. The supervisor
+releases replay by atomically writing the same `bgperf2/pre-replay/v1alpha1`
+document to `pre-replay-release.json`. Its `attempt_id` binds the release to
+the worker. The existing worker timeout includes the wait. The gate precedes
+the observation clock, target sampling and generator launch. The legacy total
+wall-time column includes the wait.

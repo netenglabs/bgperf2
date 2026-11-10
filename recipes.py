@@ -483,6 +483,8 @@ def main(argv=None):
             command.add_argument('--results-dir', required=True)
             command.add_argument('--target', help='strict target override/build identity JSON')
         if name == 'run':
+            command.add_argument('--pre-replay-gate', action='store_true',
+                                 help='wait for supervisor release before MRT measurement and replay')
             command.add_argument('--timeout', type=float, default=300,
                                  help='whole-attempt runtime deadline in seconds (default: 300)')
             command.add_argument('--diagnostics', choices=('basic', 'none'), default='basic')
@@ -712,6 +714,8 @@ def main(argv=None):
                     options['diagnostics'] = args.diagnostics
                 if args.observer_prefixes:
                     options['observer_prefixes'] = True
+                if args.pre_replay_gate:
+                    options['pre_replay_gate'] = True
                 result = run_recipe(document, workdir=args.workdir,
                                     results_dir=args.results_dir, timeout=args.timeout, **options)
                 _write_document(result)

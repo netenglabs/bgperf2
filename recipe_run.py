@@ -135,9 +135,10 @@ def _quiesce(attempt_id, env):
 
 
 class SubprocessBackend:
-    def __init__(self, *, target=None, diagnostics='none', observer_prefixes=False):
+    def __init__(self, *, target=None, diagnostics='none', observer_prefixes=False, pre_replay_gate=False):
         self.target, self.diagnostics = target, diagnostics
         self.observer_prefixes = observer_prefixes
+        self.pre_replay_gate = pre_replay_gate
 
     def execute(self, document, workdir, attempt_id, timeout):
         env = preflight._environment()
@@ -148,6 +149,8 @@ class SubprocessBackend:
         options = {'mode': self.diagnostics}
         if self.observer_prefixes:
             options['observer_prefixes'] = True
+        if self.pre_replay_gate:
+            options['pre_replay_gate'] = True
         _write(workdir / 'diagnostic-options.json', options)
         from recipe_diagnostics import stage, collect_diagnostics
         stage(workdir, 'setup')
@@ -293,13 +296,16 @@ class SubprocessBackend:
 
 
 def run_recipe(document, *, workdir, results_dir, timeout=300, target=None,
-               diagnostics='basic', observer_prefixes=False, backend=None, check=None):
+               diagnostics='basic', observer_prefixes=False, pre_replay_gate=False, backend=None, check=None):
     """Run one recipe after prerequisites, preserving every existing destination.
 
     Backend/check injection is library-only for controlled tests; the public CLI
     always uses the real prerequisite checks and bounded existing-engine worker.
     """
     recipes.validate_recipe(document)
+    from recipe_mrt import selected as mrt_selected
+    if pre_replay_gate and not mrt_selected(document):
+        raise recipes.ContractError('Pre-replay gating requires an MRT recipe')
     from artifact_store import validate_destinations, StorageError
     try:
         store = validate_destinations(workdir, results_dir)
@@ -351,7 +357,7 @@ def run_recipe(document, *, workdir, results_dir, timeout=300, target=None,
         attempt = 'bgperf_recipe_' + uuid.uuid4().hex
         try:
             outcome = (backend or SubprocessBackend(target=target, diagnostics=diagnostics,
-                        observer_prefixes=observer_prefixes)).execute(document, work, attempt, timeout)
+                        observer_prefixes=observer_prefixes, pre_replay_gate=pre_replay_gate)).execute(document, work, attempt, timeout)
         except Exception as exc:
             outcome = {'status': 'harness_failed', 'reason': f'Runtime backend failed: {exc}'}
             _write(work / 'runtime.json', outcome)

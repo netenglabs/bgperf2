@@ -181,11 +181,8 @@ instrument-bound originals remain necessary. Go vet/race tests use
 `scripts/sink_go_test.sh`, which applies the same guarded dependency copy as the build;
 a direct unpatched `go test` exposes the dependency's counterexample instead.
 
-Go forbids overlays of files inside GOMODCACHE. The maintained build therefore
-copies the verified pinned module into a fresh private directory, checks the
-copied source hash again, patches that copy, and uses a private `-modfile` with
-one explicit local replacement. Original project go.mod/go.sum and cached
-module bytes stay unchanged; copied attribution/license files remain intact.
+Dependency-copy mechanics and source-integrity guarantees are documented in the
+[observer correction plan](plans/sink-unknown-evpn.md).
 
 
 Additional controlled fixtures are `unknown-extended-community` (ordinary route,

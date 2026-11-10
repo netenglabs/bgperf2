@@ -15,7 +15,7 @@ assurance and capture behavior. This deliberately differs from unpatched
 GoBGP for this standards defect; do not claim universal GoBGP parity.
 
 Verify the complete pinned dependency file hash and exact old statement, create
-an exclusive private private module copy, and never edit the module cache or downloaded
+an exclusive private module copy, and never edit the module cache or downloaded
 input. Apply the same maintained dependency-copy command in image builds and the Go
 vet/race runner. Bind it in image recipe identity and report the explicit parser
 profile in the binary banner. Retain old immutable images and use fresh originals.
@@ -39,3 +39,11 @@ module bytes stay unchanged; copied attribution/license files remain intact.
 The private modfile must retain the pinned original dependency declaration and
 must not override an existing replacement. Go vet/tests/build use `-mod=readonly`
 so native qualification does not silently revise the selected dependency graph.
+
+
+Local review found no code blockers. Documentation duplication/wording followups
+were corrected. The pinned native Go vet/race runner succeeded with all modules
+verified, the guarded source hash matching, and the original cached file hash
+unchanged afterward. This directly checks the dependency constants and value-copy
+behavior that the read-only reviewer could not access in the external cache.
+Image/banner verification and the small native MRT qualification remain separate.

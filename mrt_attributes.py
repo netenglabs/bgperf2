@@ -21,7 +21,8 @@ def decode_attributes(payload, check_asns):
         offset += size
     facts = {'attribute_codes': sorted(values), 'asns_present': [], 'first_asn': None,
              'as_set': False, 'confederation': False, 'sequence_segments': 0,
-             'as_sequence_length': 0, 'communities': []}
+             'as_sequence_length': 0, 'communities': [],
+             'segment_count': 0, 'first_sequence_length': None}
     if 1 in values and (len(values[1]) != 1 or values[1][0] > 2):
         raise ValueError('Invalid ORIGIN')
     if 3 in values and len(values[3]) != 4:
@@ -35,7 +36,10 @@ def decode_attributes(payload, check_asns):
             if kind not in (1, 2, 3, 4) or count == 0 or offset+4*count > len(path):
                 raise ValueError('Invalid four-byte AS_PATH segment')
             numbers = [int.from_bytes(path[i:i+4], 'big') for i in range(offset, offset+4*count, 4)]
-            if offset == 2 and kind == 2: facts['first_asn'] = numbers[0]
+            facts['segment_count'] += 1
+            if offset == 2 and kind == 2:
+                facts['first_asn'] = numbers[0]
+                facts['first_sequence_length'] = count
             if kind == 1: facts['as_set'] = True
             if kind in (3, 4): facts['confederation'] = True
             if kind == 2:

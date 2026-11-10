@@ -356,3 +356,5 @@ Separate historical evidence and proposals from current documented contracts.
 Engine implementation decisions stay with the engine. Deployment-specific
 host operations, campaign scheduling, research programs and private evidence
 belong to their consuming projects and do not gate public contributions.
+
+Source-only [MRT prefix profile preparation](plans/mrt-prefix-profiles.md) derives bounded exact expectations before target output; see the [MRT guide](mrt-recipes.md).

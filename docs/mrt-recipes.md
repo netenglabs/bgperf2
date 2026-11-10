@@ -115,3 +115,48 @@ binary-to-source proof. Existing images/results stay intact, and fresh native
 qualification is necessary before adopting the corrected generator. This fixes
 only the identified grouping defect; it does not qualify every BGP attribute,
 remove next-hop-self or expand the injector's supported attribute set.
+
+## Prepare exact source-prefix profiles
+
+`venv/bin/python scripts/prepare_mrt_profiles.py --input /absolute/input.mrt
+--expected-bytes N --expected-sha256 SHA --profile-spec /absolute/selection.json
+--output /absolute/fresh/inventory.json` performs offline full-file preparation.
+The output parent must already exist; `inventory.json` and its sibling
+`workloads/` must be fresh. It launches no Docker or benchmark processes.
+
+Selection schema `bgperf2/mrt-profile-selection/v1alpha1` has exactly `schema`,
+`peer_indexes` (ordered unique indexes, at most 128), `group_sizes` (one to three
+increasing lengths of nested peer subsets, ending at the peer count),
+`target_asn`, and `observer_asn`. Both role ASNs must be absent from the entire
+source peer table and every selected path. For example, a single-peer selection
+uses `peer_indexes: [6]` and `group_sizes: [1]`.
+
+The two profiles are `as-set-reject-v1` (union of paths without AS_SET) and
+`as-set-forward-v1` (union allowing AS_SET). Both are declared source-derived
+prefix sets; target output never selects their membership. They assume import
+rejection of AS_SET before selection in the rejecting profile, and downstream
+transit for ordinary paths. NOPEER is retained: its advisory scope concerns
+bilateral peer relations ([RFC 3765 section 2](https://www.rfc-editor.org/rfc/rfc3765.html#section-2)).
+Choose the target's profile before measuring and report behavioral differences.
+
+The preparer refuses per-peer duplicate IPv4 prefixes across records,
+malformed or missing ORIGIN/AS_PATH/IPv4 NEXT_HOP, unexpected first AS, AS0 or
+role-AS paths, confederations, MP_REACH, export-scope communities, and encoded
+attribute blocks over 4061 bytes (a conservative standard UPDATE bound with seven bytes reserved for prepend/length growth).
+These are explicit scope limits, not a complete RFC attribute validator or
+best-path simulator. Unsupported conditions refuse every workload; they never
+silently filter valid source routes into an easier expectation. First-segment
+length 255 and segment counts are recorded separately for known prepend-boundary
+investigations; a long total path alone does not establish that condition.
+
+Complete size/hash and path/file identity checks precede workload publication.
+One to three nested groups share a bounded five-million-prefix universe; input,
+record and parse-time bounds are inherited from the inventory reader. Specs
+contain full explicit canonical IPv4 lists and actual per-peer offered counts.
+Keep these potentially large derived artifacts outside Git, retaining their
+size/SHA-256 descriptors and source inventory with evidence. Files are exclusive,
+mode 0600, with no resume or overwrite; interrupted publication can leave partial
+artifacts and is not a successful preparation. A prepared source expectation
+still requires injector controls, exact native observations and independent
+campaign acceptance. Preparation does not qualify a daemon or prove on-wire
+attribute preservation.

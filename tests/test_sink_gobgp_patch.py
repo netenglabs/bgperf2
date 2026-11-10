@@ -68,3 +68,15 @@ def test_project_dependency_drift_refuses_instead_of_overriding_it(tmp_path, mon
     modfile.write_text(text.replace('v4.9.0','v4.9.1') if change=='version' else text+'replace x => y\n')
     assert subprocess.run(['sh','-c',shell],capture_output=True).returncode != 0
     assert not destination.exists() and source.read_bytes()==original
+
+
+
+def test_dependency_command_is_safe_as_one_docker_run_instruction():
+    command_text=patch.build_dependency_command()
+    assert '\n' not in command_text and '\r' not in command_text
+    assert "printf '\\n%s\\n'" in command_text
+
+
+@pytest.mark.parametrize('path', ['/tmp/line\nbreak','/tmp/line\rbreak','/tmp/nul\0byte'])
+def test_multiline_or_nul_paths_refused_for_dockerfile_context(path):
+    with pytest.raises(ValueError): patch.build_dependency_command(destination=path)

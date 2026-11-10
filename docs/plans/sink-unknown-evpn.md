@@ -47,3 +47,13 @@ verified, the guarded source hash matching, and the original cached file hash
 unchanged afterward. This directly checks the dependency constants and value-copy
 behavior that the read-only reviewer could not access in the external cache.
 Image/banner verification and the small native MRT qualification remain separate.
+
+
+The first candidate build refused at Dockerfile parsing before compilation:
+a literal newline in the generated shell argument exposed `replace` as a Docker
+instruction. Generate the modfile separator with printf escapes instead, require
+single-line build commands, and reject multiline/NUL paths. Modeled tests retain
+the exact resulting modfile bytes and guard the Dockerfile context. The original
+observer image remains unchanged. This renderer correction changes no Go parser
+bytes; the pinned Go vet/race result remains applicable, and a fresh image build
+must run its own Go vet/tests before qualification.

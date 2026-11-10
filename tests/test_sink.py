@@ -52,6 +52,7 @@ def test_recipe_embeds_the_archive_and_names_its_hash():
     assert "-X main.sourceHash={0} -X main.gobgpParserProfile=unknown-ec-v1'".format(h) in dockerfile
     assert 'go test -mod=readonly -modfile=/tmp/bgperf-gobgp-unknown-ec-v1/go.mod ./...' in dockerfile
     assert 'go mod verify' in dockerfile
+    assert not any(line.startswith('replace ') for line in dockerfile.splitlines())
 
 
 def test_chunked_embedding_reassembles(monkeypatch):

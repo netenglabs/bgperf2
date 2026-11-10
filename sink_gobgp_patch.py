@@ -20,7 +20,8 @@ def build_dependency_command(*, source=SOURCE, destination=DESTINATION, project=
     tests; all production paths are fixed inside the pinned toolchain image.
     """
     for path in (source, destination, project):
-        if not PurePosixPath(path).is_absolute() or '..' in PurePosixPath(path).parts:
+        if (not PurePosixPath(path).is_absolute() or '..' in PurePosixPath(path).parts
+                or any(c in path for c in ('\n','\r','\0'))):
             raise ValueError('Absolute normalized dependency paths required')
     if PurePosixPath(source).parts[-4:] != ('pkg','packet','bgp','bgp.go'):
         raise ValueError('Pinned GoBGP packet source path required')
@@ -45,6 +46,6 @@ def build_dependency_command(*, source=SOURCE, destination=DESTINATION, project=
         'test "$(grep -Fxc '+shlex.quote(OLD)+' '+shlex.quote(target)+')" = 0',
         'cp -- '+shlex.quote(project+'/go.mod')+' '+shlex.quote(destination+'/go.mod'),
         'cp -- '+shlex.quote(project+'/go.sum')+' '+shlex.quote(destination+'/go.sum'),
-        "printf '%s\\n' "+shlex.quote('\nreplace github.com/osrg/gobgp/v4 => '+json.dumps(copied_module))+' >> '+shlex.quote(destination+'/go.mod'),
+        "printf '\\n%s\\n' "+shlex.quote('replace github.com/osrg/gobgp/v4 => '+json.dumps(copied_module))+' >> '+shlex.quote(destination+'/go.mod'),
     ]
     return ' && '.join(commands)

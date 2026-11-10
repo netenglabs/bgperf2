@@ -625,11 +625,10 @@ def main(argv=None):
             from recipe_comparison_report import verify_comparison_report
             _write_document(verify_comparison_report(args.document))
         elif args.command == 'assertions-check':
-            from recipe_assertions import evaluate_assertions
+            from recipe_assertions import evaluate_assertions, load_bound_recipe
             from recipe_results import verify_result_package
             verify_result_package(args.result)
-            from recipe_investigation import _load
-            bound = _load(Path(args.result).parent, 'recipe.json')
+            bound = load_bound_recipe(Path(args.result).parent)
             result = evaluate_assertions(read_document(args.document), bound, args.result)
             _write_document(result)
             return 0 if result.get('outcome') == 'passed' else 4 if result.get('outcome') == 'failed' else 5

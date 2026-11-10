@@ -32,3 +32,14 @@ read-only adapter binding, fixed mapping, no prefix cap and exact missing/extra
 prefix detection. Review before committing and run the engine quality gate.
 Native qualification is a separate explicitly authorized experiment with fresh
 paths, frozen source/image identities, lab pressure guards and retained failures.
+
+
+Native full-table calibration exposed an assertion CLI loader mismatch: package
+verification accepts the explicit 24 MB MRT recipe, but `assertions-check` reused
+the investigation-only 8 MiB loader and refused before producing assertions.
+Add a scoped packaged-recipe loader with 128 MiB absolute read bound and strict
+MRT-only admission above the prior 8 MiB bound. Retain regular-file/no-follow,
+complete schema validation and existing package/digest verification. Leave other
+JSON artifacts and investigation contracts unchanged. Test valid large MRT,
+large non-MRT refusal, absolute byte/path bounds and CLI forwarding. Preserve
+the interrupted native original independently of this reporting fix.

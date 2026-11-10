@@ -160,3 +160,12 @@ artifacts and is not a successful preparation. A prepared source expectation
 still requires injector controls, exact native observations and independent
 campaign acceptance. Preparation does not qualify a daemon or prove on-wire
 attribute preservation.
+
+
+The standalone `assertions-check` permits packaged MRT recipes up to 128 MiB
+because their explicit expected-prefix lists can exceed ordinary JSON metadata.
+The bounded loader parses at most 128 MiB before checking schema, then refuses
+non-MRT recipes over the prior 8 MiB limit. All recipe schema, package integrity
+and canonical digest checks remain required. Other JSON evidence retains its
+existing limits; this does not broaden investigation/comparison workloads or
+change original experiment outcomes.

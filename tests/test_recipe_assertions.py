@@ -261,3 +261,48 @@ def test_single_final_engine_event_artifact_can_supply_fallback(tmp_path, recipe
     files['synthetic.events.json'] = files.pop('raw-events.json')
     files['synthetic.events.json'].update(schema='bgperf2/measurement-events/v1alpha1', status='converged')
     assert evaluate(tmp_path, recipe, files)['outcome'] == 'passed'
+
+
+
+def test_assertion_recipe_loader_accepts_large_valid_mrt_only(tmp_path, recipe):
+    from recipe_assertions import load_bound_recipe
+    from mrt_controls import control
+    from recipe_mrt import bind
+    _, spec = control('plain', '/source.mrt', target_asn=64515, observer_asn=64516, source_asn=64520)
+    # Match the existing topology without allocating millions of test prefixes.
+    spec['peers'] = [dict(index=i, asn=64520+i, prefixes=recipe['resolved']['prefixes_per_peer'])
+                     for i in range(recipe['resolved']['neighbors'])]
+    mrt = bind(recipe, spec)
+    path = tmp_path/'recipe.json'
+    path.write_text(json.dumps(mrt)+' '* (8*1024**2))
+    assert load_bound_recipe(tmp_path) == mrt
+    path.write_text(json.dumps(recipe)+' '* (8*1024**2))
+    with pytest.raises(recipes.ContractError, match='Non-MRT'): load_bound_recipe(tmp_path)
+
+
+def test_assertion_recipe_loader_keeps_path_and_absolute_byte_bounds(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    import io
+    import recipe_assertions
+    path = tmp_path/'recipe.json'; path.symlink_to(tmp_path/'outside')
+    with pytest.raises(recipes.ContractError): recipe_assertions.load_bound_recipe(tmp_path)
+    class Oversized(io.BytesIO):
+        def read(self, size):
+            assert size == 128*1024**2+1
+            return b' ' * size
+    @contextmanager
+    def source(*args): yield Oversized()
+    monkeypatch.setattr(recipe_assertions, '_regular_file', source)
+    with pytest.raises(recipes.ContractError, match='128 MiB'): recipe_assertions.load_bound_recipe(tmp_path)
+
+
+def test_assertions_cli_uses_scoped_packaged_recipe_loader(tmp_path, recipe, monkeypatch, capsys):
+    import recipe_assertions, recipe_results
+    path = tmp_path/'assertions.json'; path.write_text(json.dumps(default_assertions(recipe)))
+    called = []
+    monkeypatch.setattr(recipe_results, 'verify_result_package', lambda p: {})
+    def load(root): called.append(root); return recipe
+    monkeypatch.setattr(recipe_assertions, 'load_bound_recipe', load)
+    monkeypatch.setattr(recipe_assertions, 'evaluate_assertions', lambda *a: {'outcome': 'passed'})
+    assert recipes.main(['assertions-check', str(path), '--result', str(tmp_path/'result.json')]) == 0
+    assert called == [tmp_path]

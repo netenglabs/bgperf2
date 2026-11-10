@@ -95,6 +95,27 @@ def _load(root, relative, references, *, max_bytes=MAX_JSON_BYTES):
         return None, f'{relative}: JSON inspection failed: {exc}'
 
 
+
+def load_bound_recipe(root):
+    """Load the packaged recipe for assertions; large lists require MRT schema.
+
+    Package verification and evaluate_assertions independently bind the complete
+    canonical recipe digest. This loader keeps nonblocking/no-follow reads and
+    a finite allocation bound; other JSON evidence remains at its prior limit.
+    """
+    from recipe_mrt import selected
+    maximum = 128 * 1024**2
+    with _regular_file(root, 'recipe.json') as stream:
+        data = stream.read(maximum+1)
+    if len(data) > maximum:
+        raise recipes.ContractError('recipe.json exceeds the 128 MiB MRT inspection bound')
+    value = json.loads(data.decode('utf-8'), object_pairs_hook=recipes._pairs,
+                       parse_constant=recipes._nonfinite)
+    if len(data) > MAX_JSON_BYTES and not selected(value):
+        raise recipes.ContractError('Non-MRT recipe.json exceeds the 8 MiB inspection bound')
+    recipes.validate_recipe(value)
+    return value
+
 def _finite(value, positive=False):
     try:
         return (not isinstance(value, bool) and isinstance(value, (int, float))

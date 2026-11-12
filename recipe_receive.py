@@ -48,9 +48,13 @@ def validate_selection(recipe, enabled, diagnostics='basic'):
                                    'synthetic IPv4, at most two peers and sixteen prefixes')
 
 
-def expectation(recipe, scenario):
+def expectation(recipe, scenario, *, loading=False):
     """Bind rendered generated source before release; never derive from target RIB."""
-    validate_selection(recipe, True)
+    if loading:
+        from recipe_receive_loading import validate_selection as validate_loading
+        validate_loading(recipe, True)
+    else:
+        validate_selection(recipe, True)
     peers = []
     union = set()
     for tester in scenario['testers']:
@@ -69,13 +73,13 @@ def expectation(recipe, scenario):
             'phase': 'before_replay', 'monotonic_ns': time.monotonic_ns()}
 
 
-def parse_rib(body, expected):
+def parse_rib(body, expected, *, max_bytes=MAX_BYTES, max_prefixes=MAX_PREFIXES):
     """Refuse partial/non-BGP snapshots; preserve union and per-peer differences."""
-    if len(body) > MAX_BYTES:
+    if len(body) > max_bytes:
         raise ValueError('RIB body exceeds retained byte bound')
     value = json.loads(body.decode('utf-8'), object_pairs_hook=recipes._pairs,
                        parse_constant=recipes._nonfinite)
-    if not isinstance(value, dict) or len(value) > MAX_PREFIXES:
+    if not isinstance(value, dict) or len(value) > max_prefixes:
         raise ValueError('Unsupported RIB object or prefix count')
     by_peer = {p['address']: set() for p in expected['peers']}
     for prefix, paths in value.items():

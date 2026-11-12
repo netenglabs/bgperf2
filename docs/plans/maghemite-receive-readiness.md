@@ -121,3 +121,61 @@ receipt has no successful receive-loading or convergence timing. Small native
 qualification, response size and observed collection cost must still be recorded
 before any MRT receive-side selection. No general receive worker or scalable
 polling implementation is claimed.
+
+
+## Separate receive-loading implementation
+
+`recipes.py run --maghemite-loading` now selects a distinct receive-loading
+receipt, rather than the preceding post-worker qualification. It reuses owned
+container setup, generator offering recorders, live health/memory diagnostics,
+role CPU sampling, parent worker deadline and cleanup. It refuses MRT, filters,
+more than two peers or more than 4,096 total synthetic IPv4 prefixes, non-basic
+diagnostics, and simultaneous observer-prefix/qualification/quiet-release options.
+The existing transit path is unchanged when the flag is absent.
+
+The lifecycle records monotonic and UTC release immediately before the first
+sequential generator launch. The rendered peer/prefix expectation is written
+before that release and bound to the recipe. Complete generator session/offering
+counters and zero reported errors/timeouts are required. A retired or missing
+generator recorder cannot attest completion. The generator timestamp remains a
+poll observation with its achieved resolution, not wire completion.
+
+After generator completion, collect configured-ASN neighbours and at most eight
+imported RIB reads. Each request uses the frozen versioned loopback API with a
+two-second HTTP timeout and the unchanged 8 MiB HTTP safety ceiling. This new
+mode explicitly selects a 2 MiB retained response ceiling (including framing),
+independent of the small qualification's unchanged 64 KiB ceiling. Every request
+rechecks owned immutable container identity; raw bytes, hash, exact request,
+HTTP status, wall/monotonic intervals and whole-target cgroup brackets survive.
+Oversized, malformed, unavailable and failed requests are terminal unmeasured
+observations. No failed request is replaced. Successful inexact snapshots remain
+recorded and the finite observation sequence may continue.
+
+Two consecutive exact imported prefix-and-peer identities separated by at least
+one second qualify observed readiness at those reads. A changed or inexact read
+resets confirmation. The release-to-generator-completion, release-to-first-exact
+read in the qualifying pair, and release-to-confirmation intervals are recorded
+only when qualification passes. These include launch, polling and API
+serialization costs. They are not precise arrival timestamps, continuous
+identity, first-prefix visibility or transit convergence. Selected-table identity
+is not polled by this loading mode. Eight inexact reads fail loading; exhaustion
+of the 120-second release-based loading bound is unmeasured. The parent-selected
+worker deadline can stop setup/loading sooner and remains authoritative.
+
+`work/maghemite-loading.json` owns the separate completion/timing receipt;
+`receive-generator-events.json`, `receive-generator-health.json` and
+`receive-role-cpu.json` retain supporting observations. The role CPU clock still
+starts at the existing bench boundary, preceding launch; each interval retains
+its actual timestamps and unavailable members. Live diagnostic samples retain
+sampled per-role container memory; request brackets retain target current/peak
+memory. Instrument costs remain uncalibrated. Samplers stop on every loading
+exit and final collection/cleanup stays bounded by the parent.
+
+The generic recipe result is deliberately `inconclusive` with no transit row,
+so transit completion and count/identity assertions cannot pass on receive
+readiness. A passing loading receipt must be assessed separately alongside the
+execution budget, final health, pressure, integrity and cleanup receipts. A
+parent timeout, interruption, health failure or cleanup error can invalidate an
+otherwise retained loading observation. There is no automatic receive comparison
+or successful transit statistic. Native completion/timing qualification and
+capacity calibration remain unrun; no full-table API feasibility is inferred.

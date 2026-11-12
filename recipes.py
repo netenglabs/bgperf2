@@ -490,6 +490,8 @@ def main(argv=None):
             command.add_argument('--timeout', type=float, default=300,
                                  help='whole-attempt runtime deadline in seconds (default: 300)')
             command.add_argument('--diagnostics', choices=('basic', 'none'), default='basic')
+            command.add_argument('--maghemite-loading', action='store_true',
+                                 help='separate bounded synthetic receive-loading receipt; no transit row')
             command.add_argument('--maghemite-receive', action='store_true',
                                  help='qualify bounded small Maghemite API snapshots after worker; no receive timing')
             command.add_argument('--observer-prefixes', action='store_true',
@@ -716,6 +718,8 @@ def main(argv=None):
                     options['target'] = read_document(args.target)
                 if args.diagnostics != 'basic':
                     options['diagnostics'] = args.diagnostics
+                if args.maghemite_loading:
+                    options['maghemite_loading'] = True
                 if args.maghemite_receive:
                     options['maghemite_receive'] = True
                 if args.observer_prefixes:

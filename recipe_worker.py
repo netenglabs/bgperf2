@@ -172,14 +172,19 @@ def execute(document, work, attempt, engine, *, target=None):
         runtime.gen_conf = lambda args: generated_scenario(engine, args, document)
         runtime.render_scenario = yaml.safe_load
         runtime.Template = lambda text: types.SimpleNamespace(render=lambda: text)
-    if options.get('maghemite_receive', False):
+    if options.get('maghemite_receive', False) or options.get('maghemite_loading', False):
         from recipe_receive import expectation
         def receive_expectation():
             # Only engine-generated synthetic source is rendered here; recipe
             # selection refuses downloaded scenario files and MRT workloads.
             scenario = engine.render_scenario((work / attempt / 'scenario.yaml').read_text())
-            _write(work / 'receive-expectation.json', expectation(document, scenario))
+            _write(work / 'receive-expectation.json', expectation(document, scenario, loading=options.get('maghemite_loading', False)))
         runtime.before_replay = receive_expectation
+        if options.get("maghemite_loading", False):
+            from recipe_receive_loading import execute_loading
+            runtime.receive_loading_release = lambda release: _write(work / 'receive-release.json', release)
+            runtime.receive_loading = lambda **kw: execute_loading(
+                work, attempt, document, runtime, **kw)
     runtime.target_image = lambda *args: roles['target']['image']
     runtime.remove_target_containers = lambda: None
     runtime.remove_old_containers = lambda: None
@@ -257,7 +262,9 @@ def execute(document, work, attempt, engine, *, target=None):
     stage(work, 'collection', reason='Existing lifecycle returned; preserve the stats row before final diagnostics.')
     # Successful process exit alone is never an experiment completion witness.
     if not row:
-        return {'status': 'inconclusive', 'reason': 'Engine returned no stats row.'}
+        return {'status': 'inconclusive', 'reason': (
+            'Separate receive-loading receipt; transit completion and timing are unmeasured.'
+            if options.get('maghemite_loading', False) else 'Engine returned no stats row.')}
     header = [x.strip() for x in engine.stats_header().split(',')]
     if len(row) != len(header):
         raise RuntimeError('Engine stats row does not match its declared header')

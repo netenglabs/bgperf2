@@ -711,6 +711,11 @@ def bench(runtime, args):
     # want to launch all the neighbors at the same(ish) time
     # launch them after the test starts because as soon as they start they can send info at least for mrt
     #  does it need to be in a different place for mrt than exabgp?
+    receive_loading = getattr(runtime, 'receive_loading', None)
+    if receive_loading is not None:
+        replay_release = {'monotonic_s': runtime.time.monotonic(),
+                          'utc': runtime.datetime.datetime.now(runtime.datetime.timezone.utc).isoformat()}
+        runtime.receive_loading_release(replay_release)
     for i in range(len(testers)):
         testers[i].launch()
         if i > 0:
@@ -735,6 +740,29 @@ def bench(runtime, args):
             bench_clock_started_s, producer=t.name,
             sample_interval_s=runtime.TESTER_POLL_INTERVAL_S)
         t.offering_stats(q, runtime.controller_stop, runtime.TESTER_POLL_INTERVAL_S)
+
+    if receive_loading is not None:
+        # A separate bounded receipt owns this selection. Never enter the
+        # observer convergence tracker or manufacture a transit stats row.
+        try:
+            receive_loading(target=target, testers=testers, queue=q,
+                            recorders=tester_lifecycles, errors=tester_observation_errors,
+                            release=replay_release)
+        finally:
+            m.stop_monitoring = True
+            target.stop_monitoring = True
+            for tester in testers:
+                tester.stop_monitoring = True
+            runtime.controller_stop.set()
+            role_cpu_thread.join(timeout=runtime.ROLE_CPU_TEARDOWN_WAIT_S)
+            if role_cpu_thread.is_alive():
+                role_cpu.poll_incomplete = 'Receive teardown ended before final cgroup pass returned.'
+            from recipe_diagnostics import write_json
+            from pathlib import Path
+            section = role_cpu.section()
+            section['origin_monotonic_s'] = bench_clock_started_s
+            write_json(Path(args.dir) / 'receive-role-cpu.json', section)
+        return None
 
     f = open(args.output, 'w') if args.output else None
     cpu = 0

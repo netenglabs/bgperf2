@@ -477,3 +477,17 @@ transit outcomes/assertions unchanged. See the engine-owned
 [readiness contract](plans/maghemite-receive-readiness.md#small-post-worker-qualification-implementation)
 for limits, evidence and timing exclusions. This opt-in does not enable MRT
 receive testing or replace a failed transit result with a receive timing.
+
+
+## Separate Maghemite receive loading
+
+`run --maghemite-loading` selects a separate synthetic receive contract (one or
+two peers, at most 4,096 total prefixes, no filter, basic diagnostics). It retains
+source-bound generator completion and bounded exact imported-RIB observations.
+The independent `work/maghemite-loading.json` receipt reports observed API table
+readiness only after two consecutive exact reads. The generic result remains
+inconclusive, with no transit row or successful transit assertions. This option
+is incompatible with `--maghemite-receive`, `--observer-prefixes` and
+`--pre-replay-gate`. See the [completion and timing contract](plans/maghemite-receive-readiness.md#separate-receive-loading-implementation)
+for the fixed loading, response and polling bounds, resource observations and
+native qualification gates. It does not enable MRT receive execution.

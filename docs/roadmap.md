@@ -368,5 +368,5 @@ The [explicit zero-route startup allowance](plans/bounded-zero-route-startup.md)
 is implemented for bounded recipe runs, preserving the ordinary 15-second default.
 The [Maghemite receive/table-loading readiness contract](plans/maghemite-receive-readiness.md)
 is a source/API-bound proposed design. It specifies receipts, observation limits
-and prerequisites; receive-side implementation and native cases remain separately
+and prerequisites, plus the explicit bounded synthetic receive-loading receipt; native cases remain separately
 selected work, with no new execution authorization from this roadmap entry.

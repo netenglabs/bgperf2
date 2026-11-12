@@ -490,3 +490,11 @@ def test_backend_collection_exception_retains_partial_package(tmp_path):
                                    check=lambda *a, **k: {'status': 'checks_passed'}, backend=Backend())
     assert result['status'] == 'harness_failed'
     assert (tmp_path / 'results/work/partial.log').read_text() == 'partial evidence'
+
+
+@pytest.mark.parametrize('seconds', [True, 14, 121, 120.0, None])
+def test_startup_allowance_refuses_before_destinations(tmp_path, seconds):
+    with pytest.raises(recipes.ContractError, match='startup allowance'):
+        recipe_run.run_recipe(recipe(), workdir=tmp_path/'work', results_dir=tmp_path/'results',
+                              zero_route_startup_seconds=seconds)
+    assert not list(tmp_path.iterdir())

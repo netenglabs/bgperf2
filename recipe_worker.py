@@ -147,6 +147,8 @@ def execute(document, work, attempt, engine, *, target=None):
     if mrt_selected(document):
         argv += ['-g', 'bgpdump2', '--mrt-file', document['mrt']['input']['path']]
     args = parser.parse_args(argv)
+    args.zero_route_startup_seconds = options.get(
+        'zero_route_startup_seconds', 15)
     # Copy the runtime namespace; compatibility wrappers needing shared globals
     # are rebound below so every bench dependency receives this scoped object.
     runtime = types.SimpleNamespace(**vars(engine))

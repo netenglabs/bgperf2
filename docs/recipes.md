@@ -459,3 +459,11 @@ does not automatically erase a supported reproduction outcome.
 
 The recipe controller maps its bounded worker outcome to these statuses. Legacy
 `bench` and `batch` exit semantics remain unchanged.
+
+
+Explicit `run --zero-route-startup-seconds N` selects an integer allowance from
+15 through 120 seconds for an observer still receiving zero routes. The default
+remains 15. The selection is retained in packaged `work/diagnostic-options.json`;
+it changes no checkpoint, positive-delivery, exact-set or health requirement.
+The clock begins at the existing observation/replay boundary, after any quiet
+gate. The controller deadline still bounds setup, replay and collection.

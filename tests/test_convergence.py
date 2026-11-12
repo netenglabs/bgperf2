@@ -854,3 +854,27 @@ def test_a_run_that_never_peered_does_not_blame_the_generators():
                       checked=False, offering_complete=False)
     assert status == ConvergenceTracker.FAILED
     assert 'offering' not in t.fail_msg
+
+
+@pytest.mark.parametrize('seconds', [True, 0, 14, 121, 120.0, float('inf'), None])
+def test_zero_route_startup_allowance_is_bounded(seconds):
+    with pytest.raises(ValueError, match='startup allowance'):
+        ConvergenceTracker(zero_route_startup_seconds=seconds)
+
+
+def test_explicit_startup_allowance_never_converges_zero_and_expires():
+    tracker = ConvergenceTracker(zero_route_startup_seconds=120)
+    tracker.note_neighbors_checkpoint()
+    for second in range(1, 121):
+        assert tracker.update(second, 0, 1, 1, False) == tracker.CONTINUE
+    assert tracker.update(121, 0, 1, 1, False) == tracker.FAILED
+
+
+def test_explicit_startup_allowance_accepts_late_positive_delivery():
+    tracker = ConvergenceTracker(zero_route_startup_seconds=120)
+    assert tracker.update(100, 0, 0, 0, False) == tracker.CONTINUE
+    tracker.note_neighbors_checkpoint()
+    assert tracker.update(110, 1000, 1, 1, True) == tracker.CONTINUE
+    for second in range(111, 116):
+        status = tracker.update(second, 1000, 1, 1, True)
+    assert status == tracker.CONVERGED

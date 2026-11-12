@@ -135,10 +135,11 @@ def _quiesce(attempt_id, env):
 
 
 class SubprocessBackend:
-    def __init__(self, *, target=None, diagnostics='none', observer_prefixes=False, pre_replay_gate=False):
+    def __init__(self, *, target=None, diagnostics='none', observer_prefixes=False, pre_replay_gate=False, zero_route_startup_seconds=15):
         self.target, self.diagnostics = target, diagnostics
         self.observer_prefixes = observer_prefixes
         self.pre_replay_gate = pre_replay_gate
+        self.zero_route_startup_seconds = zero_route_startup_seconds
 
     def execute(self, document, workdir, attempt_id, timeout):
         env = preflight._environment()
@@ -147,6 +148,8 @@ class SubprocessBackend:
         if self.target is not None:
             _write(workdir / 'target.json', self.target)
         options = {'mode': self.diagnostics}
+        if self.zero_route_startup_seconds != 15:
+            options['zero_route_startup_seconds'] = self.zero_route_startup_seconds
         if self.observer_prefixes:
             options['observer_prefixes'] = True
         if self.pre_replay_gate:
@@ -296,13 +299,16 @@ class SubprocessBackend:
 
 
 def run_recipe(document, *, workdir, results_dir, timeout=300, target=None,
-               diagnostics='basic', observer_prefixes=False, pre_replay_gate=False, backend=None, check=None):
+               diagnostics='basic', observer_prefixes=False, pre_replay_gate=False, zero_route_startup_seconds=15, backend=None, check=None):
     """Run one recipe after prerequisites, preserving every existing destination.
 
     Backend/check injection is library-only for controlled tests; the public CLI
     always uses the real prerequisite checks and bounded existing-engine worker.
     """
     recipes.validate_recipe(document)
+    if (type(zero_route_startup_seconds) is not int
+            or not 15 <= zero_route_startup_seconds <= 120):
+        raise recipes.ContractError('Zero-route startup allowance must be an integer from 15 to 120 seconds')
     from recipe_mrt import selected as mrt_selected
     if pre_replay_gate and not mrt_selected(document):
         raise recipes.ContractError('Pre-replay gating requires an MRT recipe')
@@ -357,7 +363,8 @@ def run_recipe(document, *, workdir, results_dir, timeout=300, target=None,
         attempt = 'bgperf_recipe_' + uuid.uuid4().hex
         try:
             outcome = (backend or SubprocessBackend(target=target, diagnostics=diagnostics,
-                        observer_prefixes=observer_prefixes, pre_replay_gate=pre_replay_gate)).execute(document, work, attempt, timeout)
+                        observer_prefixes=observer_prefixes, pre_replay_gate=pre_replay_gate,
+                        zero_route_startup_seconds=zero_route_startup_seconds)).execute(document, work, attempt, timeout)
         except Exception as exc:
             outcome = {'status': 'harness_failed', 'reason': f'Runtime backend failed: {exc}'}
             _write(work / 'runtime.json', outcome)

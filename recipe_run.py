@@ -135,11 +135,12 @@ def _quiesce(attempt_id, env):
 
 
 class SubprocessBackend:
-    def __init__(self, *, target=None, diagnostics='none', observer_prefixes=False, pre_replay_gate=False, zero_route_startup_seconds=15):
+    def __init__(self, *, target=None, diagnostics='none', observer_prefixes=False, pre_replay_gate=False, zero_route_startup_seconds=15, maghemite_receive=False):
         self.target, self.diagnostics = target, diagnostics
         self.observer_prefixes = observer_prefixes
         self.pre_replay_gate = pre_replay_gate
         self.zero_route_startup_seconds = zero_route_startup_seconds
+        self.maghemite_receive = maghemite_receive
 
     def execute(self, document, workdir, attempt_id, timeout):
         env = preflight._environment()
@@ -148,6 +149,8 @@ class SubprocessBackend:
         if self.target is not None:
             _write(workdir / 'target.json', self.target)
         options = {'mode': self.diagnostics}
+        if self.maghemite_receive:
+            options['maghemite_receive'] = True
         if self.zero_route_startup_seconds != 15:
             options['zero_route_startup_seconds'] = self.zero_route_startup_seconds
         if self.observer_prefixes:
@@ -253,7 +256,7 @@ class SubprocessBackend:
                     adapter_options = ({'target_adapter': document['roles']['target']['adapter']}
                                        if document['roles']['target']['adapter'] != 'bird' else {})
                     diagnostic = collect_diagnostics(workdir, attempt_id, env, mode=self.diagnostics,
-                                                     **adapter_options)
+                                                     **adapter_options, **({'maghemite_receive': True} if self.maghemite_receive else {}))
                 except Exception as exc:
                     from recipe_diagnostics import SCHEMA, memory_record
                     diagnostic = {'schema': SCHEMA, 'mode': self.diagnostics,
@@ -299,13 +302,15 @@ class SubprocessBackend:
 
 
 def run_recipe(document, *, workdir, results_dir, timeout=300, target=None,
-               diagnostics='basic', observer_prefixes=False, pre_replay_gate=False, zero_route_startup_seconds=15, backend=None, check=None):
+               diagnostics='basic', observer_prefixes=False, pre_replay_gate=False, zero_route_startup_seconds=15, maghemite_receive=False, backend=None, check=None):
     """Run one recipe after prerequisites, preserving every existing destination.
 
     Backend/check injection is library-only for controlled tests; the public CLI
     always uses the real prerequisite checks and bounded existing-engine worker.
     """
     recipes.validate_recipe(document)
+    from recipe_receive import validate_selection as validate_receive
+    validate_receive(document, maghemite_receive, diagnostics)
     if (type(zero_route_startup_seconds) is not int
             or not 15 <= zero_route_startup_seconds <= 120):
         raise recipes.ContractError('Zero-route startup allowance must be an integer from 15 to 120 seconds')
@@ -354,7 +359,7 @@ def run_recipe(document, *, workdir, results_dir, timeout=300, target=None,
         _write(work / 'target-selection.json', {
             'schema': 'bgperf2/target-selection/v1alpha1',
             'recipe_sha256': recipes.recipe_sha256(document), 'roles': roles,
-            'diagnostics': diagnostics, 'instrumentation': target['provenance']['instrumentation']})
+            'diagnostics': diagnostics, **({'maghemite_receive': True} if maghemite_receive else {}), 'instrumentation': target['provenance']['instrumentation']})
         if observer_prefixes:
             from recipe_prefixes import capture_limits
             _write(work / 'observer-prefix-selection.json', {
@@ -364,7 +369,8 @@ def run_recipe(document, *, workdir, results_dir, timeout=300, target=None,
         try:
             outcome = (backend or SubprocessBackend(target=target, diagnostics=diagnostics,
                         observer_prefixes=observer_prefixes, pre_replay_gate=pre_replay_gate,
-                        zero_route_startup_seconds=zero_route_startup_seconds)).execute(document, work, attempt, timeout)
+                        zero_route_startup_seconds=zero_route_startup_seconds,
+                        maghemite_receive=maghemite_receive)).execute(document, work, attempt, timeout)
         except Exception as exc:
             outcome = {'status': 'harness_failed', 'reason': f'Runtime backend failed: {exc}'}
             _write(work / 'runtime.json', outcome)

@@ -172,6 +172,14 @@ def execute(document, work, attempt, engine, *, target=None):
         runtime.gen_conf = lambda args: generated_scenario(engine, args, document)
         runtime.render_scenario = yaml.safe_load
         runtime.Template = lambda text: types.SimpleNamespace(render=lambda: text)
+    if options.get('maghemite_receive', False):
+        from recipe_receive import expectation
+        def receive_expectation():
+            # Only engine-generated synthetic source is rendered here; recipe
+            # selection refuses downloaded scenario files and MRT workloads.
+            scenario = engine.render_scenario((work / attempt / 'scenario.yaml').read_text())
+            _write(work / 'receive-expectation.json', expectation(document, scenario))
+        runtime.before_replay = receive_expectation
     runtime.target_image = lambda *args: roles['target']['image']
     runtime.remove_target_containers = lambda: None
     runtime.remove_old_containers = lambda: None

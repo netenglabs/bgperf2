@@ -467,3 +467,13 @@ remains 15. The selection is retained in packaged `work/diagnostic-options.json`
 it changes no checkpoint, positive-delivery, exact-set or health requirement.
 The clock begins at the existing observation/replay boundary, after any quiet
 gate. The controller deadline still bounds setup, replay and collection.
+
+## Small Maghemite receive API qualification
+
+For a separately selected synthetic Maghemite case of at most two peers and
+sixteen prefixes, `run --maghemite-receive` adds bounded post-worker imported
+and selected RIB identity receipts. It requires basic diagnostics and keeps
+transit outcomes/assertions unchanged. See the engine-owned
+[readiness contract](plans/maghemite-receive-readiness.md#small-post-worker-qualification-implementation)
+for limits, evidence and timing exclusions. This opt-in does not enable MRT
+receive testing or replace a failed transit result with a receive timing.

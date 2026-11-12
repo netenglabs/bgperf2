@@ -1,6 +1,8 @@
 # Copyright (C) 2026 bgperf2 contributors. Apache-2.0.
 """Bounded, owned-attempt diagnostics; no Docker client is initialized on import."""
 import json
+import hashlib
+import datetime
 import os
 import re
 from pathlib import Path
@@ -49,7 +51,7 @@ MAGHEMITE_NATIVE_COMMANDS = tuple(
 
 
 def collect_native(work, attempt, item, probe, errors, *, commands, command_prefix=(),
-                   scope='fixed engine-owned queries'):
+                   scope='fixed engine-owned queries', http_receipts=False):
     """Post-worker snapshots only; no convergence, acceptance or memory verdict."""
     item['native'] = {'scope': 'post-worker, after baseline memory/log collection; '
                       + scope + '; not exhaustive or convergence-time',
@@ -83,11 +85,23 @@ def collect_native(work, attempt, item, probe, errors, *, commands, command_pref
             errors.append(f'{item["id"]}: native {name}: {exc}')
             break
         try:
+            if http_receipts:
+                from recipe_receive import cgroup_sample
+                record['target_cgroup_before'] = cgroup_sample(state.get('Pid'))
+                record.update(request_started_ns=time.monotonic_ns(),
+                              request_started_utc=datetime.datetime.now(datetime.timezone.utc).isoformat())
             result = probe(['exec', item['id'], *command_prefix, *argv], raw=True)
+            if http_receipts:
+                record.update(request_completed_ns=time.monotonic_ns(),
+                              request_completed_utc=datetime.datetime.now(datetime.timezone.utc).isoformat())
+                record['target_cgroup_after'] = cgroup_sample(state.get('Pid'))
             relative = f'diagnostic-native/{item["id"]}-{name}.txt'
             path = work / relative
             path.parent.mkdir(exist_ok=True)
-            path.write_text(result['text'])
+            data = result.get('data', result['text'].encode('utf-8'))
+            path.write_bytes(data)
+            if http_receipts:
+                record['sha256'] = hashlib.sha256(data).hexdigest()
             exit_code = result.get('exit_code', 0)
             record.update(status='failed' if exit_code else ('truncated' if result['truncated'] else 'captured'),
                           path=relative, truncated=result['truncated'],
@@ -96,6 +110,9 @@ def collect_native(work, attempt, item, probe, errors, *, commands, command_pref
                 errors.append(f'{item["id"]}: native {name}: '
                               f'exit={exit_code}, truncated={result["truncated"]}')
         except (OSError, ValueError, TypeError, AttributeError, KeyError, preflight.ProbeError) as exc:
+            if http_receipts:
+                record.update(request_completed_ns=time.monotonic_ns(),
+                              request_completed_utc=datetime.datetime.now(datetime.timezone.utc).isoformat())
             record['error'] = str(exc)
             errors.append(f'{item["id"]}: native {name}: {exc}')
             # Independent queries may still answer. Each repeats ownership and
@@ -222,7 +239,7 @@ def bounded_probe(argv, *, env, timeout=3, max_bytes=MAX_BYTES, allow_nonzero=Fa
         if process.returncode and not truncated and not allow_nonzero:
             raise preflight.ProbeError(f'Diagnostic command exited {process.returncode}: '
                                        + output.decode('utf-8', errors='replace')[-1000:])
-        return {'text': output.decode('utf-8', errors='replace'),
+        return {'text': output.decode('utf-8', errors='replace'), 'data': bytes(output),
                 'truncated': truncated, 'captured_bytes': len(output), 'exit_code': process.returncode}
     finally:
         try:
@@ -353,7 +370,7 @@ def live_sample(client, owned, previous, *, expected, exit_reader=None, target_a
 
 
 def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memory_reader=None,
-                        target_adapter='bird'):
+                        target_adapter='bird', maghemite_receive=False):
     """Collect before owned cleanup. Exclude environment, mounts, journals and cores."""
     work = Path(work)
     command = command or bounded_probe
@@ -464,8 +481,12 @@ def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memor
     elif target_adapter == 'maghemite':
         for item in report['containers']:
             if item['name'].endswith('_bgperf_maghemite_target'):
-                collect_native(work, attempt, item, probe, report['errors'],
-                    commands=MAGHEMITE_NATIVE_COMMANDS, scope='fixed default-ASN 1000 API samples')
+                if maghemite_receive:
+                    from recipe_receive import collect
+                    report['maghemite_receive'] = collect(work, attempt, item, probe, report['errors'], deadline)
+                else:
+                    collect_native(work, attempt, item, probe, report['errors'],
+                        commands=MAGHEMITE_NATIVE_COMMANDS, scope='fixed default-ASN 1000 API samples')
     live_path = work / 'live-diagnostics.json'
     if live_path.is_file():
         try:

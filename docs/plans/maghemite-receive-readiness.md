@@ -94,3 +94,30 @@ modeled refusal tests, required code review, small native qualification, API
 size/atomicity/overhead assessment and a separately approved finite experiment
 selection remain. This scheduled follow-up authorizes this preparation only;
 no receive-side original is charged to or launched within the transit ceiling.
+
+## Small post-worker qualification implementation
+
+Explicit `recipes.py run --maghemite-receive` now selects a separate bounded
+post-worker API qualification receipt for synthetic Maghemite cases with at most
+two peers and sixteen prefixes. It requires basic diagnostics. Before replay,
+the worker records the rendered source peer/prefix expectation. The parent
+requires complete generator offerings and zero errors/timeouts, rechecks owned
+immutable container identity before every query, and retains neighbour evidence
+for the configured ASN plus two imported/selected snapshot pairs one second
+apart. Requests share the existing twenty-second diagnostics budget and retain
+at most 64 KiB including HTTP status framing; the HTTP client's 8 MiB safety
+limit remains unchanged.
+
+`work/maghemite-receive.json` contains the independent qualification status,
+strict prefix/peer identity differences, timestamps, body hashes and bounded raw
+response references. Whole-container cgroup CPU readings and current/peak memory
+bracket each successful request; missing samples remain unavailable. They include
+the HTTP client and daemon activity during those intervals, not isolated API
+CPU overhead. The response pair is sequential, not an atomic cross-table read.
+
+This flag changes no transit row or assertion. A failed transit result can carry
+a passing API qualification receipt, and remains a failed transit result. The
+receipt has no successful receive-loading or convergence timing. Small native
+qualification, response size and observed collection cost must still be recorded
+before any MRT receive-side selection. No general receive worker or scalable
+polling implementation is claimed.

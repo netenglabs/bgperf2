@@ -59,7 +59,7 @@ def normalize_image_name(name):
 
 
 def _find_image(name, images=None):
-    '''The local image dict carrying exactly this repository:tag, or None.
+    '''The local image dict with this exact full ID or repository:tag, or None.
 
     The one scan img_exists() and img_recipe_label() both need -- kept in one
     place so a future fix to the matching itself (this already replaced one
@@ -74,13 +74,16 @@ def _find_image(name, images=None):
     '''
     name = normalize_image_name(name)
     for img in (dckr.images() if images is None else images):
-        if name in (img.get('RepoTags') or []):
+        immutable = re.fullmatch(r'sha256:[0-9a-f]{64}', name)
+        if immutable and img.get('Id') == name:
+            return img
+        if not immutable and name in (img.get('RepoTags') or []):
             return img
     return None
 
 
 def img_exists(name, images=None):
-    '''True if a local image carries exactly this repository:tag.
+    '''True if a local image has this exact full ID or repository:tag.
 
     This used to compare only the repository half of RepoTags[0], so
     'bgperf/frr_c:10.1' looked present the moment any bgperf/frr_c image

@@ -113,3 +113,15 @@ def test_owned_cleanup_preserves_foreign_containers(tmp_path):
     runtime=SimpleNamespace(dckr=client,atomic_write_json=engine.atomic_write_json)
     native.cleanup(runtime,'attempt',tmp_path)
     assert removed==['own']
+
+
+
+def test_native_batch_preflight_accepts_present_immutable_ids_without_tags(monkeypatch):
+    import base
+    image='sha256:'+'a'*64
+    listing=[dict(Id=image,RepoTags=None)]
+    assert base.img_exists(image,listing)
+    assert not base.img_exists('sha256:'+'b'*64,listing)
+    assert not base.img_exists('sha256:'+'a'*12,listing)
+    monkeypatch.setattr(base.dckr,'images',lambda:listing)
+    engine.check_batch_images([dict(name='bird',image=image)])

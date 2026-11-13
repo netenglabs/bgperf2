@@ -31,7 +31,14 @@ exact-set refusals, unique work, cancellation, cleanup, batch identity and legac
 behavior with modeled tests. Native campaign qualification is a separate step;
 no existing historical evidence is reclassified by this implementation.
 
-Status: native binding, owned cleanup, exact final evidence, batch identity and
-optional operational handshake implemented and reviewed. Focused modeled CLI /
-legacy batch checks pass; full native quality gate and live campaign qualification
-remain required before performance conclusions. No existing originals changed.
+Status: implemented and committed in `8b81540`; exact full image-ID preflight
+corrected in `0e7ea9d`. The full native quality gate passed 3,723 checks with one
+skip. A live fixed-input 24-peer batch exercised serial admission/replay,
+successful exact-prefix capture, owned cleanup and stop-on-failure: twelve of
+thirteen originals qualified, with one failed final prefix identity causing the
+batch to stop before its successor. Swap/idle restoration and independent
+evidence/work readback passed. This qualifies the interface and fail-closed
+lifecycle, not every daemon/workload combination or a complete performance
+comparison. Experimental metrics and source/evidence bindings remain owned by
+the downstream research campaign. No existing original was reclassified and no
+failure diagnosis or retry is selected by this plan.

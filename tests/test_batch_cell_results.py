@@ -312,3 +312,17 @@ class TestReviewFixes:
     def test_no_report_without_cells_is_refused(self, tmp_path):
         with pytest.raises(SystemExit, match='--no-report'):
             bgperf2.batch(batch_args(write_config(tmp_path), tmp_path, no_report=True))
+
+
+def test_stop_on_failure_records_failed_original_and_does_not_launch_successor(
+        tmp_path,monkeypatch,fake_img_exists,no_graphs):
+    fake_img_exists(lambda name:True)
+    ran=[]
+    def failed(args):
+        ran.append(args.target)
+        row=a_row(args);row[22]='FAILED';return row
+    monkeypatch.setattr(bgperf2,'bench',failed)
+    with pytest.raises(bgperf2.StopRequested,match='stop-on-failure'):
+        bgperf2.batch(batch_args(write_config(tmp_path),tmp_path,stop_on_failure=True))
+    assert len(ran)==1
+    assert len(bgperf2.load_batch_cell_results(str(tmp_path),'cells'))==1

@@ -2484,6 +2484,11 @@ def scenario_mrt_tester_class(tester):
 
 def bench(args):
     """Compatibility entry point for the extracted run lifecycle."""
+    if getattr(args, 'mrt_spec', None):
+        import native_mrt
+        return native_mrt.bench(sys.modules[__name__], args)
+    if any(getattr(args, key, None) for key in ('mrt_spec_sha256','generator_image','observer_image','control_dir')):
+        raise ValueError('Native MRT image/hash/control options require --mrt-spec')
     return run_lifecycle.bench(
         sys.modules[__name__], args)
 
@@ -4222,6 +4227,15 @@ def check_batch_test(test):
     # run reports CONVERGED at a tenth of the table with nothing in the row or
     # the artifacts saying so.
     for target in test['targets']:
+        if target.get('mrt_spec'):
+            import native_mrt
+            if (target.get('tester_type') != 'bgpdump2' or target.get('repeat') or target.get('file')
+                    or any(not re.fullmatch(r'sha256:[0-9a-f]{64}', target.get(k) or '')
+                           for k in ('image','generator_image','observer_image'))):
+                sys.exit('Native MRT batch requires fresh bgpdump2 cells and three immutable images')
+            for neighbors in test['neighbors']:
+                for per_peer in test['prefixes']:
+                    native_mrt.workload(target['mrt_spec'], target.get('mrt_spec_sha256'), neighbors, per_peer)
         # A name first: everything below reports against it, and
         # `', '.join()` on a target that has neither name nor label raised a
         # bare TypeError -- the traceback naming neither the test nor the key
@@ -4903,7 +4917,13 @@ def check_batch_monitor_images(tests):
     wanted = set()
     for test in tests:
         monitor = batch_test_monitor(test)
-        wanted.add(MONITOR_CLASSES[monitor])
+        native = [t for t in test['targets'] if t.get('mrt_spec')]
+        for target in native:
+            for field in ('generator_image','observer_image'):
+                if not img_exists(target.get(field) or ''):
+                    sys.exit('Native MRT image unavailable: '+str(target.get(field)))
+        if len(native) != len(test['targets']):
+            wanted.add(MONITOR_CLASSES[monitor])
         # A `file:` target's scenario may state receivers of its own, so any
         # such target counts as having them; asking for an image a run turns
         # out not to need costs a build, not a matrix.
@@ -4988,6 +5008,9 @@ def batch(args):
               '{1}'.format(len(swept), ', '.join(swept)))
 
     expanded = expand_batch_config(args.batch_config)
+    if getattr(args, 'control_dir', None) and any(not t.get('mrt_spec')
+            for _, targets, _, _, _ in expanded for t in targets):
+        sys.exit('--control-dir requires fixed-input native MRT cells throughout the batch')
     if getattr(args, 'cells', None):
         return run_selected_batch_cells(args, expanded)
     resume = getattr(args, 'resume', False)
@@ -5066,6 +5089,9 @@ def batch(args):
                                               completed, repetitions,
                                               describe=False):
                 print(line)
+
+            if getattr(args, 'stop_on_failure', False) and row_failed(completed[cell_id]):
+                raise StopRequested('Recorded failed batch cell; --stop-on-failure')
 
         results = batch_report_rows(test['name'], cells, completed)
         write_batch_csv(results_path(args.results_dir, f"{test['name']}.csv"), results)
@@ -5184,7 +5210,7 @@ def batch_cell_args(args, cell):
                     'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
                     'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
                     'tester_type', 'license_file', 'version', 'threads',
-                    'tester_trace_io']:
+                    'tester_trace_io', 'mrt_spec', 'mrt_spec_sha256', 'generator_image', 'observer_image']:
         # Keyed on the value, not on the key being present: a target
         # written `tester_type:` with nothing after it parses as None,
         # which is the very slip the default exists to catch, and a
@@ -5296,9 +5322,11 @@ def run_selected_batch_cells(args, expanded):
             raise StopRequested(stop_signal.reason)
         cell_id = batch_cell_id(test['name'], cell)
         order, seed = sequences[test['name']]
-        write_batch_cell_result(args.results_dir, test['name'], cell_id,
-                                bench(batch_cell_args(args, cell)),
+        row = bench(batch_cell_args(args, cell))
+        write_batch_cell_result(args.results_dir, test['name'], cell_id, row,
                                 order=order, seed=seed)
+        if getattr(args, 'stop_on_failure', False) and row_failed(row):
+            raise StopRequested('Recorded failed batch cell; --stop-on-failure')
     if getattr(args, 'no_report', False):
         return
     touched = {test['name'] for test, _cell in selected}
@@ -6159,6 +6187,8 @@ def create_args_parser(main=True):
                               help='directory for generated graphs and CSVs; '
                                    'default: {}'.format(DEFAULT_RESULTS_DIR))
     add_gen_conf_args(parser_bench)
+    for name in ('mrt-spec', 'mrt-spec-sha256', 'generator-image', 'observer-image', 'control-dir'):
+        parser_bench.add_argument('--'+name, help='Explicit native fixed-input MRT performance binding/control')
     parser_bench.set_defaults(func=bench_command)
 
     parser_config = s.add_parser('config', help='generate config')
@@ -6198,6 +6228,8 @@ def create_args_parser(main=True):
     batch_mode.add_argument('--report', action='store_true',
                             help='rebuild the CSV, summary and graphs from the cell results '
                                  'in --results-dir; runs nothing')
+    parser_batch.add_argument('--control-dir', help='Existing absolute directory for external native-cell admission/replay control')
+    parser_batch.add_argument('--stop-on-failure', action='store_true', help='Stop after a recorded failed cell; never retry')
     parser_batch.set_defaults(func=batch)
 
     return parser

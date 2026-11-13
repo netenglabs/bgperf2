@@ -7,6 +7,10 @@ CLI and versioned artifacts; none is required to use the engine.
 
 ## Current direction
 
+The selected [native MRT performance CLI](plans/native-mrt-performance.md) moves
+routine fixed-input sweeps onto `bench`/`batch`, reusing exact-input and final
+identity checks without per-cell portable-recipe orchestration.
+
 Exact-input MRT preparation now selects a bounded, offline
 [source-peer/RIB inventory](plans/mrt-input-inventory.md). It establishes consumed
 file identity and encoded peer facts only. The selected [input-bound MRT recipe extension](plans/mrt-recipes.md) reuses

@@ -73,7 +73,7 @@ def test_synthetic_control_rejects_unsupported_before_files(tmp_path,field,value
 
 @pytest.mark.parametrize('failure',[False,True])
 def test_synthetic_native_uses_same_lifecycle_exact_capture_and_cleanup(tmp_path,monkeypatch,failure):
-    args=synthetic(tmp_path)
+    args=synthetic(tmp_path);args.native_cell_id='frozen-cell-id'
     monkeypatch.setattr(engine,'img_exists',lambda _:True)
     monkeypatch.setattr(engine,'controller_stop',threading.Event())
     cleanup=[]
@@ -92,6 +92,7 @@ def test_synthetic_native_uses_same_lifecycle_exact_capture_and_cleanup(tmp_path
         with pytest.raises(ValueError,match='completion'):native.bench(engine,args)
     else:assert native.bench(engine,args)[6]==20
     receipt=json.loads(next(Path(args.results_dir).glob('*.native.json')).read_text())
+    assert receipt['cell_id']=='frozen-cell-id'
     assert receipt['generator_containers']==1 and cleanup==[dict(expected_count=3)]
     rows=[json.loads(line) for line in Path(receipt['phases']).read_text().splitlines()]
     assert rows[-1]['phase']=='terminal' and rows[-1]['details']['status']==('failed' if failure else 'completed')

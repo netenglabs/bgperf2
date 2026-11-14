@@ -5110,7 +5110,9 @@ def batch(args):
                     stop_signal.reason))
                 raise StopRequested(stop_signal.reason)
 
-            completed[cell_id] = bench(batch_cell_args(args, cell))
+            selected_args=batch_cell_args(args,cell)
+            selected_args.native_cell_id=cell_id
+            completed[cell_id] = bench(selected_args)
             write_batch_cell_result(args.results_dir, test['name'], cell_id,
                                     completed[cell_id], order=order, seed=seed)
             write_batch_csv(results_path(args.results_dir, f"{test['name']}.csv"),
@@ -5356,7 +5358,9 @@ def run_selected_batch_cells(args, expanded):
             raise StopRequested(stop_signal.reason)
         cell_id = batch_cell_id(test['name'], cell)
         order, seed = sequences[test['name']]
-        row = bench(batch_cell_args(args, cell))
+        selected_args=batch_cell_args(args,cell)
+        selected_args.native_cell_id=cell_id
+        row = bench(selected_args)
         write_batch_cell_result(args.results_dir, test['name'], cell_id, row,
                                 order=order, seed=seed)
         if getattr(args, 'stop_on_failure', False) and row_failed(row):

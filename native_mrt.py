@@ -205,6 +205,7 @@ def bench(engine, selected):
         images=dict(target=args.image,generator=args.generator_image,observer=args.observer_image),
         label=engine.run_name(args),expected_prefixes=prefixes.expected_count(document),
         row=None,error=None)
+    if getattr(args,'native_cell_id',None):receipt['cell_id']=args.native_cell_id
     if not is_mrt:receipt['workload']=document
     engine.atomic_write_json(str(receipt_path),receipt)
     from native_phases import Journal

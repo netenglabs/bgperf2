@@ -113,3 +113,12 @@ Calibration reduction, trial counts, scientific exclusions, export expectations
 and optional continuation after isolated daemon identity failures are experiment
 or orchestration decisions; they are not engine throughput defaults. No statistic
 is recalibrated and no prior original is reclassified by this plan.
+
+## Implementation record
+
+`d6f0293` delivers lazy runtime initialization, prerequisite preflight, operational
+phase records, deferred graph reconstruction and bounded controlled synthetic
+plain transit. Its required full gate passed 3,746 tests (one intentional skip).
+A subsequent receipt binding change addresses repeated display labels in large
+matrices; native receipts use canonical cell identities rather than labels.
+No live benchmark or historical evidence rewrite qualified these changes.

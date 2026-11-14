@@ -56,3 +56,8 @@ receivers, churn, policy reload, path diversity and more than five million
 synthetic prefixes refuse before a worker. Ordinary bench commands remain
 compatible. Controlled synthetic support has modeled qualification only; select
 a separate small live qualification before a large campaign.
+
+Batch-native receipts also carry the full canonical `cell_id`, binding repeated
+target labels across peer/prefix axes and tests to their actual attempt. Labels
+remain display names; consumers must not use them as unique matrix keys. Older
+fixed-axis receipts can be read only when their label resolves unambiguously.

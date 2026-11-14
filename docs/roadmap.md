@@ -11,10 +11,10 @@ The selected [native MRT performance CLI](plans/native-mrt-performance.md) moves
 routine fixed-input sweeps onto `bench`/`batch`, reusing exact-input and final
 identity checks without per-cell portable-recipe orchestration.
 
-The [native throughput support plan](plans/native-suite-throughput.md) proposes
+The [native throughput support plan](plans/native-suite-throughput.md) delivers
 pure matrix inspection, operational phase timing, optional deferred graphs and
-generic local cell control. It is an audit/implementation proposal, not delivered
-functionality or runtime authorization. A consumer can already automate native
+generic local cell control. The implementation has modeled validation; live qualification remains
+a separately selected finite run. A consumer can already automate native
 batches across finite stages without waiting for these engine changes.
 
 Exact-input MRT preparation now selects a bounded, offline

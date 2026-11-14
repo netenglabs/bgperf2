@@ -171,3 +171,18 @@ def test_lifecycle_import_does_not_initialize_the_engine_or_docker():
                     'assert "settings" not in sys.modules; '
                     'assert "docker" not in sys.modules'],
                    cwd=bgperf2.REPO_ROOT, check=True)
+
+
+def test_deferred_graphs_preserve_rows_and_complete_sample_inputs(tmp_path):
+    import deferred_graphs
+    first=tmp_path/'ordinary';first.mkdir();second=tmp_path/'deferred';second.mkdir()
+    runtime,args,calls,_=fake_run(first)
+    expected=run_lifecycle.bench(runtime,args)
+    runtime,args,calls,_=fake_run(second);args.defer_graphs=True;phases=[]
+    runtime.native_phase=lambda phase,**details:phases.append((phase,details))
+    actual=run_lifecycle.bench(runtime,args)
+    assert actual==expected and 'graphs' not in calls and calls[-1]=='manifest'
+    doc=deferred_graphs.validate(json.loads(next((second/'results').glob('*.graph-data.json')).read_text()))
+    assert doc['samples'] and all(len(row)==7 for row in doc['samples'])
+    assert phases[0]==('measurement_finished',dict(measurement_start_unix=1000,measurement_stop_unix=1000))
+    assert phases[-1][0]=='graphs_deferred'

@@ -806,3 +806,5 @@ are less tested.
 
 The [Python environment guide](docs/python-environment.md) documents the full
 hashed lock, verification and dependency updates.
+
+Native [throughput controls](docs/native-throughput.md) provide offline planning, prerequisite preflight, operational phase journals and optional deferred graphs.

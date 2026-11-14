@@ -309,6 +309,8 @@ def bench(runtime, args):
             f.write(conf)
         conf = runtime.yaml.safe_load(runtime.Template(conf).render())
 
+    if getattr(runtime,'native_scenario',None):runtime.native_scenario(conf)
+
     # After the scenario is parsed, so this covers a -f run too -- which is one
     # of the ways the flag reaches nothing.
     runtime.warn_if_trace_io_reaches_no_generator(args, conf)
@@ -1109,7 +1111,7 @@ def bench(runtime, args):
                     target_table_witness_rule=tracker.witness_rule(),
                     convergence_rule=tracker.convergence_rule())
 
-            if elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
+            if not getattr(args,'defer_graphs',False) and elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
                 # The same stem the final graphs use. Built from args.target
                 # alone, these dropped the label, the version, the filter and
                 # the repetition, so a long run's in-progress graphs were
@@ -1169,6 +1171,8 @@ def finish_bench(runtime, args, output_stats, bench_stats, bench_start, target, 
 
     bench_stop = runtime.time.time()
     output_stats['total_time'] = bench_stop - bench_start
+    phase=getattr(runtime,'native_phase',lambda *a,**kw:None)
+    phase('measurement_finished',measurement_start_unix=bench_start,measurement_stop_unix=bench_stop)
     m.stop_monitoring = True
     target.stop_monitoring = True
     for t in testers:
@@ -1322,6 +1326,14 @@ def finish_bench(runtime, args, output_stats, bench_stats, bench_start, target, 
     # it would be better to clean things up, but often I want to to investigate where things ended up
     # remove_old_containers()
     # remove_target_containers()
-    runtime.create_bench_graphs(bench_stats, prefix=bench_prefix, results_dir=args.results_dir)
+    phase('recording_finished')
+    if getattr(args,'defer_graphs',False):
+        import deferred_graphs
+        deferred_graphs.save(runtime,bench_stats,bench_prefix,args.results_dir)
+        phase('graphs_deferred')
+    else:
+        phase('render_started')
+        runtime.create_bench_graphs(bench_stats, prefix=bench_prefix, results_dir=args.results_dir)
+        phase('render_finished')
     runtime.write_provenance(args, provenance, bench_prefix)
     return o_s

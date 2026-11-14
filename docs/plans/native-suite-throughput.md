@@ -1,7 +1,8 @@
 # Native bench/batch throughput support
 
-Status: proposed implementation plan; no engine behavior changed by this document.
-The selected work is an audit and plan first. This document authorizes no builds,
+Status: implemented with modeled qualification; small live qualification pending.
+The operator approved implementation after the audit.
+See [delivered interfaces](../native-throughput.md) and `tests/test_native_throughput.py`. This document authorizes no builds,
 image acquisition, benchmark execution, scheduling, publication or deployment.
 
 ## Problem and existing baseline

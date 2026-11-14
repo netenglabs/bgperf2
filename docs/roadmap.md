@@ -11,6 +11,12 @@ The selected [native MRT performance CLI](plans/native-mrt-performance.md) moves
 routine fixed-input sweeps onto `bench`/`batch`, reusing exact-input and final
 identity checks without per-cell portable-recipe orchestration.
 
+The [native throughput support plan](plans/native-suite-throughput.md) proposes
+pure matrix inspection, operational phase timing, optional deferred graphs and
+generic local cell control. It is an audit/implementation proposal, not delivered
+functionality or runtime authorization. A consumer can already automate native
+batches across finite stages without waiting for these engine changes.
+
 Exact-input MRT preparation now selects a bounded, offline
 [source-peer/RIB inventory](plans/mrt-input-inventory.md). It establishes consumed
 file identity and encoded peer facts only. The selected [input-bound MRT recipe extension](plans/mrt-recipes.md) reuses

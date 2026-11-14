@@ -54,8 +54,12 @@ must match the attempt exactly; finite waits, cancellation and cleanup precede
 terminal release. Unsupported generators, scenario files, repeats, filters,
 receivers, churn, policy reload, path diversity and more than five million
 synthetic prefixes refuse before a worker. Ordinary bench commands remain
-compatible. Controlled synthetic support has modeled qualification only; select
-a separate small live qualification before a large campaign.
+compatible. Controlled synthetic support has modeled checks and an eight-original live
+success-path qualification, including one/two peers with up to 2,000 generated
+prefixes per peer and a three-prefix plain MRT control. The run verified serial
+cleanup, exact final sets, offering, canonical matrix bindings, deferred rendering
+and automatic external stage transitions. This does not qualify larger tables,
+new daemons/hosts or cancellation behavior; select those separately.
 
 Batch-native receipts also carry the full canonical `cell_id`, binding repeated
 target labels across peer/prefix axes and tests to their actual attempt. Labels

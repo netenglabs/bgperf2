@@ -13,8 +13,9 @@ identity checks without per-cell portable-recipe orchestration.
 
 The [native throughput support plan](plans/native-suite-throughput.md) delivers
 pure matrix inspection, operational phase timing, optional deferred graphs and
-generic local cell control. The implementation has modeled validation; live qualification remains
-a separately selected finite run. A consumer can already automate native
+generic local cell control. The implementation has modeled checks and an accepted small live success-path
+qualification. Larger workloads and fault/cancellation behavior remain separate
+selections. A consumer can already automate native
 batches across finite stages without waiting for these engine changes.
 
 Exact-input MRT preparation now selects a bounded, offline

@@ -1,6 +1,6 @@
 # Native bench/batch throughput support
 
-Status: implemented with modeled qualification; small live qualification pending.
+Status: implemented; modeled checks and small live success-path qualification passed.
 The operator approved implementation after the audit.
 See [delivered interfaces](../native-throughput.md) and `tests/test_native_throughput.py`. This document authorizes no builds,
 image acquisition, benchmark execution, scheduling, publication or deployment.
@@ -122,3 +122,19 @@ plain transit. Its required full gate passed 3,746 tests (one intentional skip).
 A subsequent receipt binding change addresses repeated display labels in large
 matrices; native receipts use canonical cell identities rather than labels.
 No live benchmark or historical evidence rewrite qualified these changes.
+
+
+## Small live qualification
+
+On 2026-11-14, engine `fc0a7fe` was exercised by one finite external native suite:
+eight BIRD 2 originals covering one/two-peer generated transit (1,000–2,000
+prefixes per peer), a separate calibration, complete R2 cohorts, reused labels
+across peer axes and one exact three-prefix plain MRT control. All cells used
+immutable target/generator/observer IDs, existing placement and host reserves.
+Exact sets, offering, canonical receipt/cell binding, phase journals, owned
+cleanup and deferred graph data/rendering passed. External stage verification,
+headroom selection, reporting and local preservation completed automatically.
+The suite took 468.534 seconds; native batches accounted for 431.638 seconds.
+No behavioral correction or retry was needed. This is operational success-path
+qualification, not a performance ranking, general capacity or old/new speedup
+claim. Fault/cancellation cases remain modeled; larger selections remain explicit.

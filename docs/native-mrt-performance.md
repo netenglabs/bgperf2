@@ -69,7 +69,8 @@ interruption can lack an after-input check and never attests success.
 
 `--control-dir /absolute/existing/control` on native bench/batch offers an
 external supervisor a bounded local handshake. It carries no lab policy.
-All cells of a controlled batch must use explicit MRT binding.
+Controlled MRT cells use the explicit bindings above. Bounded generated BIRD/sink
+synthetic transit is also supported; see [native throughput controls](native-throughput.md).
 
 The engine atomically writes `current.json` with the attempt identity and its
 fresh child directory. It waits at most 1,800 seconds for

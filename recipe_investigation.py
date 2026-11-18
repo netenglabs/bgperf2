@@ -715,6 +715,8 @@ def run_investigation(recipe, *, baseline_target, candidate_target, workdir, res
     """Run at most one serial baseline and candidate, then preserve a portable report."""
     from recipe_targets import validate_target
     recipes.validate_recipe(recipe)
+    if recipe['schema'] != recipes.RECIPE_SCHEMA:
+        raise recipes.ContractError('This workflow currently supports synthetic recipes only')
     from recipe_prefixes import validate_selection
     validate_selection(recipe, observer_prefixes)
     for target in (baseline_target, candidate_target):

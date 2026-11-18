@@ -416,6 +416,8 @@ exec {binary} -local-as {local_as} -peer-as {peer_as} -router-id {router_id} \\
            peer_address=target['local-address'], guest=self.guest_dir,
            log=self.LOG_NAME, stderr=self.STDERR_NAME,
            snapshot=('-snapshot-socket ' + shlex.quote(self.prefix_snapshot_socket) + ' '
+                     + ('-snapshot-max-prefixes ' + str(int(self.prefix_snapshot_max_prefixes)) + ' '
+                        if getattr(self, 'prefix_snapshot_max_prefixes', None) is not None else '')
                      if getattr(self, 'prefix_snapshot_socket', None) else ''))
 
     def run(self, conf, dckr_net_name=''):

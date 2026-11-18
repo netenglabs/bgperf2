@@ -3,6 +3,20 @@
 The per-daemon `get_neighbors_state` wart, the table witness, and the delivery measurement derived off it.
 
 **Read this before editing:** `run_lifecycle.py` (run orchestration), `bgperf2.py` (the monitor poll), `base.py` (`Target.sample_target_state()`), `frr.py`, `frr_compiled.py`, `bird.py`, `gobgp.py`, `measurements.py` (`target_table_section()`, `delivery_metrics()`)
+`rustbgpd.py` supplies accepted-prefix-only neighbor observations.
+`holo.py` maps native Adj-RIB-In pre/post-policy counts without a best-path witness.
+`zebra_rs.py` exposes only the native pre-policy Adj-RIB-In snapshot.
+`bio_routing.py` declares neighbor prefix observations unavailable in the selected service.
+`maghemite.py` withholds the selected source's declared but unupdated prefix atomics.
+
+Bio-Routing's library metric uses current RouteCount, but the selected cmd/bio-rd
+never registers that collector; only the example does. ListSessions also returns
+unimplemented. Empty observation mappings attest to no count; neither zeros nor
+generic gRPC/Go metrics may stand in for received/accepted/selected route gauges.
+
+The `rustbgpd.py` adapter is also governed here. Its `rbgp` JSON field named
+`prefixes_received` is an accepted-route gauge, so only accepted counts are
+exposed. It has no pre-policy receive or best-path/table witness.
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 

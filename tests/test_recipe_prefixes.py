@@ -36,7 +36,7 @@ def check(tmp_path, recipe, receipt, *, selection=True, files=None):
     if selection:
         files['observer-prefix-selection.json'] = {
             'recipe_sha256': recipes.recipe_sha256(recipe), 'enabled': True,
-            'phase': 'post_measurement', 'max_prefixes': prefixes.MAX_PREFIXES}
+            'phase': 'post_measurement', 'max_prefixes': prefixes.capture_limits(recipe)[0]}
     spec = default_assertions(recipe, include_prefixes=True)
     return evaluate_assertions(spec, recipe, package(tmp_path, recipe, files))
 
@@ -53,6 +53,53 @@ def test_same_count_wrong_prefix_fails_identity_only(tmp_path, recipe):
     assert identity['observed']['missing_sample'] == ['100.0.0.0/32']
     assert identity['observed']['unexpected_sample'] == ['192.0.2.1/32']
     assert all(len(w['sha256']) == 64 for w in identity['evidence'])
+
+
+def test_large_complete_set_and_same_count_substitution_remain_exhaustive(recipe):
+    large = copy.deepcopy(recipe)
+    large['resolved'].update(neighbors=1, prefixes_per_peer=100_001)
+    receipt = captured(large)
+    assert prefixes.capture_limits(large) == (5_000_000, 128*1024**2, 30)
+    assert prefixes.inspect(receipt, large)['missing_count'] == 0
+    receipt['snapshot']['prefixes'][0] = '192.0.2.1/32'
+    observed = prefixes.inspect(receipt, large)
+    assert observed['missing_count'] == observed['unexpected_count'] == 1
+    assert observed['missing_sample'] == ['100.0.0.0/32']
+    assert prefixes.capture_limits(recipe) == (100_000, 4*1024**2, 3)
+
+
+def test_large_request_clock_bound_does_not_relax_small_case(recipe):
+    large = copy.deepcopy(recipe)
+    large['resolved'].update(neighbors=1, prefixes_per_peer=100_001)
+    receipt = captured(large)
+    receipt['completed_ns'] = receipt['requested_ns'] + 29_000_000_000
+    assert prefixes.inspect(receipt, large)['observed_count'] == 100_001
+    receipt['completed_ns'] = receipt['requested_ns'] + 30_000_000_001
+    with pytest.raises(ValueError, match='bounded request'):
+        prefixes.inspect(receipt, large)
+    small = captured(recipe)
+    small['completed_ns'] = small['requested_ns'] + 3_000_000_001
+    with pytest.raises(ValueError, match='bounded request'):
+        prefixes.inspect(small, recipe)
+
+
+def test_large_artifact_inspection_is_explicit_and_hash_checked(tmp_path, recipe):
+    import hashlib
+    from recipe_assertions import _load
+    large = copy.deepcopy(recipe)
+    large['resolved'].update(neighbors=1, prefixes_per_peer=100_001)
+    value = captured(large)
+    data = json.dumps(value, indent=30).encode()
+    assert len(data) > 8*1024**2
+    path = tmp_path/'observer-prefixes.json'
+    path.write_bytes(data)
+    references = {'observer-prefixes.json': {'sha256': hashlib.sha256(data).hexdigest()}}
+    assert _load(tmp_path, 'observer-prefixes.json', references)[0] is None
+    accepted, reason = _load(tmp_path, 'observer-prefixes.json', references, max_bytes=256*1024**2)
+    assert reason is None and prefixes.inspect(accepted, large)['observed_count'] == 100_001
+    path.write_bytes(data[:-1]+b' ')
+    with pytest.raises(recipes.ContractError, match='changed after verification'):
+        _load(tmp_path, 'observer-prefixes.json', references, max_bytes=256*1024**2)
 
 
 def test_complete_set_order_independent_and_explicit_deadline(tmp_path, recipe):
@@ -88,7 +135,7 @@ def test_bad_or_missing_identity_never_passes(tmp_path, recipe, mutation):
     elif mutation == 'status':
         snap['status'] = 'unavailable'
     elif mutation == 'oversize':
-        snap['prefixes'] = ['100.0.0.0/32'] * (prefixes.MAX_PREFIXES + 1)
+        snap['prefixes'] = ['100.0.0.0/32'] * (prefixes.capture_limits(recipe)[0] + 1)
         snap['accepted_count'] = len(snap['prefixes'])
     elif mutation == 'clock':
         snap['monotonic_ns'] = receipt['completed_ns'] + 1
@@ -205,7 +252,7 @@ def test_expected_prefixes_match_actual_mako_generator(recipe):
 def test_capture_selection_refuses_large_recipes_before_probes(tmp_path, monkeypatch, recipe):
     import recipe_run
     monkeypatch.setattr(prefixes, 'MAX_PREFIXES', 1)
-    with pytest.raises(recipes.ContractError, match='100000'):
+    with pytest.raises(recipes.ContractError, match='at most 1'):
         recipe_run.run_recipe(recipe, workdir=tmp_path/'work', results_dir=tmp_path/'results',
             observer_prefixes=True, check=lambda *a, **k: pytest.fail('probed'))
     assert list(tmp_path.iterdir()) == []
@@ -234,6 +281,16 @@ def test_observer_startup_option_is_explicit_and_default_compatible(tmp_path):
     old, new = [instance.get_startup_cmd() for instance in instances]
     assert '-snapshot-socket' not in old
     assert new.replace('-snapshot-socket /root/config/prefixes.sock ', '') == old
+
+
+def test_large_observer_passes_explicit_new_sink_capacity(tmp_path):
+    import bgperf2
+    from recipe_worker import scoped_adapter
+    selected = scoped_adapter(bgperf2.MONITOR_CLASSES['sink'], 'sha256:'+'1'*64, 'attempt',
+                              role='observer', capture_prefixes=True, prefix_limit=5_000_000)
+    instance = selected(str(tmp_path), {'as': 100, 'router-id': '192.0.2.1', 'local-address': '192.0.2.1'})
+    instance.config = {'target': {'as': 200, 'local-address': '192.0.2.2'}}
+    assert '-snapshot-max-prefixes 5000000 ' in instance.get_startup_cmd()
 
 
 def test_cli_forwards_capture_selection(tmp_path, recipe, monkeypatch):

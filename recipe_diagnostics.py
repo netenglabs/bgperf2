@@ -1,6 +1,8 @@
 # Copyright (C) 2026 bgperf2 contributors. Apache-2.0.
 """Bounded, owned-attempt diagnostics; no Docker client is initialized on import."""
 import json
+import hashlib
+import datetime
 import os
 import re
 from pathlib import Path
@@ -18,6 +20,103 @@ MAX_BYTES = 64 * 1024
 MAX_CONTAINERS = 128
 COLLECTION_SECONDS = 20
 LIVE_SAMPLE_LIMIT = 128
+
+# Fixed read-only samples, deliberately not full RIB/configuration dumps. These
+# addresses describe the default synthetic fixture, not arbitrary recipe input.
+ZEBRA_NATIVE_COMMANDS = tuple(
+    (name, ('/usr/bin/vtyctl', '--vty-socket', 'unix:/run/bgperf-zebra.vty',
+            'show', '--json', query))
+    for name, query in (
+        ('version', 'show version'), ('summary', 'show bgp summary'),
+        ('sample-path', 'show bgp ipv4 100.0.0.0/32'),
+        ('sample-connected', 'show ip route 10.10.0.0/16'))
+) + (
+    ('sample-kernel-route', ('/usr/sbin/ip', '-json', 'route', 'get', '10.10.0.3')),
+    ('addresses', ('/usr/sbin/ip', '-json', 'address', 'show')),
+)
+
+BIO_NATIVE_COMMANDS = (
+    ('metrics', ('/usr/local/bin/bgperf-bio-http', '--fail', '--silent', '--show-error',
+                 '--max-time', '2', '--max-filesize', '8388608',
+                 'http://127.0.0.1:55667/metrics')),
+)
+
+MAGHEMITE_NATIVE_COMMANDS = tuple(
+    (name, ('/usr/local/bin/bgperf-mg-http', '--fail', '--silent', '--show-error',
+            '--max-time', '2', '--max-filesize', '8388608', '-H', 'api-version: 13.0.0',
+            'http://127.0.0.1:4676' + path))
+    for name, path in (('routers', '/bgp/config/routers'),
+                       ('sample-peers', '/bgp/status/neighbors?asn=1000'))
+)
+
+
+def collect_native(work, attempt, item, probe, errors, *, commands, command_prefix=(),
+                   scope='fixed engine-owned queries', http_receipts=False):
+    """Post-worker snapshots only; no convergence, acceptance or memory verdict."""
+    item['native'] = {'scope': 'post-worker, after baseline memory/log collection; '
+                      + scope + '; not exhaustive or convergence-time',
+                      'queries': []}
+    for name, argv in commands:
+        record = {'name': name, 'status': 'unavailable', 'path': None,
+                  'argv': list(argv)}
+        item['native']['queries'].append(record)
+        try:
+            # Repeat the ownership and identity check immediately before each
+            # exec. An immutable ID avoids following a replaced container name.
+            inspection = json.loads(probe(['container', 'inspect', item['id']])['text'])
+            if not isinstance(inspection, list) or len(inspection) != 1:
+                raise ValueError('Native diagnostic ownership recheck malformed')
+            inspected = inspection[0]
+            if (not isinstance(inspected, dict)
+                    or inspected.get('Id') != item['id']
+                    or inspected.get('Name') != '/' + item['name']
+                    or inspected.get('Image') != item['image_id']
+                    or inspected.get('Config', {}).get('Labels', {}).get('bgperf2.recipe.attempt') != attempt):
+                raise ValueError('Native diagnostic ownership/identity recheck failed')
+            state = inspected.get('State', {})
+            if state.get('Paused') is True or state.get('Status') == 'paused':
+                record['reason'] = 'Owned container is paused; native query unavailable and not executed.'
+                # The controller intentionally freezes route allocation before
+                # collecting an interrupted attempt. Do not turn that action
+                # into a native-query or harness failure.
+                continue
+        except (OSError, ValueError, TypeError, AttributeError, KeyError, preflight.ProbeError) as exc:
+            record['error'] = str(exc)
+            errors.append(f'{item["id"]}: native {name}: {exc}')
+            break
+        try:
+            if http_receipts:
+                from recipe_receive import cgroup_sample
+                record['target_cgroup_before'] = cgroup_sample(state.get('Pid'))
+                record.update(request_started_ns=time.monotonic_ns(),
+                              request_started_utc=datetime.datetime.now(datetime.timezone.utc).isoformat())
+            result = probe(['exec', item['id'], *command_prefix, *argv], raw=True)
+            if http_receipts:
+                record.update(request_completed_ns=time.monotonic_ns(),
+                              request_completed_utc=datetime.datetime.now(datetime.timezone.utc).isoformat())
+                record['target_cgroup_after'] = cgroup_sample(state.get('Pid'))
+            relative = f'diagnostic-native/{item["id"]}-{name}.txt'
+            path = work / relative
+            path.parent.mkdir(exist_ok=True)
+            data = result.get('data', result['text'].encode('utf-8'))
+            path.write_bytes(data)
+            if http_receipts:
+                record['sha256'] = hashlib.sha256(data).hexdigest()
+            exit_code = result.get('exit_code', 0)
+            record.update(status='failed' if exit_code else ('truncated' if result['truncated'] else 'captured'),
+                          path=relative, truncated=result['truncated'],
+                          captured_bytes=result['captured_bytes'], exit_code=exit_code)
+            if result['truncated'] or exit_code:
+                errors.append(f'{item["id"]}: native {name}: '
+                              f'exit={exit_code}, truncated={result["truncated"]}')
+        except (OSError, ValueError, TypeError, AttributeError, KeyError, preflight.ProbeError) as exc:
+            if http_receipts:
+                record.update(request_completed_ns=time.monotonic_ns(),
+                              request_completed_utc=datetime.datetime.now(datetime.timezone.utc).isoformat())
+            record['error'] = str(exc)
+            errors.append(f'{item["id"]}: native {name}: {exc}')
+            # Independent queries may still answer. Each repeats ownership and
+            # checks the remaining collection budget before another exec.
 
 
 def host_snapshot():
@@ -90,15 +189,21 @@ def stage(work, name, *, status='entered', reason=None):
     write_json(path, document)
 
 
+NON_BIRD_TARGET_SUFFIXES = ('_frrouting_compiled_target', '_openbgp_target', '_rustybgp_target',
+                           '_rustbgpd_target', '_holo_target', '_zebra_rs_target', '_bio_routing_target',
+                           '_maghemite_target')
+UNSUPPORTED_DAEMON_WITNESS = 'Non-BIRD daemon process presence and exit-status witnesses are unsupported; container state does not diagnose the daemon.'
+
+
 def role_for_name(name):
-    if name.endswith(('_bird_target', '_frrouting_compiled_target')):
+    if name.endswith(('_bird_target', *NON_BIRD_TARGET_SUFFIXES)):
         return 'target'
     if name.endswith('_monitor'):
         return 'observer'
     return 'generator'
 
 
-def bounded_probe(argv, *, env, timeout=3, max_bytes=MAX_BYTES):
+def bounded_probe(argv, *, env, timeout=3, max_bytes=MAX_BYTES, allow_nonzero=False):
     """Stop a read-only CLI client on deadline/output limit, retaining bounded bytes."""
     deadline = time.monotonic() + timeout
     output = bytearray()
@@ -131,11 +236,11 @@ def bounded_probe(argv, *, env, timeout=3, max_bytes=MAX_BYTES):
             except ProcessLookupError:
                 pass
         process.wait(timeout=max(0.01, deadline - time.monotonic()))
-        if process.returncode and not truncated:
+        if process.returncode and not truncated and not allow_nonzero:
             raise preflight.ProbeError(f'Diagnostic command exited {process.returncode}: '
                                        + output.decode('utf-8', errors='replace')[-1000:])
-        return {'text': output.decode('utf-8', errors='replace'),
-                'truncated': truncated, 'captured_bytes': len(output)}
+        return {'text': output.decode('utf-8', errors='replace'), 'data': bytes(output),
+                'truncated': truncated, 'captured_bytes': len(output), 'exit_code': process.returncode}
     finally:
         try:
             os.killpg(process.pid, signal.SIGKILL)
@@ -225,7 +330,7 @@ def live_sample(client, owned, previous, *, expected, exit_reader=None, target_a
         except Exception as exc:
             sample['errors'].append('memory: ' + type(exc).__name__)
         if (sample['role'] == 'target' and target_adapter == 'bird'
-                and not name.endswith('_frrouting_compiled_target')):
+                and not name.endswith(NON_BIRD_TARGET_SUFFIXES)):
             try:
                 processes = client.top(identifier, ps_args='-eo pid,comm')
                 titles, rows = processes.get('Titles', []), processes.get('Processes', [])
@@ -258,14 +363,14 @@ def live_sample(client, owned, previous, *, expected, exit_reader=None, target_a
         del samples[:removed]
     previous['schema'] = SCHEMA
     previous['instrumentation'] = 'optional Docker stats and fixed BIRD process-list probes; observation overhead is uncalibrated'
-    if target_adapter != 'bird' or any(sample['name'].endswith('_frrouting_compiled_target') for sample in samples):
+    if target_adapter != 'bird' or any(sample['name'].endswith(NON_BIRD_TARGET_SUFFIXES) for sample in samples):
         previous['instrumentation'] = 'optional Docker stats; observation overhead is uncalibrated'
-        previous['unsupported'] = ['FRR daemon process presence and exit-status witnesses are unsupported; container state does not diagnose bgpd.']
+        previous['unsupported'] = [UNSUPPORTED_DAEMON_WITNESS]
     return failure
 
 
 def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memory_reader=None,
-                        target_adapter='bird'):
+                        target_adapter='bird', maghemite_receive=False):
     """Collect before owned cleanup. Exclude environment, mounts, journals and cores."""
     work = Path(work)
     command = command or bounded_probe
@@ -281,19 +386,30 @@ def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memor
               'privileged_artifacts': {'cores': 'not_requested', 'kernel_journal': 'not_requested'}}
     if target_adapter != 'bird':
         report['capabilities'].update(bird_process_presence=False, bird_daemon_exit=False)
-        report['unsupported'] = ['FRR daemon process presence and exit-status witnesses are unsupported; container state does not diagnose bgpd.']
+        report['unsupported'] = [UNSUPPORTED_DAEMON_WITNESS]
+    if target_adapter == 'bio-routing':
+        report['capabilities']['target_neighbor_prefix_counts'] = False
+        report['capabilities']['target_neighbor_prefix_counts_reason'] = (
+            'Selected bio-rd does not register BGP metrics; ListSessions is unimplemented. '
+            'Received, accepted and selected-path observations are unavailable.')
+    elif target_adapter == 'maghemite':
+        report['capabilities']['target_neighbor_prefix_counts'] = False
+        report['capabilities']['target_neighbor_prefix_counts_reason'] = (
+            'Selected mgd declares/reads prefix atomics without updating them. '
+            'Received, accepted and selected-path observations are unavailable.')
     if mode == 'none':
         report.update(status='disabled', missing=['Optional runtime diagnostics were explicitly disabled.'])
         write_json(work / 'diagnostics.json', report)
         return report
     deadline = time.monotonic() + COLLECTION_SECONDS
     prefix = ['docker', '--host', env.get('DOCKER_HOST', 'unix:///var/run/docker.sock')]
-    def probe(args):
+    def probe(args, *, raw=False):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise preflight.ProbeError('Overall diagnostic collection budget expired')
-        result = command(prefix + args, env=env, timeout=min(3, remaining), max_bytes=MAX_BYTES)
-        if result.get('truncated') and 'logs' not in args:
+        options = {'allow_nonzero': True} if raw else {}
+        result = command(prefix + args, env=env, timeout=min(3, remaining), max_bytes=MAX_BYTES, **options)
+        if result.get('truncated') and 'logs' not in args and not raw:
             raise preflight.ProbeError('Structured diagnostic output exceeded its byte budget')
         return result
     try:
@@ -318,10 +434,10 @@ def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memor
                 if labels.get('bgperf2.recipe.attempt') != attempt or inspected.get('Id') != identifier:
                     raise ValueError('Diagnostic ownership/ID recheck failed; foreign resource retained')
                 name = inspected.get('Name', '').lstrip('/')
-                if name.endswith('_frrouting_compiled_target'):
+                if name.endswith(NON_BIRD_TARGET_SUFFIXES):
                     report['capabilities'].update(bird_process_presence=False, bird_daemon_exit=False)
-                    report['unsupported'] = ['FRR daemon process presence and exit-status witnesses are unsupported; container state does not diagnose bgpd.']
-                filtered = {key: state.get(key) for key in ('Status', 'Running', 'ExitCode', 'OOMKilled', 'Error', 'StartedAt', 'FinishedAt')}
+                    report['unsupported'] = [UNSUPPORTED_DAEMON_WITNESS]
+                filtered = {key: state.get(key) for key in ('Status', 'Running', 'Paused', 'ExitCode', 'OOMKilled', 'Error', 'StartedAt', 'FinishedAt')}
                 item = {'id': identifier, 'name': name, 'role': role_for_name(name),
                         'image_id': inspected.get('Image'), 'state': filtered,
                         'memory': memory_record(reason='Container cgroup unavailable.'), 'log': None}
@@ -349,6 +465,28 @@ def collect_diagnostics(work, attempt, env, *, mode='basic', command=None, memor
     for item in report['containers']:
         if item['role'] == 'target':
             report['memory']['target'] = item['memory']
+    # Keep baseline evidence for every role before spending the remaining shared
+    # collection budget on supplemental native CLI work.
+    if target_adapter == 'zebra-rs':
+        for item in report['containers']:
+            if item['name'].endswith('_bgperf_zebra_rs_target'):
+                collect_native(work, attempt, item, probe, report['errors'],
+                    commands=ZEBRA_NATIVE_COMMANDS,
+                    command_prefix=('/usr/local/bin/bgperf-z-wait', '--kill-after=0.5', '2'),
+                    scope='fixed default-synthetic address samples')
+    elif target_adapter == 'bio-routing':
+        for item in report['containers']:
+            if item['name'].endswith('_bgperf_bio_routing_target'):
+                collect_native(work, attempt, item, probe, report['errors'], commands=BIO_NATIVE_COMMANDS)
+    elif target_adapter == 'maghemite':
+        for item in report['containers']:
+            if item['name'].endswith('_bgperf_maghemite_target'):
+                if maghemite_receive:
+                    from recipe_receive import collect
+                    report['maghemite_receive'] = collect(work, attempt, item, probe, report['errors'], deadline)
+                else:
+                    collect_native(work, attempt, item, probe, report['errors'],
+                        commands=MAGHEMITE_NATIVE_COMMANDS, scope='fixed default-ASN 1000 API samples')
     live_path = work / 'live-diagnostics.json'
     if live_path.is_file():
         try:

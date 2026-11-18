@@ -140,7 +140,7 @@ functional pair and verifies its bundled evidence/prose without statistical
 performance decisions. Read `docs/investigations.md` before changing those
 contracts or their trust/accounting boundaries. Read `docs/recipes.md`
 before changing its recipe/result schemas or status meanings. It currently
-supports the documented synthetic IPv4 BIRD or `frr_c` target,
+supports the documented synthetic IPv4 `bird`, `frr_c`, `openbgp`, `rustybgp`, `rustbgpd`, `holo`, `zebra-rs`, `bio-routing` or `maghemite` target,
 with BIRD generators and sink observer; recipe
 execution requires the explicit `run` operation. Declared identities are not verified images or
 host qualification, and experiment status is separate from reproduction outcome.
@@ -154,6 +154,25 @@ Read `docs/frr-source-workflow.md` and `docs/plans/frr-source-workflow.md` for t
 `scripts/first_run.py` is the newcomer entry point to the maintained FRR source
 simulation. Its prerequisites, expected result and own-input handoff are in
 `docs/first-run.md`; it runs no daemon, build, download or benchmark.
+
+Read `docs/plans/supplied-daemon-admission.md` for supplied-image OpenBGPD and
+RustyBGP recipe admission. Their existing adapters own configuration/startup;
+local-source builds and revision search remain restricted to BIRD/FRR.
+
+Read `docs/plans/new-daemon-adapters.md` for rustbgpd's supplied-release wrapper,
+permit-all IPv4 scope and accepted-prefix-only counter. It is distinct from
+RustyBGP. Unsupported filters, thread overrides and custom files refuse early.
+The same plan governs Holo's locked source build and transactional native gRPC
+adapter. Preserve the difference between installed/accepted and selected routes.
+It also governs zebra-rs's checksummed official packages, native YAML/VTY
+adapter and received-only Adj-RIB-In observation.
+It also governs Bio-Routing's pinned Go source build and native YAML. Its selected
+service does not register the library's BGP metric collector and ListSessions is
+unimplemented. Version, received/accepted and selected-path counts remain
+unavailable; never infer them from requested tags or unused API/library code.
+The plan also governs Maghemite's frozen source build, native versioned local
+API and explicit unavailable prefix gauges. Source/API implementation is not
+proof of Linux build or native route qualification; preserve those separate gates.
 
 `recipe_assertions.py` evaluates named observable correctness witnesses against
 verified packages. `recipe_comparison.py` freezes and executes explicit serial
@@ -335,7 +354,7 @@ claims.
   `-r/--repeat` in both directions.
 
 **`docs/invariants/batch-passes.md`** — `bgperf2.py`'s `expand_batch_cells()`/`batch_report_rows()`/
-`create_batch_graphs()`/`report_batch_from_cell_results()`/`load_batch_cell_results()`, `summary.py`, `graphs.py`.
+`create_batch_graphs()`/`report_batch_from_cell_results()`/`load_batch_cell_results()`, `native_batch.py`, `native_mrt.py`, `summary.py`, `graphs.py`.
 
 - A repetition repeats the whole matrix, not each cell, and is part of a run's *name*, never a
   column beside it.
@@ -349,7 +368,9 @@ claims.
   missing cell is named, never filled, and the graphs wait for it.
 - Cell results are the only record: `--resume` skips recorded cells, continues a drawn seed, and
   refuses results the config no longer lists or that ran under another sequence. SIGTERM records nothing for the cell in flight and exits
-  143. Attempt records and host-reclaim watching belong to the caller, not the engine.
+  143. The separately selected durable native mode owns attempt records,
+  calibration dependencies and explicit recovery; host-reclaim watching remains
+  with infrastructure tooling. See [the public guide](docs/native-batches.md).
 
 **`docs/invariants/target-state.md`** — `frr.py`, `bird.py`, `gobgp.py`, `base.py`'s
 `sample_target_state()`, `measurements.py`'s `target_table_section()`/`delivery_metrics()`.
@@ -405,7 +426,7 @@ component, and `bgperf2.py`'s `write_event_artifact()`, which catches for it.
   component: a throttled generator and one blocked writing to an undrained target are the same
   measurement, and three controlled runs of one shape all return it.
 
-**`docs/invariants/host-and-environment.md`** — `recipe_preflight.py`, `recipe_prepare.py`, `recipe_run.py`, `recipe_minimization_session.py`, `recipe_worker.py`, `recipe_diagnostics.py`, `contention.py`, `role_cpu.py`, the controller
+**`docs/invariants/host-and-environment.md`** — `recipe_preflight.py`, `recipe_prepare.py`, `recipe_run.py`, `recipe_minimization_session.py`, `recipe_worker.py`, `recipe_diagnostics.py`, `recipe_receive.py`, `contention.py`, `role_cpu.py`, the controller
 threads, and the `-d` warnings.
 
 - **Measure CPU as a delta between two `/proc` samples, never `ps -eo pcpu`**, which fails in both

@@ -29,6 +29,7 @@ def bench(runtime, args):
     # Here as well as in `batch()`, because a single `bench` can be stopped
     # too. Idempotent: re-installing a handler replaces it with itself.
     runtime.install_stop_handlers()
+    runtime.check_target_workload(args)
 
     output_stats = {}
     config_dir = '{0}/{1}'.format(args.dir, args.bench_name)
@@ -307,6 +308,8 @@ def bench(runtime, args):
         with open('{0}/scenario.yaml'.format(config_dir), 'w') as f:
             f.write(conf)
         conf = runtime.yaml.safe_load(runtime.Template(conf).render())
+
+    if getattr(runtime,'native_scenario',None):runtime.native_scenario(conf)
 
     # After the scenario is parsed, so this covers a -f run too -- which is one
     # of the ways the flag reaches nothing.
@@ -601,6 +604,10 @@ def bench(runtime, args):
         None if is_remote else target, m, testers, receiver_containers,
         repeat=args.repeat)
 
+    before_replay = getattr(runtime, 'before_replay', None)
+    if before_replay is not None:
+        before_replay()
+
     bench_clock_started_s = runtime.time.monotonic()
     lifecycle = runtime.MonitorEventRecorder(
         bench_clock_started_s, producer=m.name,
@@ -706,6 +713,11 @@ def bench(runtime, args):
     # want to launch all the neighbors at the same(ish) time
     # launch them after the test starts because as soon as they start they can send info at least for mrt
     #  does it need to be in a different place for mrt than exabgp?
+    receive_loading = getattr(runtime, 'receive_loading', None)
+    if receive_loading is not None:
+        replay_release = {'monotonic_s': runtime.time.monotonic(),
+                          'utc': runtime.datetime.datetime.now(runtime.datetime.timezone.utc).isoformat()}
+        runtime.receive_loading_release(replay_release)
     for i in range(len(testers)):
         testers[i].launch()
         if i > 0:
@@ -730,6 +742,29 @@ def bench(runtime, args):
             bench_clock_started_s, producer=t.name,
             sample_interval_s=runtime.TESTER_POLL_INTERVAL_S)
         t.offering_stats(q, runtime.controller_stop, runtime.TESTER_POLL_INTERVAL_S)
+
+    if receive_loading is not None:
+        # A separate bounded receipt owns this selection. Never enter the
+        # observer convergence tracker or manufacture a transit stats row.
+        try:
+            receive_loading(target=target, testers=testers, queue=q,
+                            recorders=tester_lifecycles, errors=tester_observation_errors,
+                            release=replay_release)
+        finally:
+            m.stop_monitoring = True
+            target.stop_monitoring = True
+            for tester in testers:
+                tester.stop_monitoring = True
+            runtime.controller_stop.set()
+            role_cpu_thread.join(timeout=runtime.ROLE_CPU_TEARDOWN_WAIT_S)
+            if role_cpu_thread.is_alive():
+                role_cpu.poll_incomplete = 'Receive teardown ended before final cgroup pass returned.'
+            from recipe_diagnostics import write_json
+            from pathlib import Path
+            section = role_cpu.section()
+            section['origin_monotonic_s'] = bench_clock_started_s
+            write_json(Path(args.dir) / 'receive-role-cpu.json', section)
+        return None
 
     f = open(args.output, 'w') if args.output else None
     cpu = 0
@@ -771,7 +806,9 @@ def bench(runtime, args):
     target_table_samples = []
     # The windows are durations; the tracker counts them in samples at the
     # cadence the monitor is asked for (measurement plan 7b).
-    tracker = runtime.ConvergenceTracker(sample_interval_s=runtime.MONITOR_POLL_INTERVAL_S)
+    tracker = runtime.ConvergenceTracker(
+        sample_interval_s=runtime.MONITOR_POLL_INTERVAL_S,
+        zero_route_startup_seconds=getattr(args, 'zero_route_startup_seconds', 15))
     while True:
         # Checked once per queue message, which is at least once a second: a
         # cell that would otherwise run for tens of minutes past a SIGTERM
@@ -1074,7 +1111,7 @@ def bench(runtime, args):
                     target_table_witness_rule=tracker.witness_rule(),
                     convergence_rule=tracker.convergence_rule())
 
-            if elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
+            if not getattr(args,'defer_graphs',False) and elapsed.seconds % 120 == 0 and elapsed.seconds > 1:
                 # The same stem the final graphs use. Built from args.target
                 # alone, these dropped the label, the version, the filter and
                 # the repetition, so a long run's in-progress graphs were
@@ -1134,6 +1171,8 @@ def finish_bench(runtime, args, output_stats, bench_stats, bench_start, target, 
 
     bench_stop = runtime.time.time()
     output_stats['total_time'] = bench_stop - bench_start
+    phase=getattr(runtime,'native_phase',lambda *a,**kw:None)
+    phase('measurement_finished',measurement_start_unix=bench_start,measurement_stop_unix=bench_stop)
     m.stop_monitoring = True
     target.stop_monitoring = True
     for t in testers:
@@ -1287,6 +1326,14 @@ def finish_bench(runtime, args, output_stats, bench_stats, bench_start, target, 
     # it would be better to clean things up, but often I want to to investigate where things ended up
     # remove_old_containers()
     # remove_target_containers()
-    runtime.create_bench_graphs(bench_stats, prefix=bench_prefix, results_dir=args.results_dir)
+    phase('recording_finished')
+    if getattr(args,'defer_graphs',False):
+        import deferred_graphs
+        deferred_graphs.save(runtime,bench_stats,bench_prefix,args.results_dir)
+        phase('graphs_deferred')
+    else:
+        phase('render_started')
+        runtime.create_bench_graphs(bench_stats, prefix=bench_prefix, results_dir=args.results_dir)
+        phase('render_finished')
     runtime.write_provenance(args, provenance, bench_prefix)
     return o_s

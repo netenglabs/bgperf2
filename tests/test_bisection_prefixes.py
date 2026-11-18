@@ -135,12 +135,12 @@ def test_prefix_capture_cap_refuses_before_git_or_preparation_mutation(tmp_path,
     def forbidden(*args, **kwargs):
         pytest.fail('Git or source preparation started before prefix bounds refusal')
     monkeypatch.setattr(ranges, 'LocalGit', forbidden)
-    with pytest.raises(recipes.ContractError, match='100000'):
+    with pytest.raises(recipes.ContractError, match='at most 1'):
         ranges.prepare_range(recipe, source_root=tmp_path / 'absent', good='1' * 40, bad='2' * 40,
             toolchain_image=TOOLCHAIN, runtime_image=RUNTIME, output_dir=tmp_path / 'prepared',
             predicate='prefix_assertions')
     assert not (tmp_path / 'prepared').exists()
-    with pytest.raises(recipes.ContractError, match='100000'):
+    with pytest.raises(recipes.ContractError, match='at most 1'):
         bisect.make_plan(recipe, [], [], predicate='prefix_assertions', max_trials=8)
 
 

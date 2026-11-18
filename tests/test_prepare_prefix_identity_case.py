@@ -12,7 +12,22 @@ from scripts import prepare_prefix_identity_case as case
 
 
 @pytest.fixture
-def packet(tmp_path, monkeypatch):
+def legacy_source(tmp_path, monkeypatch):
+    import sink
+    source = tmp_path/'inert-legacy-source'
+    source.mkdir()
+    fixtures = Path(__file__).parent/'fixtures/prefix-case-legacy-locks'
+    for name in ('go.mod', 'go.sum'):
+        (source/name).write_bytes((fixtures/name).read_bytes())
+    (source/'main.go').write_text('package main\n// Inert archive fixture, not an observer or historical source copy.\nconst sinkVersion = "0.2.0"\n')
+    archive = case.source_archive
+    monkeypatch.setattr(case, 'source_archive', lambda: archive(source))
+    monkeypatch.setattr(sink, 'SINK_SOURCE_DIR', source)
+    return source
+
+
+@pytest.fixture
+def packet(tmp_path, monkeypatch, legacy_source):
     cache = tmp_path/'cache'
     cache.mkdir()
     for module, version in case.MODULES:
@@ -52,10 +67,15 @@ def test_prepare_verifies_context_and_exact_bounded_commands_without_runtime(pac
     assert before == after
 
 
-def test_source_archive_matches_the_existing_sink_identity():
+def test_legacy_archive_encoding_matches_sink_archive_contract(legacy_source):
     import sink
     assert case.source_archive() == sink.sink_source_tar()
     assert case.sha(case.source_archive())[:12] == sink.sink_source_hash()
+
+
+def test_current_new_sink_cannot_silently_relabel_the_historical_case():
+    with pytest.raises(recipes.ContractError, match='reviewed sink 0.2.0'):
+        case.source_archive()
 
 
 def test_retained_legacy_build_stages_are_labeled_before_other_instructions():

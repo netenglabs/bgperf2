@@ -187,6 +187,44 @@ def test_partial_or_malformed_health_is_unmeasured(tmp_path, recipe, change):
     assert assertion['observed'] is None
 
 
+@pytest.mark.parametrize('pause', [{'Paused': True}, {'Status': 'paused'}])
+def test_controller_paused_role_never_attests_healthy(tmp_path, recipe, pause):
+    files = evidence(recipe)
+    files['diagnostics.json']['containers'][0]['state'].update(pause)
+    result = evaluate(tmp_path, recipe, files)
+    assert by_capability(result)['observed_role_health']['status'] == 'unmeasured'
+
+
+@pytest.mark.parametrize('change, expected', [
+    ('complete', 'passed'), ('missing', 'unmeasured'), ('duplicate_id', 'unmeasured'),
+    ('stopped', 'failed'),
+])
+def test_mrt_health_requires_one_distinct_snapshot_per_peer(tmp_path, change, expected):
+    from mrt_controls import control
+    from recipe_mrt import bind
+    from test_recipes import source, export
+    batch, test = source(tmp_path, neighbors=[2], prefixes=[100])
+    recipe = export(batch, test)
+    _, spec = control('plain', '/source.mrt', target_asn=64515, observer_asn=64516, source_asn=64520)
+    spec['peers'] = [dict(index=i, asn=64520+i, prefixes=recipe['resolved']['prefixes_per_peer'])
+                     for i in range(recipe['resolved']['neighbors'])]
+    mrt = bind(recipe, spec)
+    files = evidence(mrt)
+    roles = ['target', 'observer'] + ['generator'] * len(spec['peers'])
+    containers = [{'role': role, 'id': f'{index:064x}',
+                   'state': {'Running': True, 'OOMKilled': False, 'Error': ''}}
+                  for index, role in enumerate(roles)]
+    if change == 'missing':
+        containers.pop()
+    elif change == 'duplicate_id':
+        containers[-1]['id'] = containers[-2]['id']
+    elif change == 'stopped':
+        containers[-1]['state']['Running'] = False
+    files['diagnostics.json']['containers'] = containers
+    result = evaluate(tmp_path, mrt, files)
+    assert by_capability(result)['observed_role_health']['status'] == expected
+
+
 @pytest.mark.parametrize('change', ['duplicate', 'negative', 'bool_counter', 'inverted', 'no_origin', 'completion_without_start'])
 def test_bad_event_witnesses_are_retained_but_not_interpreted(tmp_path, recipe, change):
     files = evidence(recipe)
@@ -253,3 +291,48 @@ def test_single_final_engine_event_artifact_can_supply_fallback(tmp_path, recipe
     files['synthetic.events.json'] = files.pop('raw-events.json')
     files['synthetic.events.json'].update(schema='bgperf2/measurement-events/v1alpha1', status='converged')
     assert evaluate(tmp_path, recipe, files)['outcome'] == 'passed'
+
+
+
+def test_assertion_recipe_loader_accepts_large_valid_mrt_only(tmp_path, recipe):
+    from recipe_assertions import load_bound_recipe
+    from mrt_controls import control
+    from recipe_mrt import bind
+    _, spec = control('plain', '/source.mrt', target_asn=64515, observer_asn=64516, source_asn=64520)
+    # Match the existing topology without allocating millions of test prefixes.
+    spec['peers'] = [dict(index=i, asn=64520+i, prefixes=recipe['resolved']['prefixes_per_peer'])
+                     for i in range(recipe['resolved']['neighbors'])]
+    mrt = bind(recipe, spec)
+    path = tmp_path/'recipe.json'
+    path.write_text(json.dumps(mrt)+' '* (8*1024**2))
+    assert load_bound_recipe(tmp_path) == mrt
+    path.write_text(json.dumps(recipe)+' '* (8*1024**2))
+    with pytest.raises(recipes.ContractError, match='Non-MRT'): load_bound_recipe(tmp_path)
+
+
+def test_assertion_recipe_loader_keeps_path_and_absolute_byte_bounds(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    import io
+    import recipe_assertions
+    path = tmp_path/'recipe.json'; path.symlink_to(tmp_path/'outside')
+    with pytest.raises(recipes.ContractError): recipe_assertions.load_bound_recipe(tmp_path)
+    class Oversized(io.BytesIO):
+        def read(self, size):
+            assert size == 128*1024**2+1
+            return b' ' * size
+    @contextmanager
+    def source(*args): yield Oversized()
+    monkeypatch.setattr(recipe_assertions, '_regular_file', source)
+    with pytest.raises(recipes.ContractError, match='128 MiB'): recipe_assertions.load_bound_recipe(tmp_path)
+
+
+def test_assertions_cli_uses_scoped_packaged_recipe_loader(tmp_path, recipe, monkeypatch, capsys):
+    import recipe_assertions, recipe_results
+    path = tmp_path/'assertions.json'; path.write_text(json.dumps(default_assertions(recipe)))
+    called = []
+    monkeypatch.setattr(recipe_results, 'verify_result_package', lambda p: {})
+    def load(root): called.append(root); return recipe
+    monkeypatch.setattr(recipe_assertions, 'load_bound_recipe', load)
+    monkeypatch.setattr(recipe_assertions, 'evaluate_assertions', lambda *a: {'outcome': 'passed'})
+    assert recipes.main(['assertions-check', str(path), '--result', str(tmp_path/'result.json')]) == 0
+    assert called == [tmp_path]

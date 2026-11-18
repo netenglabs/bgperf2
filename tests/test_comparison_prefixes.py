@@ -108,12 +108,12 @@ def test_capture_limit_refuses_before_probes_or_destination_changes(tmp_path, re
     monkeypatch.setattr(recipe_prefixes, 'MAX_PREFIXES', 1)
     def forbidden(*args, **kwargs):
         pytest.fail('Unsupported capture reached runtime or prerequisite checks')
-    with pytest.raises(recipes.ContractError, match='100000'):
+    with pytest.raises(recipes.ContractError, match='at most 1'):
         plan_for(recipe, observer_prefixes=True)
-    with pytest.raises(recipes.ContractError, match='100000'):
+    with pytest.raises(recipes.ContractError, match='at most 1'):
         run_comparison(plan, workdir=tmp_path / 'work', results_dir=tmp_path / 'results',
                        run=forbidden, check=forbidden)
-    with pytest.raises(recipes.ContractError, match='100000'):
+    with pytest.raises(recipes.ContractError, match='at most 1'):
         staged.start_session(plan, workdir=tmp_path / 'work', results_dir=tmp_path / 'results', check=forbidden)
     assert list(tmp_path.iterdir()) == []
 

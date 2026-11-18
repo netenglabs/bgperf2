@@ -137,7 +137,12 @@ class ConvergenceTracker(object):
     CONVERGED = 'converged'
     FAILED = 'failed'
 
-    def __init__(self, sample_interval_s=DEFAULT_SAMPLE_INTERVAL_S):
+    def __init__(self, sample_interval_s=DEFAULT_SAMPLE_INTERVAL_S, *,
+                 zero_route_startup_seconds=NO_PROGRESS_DEADLINE_SECONDS):
+        if (type(zero_route_startup_seconds) is not int
+                or not 15 <= zero_route_startup_seconds <= 120):
+            raise ValueError("Zero-route startup allowance must be an integer from 15 to 120 seconds")
+        self.zero_route_startup_seconds = zero_route_startup_seconds
         # Every window, as a sample count at the cadence the monitor is asked
         # for. See the note at the top of this module for why it is the
         # cadence asked for and not the gaps achieved.
@@ -596,6 +601,10 @@ class ConvergenceTracker(object):
                           or self.offering_complete_samples
                           >= self.assurance_samples)
         if ((self.neighbors_checkpoint or self.recved_checkpoint)
+                # Target receipt can complete while export is still buffered.
+                # Stability at zero is no observer delivery, even when the
+                # target checkpoint opened this branch before no-progress.
+                and recved > 0
                 and self.last_recved_count >= self.assurance_samples
                 and offering_holds
                 and (dropped <= DROP_FRACTION
@@ -611,9 +620,8 @@ class ConvergenceTracker(object):
                 self.converged_without_neighbors_checkpoint = True
             return self.CONVERGED
 
-        if (elapsed_seconds > NO_PROGRESS_DEADLINE_SECONDS
+        if (elapsed_seconds > self.zero_route_startup_seconds
                 and not self.recved_checkpoint
-                and self.last_recved_count == 0
                 and recved == 0):
             # Nothing has arrived at all; trip the stuck check immediately
             # rather than waiting out STUCK_SAMPLES.

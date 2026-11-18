@@ -105,6 +105,241 @@ def test_optional_diagnostics_none_never_probes(tmp_path):
     assert result['memory']['target']['peak_bytes'] is None
 
 
+def zebra_fixture(*, drift=False, truncated=False, exec_error=False):
+    baseline, _ = command_fixture()
+    calls = []
+    inspections = 0
+    def command(argv, **kwargs):
+        nonlocal inspections
+        calls.append(argv)
+        if 'exec' in argv:
+            if exec_error:
+                raise preflight.ProbeError('native CLI unavailable')
+            return {'text': '{"native":true}', 'truncated': truncated, 'captured_bytes': 15}
+        result = baseline(argv, **kwargs)
+        if 'inspect' in argv:
+            inspections += 1
+            value = json.loads(result['text'])
+            value[0]['Name'] = '/attempt_bgperf_zebra_rs_target'
+            if drift and inspections > 1:
+                value[0]['Config']['Labels'][recipe_run.OWNER_LABEL] = 'foreign'
+            result['text'] = json.dumps(value)
+        return result
+    return command, calls
+
+
+def test_zebra_native_queries_are_fixed_bounded_and_after_baseline(tmp_path):
+    import zebra_rs
+    command, calls = zebra_fixture()
+    result = diagnostics.collect_diagnostics(tmp_path, 'attempt', {}, command=command,
+        memory_reader=lambda pid: {'ending_bytes': 50}, target_adapter='zebra-rs')
+    assert result['status'] == 'collected'
+    item = result['containers'][0]
+    assert result['memory']['target']['ending_bytes'] == 50
+    assert 'post-worker' in item['native']['scope']
+    executions = [argv for argv in calls if 'exec' in argv]
+    assert len(executions) == len(diagnostics.ZEBRA_NATIVE_COMMANDS) == 6
+    first_exec = next(i for i, argv in enumerate(calls) if 'exec' in argv)
+    assert any('logs' in argv for argv in calls[:first_exec])
+    for argv in executions:
+        index = argv.index('exec')
+        assert argv[index + 1:index + 5] == [CID, zebra_rs.ZebraRS.WAIT_BINARY, '--kill-after=0.5', '2']
+        assert 'sh' not in argv
+        if '/usr/bin/vtyctl' in argv:
+            assert zebra_rs.ZebraRSTarget.VTY in argv
+    for query in item['native']['queries']:
+        assert query['status'] == 'captured'
+        assert (tmp_path / query['path']).read_text() == '{"native":true}'
+    assert sum('inspect' in argv for argv in calls) == 7
+
+
+def test_zebra_native_ownership_drift_never_executes(tmp_path):
+    command, calls = zebra_fixture(drift=True)
+    result = diagnostics.collect_diagnostics(tmp_path, 'attempt', {}, command=command,
+        memory_reader=lambda pid: {'ending_bytes': 50}, target_adapter='zebra-rs')
+    assert result['status'] == 'partial'
+    assert not any('exec' in argv for argv in calls)
+    assert result['memory']['target']['ending_bytes'] == 50
+    assert 'ownership' in result['errors'][0]
+
+
+@pytest.mark.parametrize('truncated,exec_error', [(True, False), (False, True)])
+def test_zebra_native_partial_capture_preserves_baseline(tmp_path, truncated, exec_error):
+    command, _ = zebra_fixture(truncated=truncated, exec_error=exec_error)
+    result = diagnostics.collect_diagnostics(tmp_path, 'attempt', {}, command=command,
+        memory_reader=lambda pid: {'ending_bytes': 50}, target_adapter='zebra-rs')
+    assert result['status'] == 'partial'
+    assert result['containers'][0]['log']['path']
+    query = result['containers'][0]['native']['queries'][0]
+    assert query['status'] == ('unavailable' if exec_error else 'truncated')
+    assert len(result['containers'][0]['native']['queries']) == 6
+    assert result['memory']['target']['ending_bytes'] == 50
+
+
+def test_zebra_name_alone_does_not_enable_native_exec(tmp_path):
+    command, calls = zebra_fixture()
+    diagnostics.collect_diagnostics(tmp_path, 'attempt', {}, command=command,
+        memory_reader=lambda pid: {}, target_adapter='bird')
+    assert not any('exec' in argv for argv in calls)
+
+
+def test_zebra_native_none_never_probes(tmp_path):
+    result = diagnostics.collect_diagnostics(tmp_path, 'attempt', {}, mode='none', target_adapter='zebra-rs',
+        command=lambda *a, **k: pytest.fail('probed'))
+    assert result['status'] == 'disabled'
+
+
+def test_zebra_native_uses_shared_collection_deadline(tmp_path, monkeypatch):
+    command, calls = zebra_fixture()
+    now = [0.0]
+    monkeypatch.setattr(diagnostics.time, 'monotonic', lambda: now[0])
+    def expiring(argv, **kwargs):
+        result = command(argv, **kwargs)
+        if 'logs' in argv:
+            now[0] = diagnostics.COLLECTION_SECONDS
+        return result
+    result = diagnostics.collect_diagnostics(tmp_path, 'attempt', {}, command=expiring,
+        memory_reader=lambda pid: {'ending_bytes': 50}, target_adapter='zebra-rs')
+    assert result['status'] == 'partial'
+    assert not any('exec' in argv for argv in calls)
+    assert 'budget expired' in result['errors'][0]
+    assert result['containers'][0]['log']['path']
+
+
+def test_zebra_native_waits_until_every_role_baseline_is_collected(tmp_path):
+    command, calls = zebra_fixture()
+    second = 'b' * 64
+    def multiple(argv, **kwargs):
+        if 'ps' in argv:
+            return {'text': CID + '\n' + second, 'truncated': False, 'captured_bytes': 129}
+        result = command(argv, **kwargs)
+        if 'inspect' in argv and second in argv:
+            value = json.loads(result['text'])
+            value[0].update(Id=second, Name='/attempt_bgperf_monitor')
+            result['text'] = json.dumps(value)
+        return result
+    result = diagnostics.collect_diagnostics(tmp_path, 'attempt', {}, command=multiple,
+        memory_reader=lambda pid: {}, target_adapter='zebra-rs')
+    assert result['status'] == 'collected'
+    first_exec = next(i for i, argv in enumerate(calls) if 'exec' in argv)
+    assert any('logs' in argv and second in argv for argv in calls[:first_exec])
+
+
+def test_zebra_nonzero_native_retains_output_and_later_kernel_queries(tmp_path):
+    command, calls = zebra_fixture()
+    def failed_version(argv, **kwargs):
+        result = command(argv, **kwargs)
+        if 'exec' in argv:
+            assert kwargs['allow_nonzero'] is True
+            if argv[-1] == 'show version':
+                result.update(text='native timeout detail', exit_code=124)
+        return result
+    result = diagnostics.collect_diagnostics(tmp_path, 'attempt', {}, command=failed_version,
+        memory_reader=lambda pid: {}, target_adapter='zebra-rs')
+    queries = result['containers'][0]['native']['queries']
+    assert result['status'] == 'partial'
+    assert queries[0]['status'] == 'failed' and queries[0]['exit_code'] == 124
+    assert (tmp_path / queries[0]['path']).read_text() == 'native timeout detail'
+    assert queries[-1]['status'] == 'captured'
+    assert sum('exec' in argv for argv in calls) == 6
+
+
+def test_bounded_probe_can_retain_nonzero_native_output():
+    import os
+    import sys
+    result = diagnostics.bounded_probe(
+        [sys.executable, '-c', 'import sys; print("failed native output"); sys.exit(124)'],
+        env=os.environ.copy(), allow_nonzero=True)
+    assert result['exit_code'] == 124
+    assert result['text'] == 'failed native output\n'
+
+
+@pytest.mark.parametrize('adapter,suffix', [
+    ('zebra-rs', '_bgperf_zebra_rs_target'),
+    ('bio-routing', '_bgperf_bio_routing_target'),
+    ('maghemite', '_bgperf_maghemite_target'),
+])
+def test_controller_paused_native_queries_are_unavailable_not_harness_failures(tmp_path, adapter, suffix):
+    baseline, calls = zebra_fixture()
+    def command(argv, **kwargs):
+        assert 'exec' not in argv, 'Paused target must not receive native exec queries'
+        result = baseline(argv, **kwargs)
+        if 'inspect' in argv:
+            inspected = json.loads(result['text'])
+            inspected[0]['Name'] = '/attempt' + suffix
+            inspected[0]['State'].update(Paused=True, Status='paused')
+            result['text'] = json.dumps(inspected)
+        return result
+    result = diagnostics.collect_diagnostics(tmp_path, 'attempt', {}, command=command,
+        memory_reader=lambda pid: {'ending_bytes': 123}, target_adapter=adapter)
+    assert result['status'] == 'collected' and result['errors'] == []
+    target = result['containers'][0]
+    assert target['state']['Paused'] is True and target['memory']['ending_bytes'] == 123
+    assert target['log']['path']
+    assert all(query['status'] == 'unavailable' and query['path'] is None
+               and 'paused' in query['reason'] for query in target['native']['queries'])
+
+
+@pytest.mark.parametrize('drift', [False, True])
+def test_bio_native_metrics_reuse_owned_deadline_and_capture_contract(tmp_path, drift):
+    from bio_routing import BioRouting
+    baseline, calls = zebra_fixture(drift=drift)
+    def command(argv, **kwargs):
+        result = baseline(argv, **kwargs)
+        if 'inspect' in argv:
+            value = json.loads(result['text'])
+            value[0]['Name'] = '/attempt_bgperf_bio_routing_target'
+            result['text'] = json.dumps(value)
+        return result
+    result = diagnostics.collect_diagnostics(tmp_path, 'attempt', {}, command=command,
+        memory_reader=lambda pid: {'ending_bytes': 50}, target_adapter='bio-routing')
+    queries = result['containers'][0]['native']['queries']
+    assert len(queries) == 1
+    assert result['capabilities']['target_neighbor_prefix_counts'] is False
+    assert 'unavailable' in result['capabilities']['target_neighbor_prefix_counts_reason']
+    if drift:
+        assert result['status'] == 'partial'
+        assert not any('exec' in argv for argv in calls)
+    else:
+        assert result['status'] == 'collected'
+        argv, = [argv for argv in calls if 'exec' in argv]
+        index = argv.index('exec')
+        assert argv[index + 1:index + 3] == [CID, BioRouting.HTTP_BINARY]
+        assert argv[argv.index('--max-time') + 1] == '2'
+        assert argv[argv.index('--max-filesize') + 1] == '8388608'
+        assert queries[0]['status'] == 'captured'
+        assert (tmp_path / queries[0]['path']).read_text() == '{"native":true}'
+    assert result['memory']['target']['ending_bytes'] == 50
+
+
+@pytest.mark.parametrize('drift', [False, True])
+def test_maghemite_native_samples_use_versioned_owned_read_only_api(tmp_path, drift):
+    from maghemite import Maghemite, MaghemiteTarget
+    baseline, calls = zebra_fixture(drift=drift)
+    def command(argv, **kwargs):
+        result = baseline(argv, **kwargs)
+        if 'inspect' in argv:
+            value = json.loads(result['text'])
+            value[0]['Name'] = '/attempt_bgperf_maghemite_target'
+            result['text'] = json.dumps(value)
+        return result
+    result = diagnostics.collect_diagnostics(tmp_path, 'attempt', {}, command=command,
+        memory_reader=lambda pid: {}, target_adapter='maghemite')
+    assert result['capabilities']['target_neighbor_prefix_counts'] is False
+    assert 'default-ASN 1000' in result['containers'][0]['native']['scope']
+    executions = [argv for argv in calls if 'exec' in argv]
+    if drift:
+        assert result['status'] == 'partial' and not executions
+    else:
+        assert result['status'] == 'collected' and len(executions) == 2
+        for argv in executions:
+            assert argv[argv.index('exec') + 2] == Maghemite.HTTP_BINARY
+            assert 'api-version: ' + MaghemiteTarget.API_VERSION in argv
+            assert argv[argv.index('--max-time') + 1] == '2'
+            assert argv[-1].startswith(MaghemiteTarget.API)
+            assert '-X' not in argv and '--data-binary' not in argv
+
+
 def live_client(present=True, usage=100):
     return SimpleNamespace(stats=lambda *a, **k: {'memory_stats': {'usage': usage}},
         top=lambda *a, **k: {'Titles': ['PID', 'COMMAND'],

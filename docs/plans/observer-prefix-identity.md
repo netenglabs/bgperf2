@@ -57,7 +57,44 @@ remain separately approved validation work.
   the actual implementation commit. No runtime case executed in that offline
   implementation checkpoint.
 
-## Remaining validation
+## Larger synthetic capture extension — selected 2026-11-08
+
+Extend the same exhaustive IPv4 list snapshot and host set-difference oracle
+to at most five million held/accepted prefixes. Do not replace identity with
+count agreement, a truncated list or a sampled oracle. Preserve the current
+100,000-prefix/4-MiB/three-second client bounds for smaller recipes; larger
+selected recipes may use an explicit bounded 128-MiB/30-second post-measurement
+transport. Keep the schema and existing clock/measurement definitions unchanged.
+The sink must still copy one complete table atomically and release its UPDATE
+lock before sorting, formatting and transport. Extend its bounded write window
+for larger snapshots only. New capacity is not demonstrated native readiness:
+review, required Python/Go checks, an immutable rebuilt sink and native exact-set
+admission precede larger experiments. Original sink images and small-case
+evidence remain retained.
+Sink 0.3.0 exposes the explicit larger limit while retaining the 100,000 default.
+The pretty-printed large capture envelope alone may use a bounded 256-MiB
+offline inspection; this does not raise ordinary metadata limits.
+
+Before larger fanout execution, also close the interruption gap in the public
+controller: killing its host worker stops sampling, but owned container daemons
+and generators otherwise continue allocating while diagnostics run. On an
+interrupted/timed-out worker, promptly quiesce only re-inspected attempt-labelled
+container IDs, prioritizing the target, before slower collection. Retain explicit
+stop actions/errors and distinguish a controller-planned stop from a native
+daemon crash. Do not remove resources before preserving their available logs;
+normal completion/capture and final owned cleanup retain their current owners.
+Unobtainable post-stop gauges/queries must remain unavailable, never zero or
+successful correctness evidence. Source changes and meaningful regressions
+require independent review before commit and native admission.
+The selected mechanism pauses owned containers, target first, after rechecking
+immutable IDs and attempt labels, and retains `owned-quiescence.json`. Normal
+completion stays unchanged; interruption/timeout quiescence precedes collection.
+Paused role state is explicit and cannot attest healthy running roles. The
+existing final owner-checked cleanup removes the paused resources. A separate
+network-isolated native preparation probe confirmed paused-state reporting and
+forced removal without BGP traffic; its original receipt remains retained.
+
+## Earlier remaining validation
 
 The [2026-11-03 real-BIRD case](observer-prefix-runtime-validation.md#successful-existing-image-worker--2026-11-03)
 now validates this specific runtime path: one 12.088-second worker, all six

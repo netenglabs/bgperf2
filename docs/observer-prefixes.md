@@ -9,10 +9,14 @@ delivery history or identity at convergence confirmation.
 ## Select capture and assertion separately
 
 Use the existing supported disjoint synthetic IPv4 BIRD/BIRD/sink recipe with
-at most 100,000 expected prefixes. The observer must be an explicitly selected
+at most 5,000,000 expected prefixes. The observer must be an explicitly selected
 immutable image built from sink 0.2.0 or later with snapshot support. Existing
 0.1.0 images do not support this flag; the runner never rebuilds, pulls or
 substitutes them. Ordinary runs without the flag still support existing images.
+Recipes above 100,000 prefixes require a separately built sink 0.3.0 or later
+and select its explicit `-snapshot-max-prefixes 5000000` capacity. Smaller
+recipes keep the original sink arguments and resource bounds, including
+compatibility with the retained 0.2.0 images.
 Export the recipe at the clean engine revision and pin the actual new observer
 image before authorizing execution. The fixture recipe's image IDs are examples.
 
@@ -73,10 +77,16 @@ Session identity, UPDATE count, accepted count and monotonic timestamp describe
 the same state. Rejected-but-held entries are excluded from the accepted set.
 Session loss invalidates the exposed table; an inactive session is unavailable.
 
-Both held and accepted tables are limited to 100,000 entries for capture. A
-larger table returns unavailable without scanning/copying it. The server handles
-one response at a time with a two-second write deadline; the client has one
-three-second total request budget and a 4 MiB response limit. Socket failures,
+Both held and accepted tables are limited to the selected capture capacity:
+100,000 by default, up to 5,000,000 only with the explicit larger limit. A
+table exceeding that bound returns unavailable without scanning/copying it.
+The server handles one response at a time. Small capture retains its two-second
+write deadline, three-second total client request and 4 MiB response limit.
+Larger selected recipes use a 30-second server/client budget and a 128 MiB
+transport limit. The full, pretty-printed large capture artifact alone may use
+a 256 MiB offline inspection bound; ordinary JSON artifacts retain 8 MiB.
+Every accepted prefix is retained and compared, including equal-count
+substitutions; no truncation, sampling or count-only fallback is used. Socket failures,
 partial replies and malformed evidence do not alter convergence or become a
 prefix mismatch. The worker retains an unavailable receipt; if the worker itself
 times out, its existing inconclusive/interruption semantics still apply.

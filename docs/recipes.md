@@ -26,12 +26,15 @@ remains satisfied; create the separate artifact directory before exporting.
 
 ## Export one cell
 
-The supported workload is synthetic IPv4 with a BIRD or `frr_c` target, BIRD
+The supported workload is synthetic IPv4 with a `bird`, `frr_c`, `openbgp`, `rustybgp`, `rustbgpd`, `holo`, `zebra-rs`, `bio-routing` or `maghemite` target, BIRD
 generator and sink observer, with disjoint prefixes and no policy filter or
-additional receivers. Scenario files, Mako, MRT, hooks, local build instructions,
+additional receivers. Scenario files, Mako, hooks, local build instructions,
 other adapters and workload extensions are refused. These limits keep downloaded
 recipes declarative and prevent unsupported fields from silently changing what
 runs.
+
+The opt-in [MRT recipe variant](mrt-recipes.md) binds a separate strict workload
+to this topology source; ordinary synthetic exports remain unchanged.
 
 The selected source target determines the adapter; role identities must match it.
 See the [FRR guide](frr-maintainer-workflow.md) for adapter-compatible images and
@@ -39,6 +42,11 @@ its modeled public CLI walkthrough. The [FRR source workflow](frr-source-workflo
 adds explicit local builds and correctness revision searches. FRR target threads
 and `target_crash` remain unsupported. BIRD defaults and existing
 recipe identities are unchanged.
+
+OpenBGPD and RustyBGP use supplied immutable images and their existing adapters.
+Their local-source builders, revision searches, target threads and crash
+witnesses are unsupported. See [supplied-daemon admission](plans/supplied-daemon-admission.md)
+for qualification scope; contract support alone does not establish a live result.
 
 An optional test-level `pin` uses the existing `bench` CPU layout syntax:
 
@@ -232,7 +240,7 @@ After the OS prerequisites, locked environment and selected exact images are
 available, use one clean checkout at the recipe's full engine revision. Running
 a recipe executes containers with the current user's Docker authority. Read the
 recipe, trust the selected images and choose an otherwise idle suitable Linux
-host before execution. Supported targets are BIRD and `frr_c`,
+host before execution. Supported targets are `bird`, `frr_c`, `openbgp`, `rustybgp`, `rustbgpd`, `holo`, `zebra-rs`, `bio-routing` and `maghemite`,
 with BIRD generators and sink observer.
 The public fixture's fake image pins cannot run.
 
@@ -301,6 +309,18 @@ successfully. Ctrl-C or SIGTERM during the
 worker yields `interrupted` (130 or 143). Cleanup failures yield `harness_failed`
 (exit 3) with details, retaining evidence. A hard kill, disk failure or power loss
 can prevent packaging or cleanup; there is no automatic retry or recovery claim.
+
+After a worker interruption or budget expiry, the controller pauses this
+attempt's labelled containers before slower diagnostics, prioritizing the
+target. It rechecks each full immutable ID and ownership label immediately
+before acting, records bounded actions/errors in `work/owned-quiescence.json`,
+and leaves removal to the existing final cleanup. This stops continued route
+allocation while preserving PID/cgroup/log evidence. A controller pause is
+explicit in diagnostic state and is not a native daemon crash or a healthy
+running-role witness. Post-stop native queries may be unavailable; they never
+become fabricated zero counts or successful correctness evidence. Normal
+completion is unchanged. Quiescence uncertainty remains a harness failure with
+its original pre-collection status retained where applicable.
 
 An existing engine stats row determines `completed` (0) or
 `experiment_failed` (4); a missing row is inconclusive and worker exceptions are
@@ -439,3 +459,35 @@ does not automatically erase a supported reproduction outcome.
 
 The recipe controller maps its bounded worker outcome to these statuses. Legacy
 `bench` and `batch` exit semantics remain unchanged.
+
+
+Explicit `run --zero-route-startup-seconds N` selects an integer allowance from
+15 through 120 seconds for an observer still receiving zero routes. The default
+remains 15. The selection is retained in packaged `work/diagnostic-options.json`;
+it changes no checkpoint, positive-delivery, exact-set or health requirement.
+The clock begins at the existing observation/replay boundary, after any quiet
+gate. The controller deadline still bounds setup, replay and collection.
+
+## Small Maghemite receive API qualification
+
+For a separately selected synthetic Maghemite case of at most two peers and
+sixteen prefixes, `run --maghemite-receive` adds bounded post-worker imported
+and selected RIB identity receipts. It requires basic diagnostics and keeps
+transit outcomes/assertions unchanged. See the engine-owned
+[readiness contract](plans/maghemite-receive-readiness.md#small-post-worker-qualification-implementation)
+for limits, evidence and timing exclusions. This opt-in does not enable MRT
+receive testing or replace a failed transit result with a receive timing.
+
+
+## Separate Maghemite receive loading
+
+`run --maghemite-loading` selects a separate synthetic receive contract (one or
+two peers, at most 4,096 total prefixes, no filter, basic diagnostics). It retains
+source-bound generator completion and bounded exact imported-RIB observations.
+The independent `work/maghemite-loading.json` receipt reports observed API table
+readiness only after two consecutive exact reads. The generic result remains
+inconclusive, with no transit row or successful transit assertions. This option
+is incompatible with `--maghemite-receive`, `--observer-prefixes` and
+`--pre-replay-gate`. See the [completion and timing contract](plans/maghemite-receive-readiness.md#separate-receive-loading-implementation)
+for the fixed loading, response and polling bounds, resource observations and
+native qualification gates. It does not enable MRT receive execution.

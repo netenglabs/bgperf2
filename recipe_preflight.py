@@ -403,6 +403,14 @@ def check_recipe(document, *, workdir, results_dir, target=None):
         _add(report, 'destinations.artifact_store', 'refused', str(exc))
         return report
     env, host, bootstrap_ok = runtime_prerequisites(report, document)
+    from recipe_mrt import selected, verify_input
+    if bootstrap_ok and selected(document):
+        try:
+            receipt = verify_input(document)
+            _add(report, 'mrt.input', 'pass', 'Complete bound MRT input identity verified.', receipt=receipt)
+        except (OSError, ValueError, RuntimeError) as exc:
+            _add(report, 'mrt.input', 'refused', str(exc))
+            return report
     for role, declaration in roles.items():
         if bootstrap_ok:
             _image(report, role, declaration['image'], host, env)

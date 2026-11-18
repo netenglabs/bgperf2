@@ -40,6 +40,8 @@ def validate_comparison_plan(plan):
                   optional=('observer_prefixes',), where='comparison plan')
     recipes._choice(plan['schema'], (PLAN_SCHEMA,), 'comparison plan.schema')
     recipes.validate_recipe(plan['recipe'])
+    if plan['recipe']['schema'] != recipes.RECIPE_SCHEMA:
+        raise recipes.ContractError('This workflow currently supports synthetic recipes only')
     if 'observer_prefixes' in plan and plan['observer_prefixes'] is not True:
         raise recipes.ContractError('Comparison prefix capture selection must be boolean true')
     from recipe_prefixes import validate_selection
@@ -85,6 +87,8 @@ def make_comparison_plan(recipe, *, baseline_target, candidate_target, repetitio
     elif seed is not None:
         raise recipes.ContractError('seed applies only to shuffle order')
     recipes.validate_recipe(recipe)
+    if recipe['schema'] != recipes.RECIPE_SCHEMA:
+        raise recipes.ContractError('This workflow currently supports synthetic recipes only')
     from recipe_prefixes import validate_selection
     validate_selection(recipe, observer_prefixes)
     from recipe_assertions import default_assertions

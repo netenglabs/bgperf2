@@ -42,7 +42,7 @@ _REVISION = re.compile(r'[0-9a-f]{40}\Z')
 _IMAGE = re.compile(r'(?:sha256:[0-9a-f]{64}|[a-zA-Z0-9][a-zA-Z0-9._:/-]*@sha256:[0-9a-f]{64})\Z')
 _KEY = re.compile(r'[0-9a-f]{16}\Z')
 _TEST_REQUIRED = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
-TARGET_ADAPTERS = ('bird', 'frr_c')
+TARGET_ADAPTERS = ('bird', 'frr_c', 'openbgp', 'rustybgp', 'rustbgpd', 'holo', 'zebra-rs', 'bio-routing', 'maghemite')
 _TEST_OPTIONAL = ('prefix_scope', 'repetitions', 'order', 'seed', 'monitor', 'pin')
 _TARGET_KEYS = ('name', 'tester_type', 'version', 'image', 'label', 'threads')
 
@@ -232,7 +232,7 @@ def _source_tests(text):
             if target.get('threads') is not None:
                 _integer(target['threads'], f'{tw}.threads', 1)
                 if target['name'] != 'bird':
-                    raise ContractError(f'{tw}.threads: FRR target thread controls are unsupported')
+                    raise ContractError(f'{tw}.threads: target thread controls are supported only for BIRD')
             expanded = expand_target_versions([target])[0]
             run_name = expanded.get('label') or (expanded['name'] + ' ' + expanded['version']
                                                 if expanded.get('version') else expanded['name'])
@@ -295,14 +295,21 @@ def _roles(roles, target_adapter='bird'):
                'an immutable image ID (sha256:<64 hex>) or repository@sha256:<64 hex>')
 
 
+def require_crash_witness(adapter, expected_outcome):
+    if adapter != 'bird' and expected_outcome == 'target_crash':
+        label = {'frr_c': 'FRR', 'openbgp': 'OpenBGPD', 'rustybgp': 'RustyBGP',
+                 'rustbgpd': 'rustbgpd', 'holo': 'Holo', 'zebra-rs': 'zebra-rs',
+                 'bio-routing': 'Bio-Routing', 'maghemite': 'Maghemite'}[adapter]
+        raise ContractError(f'{label} target_crash reproduction is unsupported; use observable functional assertions')
+
+
 def _recipe(text, test_name, cell_key, engine_revision, roles, question, expected_outcome):
     _match(engine_revision, _REVISION, 'engine.revision', 'a full 40-character lowercase Git revision')
     _text(question, 'reproduction.question')
     _choice(expected_outcome, EXPECTED_OUTCOMES, 'reproduction.expected_outcome')
     test, cell, raw_target, resolved = _select(text, test_name, cell_key)
     _roles(roles, resolved['target']['name'])
-    if resolved['target']['name'] == 'frr_c' and expected_outcome == 'target_crash':
-        raise ContractError('FRR target_crash reproduction is unsupported; use observable functional assertions')
+    require_crash_witness(resolved['target']['name'], expected_outcome)
     if cell['target'].get('image') is not None:
         _same(roles['target']['image'], cell['target']['image'], 'roles.target.image')
     return {
@@ -333,6 +340,9 @@ def export_recipe(batch_path, test_name, cell_key, *, engine_revision, roles, qu
 
 def validate_recipe(document):
     """Re-resolve embedded source and verify the complete strict envelope."""
+    from recipe_mrt import selected, validate
+    if selected(document):
+        return validate(document)
     _keys(document, ('schema', 'engine', 'source', 'selection', 'legacy', 'resolved',
                      'roles', 'inputs', 'seeds', 'resources', 'completion', 'reproduction'))
     _choice(document['schema'], (RECIPE_SCHEMA,), 'schema')
@@ -454,6 +464,7 @@ def main(argv=None):
         export.add_argument('--' + flag, required=True)
     export.add_argument('--expected-outcome', choices=EXPECTED_OUTCOMES,
                         default='experiment_completed')
+    export.add_argument('--mrt-spec', help='bind a strict MRT workload to the selected topology cell')
     export.add_argument('-o', '--output')
     for name in ('validate', 'inspect', 'result-validate', 'result-verify', 'plan', 'check',
                  'prepare', 'run', 'target-image', 'target-validate', 'target-source-plan',
@@ -472,9 +483,17 @@ def main(argv=None):
             command.add_argument('--results-dir', required=True)
             command.add_argument('--target', help='strict target override/build identity JSON')
         if name == 'run':
+            command.add_argument('--zero-route-startup-seconds', type=int, default=15,
+                                 help='zero-route startup allowance, 15–120 seconds (default: 15)')
+            command.add_argument('--pre-replay-gate', action='store_true',
+                                 help='wait for supervisor release before MRT measurement and replay')
             command.add_argument('--timeout', type=float, default=300,
                                  help='whole-attempt runtime deadline in seconds (default: 300)')
             command.add_argument('--diagnostics', choices=('basic', 'none'), default='basic')
+            command.add_argument('--maghemite-loading', action='store_true',
+                                 help='separate bounded synthetic receive-loading receipt; no transit row')
+            command.add_argument('--maghemite-receive', action='store_true',
+                                 help='qualify bounded small Maghemite API snapshots after worker; no receive timing')
             command.add_argument('--observer-prefixes', action='store_true',
                                  help='capture a bounded accepted IPv4 prefix snapshot after measurement (requires supporting sink image)')
         if name == 'target-image':
@@ -580,6 +599,9 @@ def main(argv=None):
             document = export_recipe(args.batch, args.test, args.cell,
                                      engine_revision=args.engine_revision, roles=roles,
                                      question=args.question, expected_outcome=args.expected_outcome)
+            if args.mrt_spec:
+                from recipe_mrt import bind
+                document = bind(document, read_document(args.mrt_spec))
             _write_document(document, args.output)
         elif args.command == 'result-verify':
             from recipe_results import verify_result_package
@@ -611,11 +633,10 @@ def main(argv=None):
             from recipe_comparison_report import verify_comparison_report
             _write_document(verify_comparison_report(args.document))
         elif args.command == 'assertions-check':
-            from recipe_assertions import evaluate_assertions
+            from recipe_assertions import evaluate_assertions, load_bound_recipe
             from recipe_results import verify_result_package
             verify_result_package(args.result)
-            from recipe_investigation import _load
-            bound = _load(Path(args.result).parent, 'recipe.json')
+            bound = load_bound_recipe(Path(args.result).parent)
             result = evaluate_assertions(read_document(args.document), bound, args.result)
             _write_document(result)
             return 0 if result.get('outcome') == 'passed' else 4 if result.get('outcome') == 'failed' else 5
@@ -697,8 +718,16 @@ def main(argv=None):
                     options['target'] = read_document(args.target)
                 if args.diagnostics != 'basic':
                     options['diagnostics'] = args.diagnostics
+                if args.maghemite_loading:
+                    options['maghemite_loading'] = True
+                if args.maghemite_receive:
+                    options['maghemite_receive'] = True
                 if args.observer_prefixes:
                     options['observer_prefixes'] = True
+                if args.pre_replay_gate:
+                    options['pre_replay_gate'] = True
+                if args.zero_route_startup_seconds != 15:
+                    options['zero_route_startup_seconds'] = args.zero_route_startup_seconds
                 result = run_recipe(document, workdir=args.workdir,
                                     results_dir=args.results_dir, timeout=args.timeout, **options)
                 _write_document(result)
@@ -730,7 +759,7 @@ def main(argv=None):
                 _write_document({'valid': True, 'schema': RESULT_SCHEMA})
             else:
                 validate_recipe(document)
-                _write_document({'valid': True, 'schema': RECIPE_SCHEMA,
+                _write_document({'valid': True, 'schema': document['schema'],
                                  'recipe_sha256': recipe_sha256(document)})
     except (ValueError, OSError, UnicodeError, RecursionError) as exc:
         print(f'{args.command}: {exc}', file=sys.stderr)

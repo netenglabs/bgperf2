@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-LOCK_NAMES = {'batch-driver.lock', '.block.lock', '.spot-boot.lock', '.bgperf-measurement.lock'}
+LOCK_NAMES = {'batch-driver.lock', '.block.lock', '.spot-boot.lock', '.bgperf-measurement.lock', '.native-batch.lock'}
 
 _spec = importlib.util.spec_from_file_location('bgperf_dev_checks', ROOT / 'scripts/dev_checks.py')
 _checks = importlib.util.module_from_spec(_spec)

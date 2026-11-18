@@ -21,7 +21,7 @@ import recipes
 from recipe_assertions import default_assertions, evaluate_assertions
 from recipe_investigation import _copy_package, _read_attempt
 from recipe_results import _regular_file, verify_result_package
-from recipe_targets import validate_build_plan, validate_target
+from recipe_targets import validate_build_plan, validate_target, require_source_adapter
 
 PLAN_SCHEMA = 'bgperf2/bisection-plan/v1alpha1'
 REPORT_SCHEMA = 'bgperf2/bisection-report/v1alpha1'
@@ -158,8 +158,8 @@ def validate_plan(plan):
 def make_plan(recipe, build_plans, commit_objects, *, predicate, max_trials,
               worker_timeout=120, build_timeout=1200):
     recipes.validate_recipe(recipe)
-    if recipe['roles']['target']['adapter'] == 'frr_c' and predicate == 'target_crash':
-        raise recipes.ContractError('FRR target_crash bisection is unsupported; select correctness assertions')
+    recipes.require_crash_witness(recipe['roles']['target']['adapter'], predicate)
+    require_source_adapter(recipe['roles']['target']['adapter'])
     if predicate == 'prefix_assertions':
         recipes.validate_recipe(recipe)
         from recipe_prefixes import validate_selection

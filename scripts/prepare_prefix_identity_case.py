@@ -76,12 +76,15 @@ def revision():
     return head
 
 
-def source_archive():
-    files = sorted(p.name for p in (ROOT/'sink').iterdir()
+def source_archive(source=None):
+    # The CLI keeps its historical reviewed-source gate. Library-only source
+    # injection permits inert archive fixtures without relabelling current code.
+    source = ROOT/'sink' if source is None else safe(source)
+    files = sorted(p.name for p in source.iterdir()
                    if p.suffix == '.go' or p.name in ('go.mod', 'go.sum'))
     if not 1 <= len(files) <= 128:
         raise recipes.ContractError('Unexpected sink source file count')
-    contents = {name: read(ROOT/'sink', name) for name in files}
+    contents = {name: read(source, name) for name in files}
     if sha(contents['go.mod']) != GO_MOD or sha(contents['go.sum']) != GO_SUM:
         raise recipes.ContractError('This bounded case requires the reviewed GoBGP 4.9.0/x-sys 0.45.0 pins')
     if b'const sinkVersion = "0.2.0"' not in contents.get('main.go', b''):

@@ -23,6 +23,8 @@ python="${repo}/venv/bin/python"
 [[ -x "${python}" ]] || python=python3
 
 image="$(cd "${repo}" && "${python}" -c 'import sink; print(sink.Sink.BUILD_VARS["go_image"])')"
+sink_patch_command="$(cd "${repo}" && "${python}" -c 'import sink_gobgp_patch; print(sink_gobgp_patch.build_dependency_command())')"
+sink_modfile="$(cd "${repo}" && "${python}" -c 'import sink_gobgp_patch; print(sink_gobgp_patch.MODFILE)')"
 cache="${GOMODCACHE_DIR:-/data/bgperf-work/gomod}"
 mkdir -p "${cache}"
 
@@ -39,4 +41,7 @@ exec docker run --rm \
     -v "${cache}:/go/pkg/mod" \
     -w /src \
     "${image}" \
-    sh -c 'go vet ./... && go test -race -count=1 "$@"' sh "$@"
+    sh -c 'sink_patch=$1; sink_modfile=$2; shift 2
+        go mod download && go mod verify && sh -c "$sink_patch" &&
+        go vet -mod=readonly -modfile="$sink_modfile" ./... &&
+        go test -mod=readonly -modfile="$sink_modfile" -race -count=1 "$@"' sh "$sink_patch_command" "$sink_modfile" "$@"

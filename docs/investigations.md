@@ -6,7 +6,7 @@ walkthrough, start with the [maintainer workflow](maintainer-workflow.md).
 Use one immutable [recipe](recipes.md), with separate target/build identity
 records for the baseline and candidate. The recipe's workload, generator,
 observer, engine revision, completion contract and reproduction question stay
-fixed. Supported synthetic IPv4 targets are BIRD and `frr_c`, with
+fixed. Supported synthetic IPv4 targets are `bird`, `frr_c`, `openbgp` and `rustybgp`, with
 BIRD generators and sink observer. Both target selections must use the recipe's
 adapter. See the [FRR guide](frr-maintainer-workflow.md) for compatible supplied
 images and conservative container diagnostics. The [FRR source workflow](frr-source-workflow.md)
@@ -14,6 +14,10 @@ adds local builds and correctness revision search. Target threads and target-cra
 reproduction remain BIRD-only. This is one
 functional investigation; [descriptive comparisons](comparisons.md) are separate
 and calibrated performance decisions remain disabled.
+
+OpenBGPD and RustyBGP accept supplied images only. Their container health and
+memory diagnostics do not attest daemon-process liveness or exit status;
+local-source builds and revision searches refuse before source/host probes.
 
 ## Optional received-prefix correctness
 
@@ -394,6 +398,39 @@ The packages preserve:
   Final collection has a 20-second probe budget plus bounded client termination,
   up to 128 owned containers,
   64 KiB per probe and a requested tail of 200 log lines.
+  With a zebra-rs target, remaining collection budget also permits fixed native
+  snapshots after baseline state, logs and memory for every role: version,
+  BGP summary, one default-synthetic path (`100.0.0.0/32`), one connected prefix
+  (`10.10.0.0/16`), kernel lookup of `10.10.0.3`, and namespace addresses.
+  Each native exec rechecks the immutable owned container ID, name, image and
+  attempt label, uses a two-second in-container deadline (0.5-second kill grace),
+  and shares the existing 20-second collection budget and 64 KiB output bound.
+  `diagnostic-native/*.txt` retains raw output with per-query status, errors and
+  truncation in `diagnostics.json`. Missing queries remain unavailable. These
+  fixed address samples are not exhaustive for arbitrary recipes. They run
+  after the worker and baseline memory observations, before cleanup; they are
+  not convergence-time observations and change no measurement or assertion.
+  No full RIB, running configuration, neighbor authentication or environment
+  dump is requested. `none` disables these queries too.
+  With a Bio-Routing target, the same owned supplemental collector retains a
+  raw loopback metrics scrape using its benchmark-specific HTTP client, a
+  two-second native deadline, 8 MiB transfer limit and 64 KiB parent capture limit. This diagnostic
+  is after the worker and baseline memory/log observations, shares the 20-second
+  collection budget, and changes no assertion or target-counter interpretation.
+  The immutable owned ID/name/image/attempt checks repeat before the exec;
+  failed/partial scrapes retain explicit status and available raw output.
+  The selected standalone service does not register its library's BGP metric
+  collector and its session RPC is unimplemented; target neighbor prefix counts
+  are explicitly unavailable in the capability record. A raw scrape is only
+  diagnostic evidence and cannot supply missing route gauges.
+  Maghemite also declares prefix gauges unavailable (its selected API prefix
+  atomics are not updated). Its supplemental native samples read the router list
+  and default-ASN 1000 neighbor state using the fixed v13 version header. The
+  same owned ID/name/image/attempt rechecks, two-second HTTP deadlines, 8 MiB
+  transfer/64 KiB capture limits and shared 20-second collection budget apply.
+  These post-worker samples expose no authentication configuration, perform no
+  mutations, and cannot turn API zero counters into prefix witnesses. Nondefault
+  ASNs may yield an unavailable sample; this is explicitly a default-ASN fixture.
 - Preserved CSV/event material before final graph/provenance collectors. The
   `raw-samples.csv` file is the retained legacy graph series after its existing
   assurance slicing, not every observed poll. `raw-samples.metadata.json` states

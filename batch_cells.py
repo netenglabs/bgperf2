@@ -292,6 +292,7 @@ def batch_cell_id(test_name, cell):
     monitor = cell_monitor(cell)
     if monitor != UNMARKED_MONITOR:
         identity['monitor'] = monitor
+    if cell.get('defer_graphs'):identity['defer_graphs']=True
     return json.dumps(identity, sort_keys=True, separators=(',', ':'), default=str)
 
 

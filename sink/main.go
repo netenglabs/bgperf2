@@ -22,17 +22,20 @@ import (
 	"time"
 )
 
-const sinkVersion = "0.2.0"
+const sinkVersion = "0.4.0"
 
 // sourceHash is set at build time from the files compiled (see sink.py). An
 // image built some other way says so rather than reporting nothing.
 var sourceHash = "unknown"
 
+// Builds report whether they applied the source-bound dependency correction.
+var gobgpParserProfile = "unpatched"
+
 func gobgpVersion() string {
 	if info, ok := debug.ReadBuildInfo(); ok {
 		for _, d := range info.Deps {
 			if d.Path == "github.com/osrg/gobgp/v4" {
-				return d.Version
+				return d.Version + "+" + gobgpParserProfile
 			}
 		}
 	}
@@ -62,6 +65,7 @@ func main() {
 		heartbeat    = flag.Duration("heartbeat", time.Second, "write a heartbeat after this long with nothing written")
 		logPath      = flag.String("log", "", "the event log to append to")
 		snapshotPath = flag.String("snapshot-socket", "", "optional local Unix socket for bounded accepted-prefix snapshots")
+		snapshotMax  = flag.Int("snapshot-max-prefixes", maxSnapshotPrefixes, "held/accepted snapshot prefix limit (1 to 5000000; requires snapshot socket)")
 		version      = flag.Bool("version", false, "print the version and exit")
 	)
 	flag.Parse()
@@ -105,6 +109,10 @@ func main() {
 	}
 	cfg.holdTime = uint16(*holdTime)
 	cfg.snapshotSocket = *snapshotPath
+	if err := validateSnapshotLimit(*snapshotPath, *snapshotMax); err != nil {
+		fail("%v", err)
+	}
+	cfg.snapshotMaxPrefixes = *snapshotMax
 	cfg.connectRetry, cfg.coalesce, cfg.heartbeat = *connectRetry, *coalesce, *heartbeat
 	if cfg.hostname, err = os.Hostname(); err != nil {
 		cfg.hostname = "bgperf-sink"

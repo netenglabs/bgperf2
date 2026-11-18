@@ -26,6 +26,7 @@ Advanced workflows:
 * [One maintainer investigation](docs/maintainer-workflow.md) (offline reproduction, local rollback, interruption recovery and correctness bisection)
 * [Prepare your own source checkout](docs/maintainer-checkout.md) (isolated revision range and verified, unexecuted handoff)
 * [Minimize a reproducer](docs/minimization.md) (bounded peer/prefix-count reduction with fresh confirmation and verified evidence)
+* [Fixed-input MRT performance sweeps](docs/native-mrt-performance.md) (native bench/batch, exact workload bindings and final prefix identity)
 * [Small functional checks](docs/functional-validation.md) (immediate bounded execution, load observations and verified correctness)
 * [Investigate a local BIRD fix](docs/investigations.md) (target/build identities, diagnostics and baseline/fix reports)
 * [Supplied-image FRR maintainer workflow](docs/frr-maintainer-workflow.md) (functional assertions, reports and bounded minimization)
@@ -48,9 +49,12 @@ network:
 
 - **target** — the daemon under test: BIRD (`bird`), FRRouting built from
   source (`frr_c`), OpenBGPD (`openbgp`), RustyBGP (`rustybgp`, routes and
-  neighbors only; it lacks some of the policy bgperf2 uses), Flock (`flock`),
-  and the commercial Arista cEOS (`eos`), Juniper cRPD (`junos`) and Nokia
-  SR Linux (`srlinux`).
+  neighbors only; it lacks some of the policy bgperf2 uses), rustbgpd
+  (`rustbgpd`), Holo (`holo`), zebra-rs (`zebra-rs`) and Bio-Routing
+  (`bio-routing`) and Maghemite (`maghemite`), with permit-all IPv4 loading; see
+  [adapter scope](docs/plans/new-daemon-adapters.md). Flock (`flock`) and the
+  commercial Arista cEOS (`eos`), Juniper cRPD (`junos`) and Nokia SR Linux
+  (`srlinux`) are also selectable.
 - **testers** — route generators. BIRD (default) or ExaBGP synthesise prefixes,
   which makes it cheap to drive hundreds of peers; bgpdump2 plays back an MRT
   file, which is how you load a full Internet table.
@@ -61,6 +65,10 @@ network:
 
 `bench` runs one such experiment; `batch` runs a matrix of them from a YAML file
 and compares them in a CSV, a summary and graphs.
+
+For one native batch with separate calibrations, retained attempts and explicit
+Spot/interrupt continuation, see [durable native batches](docs/native-batches.md).
+The engine owns recovery; no external agent or private campaign runner is needed.
 
 ## Prerequisites
 
@@ -855,3 +863,5 @@ are less tested.
 
 The [Python environment guide](docs/python-environment.md) documents the full
 hashed lock, verification and dependency updates.
+
+Native [throughput controls](docs/native-throughput.md) provide offline planning, prerequisite preflight, operational phase journals and optional deferred graphs.

@@ -48,8 +48,9 @@ from nsenter import Namespace
 from psutil import virtual_memory
 import subprocess
 from subprocess import check_output
-import matplotlib.pyplot as plt
-import numpy as np
+from lazy_runtime import module as lazy_module
+plt = lazy_module('matplotlib.pyplot')
+np = lazy_module('numpy')
 from base import *
 from exabgp import ExaBGP, ExaBGP_MRTParse
 from gobgp import GoBGP
@@ -57,6 +58,11 @@ from bird import BIRD, BIRDTarget
 from frr import FRRoutingTarget
 from frr_compiled import FRRoutingCompiled, FRRoutingCompiledTarget
 from rustybgp import RustyBGP, RustyBGPTarget
+from rustbgpd import RustBGPD, RustBGPDTarget
+from holo import Holo, HoloTarget
+from zebra_rs import ZebraRS, ZebraRSTarget
+from bio_routing import BioRouting, BioRoutingTarget
+from maghemite import Maghemite, MaghemiteTarget
 from openbgp import OpenBGP, OpenBGPTarget
 from flock import Flock, FlockTarget
 from srlinux import SRLinux, SRLinuxTarget
@@ -108,6 +114,11 @@ BUILDABLE_IMAGES = {
     'gobgp': GoBGP,
     'bird': BIRD,
     'rustybgp': RustyBGP,
+    'rustbgpd': RustBGPD,
+    'holo': Holo,
+    'zebra-rs': ZebraRS,
+    'bio-routing': BioRouting,
+    'maghemite': Maghemite,
     'openbgp': OpenBGP,
     'flock': Flock,
     'frr_c': FRRoutingCompiled,
@@ -119,7 +130,7 @@ BUILDABLE_IMAGES = {
 
 # What `prepare` builds, in order. Flock and the commercial NOSes are left out:
 # they are downloaded rather than compiled.
-PREPARE_IMAGES = ['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'rustybgp',
+PREPARE_IMAGES = ['exabgp', 'exabgp_mrtparse', 'gobgp', 'bird', 'rustybgp', 'rustbgpd', 'holo', 'zebra-rs', 'bio-routing', 'maghemite',
                   'openbgp', 'frr_c', 'bgpdump2', 'sink']
 
 # Targets `bench -t` accepts. The class both selects the daemon's behaviour and
@@ -187,6 +198,11 @@ TARGET_CLASSES = {
     'bird': BIRDTarget,
     'frr_c': FRRoutingCompiledTarget,
     'rustybgp': RustyBGPTarget,
+    'rustbgpd': RustBGPDTarget,
+    'holo': HoloTarget,
+    'zebra-rs': ZebraRSTarget,
+    'bio-routing': BioRoutingTarget,
+    'maghemite': MaghemiteTarget,
     'openbgp': OpenBGPTarget,
     'flock': FlockTarget,
     'srlinux': SRLinuxTarget,
@@ -2469,6 +2485,14 @@ def scenario_mrt_tester_class(tester):
 
 def bench(args):
     """Compatibility entry point for the extracted run lifecycle."""
+    if getattr(args, 'mrt_spec', None):
+        import native_mrt
+        return native_mrt.bench(sys.modules[__name__], args)
+    if getattr(args,'control_dir',None):
+        import native_mrt
+        return native_mrt.bench(sys.modules[__name__],args)
+    if any(getattr(args, key, None) for key in ('mrt_spec_sha256','generator_image','observer_image')):
+        raise ValueError('Native MRT image/hash/control options require --mrt-spec')
     return run_lifecycle.bench(
         sys.modules[__name__], args)
 
@@ -2658,6 +2682,7 @@ def write_provenance(args, provenance, prefix):
         'repetition': getattr(args, 'repetition', None),
         'filter_test': getattr(args, 'filter_test', None),
     }
+    if getattr(args,'defer_graphs',False):doc['run']['defer_graphs']=True
     path = results_path(args.results_dir, prefix + '.versions.json')
 
     # Through `atomic_write()`, not a plain `open(path, 'w')`. A kill landing
@@ -4207,14 +4232,25 @@ def check_batch_test(test):
     # run reports CONVERGED at a tenth of the table with nothing in the row or
     # the artifacts saying so.
     for target in test['targets']:
+        if not isinstance(target, dict) or not target.get('name'):
+            sys.exit("test '{0}': every target needs a `name`, got {1!r}".format(test['name'], target))
+        if target.get('mrt_spec'):
+            import native_mrt
+            if (target.get('tester_type') != 'bgpdump2' or target.get('repeat') or target.get('file')
+                    or any(not re.fullmatch(r'sha256:[0-9a-f]{64}', target.get(k) or '')
+                           for k in ('image','generator_image','observer_image'))):
+                sys.exit('Native MRT batch requires fresh bgpdump2 cells and three immutable images')
+            for neighbors in test['neighbors']:
+                for per_peer in test['prefixes']:
+                    native_mrt.workload(target['mrt_spec'], target.get('mrt_spec_sha256'), neighbors, per_peer)
         # A name first: everything below reports against it, and
         # `', '.join()` on a target that has neither name nor label raised a
         # bare TypeError -- the traceback naming neither the test nor the key
         # that this function exists to eliminate, produced by the checks added
         # to eliminate it.
-        if not isinstance(target, dict) or not target.get('name'):
-            sys.exit("test '{0}': every target needs a `name`, got {1!r}".format(
-                test['name'], target))
+        for selected_filter in test['filter_test']:
+            check_target_workload(argparse.Namespace(**dict(
+                target, target=target['name'], filter_test=selected_filter)))
         # Every generator check below exempts a scenario target: it never
         # reaches `gen_conf()`, so its generator is inert and none of the
         # advice these print would change what runs.
@@ -4885,7 +4921,13 @@ def check_batch_monitor_images(tests):
     wanted = set()
     for test in tests:
         monitor = batch_test_monitor(test)
-        wanted.add(MONITOR_CLASSES[monitor])
+        native = [t for t in test['targets'] if t.get('mrt_spec') or (t.get('generator_image') and t.get('observer_image'))]
+        for target in native:
+            for field in ('generator_image','observer_image'):
+                if not img_exists(target.get(field) or ''):
+                    sys.exit('Native MRT image unavailable: '+str(target.get(field)))
+        if len(native) != len(test['targets']):
+            wanted.add(MONITOR_CLASSES[monitor])
         # A `file:` target's scenario may state receivers of its own, so any
         # such target counts as having them; asking for an image a run turns
         # out not to need costs a build, not a matrix.
@@ -4903,7 +4945,7 @@ def check_batch_monitor_images(tests):
         sys.exit('\n'.join(['this batch cannot run:'] + ['  ' + m for m in missing]))
 
 
-def expand_batch_config(path):
+def expand_batch_config(path, defer_graphs=False):
     """Read a batch config and expand and check every test in it.
 
     Every test is checked before any of them runs. Checking each test as it
@@ -4932,7 +4974,30 @@ def expand_batch_config(path):
     if repeated:
         sys.exit('{0}: test name(s) used more than once: {1}'.format(
             path, ', '.join(map(str, repeated))))
+    if defer_graphs:
+        for _test,_targets,cells,_order,_seed in expanded:
+            for cell in cells:cell['defer_graphs']=True
     return expanded
+
+
+def native_preflight(args):
+    """Check all controlled native prerequisites, without creating a worker."""
+    expanded=expand_batch_config(args.batch_config,getattr(args,'defer_graphs',False))
+    import native_mrt
+    inputs={};images=set();count=0
+    for _test,_targets,cells,_order,_seed in expanded:
+        for cell in cells:
+            selected=batch_cell_args(args,cell);count+=1
+            if getattr(selected,'mrt_spec',None):
+                spec=native_mrt.validate(selected)
+                key=json.dumps(spec['input'],sort_keys=True)
+                if key not in inputs:inputs[key]=native_mrt.mrt.verify_input(dict(mrt=spec))
+            else:native_mrt.synthetic_spec(selected)
+            images.update((selected.image,selected.generator_image,selected.observer_image))
+    for image in sorted(images):
+        if not img_exists(image):raise ValueError('Native image unavailable: '+image)
+    print(json.dumps(dict(schema='bgperf2/native-preflight/v1',status='verified',cells=count,
+        images=sorted(images),inputs=list(inputs.values())),indent=2,sort_keys=True))
 
 
 def batch(args):
@@ -4943,20 +5008,48 @@ def batch(args):
     other variables can be set, but not iterated through
 
     `--resume` skips every cell that already has a result in --results-dir.
-    Anything more -- a record of attempts, refusing to continue after a
-    failure, watching for a host being reclaimed -- belongs to whatever drives
-    the batch, through `--list-cells`, `--cells` and `--report`.
+    The opt-in durable native mode also owns attempts, calibration dependencies
+    and explicit interruption recovery. External supervisors retain their
+    `--list-cells`, `--cells`, `--report` and cell-control interface. Cloud
+    watching and host provisioning remain outside the engine.
     """
+    if any(getattr(args, flag, None) is not None for flag in
+           ('maximum_originals', 'timeout_seconds', 'operational_policy_sha256')):
+        if not (getattr(args, 'durable', False) or getattr(args, 'calibrate', False)
+                or getattr(args, 'recover', False)
+                or os.path.isfile(os.path.join(args.results_dir, 'native-batch.json'))):
+            raise ValueError('Durable invocation controls require --durable')
+    if getattr(args, 'batch_status', False):
+        if any(getattr(args, flag, False) for flag in ('list_cells', 'report', 'preflight')):
+            raise ValueError('--status cannot run another batch operation')
+        import native_batch
+        if not args.batch_config:
+            return native_batch.inspect_saved(args)
+        return native_batch.run(sys.modules[__name__], args,
+            expand_batch_config(args.batch_config, getattr(args, 'defer_graphs', False)))
     # Neither runs a cell, and both print documents a caller parses, so they
     # return before anything below can print anything of its own.
     if getattr(args, 'list_cells', False):
-        return list_batch_cells(expand_batch_config(args.batch_config))
+        if getattr(args, 'durable', False) or getattr(args, 'calibrate', False):
+            import native_batch
+            return native_batch.list_plan(sys.modules[__name__], args,
+                expand_batch_config(args.batch_config, getattr(args, 'defer_graphs', False)))
+        return list_batch_cells(expand_batch_config(args.batch_config, getattr(args,'defer_graphs',False)))
     if getattr(args, 'report', False):
         return report_batch_from_cell_results(
-            expand_batch_config(args.batch_config), args.results_dir)
+            expand_batch_config(args.batch_config, getattr(args,'defer_graphs',False)), args.results_dir, getattr(args,'defer_graphs',False))
 
     if getattr(args, 'no_report', False) and not getattr(args, 'cells', None):
         sys.exit('--no-report applies only to --cells')
+
+    if getattr(args,'preflight',False):
+        return native_preflight(args)
+
+    if (getattr(args, 'durable', False) or getattr(args, 'calibrate', False) or getattr(args, 'recover', False)
+            or os.path.isfile(os.path.join(args.results_dir, 'native-batch.json'))):
+        import native_batch
+        return native_batch.run(sys.modules[__name__], args,
+            expand_batch_config(args.batch_config, getattr(args, 'defer_graphs', False)))
 
     # Before the first cell: a SIGTERM during cell 1 must already abandon it.
     install_stop_handlers()
@@ -4969,7 +5062,12 @@ def batch(args):
         print('found {0} unfinished write(s) from an interrupted run, removed: '
               '{1}'.format(len(swept), ', '.join(swept)))
 
-    expanded = expand_batch_config(args.batch_config)
+    expanded = expand_batch_config(args.batch_config, getattr(args,'defer_graphs',False))
+    if getattr(args,'control_dir',None):
+        for _test,_targets,cells,_order,_seed in expanded:
+            for cell in cells:
+                if not cell['target'].get('mrt_spec'):
+                    __import__('native_mrt').synthetic_spec(batch_cell_args(args,cell))
     if getattr(args, 'cells', None):
         return run_selected_batch_cells(args, expanded)
     resume = getattr(args, 'resume', False)
@@ -5037,7 +5135,9 @@ def batch(args):
                     stop_signal.reason))
                 raise StopRequested(stop_signal.reason)
 
-            completed[cell_id] = bench(batch_cell_args(args, cell))
+            selected_args=batch_cell_args(args,cell)
+            selected_args.native_cell_id=cell_id
+            completed[cell_id] = bench(selected_args)
             write_batch_cell_result(args.results_dir, test['name'], cell_id,
                                     completed[cell_id], order=order, seed=seed)
             write_batch_csv(results_path(args.results_dir, f"{test['name']}.csv"),
@@ -5049,11 +5149,15 @@ def batch(args):
                                               describe=False):
                 print(line)
 
+            if getattr(args, 'stop_on_failure', False) and row_failed(completed[cell_id]):
+                raise StopRequested('Recorded failed batch cell; --stop-on-failure')
+
         results = batch_report_rows(test['name'], cells, completed)
         write_batch_csv(results_path(args.results_dir, f"{test['name']}.csv"), results)
         print_batch_report(test['name'], results, summary_path, cells, completed,
                            repetitions)
-        create_batch_graphs(results, test['name'], results_dir=args.results_dir)
+        if not getattr(args,'defer_graphs',False):
+            create_batch_graphs(results, test['name'], results_dir=args.results_dir)
 
 
 def check_resumable(expanded, results_dir):
@@ -5158,6 +5262,7 @@ def batch_cell_args(args, cell):
     # `bird 2.19.2` sitting beside `bird 2.19.2 #2` reads as a
     # different thing rather than as the first of three.
     a.repetition = cell['repetition']
+    a.defer_graphs = bool(cell.get('defer_graphs'))
     # read any config attribute that was specified in the yaml batch file
     a.local_address_prefix = t['local_address_prefix'] if 'local_address_prefix' in t else '10.10.0.0/16'
     # Refused by `check_batch_test()` when true, so it is never copied.
@@ -5166,7 +5271,7 @@ def batch_cell_args(args, cell):
                     'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
                     'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
                     'tester_type', 'license_file', 'version', 'threads',
-                    'tester_trace_io']:
+                    'tester_trace_io', 'mrt_spec', 'mrt_spec_sha256', 'generator_image', 'observer_image']:
         # Keyed on the value, not on the key being present: a target
         # written `tester_type:` with nothing after it parses as None,
         # which is the very slip the default exists to catch, and a
@@ -5278,18 +5383,22 @@ def run_selected_batch_cells(args, expanded):
             raise StopRequested(stop_signal.reason)
         cell_id = batch_cell_id(test['name'], cell)
         order, seed = sequences[test['name']]
-        write_batch_cell_result(args.results_dir, test['name'], cell_id,
-                                bench(batch_cell_args(args, cell)),
+        selected_args=batch_cell_args(args,cell)
+        selected_args.native_cell_id=cell_id
+        row = bench(selected_args)
+        write_batch_cell_result(args.results_dir, test['name'], cell_id, row,
                                 order=order, seed=seed)
+        if getattr(args, 'stop_on_failure', False) and row_failed(row):
+            raise StopRequested('Recorded failed batch cell; --stop-on-failure')
     if getattr(args, 'no_report', False):
         return
     touched = {test['name'] for test, _cell in selected}
     report_batch_from_cell_results(
         [entry for entry in expanded if entry[0]['name'] in touched],
-        args.results_dir)
+        args.results_dir, getattr(args,'defer_graphs',False))
 
 
-def report_batch_from_cell_results(expanded, results_dir):
+def report_batch_from_cell_results(expanded, results_dir, defer_graphs=False):
     """Rebuild each test's CSV, summary and graphs from its cell results.
 
     Missing cells are named, never filled. The summary already tells a pass
@@ -5326,7 +5435,8 @@ def report_batch_from_cell_results(expanded, results_dir):
                 print('  graphs already in {0} were drawn from other rows and '
                       'are not updated'.format(results_dir))
             continue
-        create_batch_graphs(results, name, results_dir=results_dir)
+        if not defer_graphs:
+            create_batch_graphs(results, name, results_dir=results_dir)
 
 
 BATCH_CELL_RESULT_SCHEMA_VERSION = 1
@@ -5850,7 +5960,23 @@ def check_generator_matches_workload(args):
             '--mrt-file was given'.format(tester))
 
 
+def check_target_workload(args):
+    """Reject unsupported adapter controls before config writes or teardown."""
+    target = getattr(args, 'target', None)
+    if target not in ('rustbgpd', 'holo', 'zebra-rs', 'bio-routing', 'maghemite'):
+        return
+    if (getattr(args, 'filter_test', None) not in (None, 'None')
+            or getattr(args, 'threads', None) is not None
+            or any(getattr(args, field, 0) not in (None, 0) for field in (
+                'as_path_list_num', 'prefix_list_num', 'community_list_num', 'ext_community_list_num'))
+            or getattr(args, 'file', None)
+            or getattr(args, 'target_config_file', None)):
+        sys.exit(f'{target} supports permit-all IPv4 loading without filters, '
+                 'thread overrides or custom configuration/scenario files')
+
+
 def config(args):
+    check_target_workload(args)
     try:
         refuse_single_table(getattr(args, 'single_table', False),
                             '-s/--single-table')
@@ -6125,6 +6251,9 @@ def create_args_parser(main=True):
                               help='directory for generated graphs and CSVs; '
                                    'default: {}'.format(DEFAULT_RESULTS_DIR))
     add_gen_conf_args(parser_bench)
+    parser_bench.add_argument('--defer-graphs',action='store_true',help='Save bench graph inputs and defer rendering')
+    for name in ('mrt-spec', 'mrt-spec-sha256', 'generator-image', 'observer-image', 'control-dir'):
+        parser_bench.add_argument('--'+name, help='Explicit native fixed-input MRT performance binding/control')
     parser_bench.set_defaults(func=bench_command)
 
     parser_config = s.add_parser('config', help='generate config')
@@ -6149,6 +6278,7 @@ def create_args_parser(main=True):
                               help='directory for generated graphs and CSVs; '
                                    'default: {}'.format(DEFAULT_RESULTS_DIR))
     batch_mode = parser_batch.add_mutually_exclusive_group()
+    batch_mode.add_argument('--preflight',action='store_true',help='Verify all native role images, exact inputs and workload bindings without starting workers')
     batch_mode.add_argument('--resume', action='store_true',
                             help='skip every cell that already has a result in --results-dir; '
                                  'a shuffled test must state seed:')
@@ -6164,7 +6294,22 @@ def create_args_parser(main=True):
     batch_mode.add_argument('--report', action='store_true',
                             help='rebuild the CSV, summary and graphs from the cell results '
                                  'in --results-dir; runs nothing')
+    parser_batch.add_argument('--defer-graphs', action='store_true', help='Save complete bench plot inputs; render graphs offline after measurement')
+    parser_batch.add_argument('--control-dir', help='Existing absolute directory for external native-cell admission/replay control')
+    parser_batch.add_argument('--stop-on-failure', action='store_true', help='Stop after a recorded failed cell; never retry')
+    parser_batch.add_argument('--operational-policy-sha256', help='Bind managed durable attempts to the selected host policy')
+    parser_batch.add_argument('--recover', action='store_true', help='Recover retained durable attempts without starting measurements')
+    parser_batch.add_argument('--maximum-originals', type=int, help='Durable invocation fresh-original ceiling')
+    parser_batch.add_argument('--timeout-seconds', type=int, help='Durable invocation time ceiling checked between originals')
+    parser_batch.add_argument('--durable', action='store_true', help='Run one durable native batch with explicit interruption recovery')
+    parser_batch.add_argument('--calibrate', action='store_true', help='Durable batch: separate calibration before each configuration/workload')
+    parser_batch.add_argument('--status', dest='batch_status', action='store_true', help='Inspect saved durable batch state without running')
     parser_batch.set_defaults(func=batch)
+
+    render_parser=s.add_parser('render-bench',help='Render saved bench graph data without Docker')
+    render_parser.add_argument('--input',required=True)
+    render_parser.add_argument('--results-dir',required=True)
+    render_parser.set_defaults(func=lambda args: __import__('deferred_graphs').render(sys.modules[__name__],args))
 
     return parser
 

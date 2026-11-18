@@ -19,4 +19,7 @@ try:
 except ImportError:
     from docker import APIClient as Client
 
-dckr = Client(version='auto')
+from lazy_runtime import LazyValue
+
+# Parsing/listing/help must work without a runtime socket.
+dckr = LazyValue(lambda: Client(version='auto'))

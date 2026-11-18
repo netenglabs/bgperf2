@@ -1,5 +1,64 @@
 # MRT injection
 
+## Inspect an exact input before choosing source peers
+
+The standalone offline command inventories a consumed TABLE_DUMP_V2 file without
+Docker, downloads or BGP traffic:
+
+```sh
+venv/bin/python scripts/inspect_mrt.py \
+  --input /absolute/input.mrt \
+  --expected-bytes EXPECTED_SIZE --expected-sha256 EXPECTED_SHA256 \
+  --output /absolute/fresh-inventory.json
+```
+
+Use an existing canonical absolute regular file and its independently selected
+expected size/hash. Inspection reads and hashes the entire file, rejects changes
+to its identity/metadata and creates an exclusive mode-0600 JSON output only
+after validation. It never replaces prior output. The fixed bounds are 16 GiB
+of input. Exit zero attests successful output writing; if writing or fsync
+fails, exit nonzero leaves any partial output for inspection. It is not a
+successful inventory. Keep that failure and use a fresh output identity rather
+than overwriting or treating the partial JSON as valid. Other fixed bounds are
+16 MiB per record, 4,096 peers and a default 1,800-second deadline;
+`--timeout-seconds` can lower that deadline. Memory grows with one record and
+peer counters, not with every prefix or attribute in the input.
+
+The result records the collector/view and each encoded peer's zero-based index,
+BGP ID, address, ASN and IPv4/IPv6 unicast RIB **entry** counts. These are encoded
+facts under [RFC 6396 sections 2 and 4.3](https://www.rfc-editor.org/rfc/rfc6396.html#section-4.3),
+not a source-peer selection, unique-prefix count or prediction of exported
+routes. Attribute bytes are opaque. Repeated prefixes in separate records are
+not deduplicated. Only one initial peer table followed by IPv4/IPv6 unicast RIB
+records is supported; ADD-PATH, multicast, generic RIB, other MRT types and
+truncation fail rather than producing a partial inventory.
+
+Run inspection on an idle host under the operator's normal preparation locks
+and resource guards. It does not authorize a route worker or add MRT support to
+the synthetic recipe interface. The
+[inventory plan](plans/mrt-input-inventory.md) tracks that separation; explicit
+fixed peer sets, expected route semantics and native replay qualification remain
+unfinished. The legacy injection workflow below retains its existing behavior.
+
+Optionally add `--attribute-peers 0,2 --check-asns 64512,64513` to inventory
+selected encoded IPv4 RIB attributes. Both flags are required together. The
+result adds per-peer entry counts for standard export-scope communities,
+checked ASNs in four-byte AS_PATH, AS sets/confederation segments, multiple
+sequence segments, first-AS differences and attribute-presence facts. A missing
+IPv4 NEXT_HOP attribute is not itself an error: MP_REACH can carry the next hop.
+The maximum encoded AS_SEQUENCE length is a separate value, null if no valid
+AS_PATH was classified; it is not an entry counter.
+Malformed known attributes have a separate count and at most five examples per
+peer; they do not become successful classifications. Other selected RIB entries
+still contribute their input count. Unknown attribute payloads remain opaque.
+This opt-in does not select routes, apply BGP policy, resolve overlap/best paths
+or produce an expected exported prefix set. Existing default inspections retain
+their opaque-attribute behavior. Peer/ASN selections and input/implementation
+identities are recorded; omitting a counter key means zero among well-formed
+entries. Malformed entries remain unknown for those classifications.
+
+## Legacy injection workflow
+
 This feature requires the basic knowledge about how `bgperf2` works.
 Please refer to [this guide](https://github.com/osrg/bgperf/blob/master/docs/how_bgperf_works.md).
 
@@ -96,3 +155,25 @@ Here, two testers are configured:
 
 ExaBGP testers accept the following options:
 - `high-perf`: True/False, to enable [ExaBGP High Performance mode](https://github.com/Exa-Networks/exabgp/wiki/High-Performance).
+
+
+## Inspect attributes for exact source prefixes
+
+The offline `scripts/inspect_mrt.py` attribute mode accepts optional
+`--attribute-prefixes 103.137.98.0/23` with `--attribute-peers` and `--check-asns`.
+Supply the existing complete input size/hash and fresh output arguments. It
+retains only exact canonical source-prefix matches for the selected peers, up to
+eight prefixes and sixteen peers. Duplicate selected peer/prefix entries refuse.
+Absent entries stay absent. `routes` records source attribute length/SHA-256,
+raw hex and existing decoded facts; hex/detailed facts are explicitly unavailable
+above 4096 bytes, while the complete attribute hash remains. This bounds detailed
+output without silently truncating a source attribute. Ordinary inventory output
+is unchanged when this option is omitted. These are consumed source bytes, not
+proof of the injector's wire output or a reason to remove a failed expected route.
+
+Prefix matching uses canonical network identity, ignoring unused NLRI padding
+bits as the existing reader does. Detailed entries separately retain original
+`source_nlri` prefix length, encoded prefix hex and whether unused bits were zero.
+This avoids describing normalized network text as the original source bytes.
+Duplicate selected peer/network entries across records still refuse. Existing
+counter and null/attribute-presence interpretation limits remain in the scope.

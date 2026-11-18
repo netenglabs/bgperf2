@@ -8,6 +8,8 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
+from collections import Counter
 
 import recipes
 from measurements import EventKind, EventPhase, LifecycleEvent
@@ -21,7 +23,9 @@ MAX_JSON_BYTES = 8 * 1024 * 1024
 def _definitions(recipe, include_prefixes=False):
     resolved = recipe['resolved']
     sessions = resolved['neighbors']
-    total = sessions * resolved['prefixes_per_peer']
+    from recipe_prefixes import expected_count
+    from recipe_mrt import selected
+    total = expected_count(recipe)
     definitions = [
         ('sessions.ready', 'session_establishment', sessions, 'recorded_worker_budget'),
         ('injection.complete', 'injection_completion', sessions, 'recorded_worker_budget'),
@@ -30,9 +34,10 @@ def _definitions(recipe, include_prefixes=False):
         ('roles.healthy', 'observed_role_health', ['generator', 'observer', 'target'], 'pre_cleanup_snapshot'),
     ]
     if include_prefixes:
+        expected = ({'count': total, 'layout': 'declared_mrt_ipv4_prefix_set'} if selected(recipe) else
+                    {'first': '100.0.0.0/32', 'count': total, 'layout': 'contiguous_ipv4_host_routes'})
         definitions.append(('observer.prefixes', 'observer_prefix_identity',
-            {'first': '100.0.0.0/32', 'count': total, 'layout': 'contiguous_ipv4_host_routes'},
-            'post_measurement_snapshot'))
+                            expected, 'post_measurement_snapshot'))
     return definitions
 
 
@@ -68,15 +73,15 @@ def validate_assertions(spec, recipe):
     return spec
 
 
-def _load(root, relative, references):
+def _load(root, relative, references, *, max_bytes=MAX_JSON_BYTES):
     """Read only listed bytes, rechecking the digest after package verification."""
     if relative not in references:
         return None, f'{relative} was not collected.'
     try:
         with _regular_file(root, relative) as source:
-            data = source.read(MAX_JSON_BYTES + 1)
-        if len(data) > MAX_JSON_BYTES:
-            return None, f'{relative} exceeds the 8 MiB JSON inspection bound; raw evidence retained.'
+            data = source.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            return None, f'{relative} exceeds the {max_bytes // (1024 * 1024)} MiB JSON inspection bound; raw evidence retained.'
         if hashlib.sha256(data).hexdigest() != references[relative]['sha256']:
             raise recipes.ContractError(f'{relative}: evidence changed after verification')
         value = json.loads(data.decode('utf-8'), object_pairs_hook=recipes._pairs,
@@ -91,6 +96,27 @@ def _load(root, relative, references):
             raise
         return None, f'{relative}: JSON inspection failed: {exc}'
 
+
+
+def load_bound_recipe(root):
+    """Load the packaged recipe for assertions; large lists require MRT schema.
+
+    Package verification and evaluate_assertions independently bind the complete
+    canonical recipe digest. This loader keeps nonblocking/no-follow reads and
+    a finite allocation bound; other JSON evidence remains at its prior limit.
+    """
+    from recipe_mrt import selected
+    maximum = 128 * 1024**2
+    with _regular_file(root, 'recipe.json') as stream:
+        data = stream.read(maximum+1)
+    if len(data) > maximum:
+        raise recipes.ContractError('recipe.json exceeds the 128 MiB MRT inspection bound')
+    value = json.loads(data.decode('utf-8'), object_pairs_hook=recipes._pairs,
+                       parse_constant=recipes._nonfinite)
+    if len(data) > MAX_JSON_BYTES and not selected(value):
+        raise recipes.ContractError('Non-MRT recipe.json exceeds the 8 MiB inspection bound')
+    recipes.validate_recipe(value)
+    return value
 
 def _finite(value, positive=False):
     try:
@@ -232,17 +258,21 @@ def evaluate_assertions(spec, recipe, result_path):
             else:
                 answer['reason'] = runtime_reason or 'No decisive existing engine completion outcome was recorded.'
         elif capability == 'observer_prefix_identity':
-            from recipe_prefixes import inspect, MAX_PREFIXES
+            from recipe_prefixes import inspect, capture_limits, SMALL_MAX_PREFIXES
             path = 'work/observer-prefixes.json'
             selection_path = 'work/observer-prefix-selection.json'
-            capture, capture_reason = _load(root, path, references)
+            max_prefixes, _, _ = capture_limits(recipe)
+            # Pretty-printed capture envelopes are larger than compact socket
+            # JSON. Only this explicitly selected large artifact gets the bound.
+            inspection_bytes = 256 * 1024 * 1024 if max_prefixes > SMALL_MAX_PREFIXES else MAX_JSON_BYTES
+            capture, capture_reason = _load(root, path, references, max_bytes=inspection_bytes)
             selection, selection_reason = _load(root, selection_path, references)
             answer['evidence'] = witnesses(path, selection_path, raw_path)
             try:
                 if capture is None or selection is None:
                     raise ValueError(capture_reason or selection_reason)
                 recipes._same(selection, {'recipe_sha256': recipes.recipe_sha256(recipe),
-                    'enabled': True, 'phase': 'post_measurement', 'max_prefixes': MAX_PREFIXES},
+                    'enabled': True, 'phase': 'post_measurement', 'max_prefixes': max_prefixes},
                     'observer prefix capture selection')
                 observed = inspect(capture, recipe)
                 if not events or capture['requested_ns'] < max(event.monotonic_s for event in events) * 1e9:
@@ -260,21 +290,30 @@ def evaluate_assertions(spec, recipe, result_path):
             containers = diagnostic.get('containers') if diagnostic else None
             if isinstance(containers, list) and containers and all(isinstance(item, dict)
                     and isinstance(item.get('role'), str) for item in containers):
-                roles = {item.get('role') for item in containers}
+                roles = Counter(item['role'] for item in containers)
+                expected_roles = Counter(assertion['expected'])
                 states = [item.get('state') for item in containers]
                 failed = any(isinstance(state, dict) and (state.get('Running') is False
                              or state.get('OOMKilled') is True or (isinstance(state.get('Error'), str)
                              and bool(state['Error']))) for state in states)
-                # This supported BIRD recipe creates exactly one container per
-                # role; its generator hosts every configured session.
-                complete = (len(containers) == len(assertion['expected'])
-                            and roles == set(assertion['expected']) and all(isinstance(state, dict)
+                distinct = True
+                if 'mrt' in recipe:
+                    expected_roles['generator'] = len(recipe['mrt']['peers'])
+                    identifiers = [item.get('id') for item in containers]
+                    distinct = (all(isinstance(identifier, str) and re.fullmatch(r'[0-9a-f]{64}', identifier)
+                                    for identifier in identifiers)
+                                and len(set(identifiers)) == len(identifiers))
+                complete = (roles == expected_roles and distinct and all(isinstance(state, dict)
                             and state.get('Running') is True and state.get('OOMKilled') is False
+                            and state.get('Paused') is not True and state.get('Status') != 'paused'
                             and state.get('Error') == '' for state in states))
                 if failed or complete:
                     answer.update(observed=[{'role': item.get('role'), 'state': item.get('state')} for item in containers],
                                   status='failed' if failed else 'passed',
                                   reason='Owned container states at final pre-cleanup collection; continuous and daemon-process health are unmeasured.')
+                elif any(isinstance(state, dict) and (state.get('Paused') is True
+                        or state.get('Status') == 'paused') for state in states):
+                    answer['reason'] = 'Paused roles cannot attest running health; controller/manual pause is not a native failure witness.'
             if answer['status'] == 'unmeasured':
                 answer['reason'] = diagnostic_reason or 'Complete final container health snapshots were not recorded.'
         if assertion['deadline']['kind'] in ('recorded_worker_budget', 'post_measurement_snapshot'):

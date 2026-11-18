@@ -12,9 +12,29 @@ import sys
 import types
 import threading
 import tempfile
+import time
 
 from recipe_run import OWNER_LABEL, _write
 import recipes
+
+
+def wait_for_replay_release(work, attempt):
+    """Publish readiness and await the supervisor within the worker budget."""
+    from recipe_diagnostics import stage
+    request = work / 'pre-replay-ready.json'
+    release = work / 'pre-replay-release.json'
+    if os.path.lexists(request) or os.path.lexists(release):
+        raise ValueError('Pre-replay gate requires fresh request and release paths')
+    stage(work, 'pre_replay_quiet')
+    expected = {'schema': 'bgperf2/pre-replay/v1alpha1', 'attempt_id': attempt}
+    _write(request, expected)
+    while not os.path.lexists(release):
+        time.sleep(0.1)
+    if release.is_symlink() or not release.is_file() or release.stat().st_size > 1024:
+        raise ValueError('Invalid pre-replay release file')
+    if recipes.read_document(release) != expected:
+        raise ValueError('Pre-replay release does not match the attempt')
+    stage(work, 'replay_released')
 
 
 class OwnedDocker:
@@ -58,7 +78,7 @@ class OwnedDocker:
 
 
 def scoped_adapter(adapter, image, prefix, *, role=None, work=None, capture_exit=False,
-                   capture_prefixes=False, target_adapter='bird'):
+                   capture_prefixes=False, target_adapter='bird', prefix_limit=None):
     """Preserve adapter behavior, replacing only binary and runtime name."""
     class Selected(adapter):
         @classmethod
@@ -77,6 +97,8 @@ def scoped_adapter(adapter, image, prefix, *, role=None, work=None, capture_exit
                 # be writable by the unprivileged host client across UID maps.
                 os.chmod(self.host_dir, 0o700)
                 self.prefix_snapshot_socket = self.guest_dir + '/' + SOCKET_NAME
+                if prefix_limit is not None:
+                    self.prefix_snapshot_max_prefixes = prefix_limit
 
         def wait_established(self, *args, **kwargs):
             if work is not None and role == 'observer':
@@ -121,14 +143,48 @@ def execute(document, work, attempt, engine, *, target=None):
         argv += ['--threads', str(resolved['target']['threads'])]
     if 'pin' in resolved:
         argv += ['--pin', resolved['pin']]
+    from recipe_mrt import selected as mrt_selected
+    if mrt_selected(document):
+        argv += ['-g', 'bgpdump2', '--mrt-file', document['mrt']['input']['path']]
     args = parser.parse_args(argv)
+    args.zero_route_startup_seconds = options.get(
+        'zero_route_startup_seconds', 15)
     # Copy the runtime namespace; compatibility wrappers needing shared globals
     # are rebound below so every bench dependency receives this scoped object.
     runtime = types.SimpleNamespace(**vars(engine))
+    if options.get('pre_replay_gate', False):
+        runtime.before_replay = lambda: wait_for_replay_release(work, attempt)
     runtime.TARGET_CLASSES = {target_adapter: scoped_adapter(engine.TARGET_CLASSES[target_adapter], roles['target']['image'], attempt, role='target', work=work, capture_exit=options.get('mode') == 'basic', target_adapter=target_adapter)}
+    from recipe_prefixes import capture_limits, SMALL_MAX_PREFIXES
+    selected_prefix_limit = capture_limits(document)[0]
     runtime.MONITOR_CLASSES = {'sink': scoped_adapter(engine.MONITOR_CLASSES['sink'], roles['observer']['image'], attempt, role='observer', work=work,
-        capture_prefixes=options.get('observer_prefixes', False))}
+        capture_prefixes=options.get('observer_prefixes', False),
+        prefix_limit=selected_prefix_limit if selected_prefix_limit > SMALL_MAX_PREFIXES else None)}
     runtime.BIRDTester = scoped_adapter(engine.BIRDTester, roles['generator']['image'], attempt, role='generator', work=work)
+    if mrt_selected(document):
+        from recipe_mrt import adapter, generated_scenario, verify_input
+        _write(work / 'mrt-input-before.json', verify_input(document))
+        from bgpdump2 import Bgpdump2Tester
+        fixed = adapter(scoped_adapter(Bgpdump2Tester, roles['generator']['image'],
+                                     attempt, role='generator', work=work), document)
+        runtime.scenario_mrt_tester_class = lambda tester: fixed
+        import yaml
+        runtime.gen_conf = lambda args: generated_scenario(engine, args, document)
+        runtime.render_scenario = yaml.safe_load
+        runtime.Template = lambda text: types.SimpleNamespace(render=lambda: text)
+    if options.get('maghemite_receive', False) or options.get('maghemite_loading', False):
+        from recipe_receive import expectation
+        def receive_expectation():
+            # Only engine-generated synthetic source is rendered here; recipe
+            # selection refuses downloaded scenario files and MRT workloads.
+            scenario = engine.render_scenario((work / attempt / 'scenario.yaml').read_text())
+            _write(work / 'receive-expectation.json', expectation(document, scenario, loading=options.get('maghemite_loading', False)))
+        runtime.before_replay = receive_expectation
+        if options.get("maghemite_loading", False):
+            from recipe_receive_loading import execute_loading
+            runtime.receive_loading_release = lambda release: _write(work / 'receive-release.json', release)
+            runtime.receive_loading = lambda **kw: execute_loading(
+                work, attempt, document, runtime, **kw)
     runtime.target_image = lambda *args: roles['target']['image']
     runtime.remove_target_containers = lambda: None
     runtime.remove_old_containers = lambda: None
@@ -190,15 +246,25 @@ def execute(document, work, attempt, engine, *, target=None):
     if engine.dckr.networks(names=[attempt + '-br']):
         raise RuntimeError('Attempt network already exists; refusing reuse')
     engine.capture_tool_revision()
-    row = run_lifecycle.bench(runtime, args)
-    if options.get('observer_prefixes', False):
-        from recipe_prefixes import capture, SOCKET_NAME
-        _write(work / 'observer-prefixes.json',
-               capture(work / attempt / 'monitor' / SOCKET_NAME, document))
+    try:
+        row = run_lifecycle.bench(runtime, args)
+        if options.get('observer_prefixes', False):
+            from recipe_prefixes import capture, SOCKET_NAME
+            _write(work / 'observer-prefixes.json',
+                   capture(work / attempt / 'monitor' / SOCKET_NAME, document))
+    finally:
+        if mrt_selected(document):
+            try:
+                _write(work / 'mrt-input-after.json', verify_input(document))
+            except (OSError, ValueError, RuntimeError) as exc:
+                _write(work / 'mrt-input-after.json', {'status': 'failed', 'reason': str(exc)})
+                raise
     stage(work, 'collection', reason='Existing lifecycle returned; preserve the stats row before final diagnostics.')
     # Successful process exit alone is never an experiment completion witness.
     if not row:
-        return {'status': 'inconclusive', 'reason': 'Engine returned no stats row.'}
+        return {'status': 'inconclusive', 'reason': (
+            'Separate receive-loading receipt; transit completion and timing are unmeasured.'
+            if options.get('maghemite_loading', False) else 'Engine returned no stats row.')}
     header = [x.strip() for x in engine.stats_header().split(',')]
     if len(row) != len(header):
         raise RuntimeError('Engine stats row does not match its declared header')

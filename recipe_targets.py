@@ -37,6 +37,11 @@ FRR_CONFIGURE = ('--prefix=/usr', '--sbindir=/usr/lib/frr', '--sysconfdir=/etc',
                  '--enable-group=frr', '--enable-vty-group=frrvty')
 
 
+def require_source_adapter(adapter):
+    if adapter not in BUILD_RECIPES:
+        raise recipes.ContractError(f'{adapter}: local source builds and revision searches are unsupported; supply an immutable image')
+
+
 def _build_flags(adapter, cflags, configure_flags, instrumentation):
     cflags, options = _flags(cflags, configure_flags, instrumentation)
     if adapter == 'frr_c':
@@ -167,6 +172,7 @@ def validate_target(document, recipe=None):
         if provenance['source'] is not None or provenance['build'] is not None:
             raise recipes.ContractError('supplied images must not invent source/build identities')
     else:
+        require_source_adapter(document['adapter'])
         source = _source(provenance['source'])
         build = provenance['build']
         recipes._keys(build, ('recipe', 'toolchain_image', 'runtime_image', 'toolchain_image_id', 'runtime_image_id', 'compiler_flags', 'linker_flags',
@@ -328,7 +334,10 @@ def plan_source_build(recipe, source_root, revision, *, toolchain_image, runtime
                       configure_flags=()):
     """Inspect local source and emit identities; never execute code or Docker."""
     recipes.validate_recipe(recipe)
+    if recipe['schema'] != recipes.RECIPE_SCHEMA:
+        raise recipes.ContractError('This workflow currently supports synthetic recipes only')
     adapter = recipe['roles']['target']['adapter']
+    require_source_adapter(adapter)
     _image(toolchain_image, 'toolchain_image'); _image(runtime_image, 'runtime_image')
     cflags, configure_flags = _build_flags(adapter, cflags, configure_flags, instrumentation)
     source, _, _ = _snapshot(source_root, revision, include_dirty, adapter=adapter)
@@ -361,7 +370,10 @@ def validate_build_plan(plan):
                         'configure_flags', 'build_recipe', 'network', 'requirements', 'limits'))
     recipes._choice(plan['schema'], (BUILD_SCHEMA,), 'schema')
     recipes.validate_recipe(plan['recipe'])
+    if plan['recipe']['schema'] != recipes.RECIPE_SCHEMA:
+        raise recipes.ContractError('This workflow currently supports synthetic recipes only')
     adapter = plan['recipe']['roles']['target']['adapter']
+    require_source_adapter(adapter)
     if recipes.recipe_sha256(plan['recipe']) != plan['recipe_sha256']:
         raise recipes.ContractError('Build plan recipe binding differs')
     if not isinstance(plan['source_root'], str) or not Path(plan['source_root']).is_absolute():

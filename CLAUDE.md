@@ -351,7 +351,7 @@ claims.
   `-r/--repeat` in both directions.
 
 **`docs/invariants/batch-passes.md`** — `bgperf2.py`'s `expand_batch_cells()`/`batch_report_rows()`/
-`create_batch_graphs()`/`report_batch_from_cell_results()`/`load_batch_cell_results()`, `summary.py`, `graphs.py`.
+`create_batch_graphs()`/`report_batch_from_cell_results()`/`load_batch_cell_results()`, `native_batch.py`, `native_mrt.py`, `summary.py`, `graphs.py`.
 
 - A repetition repeats the whole matrix, not each cell, and is part of a run's *name*, never a
   column beside it.
@@ -365,7 +365,9 @@ claims.
   missing cell is named, never filled, and the graphs wait for it.
 - Cell results are the only record: `--resume` skips recorded cells, continues a drawn seed, and
   refuses results the config no longer lists or that ran under another sequence. SIGTERM records nothing for the cell in flight and exits
-  143. Attempt records and host-reclaim watching belong to the caller, not the engine.
+  143. The separately selected durable native mode owns attempt records,
+  calibration dependencies and explicit recovery; host-reclaim watching remains
+  with infrastructure tooling. See [the public guide](docs/native-batches.md).
 
 **`docs/invariants/target-state.md`** — `frr.py`, `bird.py`, `gobgp.py`, `base.py`'s
 `sample_target_state()`, `measurements.py`'s `target_table_section()`/`delivery_metrics()`.

@@ -5008,13 +5008,26 @@ def batch(args):
     other variables can be set, but not iterated through
 
     `--resume` skips every cell that already has a result in --results-dir.
-    Anything more -- a record of attempts, refusing to continue after a
-    failure, watching for a host being reclaimed -- belongs to whatever drives
-    the batch, through `--list-cells`, `--cells` and `--report`.
+    The opt-in durable native mode also owns attempts, calibration dependencies
+    and explicit interruption recovery. External supervisors retain their
+    `--list-cells`, `--cells`, `--report` and cell-control interface. Cloud
+    watching and host provisioning remain outside the engine.
     """
+    if getattr(args, 'batch_status', False):
+        if any(getattr(args, flag, False) for flag in ('list_cells', 'report', 'preflight')):
+            raise ValueError('--status cannot run another batch operation')
+        import native_batch
+        if not args.batch_config:
+            return native_batch.inspect_saved(args)
+        return native_batch.run(sys.modules[__name__], args,
+            expand_batch_config(args.batch_config, getattr(args, 'defer_graphs', False)))
     # Neither runs a cell, and both print documents a caller parses, so they
     # return before anything below can print anything of its own.
     if getattr(args, 'list_cells', False):
+        if getattr(args, 'durable', False) or getattr(args, 'calibrate', False):
+            import native_batch
+            return native_batch.list_plan(sys.modules[__name__], args,
+                expand_batch_config(args.batch_config, getattr(args, 'defer_graphs', False)))
         return list_batch_cells(expand_batch_config(args.batch_config, getattr(args,'defer_graphs',False)))
     if getattr(args, 'report', False):
         return report_batch_from_cell_results(
@@ -5025,6 +5038,12 @@ def batch(args):
 
     if getattr(args,'preflight',False):
         return native_preflight(args)
+
+    if (getattr(args, 'durable', False) or getattr(args, 'calibrate', False)
+            or os.path.isfile(os.path.join(args.results_dir, 'native-batch.json'))):
+        import native_batch
+        return native_batch.run(sys.modules[__name__], args,
+            expand_batch_config(args.batch_config, getattr(args, 'defer_graphs', False)))
 
     # Before the first cell: a SIGTERM during cell 1 must already abandon it.
     install_stop_handlers()
@@ -6272,6 +6291,9 @@ def create_args_parser(main=True):
     parser_batch.add_argument('--defer-graphs', action='store_true', help='Save complete bench plot inputs; render graphs offline after measurement')
     parser_batch.add_argument('--control-dir', help='Existing absolute directory for external native-cell admission/replay control')
     parser_batch.add_argument('--stop-on-failure', action='store_true', help='Stop after a recorded failed cell; never retry')
+    parser_batch.add_argument('--durable', action='store_true', help='Run one durable native batch with explicit interruption recovery')
+    parser_batch.add_argument('--calibrate', action='store_true', help='Durable batch: separate calibration before each configuration/workload')
+    parser_batch.add_argument('--status', dest='batch_status', action='store_true', help='Inspect saved durable batch state without running')
     parser_batch.set_defaults(func=batch)
 
     render_parser=s.add_parser('render-bench',help='Render saved bench graph data without Docker')

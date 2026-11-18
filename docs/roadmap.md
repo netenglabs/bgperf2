@@ -7,6 +7,13 @@ CLI and versioned artifacts; none is required to use the engine.
 
 ## Current direction
 
+The selected [native batch recovery plan](plans/native-batch-recovery.md) moves
+durable attempts, explicit interruption recovery, calibration dependencies and
+independent failure handling into the public engine. It extends `batch` and
+removes agent-directed campaign recovery from the intended runtime workflow.
+Existing AWS measurements are stopped; local implementation and modeled tests
+do not authorize restarting them.
+
 The selected [native MRT performance CLI](plans/native-mrt-performance.md) moves
 routine fixed-input sweeps onto `bench`/`batch`, reusing exact-input and final
 identity checks without per-cell portable-recipe orchestration.

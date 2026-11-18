@@ -2,7 +2,7 @@
 
 How a matrix becomes an ordered list of runs, and what the passes of one cell are allowed to say about each other.
 
-**Read this before editing:** `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `bgperf2.py` (`expand_batch_cells()`, `batch_report_rows()`, `bench_output_prefix()`, `create_batch_graphs()`, `report_batch_from_cell_results()`, `load_batch_cell_results()`), `summary.py`, `graphs.py`
+**Read this before editing:** `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `native_batch.py` (durable attempts, calibration dependencies and explicit recovery), `native_mrt.py` (reserved native attempt identity and interruption status), `bgperf2.py` (`expand_batch_cells()`, `batch_report_rows()`, `bench_output_prefix()`, `create_batch_graphs()`, `report_batch_from_cell_results()`, `load_batch_cell_results()`), `summary.py`, `graphs.py`
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
 
@@ -239,6 +239,27 @@ already does the same thing along the version axis by labelling each version. Th
 two identical target entries are refused rather than treated as two observations — that is what
 `repetitions` is for, and it names its passes.
 
-Note the container work directory (`<--dir>/<bench-name>`) is wiped at the start of every cell, so
+In legacy execution the container work directory (`<--dir>/<bench-name>`) is wiped at the start of every cell, so
 raw daemon and tester logs only ever survive for the run in progress — that is true across cells
 already, and repetitions do not change it. The published artifacts are the durable record.
+Native execution uses fresh attempt-specific directories and retains earlier work.
+
+## Selected durable native mode
+
+The 2026-11-17 operator decision selects engine-owned attempt accounting and
+recovery for opt-in native batches, superseding the earlier rule assigning all
+attempt intelligence to external callers for this mode. Legacy batches and their
+cell-result identity/resume semantics remain unchanged. Cloud watching and
+instance launching still belong to infrastructure tooling.
+
+`native_batch.py` freezes the existing finite matrix, keeps calibrations apart
+from measured repetitions, records every reserved attempt before its worker,
+and holds one exclusive results lease. A native receipt remains the original;
+state/CSV/summary publication cannot make an interrupted or failed attempt a
+successful timing. A completion receipt can survive loss of its parent's
+publication; explicit resume adopts it only with matching cell/workload/images
+and verified terminal cleanup. Failed calibration blocks only its dependents.
+Unknown cleanup stops independent work. Recovery retains inspect/log evidence
+before deleting only the interrupted attempt's owned objects; original work and
+receipts stay retained. The [public guide](../native-batches.md) owns the CLI,
+status meanings, supported scope and preservation limits.

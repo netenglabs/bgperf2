@@ -54,6 +54,10 @@ network:
 `bench` runs one such experiment; `batch` runs a matrix of them from a YAML file
 and compares them in a CSV, a summary and graphs.
 
+For one native batch with separate calibrations, retained attempts and explicit
+Spot/interrupt continuation, see [durable native batches](docs/native-batches.md).
+The engine owns recovery; no external agent or private campaign runner is needed.
+
 ## Prerequisites
 
 * Linux with Docker; your user must be in the `docker` group.

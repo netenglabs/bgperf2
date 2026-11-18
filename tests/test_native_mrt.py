@@ -52,8 +52,16 @@ def test_fixed_offering_requires_one_complete_attempt_bound_witness_per_peer(tmp
 
 
 @pytest.mark.parametrize('failure',[False,True])
-def test_native_bench_calls_lifecycle_directly_captures_afterward_and_cleans(tmp_path,monkeypatch,failure):
+@pytest.mark.parametrize('reserved',[False,True])
+@pytest.mark.parametrize('storage_failure',[False,True])
+def test_native_bench_calls_lifecycle_directly_captures_afterward_and_cleans(tmp_path,monkeypatch,failure,reserved,storage_failure):
     args,spec=fixture(tmp_path);order=[]
+    if reserved:
+        args.native_attempt_id='bgperf_bench_'+'a'*32
+        args.native_durable=True
+    if storage_failure:
+        def refused(*a):raise OSError('storage refused')
+        monkeypatch.setattr(native,'flush_outputs',refused)
     monkeypatch.setattr(engine,'img_exists',lambda image:True)
     monkeypatch.setattr(engine,'controller_stop',threading.Event())
     created=[]
@@ -64,6 +72,7 @@ def test_native_bench_calls_lifecycle_directly_captures_afterward_and_cleans(tmp
     monkeypatch.setattr(engine.dckr,'networks',lambda **kw:[])
     def run(runtime,actual):
         assert actual.bench_name.startswith('bgperf_bench_')
+        if reserved:assert actual.bench_name==args.native_attempt_id
         assert actual.mrt_file==spec['input']['path']
         assert runtime.TARGET_CLASSES['bird'].require_image()==args.image
         assert runtime.MONITOR_CLASSES['sink'].require_image()==args.observer_image
@@ -78,15 +87,27 @@ def test_native_bench_calls_lifecycle_directly_captures_afterward_and_cleans(tmp
     monkeypatch.setattr(native.run_lifecycle,'bench',run)
     monkeypatch.setattr(native.prefixes,'capture',lambda *a:order.append('capture') or {})
     monkeypatch.setattr(native.prefixes,'inspect',lambda *a:dict(missing_count=int(failure),unexpected_count=0))
-    if failure:
-        with pytest.raises(ValueError,match='completion/identity'):native.bench(engine,args)
+    if failure or reserved and storage_failure:
+        with pytest.raises(ValueError,match='storage failed' if reserved and storage_failure else 'completion/identity'):native.bench(engine,args)
     else:
         assert native.bench(engine,args)[6]==len(spec['expected_prefixes'])
     assert order==['lifecycle','capture']
     receipt=json.loads(next(Path(args.results_dir).glob('*.mrt.json')).read_text())
-    assert receipt['status']==('failed' if failure else 'completed')
+    assert receipt['status']==('failed' if failure or reserved and storage_failure else 'completed')
+    if reserved and not storage_failure:assert receipt['storage_flushed'] is True
+    if reserved and storage_failure:assert receipt['storage_error']=='storage refused' and not receipt.get('storage_flushed')
     assert receipt['input_before']['status']==receipt['input_after']['status']=='verified'
     assert (Path(receipt['work'])/'cleanup.json').is_file()
+
+
+def test_durable_flush_includes_regular_payloads_and_directory_entries_not_link_targets(tmp_path,monkeypatch):
+    root=tmp_path/'attempt';root.mkdir();payload=root/'samples.csv';payload.write_text('samples')
+    outside=tmp_path/'input.mrt';outside.write_text('input');(root/'input-link').symlink_to(outside)
+    seen=[]
+    monkeypatch.setattr(native.os,'fsync',lambda fd:seen.append(Path(native.os.readlink('/proc/self/fd/'+str(fd)))))
+    native.flush_outputs(root)
+    assert payload in seen and root in seen and root.parent in seen
+    assert outside not in seen and root/'input-link' not in seen
 
 
 def test_batch_forwards_bindings_and_control_without_recipe_commands(tmp_path):

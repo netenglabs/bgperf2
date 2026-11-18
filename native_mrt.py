@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import time
 import types
 import uuid
@@ -21,6 +22,32 @@ import run_lifecycle
 
 
 _CACHE = {}
+
+
+def flush_outputs(*roots):
+    """Make native payloads durable before publishing a completed receipt.
+
+    Runtime sockets and symlinks carry no flushable file contents. Never open
+    them or follow a link into the shared input cache.
+    """
+    directories = set()
+    for root in roots:
+        root = Path(root)
+        if root.is_symlink(): raise ValueError('Native output root is a symlink')
+        for path in [root, *root.rglob('*')]:
+            mode = path.lstat().st_mode
+            if stat.S_ISREG(mode):
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                try:
+                    if not stat.S_ISREG(os.fstat(fd).st_mode): raise ValueError('Native output type changed')
+                    os.fsync(fd)
+                finally: os.close(fd)
+            elif stat.S_ISDIR(mode): directories.add(path)
+        directories.update(root.parents)
+    for path in sorted(directories, key=lambda p:len(p.parts), reverse=True):
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try: os.fsync(fd)
+        finally: os.close(fd)
 
 
 def workload(path, digest, neighbors, per_peer):
@@ -189,7 +216,9 @@ def bench(engine, selected):
     for image in (args.image,args.generator_image,args.observer_image):
         if not engine.img_exists(image):
             raise ValueError('Native MRT image unavailable: '+image)
-    attempt = 'bgperf_bench_' + uuid.uuid4().hex
+    attempt = getattr(args, 'native_attempt_id', None) or 'bgperf_bench_' + uuid.uuid4().hex
+    if not re.fullmatch(r'bgperf_bench_[0-9a-f]{32}', attempt):
+        raise ValueError('Invalid native attempt identity')
     args.bench_name = attempt
     if is_mrt:args.mrt_file = spec['input']['path']
     work = Path(args.dir)/attempt
@@ -289,7 +318,7 @@ def bench(engine, selected):
         receipt['status']='completed'
         return row
     except BaseException as exc:
-        receipt.update(status='stopped' if isinstance(exc,engine.StopRequested) else 'failed',error=str(exc))
+        receipt.update(status='stopped' if isinstance(exc,(engine.StopRequested,KeyboardInterrupt)) else 'failed',error=str(exc))
         raise
     finally:
         runtime.controller_stop.set()
@@ -302,6 +331,13 @@ def bench(engine, selected):
             if receipt['error'] is None:receipt['error']='Cleanup: '+str(exc)
             raise
         finally:
+            if getattr(args,'native_durable',False):
+                try:
+                    flush_outputs(work,Path(args.results_dir))
+                    receipt['storage_flushed']=True
+                except (OSError,ValueError) as exc:
+                    receipt.update(status='failed',storage_error=str(exc))
+                    if receipt['error'] is None:receipt['error']='Native payload storage failed: '+str(exc)
             try:journal.note('terminal',status=receipt['status'])
             except OSError as exc:receipt['phase_error']=str(exc)
             if receipt.get('phase_error'):
@@ -310,3 +346,4 @@ def bench(engine, selected):
             if control:
                 engine.atomic_write_json(str(control/'done.json'),dict(attempt_id=attempt,status=receipt['status']))
             if receipt.get('phase_error'):raise ValueError(receipt['error'])
+            if receipt.get('storage_error'):raise ValueError('Native payload storage failed: '+receipt['storage_error'])

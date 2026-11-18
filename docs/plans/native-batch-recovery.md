@@ -67,3 +67,13 @@ fix uses the existing row formatter. Focused checks additionally cover unresolve
 completion status, saved work-root recovery, retained recovery-history pointers,
 and flushing native payloads before completion attestation. A stopped/incomplete
 original never becomes an accepted timing through a report or resume operation.
+
+## Selected local integration refinement, 2026-11-17
+
+The operator selected completing the local Research/Lab integration after the
+first engine delivery. Managed durable control now binds host-policy review
+before checkpoint/next-cell admission, supports recovery without new work,
+bounds fresh reservations per invocation and stores row column names. Existing
+native clocks/images/guards and historical attempts are unchanged. Real daemon
+or AWS execution remains stopped and separately selected. Focused recovery
+checks include rejection, lost review, no-launch recovery and bounded resume.

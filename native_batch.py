@@ -18,6 +18,10 @@ SCHEMA = 'bgperf2/native-batch-state/v1'
 ATTEMPT = re.compile(r'bgperf_bench_[0-9a-f]{32}')
 
 
+class MissingOperationalReview(ValueError):
+    pass
+
+
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -69,7 +73,12 @@ def blueprint(engine, args, expanded, calibrate, *, validate=True):
                 test=test['name'], cell=cell, kind='measurement', requires=calibrations.get(group), order=order, seed=seed))
         positions.extend(measured)
     if len({p['key'] for p in positions}) != len(positions): raise ValueError('Duplicate native batch position')
-    return dict(calibrate=calibrate, work_root=str(canonical(args.dir)), positions=positions)
+    plan = dict(calibrate=calibrate, work_root=str(canonical(args.dir)), positions=positions)
+    policy = getattr(args, 'operational_policy_sha256', None)
+    if policy:
+        if not re.fullmatch(r'[0-9a-f]{64}', policy): raise ValueError('Operational policy SHA256 required')
+        plan['operational_policy_sha256'] = policy
+    return plan
 
 
 def inspect_saved(args):
@@ -172,13 +181,56 @@ def recover_owned(engine, root, attempt, *, destination=None):
     return str(destination)
 
 
+def operational_review(engine, root, attempt):
+    """Bind host-policy review before treating native completion as qualified."""
+    if not attempt.get('operational_policy_sha256') or attempt.get('operational_review_missing'): return
+    saved = root / 'operations' / (attempt['id'] + '.json')
+    if attempt.get('operational_review_sha256'):
+        if digest(saved) != attempt['operational_review_sha256']:
+            raise ValueError('Retained operational review changed')
+        review = read(saved)
+    else:
+        control = Path(attempt['control'])
+        try:
+            token = read(control / 'completion-release.json')
+            review = read(control / 'operational-review.json')
+        except FileNotFoundError as exc:
+            raise MissingOperationalReview('Operational review missing; use --recover before resume') from exc
+        if token != dict(attempt_id=attempt['id'], status=review.get('status'),
+                         review_sha256=digest(control / 'operational-review.json')):
+            raise ValueError('Operational completion release differs')
+        if (review.get('attempt_id') != attempt['id']
+                or review.get('policy_sha256') != attempt['operational_policy_sha256']
+                or review.get('status') not in ('passed', 'rejected')):
+            raise ValueError('Operational review identity/policy differs')
+        saved.parent.mkdir(exist_ok=True)
+        engine.atomic_write_json(str(saved), review)
+        native_mrt.flush_outputs(saved.parent)
+        attempt['operational_review_sha256'] = digest(saved)
+    if review['status'] != 'passed':
+        attempt['unqualified_reason'] = 'operational_policy_rejected: ' + str(review.get('reason'))
+
+
+def wait_operational(engine, root, attempt):
+    if not attempt.get('operational_policy_sha256'): return
+    path = Path(attempt['control']) / 'completion-release.json'
+    try: native_mrt.wait_for(engine, path, 180)
+    except ValueError:
+        if not path.exists(): raise MissingOperationalReview('Operational review deadline; use --recover') from None
+        raise
+    operational_review(engine, root, attempt)
+
+
 def terminal(engine, root, position, entry, work_root, attempt):
     path, value = checked_receipt(engine, root, position, attempt['id'], work_root)
-    if value['status'] not in ('completed', 'failed'): raise ValueError('Native result is not terminal')
+    if value['status'] not in ('completed', 'failed') and not attempt.get('unqualified_reason'): raise ValueError('Native result is not terminal')
     if value.get('storage_flushed') is not True: raise ValueError('Native payload durability is unverified')
     clean_receipt(value)
     selected = engine.batch_cell_args(SimpleNamespace(), position['cell'])
-    if value['status'] == 'completed':
+    operational_review(engine, root, attempt)
+    if attempt.get('unqualified_reason'):
+        row = failed_row(engine, selected, attempt['unqualified_reason']); status = 'failed'
+    elif value['status'] == 'completed':
         row = value.get('row'); identity = value.get('identity', {})
         if (not isinstance(row, list) or len(row) != len(engine.stats_header().split(',')) or engine.row_failed(row)
                 or identity.get('missing_count') != 0 or identity.get('unexpected_count') != 0 or not value.get('offering')):
@@ -193,6 +245,9 @@ def terminal(engine, root, position, entry, work_root, attempt):
 def qualify(engine, root, position, entry, work_root, attempt):
     try:
         return terminal(engine, root, position, entry, work_root, attempt)
+    except MissingOperationalReview:
+        attempt['status'] = entry['status'] = 'interrupted'
+        raise
     except Exception:
         attempt['status'] = entry['status'] = 'unresolved'
         raise
@@ -237,8 +292,21 @@ def validate_state(state, plan):
 
 
 def run(engine, args, expanded):
-    if getattr(args, 'cells', None) or getattr(args, 'control_dir', None) or getattr(args, 'no_report', False):
+    if getattr(args, 'cells', None) or getattr(args, 'no_report', False):
         raise ValueError('Durable batch owns its cells and recovery; external cell control/selection is separate')
+    control = getattr(args, 'control_dir', None)
+    policy = getattr(args, 'operational_policy_sha256', None)
+    recovery_only = getattr(args, 'recover', False)
+    if bool(control) != bool(policy) and not recovery_only:
+        raise ValueError('Managed durable batches require control directory and operational policy SHA256 together')
+    if control:
+        control = str(canonical(control))
+        if not Path(control).is_dir(): raise ValueError('Existing control directory required')
+    maximum = getattr(args, 'maximum_originals', None)
+    seconds = getattr(args, 'timeout_seconds', None)
+    if maximum is not None and (type(maximum) is not int or maximum < 1): raise ValueError('Positive original ceiling required')
+    if seconds is not None and (type(seconds) is not int or seconds < 1): raise ValueError('Positive time ceiling required')
+    started = time.monotonic(); fresh = 0
     root = canonical(args.results_dir); state_path = root / 'native-batch.json'
     existing = read(state_path) if state_path.exists() else None
     if existing:
@@ -248,27 +316,35 @@ def run(engine, args, expanded):
         if not getattr(args, 'batch_status', False) and supplied not in (recorded_work, default):
             raise ValueError('Recorded work root is ' + recorded_work + '; resume cannot relocate originals')
         args = copy.copy(args); args.dir = recorded_work
+        recorded_policy = existing['plan'].get('operational_policy_sha256')
+        if policy and policy != recorded_policy: raise ValueError('Operational policy differs')
+        args.operational_policy_sha256 = recorded_policy
+        if recorded_policy and not control and not recovery_only and not getattr(args, 'batch_status', False):
+            raise ValueError('Managed resume requires host control')
     calibrate = bool(getattr(args, 'calibrate', False) or existing and existing['plan']['calibrate'])
     plan = blueprint(engine, args, expanded, calibrate)
     if existing: validate_state(existing, plan)
     if getattr(args, 'batch_status', False):
         if not existing: raise ValueError('No durable batch state')
         print(json.dumps(status(existing), indent=2)); return
-    if existing and not getattr(args, 'resume', False): raise ValueError('Durable batch retained; use --resume or --status')
+    if existing and not (getattr(args, 'resume', False) or recovery_only): raise ValueError('Durable batch retained; use --resume or --status')
     if not existing and getattr(args, 'resume', False): raise ValueError('No durable batch to resume')
     if not existing and root.exists() and any(p.name != '.native-batch.lock' for p in root.iterdir()):
         raise ValueError('Durable batch requires fresh results; existing evidence is retained')
+    if recovery_only and not existing: raise ValueError('No durable batch to recover')
     # Images and the entire finite definition qualify before the first worker.
-    engine.check_batch_images([p['cell']['target'] for p in plan['positions']])
-    engine.check_batch_monitor_images([t for t, *_ in expanded])
-    engine.check_batch_pin_and_repeat([t for t, *_ in expanded])
+    if not recovery_only:
+        engine.check_batch_images([p['cell']['target'] for p in plan['positions']])
+        engine.check_batch_monitor_images([t for t, *_ in expanded])
+        engine.check_batch_pin_and_repeat([t for t, *_ in expanded])
     root.mkdir(parents=True, exist_ok=True)
     with (root / '.native-batch.lock').open('a') as lock:
         try: fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError: raise ValueError('Native batch controller is already active') from None
-        if state_path.exists() and not getattr(args, 'resume', False):
+        if state_path.exists() and not (getattr(args, 'resume', False) or recovery_only):
             raise ValueError('Durable batch appeared during admission; use --resume')
         state = read(state_path) if state_path.exists() else dict(schema=SCHEMA, plan=plan, status='prepared',
+            columns=[h.strip() for h in engine.stats_header().split(',')],
             cells={p['key']:dict(status='unrun', attempts=[]) for p in plan['positions']})
         validate_state(state, plan)
         args = copy.copy(args); args.results_dir = str(root); args.dir = plan['work_root']
@@ -296,12 +372,20 @@ def run(engine, args, expanded):
                     continue
                 if entry['status'] == 'unresolved': raise ValueError('Unresolved original retained; no automatic retry')
                 if position['requires'] and state['cells'][position['requires']]['status'] != 'completed':
+                    if recovery_only and state['cells'][position['requires']]['status'] != 'failed': continue
                     entry.update(status='blocked', reason='calibration_not_qualified'); save(); continue
                 if entry['attempts']:
                     attempt = entry['attempts'][-1]
                     path = receipt_path(root, attempt['id'], position['cell'])
                     value = checked_receipt(engine, root, position, attempt['id'], work_root)[1] if path.exists() else None
                     if value and value['status'] in ('completed', 'failed'):
+                        # A valid native receipt with no host review remains unqualified.
+                        # Recovery never invents an admission or repeats this original.
+                        if recovery_only and attempt.get('operational_policy_sha256'):
+                            try: operational_review(engine, root, attempt)
+                            except MissingOperationalReview:
+                                attempt['unqualified_reason'] = 'operational_review_missing_after_interruption'
+                                attempt['operational_review_missing'] = True
                         qualify(engine, root, position, entry, work_root, attempt); save(); continue
                     recoveries = attempt.setdefault('recoveries', [])
                     if attempt.get('recovery') and attempt['recovery'] not in recoveries:
@@ -317,34 +401,58 @@ def run(engine, args, expanded):
                     recover_owned(engine, root, attempt['id'], destination=destination)
                     retained = [p for p in (work_root / attempt['id'], root / attempt['id']) if p.is_dir()]
                     if retained: native_mrt.flush_outputs(*retained)
+                    if attempt.get('operational_policy_sha256') and (Path(attempt['control'])/'completion-release.json').exists():
+                        operational_review(engine, root, attempt)
+                    if attempt.get('unqualified_reason'):
+                        selected = engine.batch_cell_args(args, position['cell'])
+                        entry.update(status='failed', row=failed_row(engine, selected, attempt['unqualified_reason']))
+                        attempt['status']='failed'
+                        if path.exists(): attempt['receipt_sha256']=digest(path)
                     save()
+                if recovery_only or entry['status'] == 'failed': continue
+                if (maximum is not None and fresh >= maximum) or (seconds is not None and time.monotonic()-started >= seconds):
+                    state['status']='paused'; state['budget_stop']='invocation_ceiling'; break
                 selected = engine.batch_cell_args(args, position['cell'])
                 attempt = dict(id='bgperf_bench_' + uuid.uuid4().hex, status='running', host=socket.gethostname(),
                     boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip(), engine=engine.tool_revision(), started_unix=time.time())
-                entry['attempts'].append(attempt); entry['status'] = 'running'; save()
+                if policy or plan.get('operational_policy_sha256'):
+                    attempt.update(operational_policy_sha256=plan['operational_policy_sha256'],
+                                   control=str(canonical(control) / attempt['id']))
+                entry.pop('reason', None)
+                entry['attempts'].append(attempt); entry['status'] = 'running'; fresh += 1; save()
                 selected.native_cell_id = position['id']; selected.native_attempt_id = attempt['id']
                 selected.native_durable = True
+                selected.control_dir = control
                 try:
                     native_mrt.bench(engine, selected)
                 except (KeyboardInterrupt, engine.StopRequested) as exc:
                     attempt['error'] = str(exc) or type(exc).__name__
-                    attempt['status'] = entry['status'] = 'interrupted'; save(); raise
+                    attempt['status'] = entry['status'] = 'interrupted'
+                    if attempt.get('operational_policy_sha256') and (Path(attempt['control'])/'completion-release.json').exists():
+                        operational_review(engine, root, attempt)
+                    save(); raise
                 except Exception as exc:
                     attempt['error'] = str(exc)
                     path = receipt_path(root, attempt['id'], position['cell'])
                     if not path.exists():
                         attempt['status'] = entry['status'] = 'unresolved'; entry['error'] = str(exc); save(); raise
-                    try: qualify(engine, root, position, entry, work_root, attempt)
+                    try:
+                        wait_operational(engine, root, attempt)
+                        qualify(engine, root, position, entry, work_root, attempt)
+                    except MissingOperationalReview:
+                        attempt['status'] = entry['status'] = 'interrupted'; save(); raise
                     except Exception:
                         attempt['status'] = entry['status'] = 'unresolved'; save(); raise
-                else: qualify(engine, root, position, entry, work_root, attempt)
+                else:
+                    wait_operational(engine, root, attempt)
+                    qualify(engine, root, position, entry, work_root, attempt)
                 save()
                 print(json.dumps(dict(cell=position['key'], kind=position['kind'],
                     configuration=position['cell']['target'].get('label') or position['cell']['target']['name'],
                     repetition=position['cell'].get('repetition'), status=entry['status'])), flush=True)
                 if entry['status'] == 'failed' and getattr(args, 'stop_on_failure', False):
                     raise engine.StopRequested('Recorded failed batch cell; --stop-on-failure')
-            state['status'] = 'completed_with_dispositions' if any(c['status'] in ('failed', 'blocked') for c in state['cells'].values()) else 'completed'
+            if state['status'] != 'paused': state['status'] = ('recovered' if recovery_only else 'completed_with_dispositions') if any(c['status'] in ('failed', 'blocked') for c in state['cells'].values()) else ('recovered' if recovery_only else 'completed')
         except BaseException as exc:
             state.update(status='stopped', error=str(exc)); raise
         finally:

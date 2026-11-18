@@ -339,3 +339,92 @@ def test_recovery_preserves_before_deletion_and_never_touches_foreign_objects(tm
     else:
         with pytest.raises((ValueError,OSError)):batch.recover_owned(runtime,tmp_path,attempt)
         assert not removed and not network_removed
+
+
+def managed(model, monkeypatch, *, reject=None, missing=None):
+    control=Path(model.args.results_dir).parent/'control';control.mkdir()
+    model.args.control_dir=str(control);model.args.operational_policy_sha256='a'*64
+    def run(runtime,selected):
+        model.run(runtime,selected)
+        path=control/selected.native_attempt_id;path.mkdir()
+        if selected.label==missing:raise HardLoss()
+        review=dict(attempt_id=selected.native_attempt_id,policy_sha256='a'*64,
+                    status='rejected' if selected.label==reject else 'passed',reason='modeled resource guard',
+                    cohort=dict(cpu_model='simulated',memory_bytes=64*1024**3))
+        engine.atomic_write_json(str(path/'operational-review.json'),review)
+        engine.atomic_write_json(str(path/'completion-release.json'),dict(attempt_id=selected.native_attempt_id,
+            status=review['status'],review_sha256=batch.digest(path/'operational-review.json')))
+    monkeypatch.setattr(batch.native_mrt,'bench',run)
+
+
+def test_managed_batch_requires_and_preserves_operational_qualification(model,monkeypatch):
+    managed(model,monkeypatch,reject='first');engine.batch(model.args)
+    state=model.state()
+    assert len(model.calls)==5
+    assert sum(c['status']=='blocked' for c in state['cells'].values())==3
+    failed=next(c for c in state['cells'].values() if c['status']=='failed')
+    assert failed['attempts'][0]['unqualified_reason'].startswith('operational_policy_rejected')
+    assert failed['row'][state['columns'].index('elapsed (s)')] is None
+    model.args.resume=True;engine.batch(model.args);assert len(model.calls)==5
+    review=next((Path(model.args.results_dir)/'operations').glob('*.json'));review.write_text('{}')
+    with pytest.raises(ValueError,match='review changed'):engine.batch(model.args)
+
+
+def test_recovery_without_host_review_never_adopts_timing_or_launches(model,monkeypatch):
+    managed(model,monkeypatch,missing='first')
+    with pytest.raises(HardLoss):engine.batch(model.args)
+    model.args.recover=True;model.args.control_dir=None;model.args.operational_policy_sha256=None
+    engine.batch(model.args);state=model.state()
+    assert len(model.calls)==1 and state['status']=='recovered'
+    original=next(c for c in state['cells'].values() if c['attempts'])
+    assert original['status']=='failed'
+    assert original['row'][state['columns'].index('elapsed (s)')] is None
+    assert 'missing' in original['attempts'][0]['unqualified_reason']
+
+
+def test_finite_invocation_resumes_without_repeating_completed_originals(model):
+    model.args.maximum_originals=3;engine.batch(model.args)
+    assert model.state()['status']=='paused' and len(model.calls)==3
+    retained={p.name:batch.digest(p) for p in Path(model.args.results_dir).glob('*.native.json')}
+    model.args.resume=True;engine.batch(model.args)
+    assert len(model.calls)==6 and model.state()['status']=='paused'
+    engine.batch(model.args)
+    assert len(model.calls)==8 and model.state()['status']=='completed'
+    assert all(batch.digest(Path(model.args.results_dir)/name)==sha for name,sha in retained.items())
+
+
+def test_recover_only_does_not_require_images_or_run_unrun_positions(model,monkeypatch):
+    model.args.maximum_originals=1;engine.batch(model.args)
+    monkeypatch.setattr(engine,'check_batch_images',lambda *a:pytest.fail('Recovery probed images'))
+    model.args.recover=True;engine.batch(model.args)
+    assert len(model.calls)==1 and model.state()['status']=='recovered'
+
+
+@pytest.mark.parametrize('flag,value',[('maximum_originals',1),('timeout_seconds',10),('operational_policy_sha256','a'*64)])
+def test_durable_controls_never_silently_fall_back_to_legacy(model,flag,value):
+    model.args.calibrate=False;setattr(model.args,flag,value)
+    with pytest.raises(ValueError,match='require --durable'):engine.batch(model.args)
+    assert not model.calls
+
+
+def test_missing_review_can_be_recovered_after_an_unsuccessful_resume(model,monkeypatch):
+    managed(model,monkeypatch,missing='first')
+    with pytest.raises(HardLoss):engine.batch(model.args)
+    model.args.resume=True
+    with pytest.raises(batch.MissingOperationalReview):engine.batch(model.args)
+    assert next(c for c in model.state()['cells'].values() if c['attempts'])['status']=='interrupted'
+    model.args.recover=True;model.args.control_dir=None;model.args.operational_policy_sha256=None
+    engine.batch(model.args)
+    assert next(c for c in model.state()['cells'].values() if c['attempts'])['status']=='failed'
+    assert len(model.calls)==1
+
+
+def test_relative_control_is_canonicalized_before_native_worker(model,monkeypatch):
+    managed(model,monkeypatch)
+    original=batch.native_mrt.bench
+    model.args.control_dir=os.path.relpath(model.args.control_dir)
+    def run(runtime,selected):
+        assert Path(selected.control_dir).is_absolute()
+        return original(runtime,selected)
+    monkeypatch.setattr(batch.native_mrt,'bench',run);engine.batch(model.args)
+    assert len(model.calls)==8

@@ -80,3 +80,32 @@ volume with existing infrastructure tooling and invoke explicit resume. This
 new mode does not adopt closed Lab campaign originals or reclassify historical
 results. Local modeled checks qualify the state machine; a real interruption
 validation is a separately selected future measurement.
+
+## Managed host policy and bounded invocations
+
+A caller may retain its existing per-cell admission/replay guards with
+`--control-dir DIR --operational-policy-sha256 SHA256`. The policy digest is
+frozen in the plan; each invocation uses a fresh existing control directory.
+After native `done.json`, the engine waits for `completion-release.json` before
+qualifying that original or starting a successor. The caller writes
+`operational-review.json` with `attempt_id`, `policy_sha256`, `status` (`passed`
+or `rejected`), a descriptive `cohort` and optional `reason`; the release contains
+`attempt_id`, `status`, `review_sha256`. The engine preserves and verifies the
+review separately from the immutable native receipt. A rejection produces no
+accepted timing and blocks calibration dependents. A missing review stops work.
+
+`--recover` recovers owned interrupted objects and adopts qualified receipts
+without starting any measurement or requiring images. A native completion
+whose host review was lost is retained as an unqualified failure, not retried.
+Use this operation before restoring the caller's swap session/idle admission.
+Ordinary interrupted attempts may receive fresh originals only on explicit
+`--resume`; ordinary failures and resource rejections are never retried.
+
+`--maximum-originals N` limits fresh reservations in this invocation. Resume
+skips/adoptions do not consume that budget. `--timeout-seconds N` is checked
+between originals; callers must enforce the whole-invocation deadline, including
+an in-flight original and restoration. A ceiling leaves remaining positions
+explicit and status `paused`; it is not automatic scheduling. Saved `columns`
+define the native row layout for standalone offline readers.
+
+These are locally modeled contracts, not live daemon interruption qualification.

@@ -5013,6 +5013,12 @@ def batch(args):
     `--list-cells`, `--cells`, `--report` and cell-control interface. Cloud
     watching and host provisioning remain outside the engine.
     """
+    if any(getattr(args, flag, None) is not None for flag in
+           ('maximum_originals', 'timeout_seconds', 'operational_policy_sha256')):
+        if not (getattr(args, 'durable', False) or getattr(args, 'calibrate', False)
+                or getattr(args, 'recover', False)
+                or os.path.isfile(os.path.join(args.results_dir, 'native-batch.json'))):
+            raise ValueError('Durable invocation controls require --durable')
     if getattr(args, 'batch_status', False):
         if any(getattr(args, flag, False) for flag in ('list_cells', 'report', 'preflight')):
             raise ValueError('--status cannot run another batch operation')
@@ -5039,7 +5045,7 @@ def batch(args):
     if getattr(args,'preflight',False):
         return native_preflight(args)
 
-    if (getattr(args, 'durable', False) or getattr(args, 'calibrate', False)
+    if (getattr(args, 'durable', False) or getattr(args, 'calibrate', False) or getattr(args, 'recover', False)
             or os.path.isfile(os.path.join(args.results_dir, 'native-batch.json'))):
         import native_batch
         return native_batch.run(sys.modules[__name__], args,
@@ -6291,6 +6297,10 @@ def create_args_parser(main=True):
     parser_batch.add_argument('--defer-graphs', action='store_true', help='Save complete bench plot inputs; render graphs offline after measurement')
     parser_batch.add_argument('--control-dir', help='Existing absolute directory for external native-cell admission/replay control')
     parser_batch.add_argument('--stop-on-failure', action='store_true', help='Stop after a recorded failed cell; never retry')
+    parser_batch.add_argument('--operational-policy-sha256', help='Bind managed durable attempts to the selected host policy')
+    parser_batch.add_argument('--recover', action='store_true', help='Recover retained durable attempts without starting measurements')
+    parser_batch.add_argument('--maximum-originals', type=int, help='Durable invocation fresh-original ceiling')
+    parser_batch.add_argument('--timeout-seconds', type=int, help='Durable invocation time ceiling checked between originals')
     parser_batch.add_argument('--durable', action='store_true', help='Run one durable native batch with explicit interruption recovery')
     parser_batch.add_argument('--calibrate', action='store_true', help='Durable batch: separate calibration before each configuration/workload')
     parser_batch.add_argument('--status', dest='batch_status', action='store_true', help='Inspect saved durable batch state without running')

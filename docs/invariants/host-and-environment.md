@@ -181,12 +181,14 @@ is the reserve only root may use, and bgperf2 does not run as root — and it me
 **existing** ancestor, because `bench()` asks before it creates the directory, on purpose. A warning
 about log volume is worth nothing once the logs are written.
 
-Two things made it that large, and only one is fixed:
+Two things made historical BIRD logs that large:
 
 - The BIRD tester config used `log ... all`, which includes `trace` — every route event, ~7KB per
   prefix. It now names the classes `find_errors()` actually needs, about 6x less.
 - What remains is `<RMT> Invalid route ... withdrawn`: the target re-advertises everything it
   learns back to the testers, which reject it. That is normal operation — `find_errors()` already
-  excludes those lines — but they are class `remote`, which `find_errors()` needs, so they cannot be filtered
-  out without blinding it. Stopping the target from exporting to testers would remove the noise but
-  would also change the workload (no RIB-out to N peers), so it is left alone.
+  excludes those lines. Fresh generators now filter only those existing remote
+  exclusions before disk, retaining all other remote messages. Their GNU awk
+  helper names itself `bgperf-bird-log`; only that dedicated name is allowed,
+  not generic awk interpreters. Generator cgroup CPU still includes the helper.
+  The target continues exporting to testers, preserving its RIB-out workload.

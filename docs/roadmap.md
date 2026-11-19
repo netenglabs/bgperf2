@@ -24,6 +24,10 @@ Completed runtime cases remain closed.
 
 ## Recent delivery and validation
 
+[BIRD generator log volume](plans/bird-generator-log-volume.md) is the selected
+2026-11-18 fix: discard only already-excluded remote messages before disk while
+retaining other messages and the existing tester-health checks.
+
 [Maintainer first-run release readiness](plans/maintainer-first-run.md)
 merged at `98dd03a`, after the workflows and storage fix at `e9431ee`. It connects
 a fresh checkout to a clearly simulated FRR example, concise verified results and the

@@ -278,6 +278,22 @@ shorter than the 1.0s poll resolution; the generator measured its own send at
 
 ## Tester health counts — a partial final line is not read
 
+New BIRD generators filter the existing `<RMT>` exclusions (`NEXT_HOP` and
+`Invalid route`) through a transient FIFO before writing their ordinary log.
+Other remote messages and every other selected severity remain enabled and are
+flushed immediately. The scanner still applies its exclusions to older logs.
+The FIFO is unlinked after BIRD opens it, leaving ordinary retained files; its
+reader and BIRD live inside the owned generator container and end at cleanup.
+GNU awk (already in BIRD images) preserves the original record terminator, so
+EOF does not turn an incomplete message into a complete scanner input. Its
+dedicated `bgperf-bird-log` process name attributes its CPU to the harness; other
+awk processes remain foreign. Filter CPU is included in generator cgroup usage.
+The finite FIFO can backpressure BIRD if the reader falls behind; that overhead
+is part of this fresh engine cohort and requires fresh sizing, not an assumed
+speedup. Startup failures also terminate a reader waiting for the FIFO to open.
+This changes logging overhead for fresh source identities, not acceptance or
+offering semantics. MRT generator logs are unchanged.
+
 `find_errors()` and `find_timeouts()` decide `tester_health`, and
 `check_timing_evidence.py` rejects a row on any nonzero count, so one line
 decides whether a converged run is evidence. **Every scan that opens a log goes

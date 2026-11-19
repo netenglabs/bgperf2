@@ -21,6 +21,20 @@ from churn import split_churn_paths
 from measurements import TesterOffering
 from  settings import dckr
 from subprocess import check_output, Popen, PIPE
+import shlex
+
+
+# Match the health scanner's existing exclusions, and only for remote-class
+# messages. Keep everything else, flushing each retained line so health scans
+# need not wait for an awk output buffer. This runs inside the generator image.
+BIRD_LOG_FILTER = '''
+BEGIN {
+    printf "bgperf-bird-log" > "/proc/self/comm"
+    close("/proc/self/comm")
+}
+index($0, "<RMT>") && (index($0, "NEXT_HOP") || index($0, "Invalid route")) { next }
+{ printf "%s%s", $0, RT; fflush() }
+'''
 
 
 class ExaBGPTester(Tester, ExaBGP):
@@ -94,15 +108,10 @@ class BIRDTester(Tester, BIRD):
         for p in peers:
             with open('{0}/{1}.conf'.format(self.host_dir, p['router-id']), 'w') as f:
                 local_address = p['local-address']
-                # Log classes, not `all`. `all` includes trace, and a BIRD
-                # tester traces every route event: 50 peers x 100k prefixes
-                # wrote 700MB per peer, 31GB in total. /tmp is tmpfs on a
-                # typical box, so that is 31GB of *RAM* -- it dragged the
-                # recorded min_free from 56GB to 28.5GB on a run whose target
-                # daemon used 0.56GB, making that column a measure of tester
-                # logging rather than of the daemon. find_errors() only needs
-                # <RMT>, and nothing reads the logs during a run.
-                config = '''log "{5}/{2}.log" {{ info, remote, warning, error, auth, bug, fatal }};
+                # A transient FIFO filters the already-excluded reflected-route
+                # messages before they reach disk. Keep the remote class enabled:
+                # other remote messages still qualify tester health.
+                config = '''log "{5}/{2}.log.pipe" {{ info, remote, warning, error, auth, bug, fatal }};
 #debug protocols all;
 debug protocols {{states}};
 router id {2};
@@ -255,7 +264,24 @@ ulimit -n 65536
 ''']
         peers = list(self.conf.get('neighbors', {}).values())
         for p in peers:
-            startup.append('''bird -c {0}/{1}.conf -s {0}/{1}.ctl >>{0}/{1}.log 2>&1\n'''.format(self.guest_dir, p['router-id']))
+            stem = '{0}/{1}'.format(self.guest_dir, p['router-id'])
+            quoted = {key: shlex.quote(stem + suffix) for key, suffix in (
+                ('pipe', '.log.pipe'), ('log', '.log'), ('conf', '.conf'),
+                ('ctl', '.ctl'))}
+            startup.append('''mkfifo {pipe} >>{log} 2>&1 || exit 1
+gawk {filter} <{pipe} >>{log} 2>>{log} &
+filter_pid=$!
+bird -c {conf} -s {ctl} >>{log} 2>&1
+bird_status=$?
+# BIRD and awk retain their open descriptors. Do not leave a special file in
+# the work tree: preserved artifacts remain ordinary files after startup.
+rm -f {pipe}
+if [ "$bird_status" -ne 0 ]; then
+    kill "$filter_pid" 2>/dev/null || true
+    wait "$filter_pid" 2>/dev/null || true
+    exit "$bird_status"
+fi
+'''.format(filter=shlex.quote(BIRD_LOG_FILTER), **quoted))
         return '\n'.join(startup)
 
     @staticmethod

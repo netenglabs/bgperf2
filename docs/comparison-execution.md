@@ -81,6 +81,17 @@ reviewer is independent. A rejection stops the session. A command interruption
 or crash leaving stage `running` also refuses further execution; there is no
 automatic resume or repair path.
 
+Reviews exist only at `first_review` and `final_review`. There is no public
+command to reject continuation between them. When an external controller stops
+a session mid-sequence, for example because outside CPU exceeded its own cap,
+the public session remains `ready` at its next index and an accepted first
+review stays unmodified. The external stop record then governs; do not issue
+another `comparison-step`.
+
+Use staged steps rather than `compare` whenever a gate must run between
+attempts: `compare` cannot pause on assertion, resolution or review findings
+until the whole sequence ends.
+
 For an A/A-to-A/B review gate, create the second session with
 `--prior-review /absolute/new-aa-results/reviews/final.json`. Start requires a
 verified accepted final review, a fully completed series with passed assertions,

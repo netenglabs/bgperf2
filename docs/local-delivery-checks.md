@@ -47,6 +47,11 @@ explicit different budget. `--backend-json '["/absolute/reviewer", "arg"]'`
 supports another backend without shell evaluation; it receives the contract on
 stdin and returns the documented JSON on stdout.
 
+A `--previous` review verifies only the earlier blocker IDs. Omitting a blocker
+from the response does not resolve it, and a change to unrelated files or to
+the review baseline requires a new broad review. Followups stay visible but do
+not block readiness.
+
 Successful validation receipts live in ignored `.dev-checks/receipts/`; full
 stdout/stderr and failed-run records live in `.dev-checks/runs/`. A receipt
 matches actual tracked/untracked source bytes and modes, Git HEAD/index/status/
@@ -73,6 +78,13 @@ services are not exhaustively fingerprinted; use these profiles only for the
 repository's deterministic development checks. Hosted CI always runs afresh.
 Local receipts are trusted records and cannot prove that their owner did not
 modify them.
+
+Known limits: Git injects PATH and editor variables into hooks, so a manual
+validation can miss the hook's receipt even before HEAD changes; identical hook
+retries do reuse their own receipt. `dev_checks.py` gives each command a
+20-minute default deadline (`--timeout`). Recursive or special symlink
+referents run without reuse; a source alias the checker cannot read is not
+worked around.
 
 Git-aware tests are conservatively kept in the suite: a commit changes HEAD,
 index or status and can require a fresh run. This intentionally saves repeated
@@ -106,5 +118,4 @@ venv/bin/python -I scripts/dev_checks.py --repo /absolute/checkout --snapshot
 The `bgperf2/local-source/v1` response contains `snapshot` with the same source
 identity used by receipts. It initializes no runtime and publishes no receipt.
 Consumers own delivery journals, worktree setup and deployment; none is required
-for this engine workflow. Historical data migration remains separate. See the
-[implementation plan](plans/local-delivery-checks.md).
+for this engine workflow. Historical data migration remains separate.

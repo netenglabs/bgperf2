@@ -43,10 +43,8 @@ adds explicit local builds and correctness revision searches. FRR target threads
 and `target_crash` remain unsupported. BIRD defaults and existing
 recipe identities are unchanged.
 
-OpenBGPD and RustyBGP use supplied immutable images and their existing adapters.
-Their local-source builders, revision searches, target threads and crash
-witnesses are unsupported. See [supplied-daemon admission](plans/supplied-daemon-admission.md)
-for qualification scope; contract support alone does not establish a live result.
+Other targets have the limits in [target adapter scope](#target-adapter-scope);
+contract support alone does not establish a live result.
 
 An optional test-level `pin` uses the existing `bench` CPU layout syntax:
 
@@ -116,6 +114,69 @@ file must not already exist; export preserves earlier files. All phase 0 command
 exit 0 for a valid contract and 2 for input, selection, validation or write
 refusal. These are contract-operation exits, not runtime experiment verdicts.
 
+## Target adapter scope
+
+Every target other than BIRD and FRR runs only the permit-all synthetic IPv4
+workload from a supplied or pinned image. Local-source builds, revision
+searches, target threads, crash witnesses, custom configuration or scenario
+files, policy options and nonzero AS-path, prefix, community or
+extended-community filter counts refuse at bench, scenario, config and batch
+entry before teardown: ignoring a requested filter would change the workload.
+Each adapter's admission below is a small two-peer, 100-prefix-per-peer,
+six-assertion exact-prefix original. It qualifies functional loading only, not
+policy/attribute behavior, sampling cost under load or performance.
+
+| Target | Image | Native counter | Admission |
+| --- | --- | --- | --- |
+| `openbgp` (OpenBGPD) | supplied | existing adapter | passed (9.3) |
+| `rustybgp` (RustyBGP) | supplied | existing adapter | passed (HEAD `3dbf3e1134`, 0.2.0) |
+| `rustbgpd` | wrapped release 0.81.0 | accepted prefixes | passed |
+| `holo` | locked source build 0.9.0 | received (pre-policy) and installed (accepted) | passed |
+| `zebra-rs` | checksummed release 26.11.1 | received (pre-policy) only | passed with 1-second eBGP advertisement interval |
+| `bio-routing` | pinned Go source build 0.1.10 | none | passed on sink witnesses only |
+| `maghemite` | frozen source build | none | transit incompatible; receive-only |
+
+- **rustbgpd** is distinct from RustyBGP. The wrapper repackages the official
+  release image by digest without rebuilding binaries. It adds root execution,
+  iproute2 and an idle shell, disables inherited health probes and transfers
+  `/var/lib/rustbgpd` to the effective root UID (mode 0755): startup rejects a
+  control-socket parent owned by another UID. The CLI's `prefixes_received` is
+  accepted-route accounting; it is never reported as a pre-policy received
+  count or a best-path witness.
+- **Holo** builds the selected commit with `--locked --release` and pinned
+  builder/runtime digests, and installs `libprotobuf-dev` explicitly for the
+  Protobuf well-known includes. Configuration is a bootstrap TOML plus a
+  transactional YANG commit over loopback gRPC (grpcurl 1.9.3, gNMI disabled),
+  regenerated after Docker attaches the benchmark interface. Probes are bounded
+  at 1 second for capabilities, 10 for the startup commit and 5 for operational
+  reads. `prefixes.installed` counts accepted paths, not selected best paths.
+- **zebra-rs** verifies the published release-archive SHA-256 before extraction;
+  binary-to-source mapping remains a publisher claim (version metadata reports an
+  unknown, dirty source). Its default 30-second eBGP advertisement interval
+  exceeds the engine's 15-second no-progress deadline and delivers nothing in
+  time, so the adapter writes `router.bgp.timer.adv-interval.ebgp: 1`, matching
+  FRR. `pfx_rcvd` is pre-policy Adj-RIB-In; the summary's established `state` is
+  the decimal count string. Optional post-worker diagnostic snapshots are read-only.
+- **Bio-Routing** has no version flag, so its version is recorded as UNKNOWN.
+  The adapter enables `advertise_ipv4_multiprotocol` on every neighbor; without
+  it BIRD peers refuse with NOTIFICATION 2/7. `cmd/bio-rd` does not register the
+  library's BGP metric collector and ListSessions is unimplemented, so received,
+  accepted and selected counts are unavailable. Convergence relies on the
+  independent sink and offering witnesses. One bounded post-worker loopback
+  metrics scrape documents this; the runtime requires curl 8.4.0 or later so the
+  size bound applies to bodies without Content-Length.
+- **Maghemite** builds with the default features on Linux (Rust 1.97.1) and uses
+  the v13 local admin API with NoFiltering policies. The local MGS discovery
+  failure stays visible. Its API prefix counters are never updated, so no gauges
+  exist. Sessions establish, but the frozen source deliberately does not
+  redistribute learned routes, so generator-to-target-to-observer transit is
+  incompatible. Only the [receive-side contracts](#small-maghemite-receive-api-qualification)
+  below apply. No release is catalogued; select a full source commit.
+
+Build/API/session compatibility, a version banner or an image marker is never
+route-export admission or binary-to-source proof. Retain source IDs, lock and
+toolchain metadata and immutable image identities separately.
+
 ## Plan and check prerequisites
 
 Use this read-only path before explicit execution. Use the same hashed bootstrap as the
@@ -169,7 +230,12 @@ resource estimates, foreign CPU qualification, runtime capabilities, hardware
 suitability and source/build reconstruction remain unknown or unassessed. It is
 not a readiness or performance-comparison verdict. The supported synthetic
 BIRD/BIRD/sink functional workflow and early-timeout path have passed separately
-authorized real checks; see the [validation record and limits](plans/milestone-a-runtime-validation.md).
+authorized real checks. A one-peer/100-prefix attempt completed and returned a
+verified package. A 0.01-second worker deadline returned `inconclusive` (exit 5)
+with a verified partial package whose missing artifacts carry reasons; it fired
+before configuration generation or container start, so timeout cleanup with
+running containers is covered only by fake-runtime tests. Real `prepare --pull`
+acquisition has not been exercised. See [engine decisions](decisions.md#not-qualified).
 Those checks establish neither hardware suitability nor performance comparability.
 Explicit execution is described below.
 The public fixture has synthetic image pins and a historical engine revision;
@@ -467,6 +533,11 @@ remains 15. The selection is retained in packaged `work/diagnostic-options.json`
 it changes no checkpoint, positive-delivery, exact-set or health requirement.
 The clock begins at the existing observation/replay boundary, after any quiet
 gate. The controller deadline still bounds setup, replay and collection.
+Invalid values are refused before any destination is created. There is no
+target-specific default: callers such as the lab select a larger allowance
+explicitly, and ordinary `bench` and existing recipe callers keep 15 seconds.
+A bound above 120 seconds, a new timing policy or a receive-only measurement
+contract would each need a separate design.
 
 ## Small Maghemite receive API qualification
 

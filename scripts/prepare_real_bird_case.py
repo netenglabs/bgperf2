@@ -107,7 +107,7 @@ def prepare(source, output):
 def render_case(scope, recipe, revision):
     lines = ['# Real BIRD neutral functional validation', '', QUESTION, '',
         'Execution approval is pending. The commands below have NOT run.', '',
-        'Read the authoritative [case plan](' + str(ROOT / 'docs/plans/real-bird-maintainer-validation.md') + ').', '',
+        'Read the [maintainer checkout guide](' + str(ROOT / 'docs/maintainer-checkout.md') + ') for this case\'s scope and limits.', '',
         'Engine revision: `' + revision + '`. Recipe SHA-256: `' + recipes.recipe_sha256(recipe) + '`.', '',
         '[Verification](verification.json), [packaging map](packaging/packaging.json),',
         '[source range](range/REPORT.md), [full handoff](handoff/RUNBOOK.md),',

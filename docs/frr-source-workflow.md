@@ -4,7 +4,7 @@ Use the existing `frr_c` adapter with explicitly selected trusted local FRR
 source, BIRD generators and sink observer. The separate
 [supplied-image workflow](frr-maintainer-workflow.md) retains its completed
 functional qualification; that pair establishes no FRR source-build qualification.
-The [implementation record](plans/frr-source-workflow.md) owns delivery progress.
+The source workflow was implemented and reviewed at `701ae2c`.
 
 ## Start with the maintained modeled workflow
 
@@ -129,19 +129,31 @@ FRR `target_crash` and thread controls remain unsupported. Backgrounded bgpd
 startup supplies no BIRD foreground-exit witness; container health remains a
 bounded snapshot. Performance policy stays disabled, formal calibration deferred
 and unrelated upstream investigation paused. No command in this guide authorizes
-real execution, acquisition, evidence transfer, push or publication. The
-[source-build functional record](plans/frr-source-runtime-validation.md)
-records the completed retained-image pair and its source/base limitations.
-The [controlled local regression case](plans/frr-correctness-localization-validation.md)
-exercises changed-revision public-run evidence/reporting, native image-only
-minimization and source-bound external-trial prefix bisection. Its local fault,
-rollback, finite budgets and fresh confirmations establish only the recorded
-functional scope; combined-controller execution and broader source support
-remain separate qualifications.
+real execution, acquisition, evidence transfer, push or publication.
 
-The [combined-controller validation](plans/frr-controller-runtime-validation.md)
-now separately covers five public bisection `step --execute` trials, including
-three native builds and two build-cache hits with fresh workers, plus a four-run
-alternating public comparison. Its report reconstruction/relocation and cleanup
-passed; compilation was cached. The full-search loop and performance remain
-outside this bounded functional qualification.
+## Live qualification and limits
+
+FRR 10.3.1 (`35e662e`) tracks 79 topotest symlinks. The live cases used a
+separately recorded adaptation (`b7ffb58`) that materialized only those links,
+built on an existing FRR image as both builder and runtime base. That base
+keeps its earlier FRR installation, so residual modules, libraries and build
+tree remain possible; build review checks the freshly installed `bgpd`,
+`vtysh` and `libfrr` paths, and workers must report the expected version.
+Raw FRR logs from passing runs contain zclient-send failures; treat them as
+recorded warnings, not a failed witness.
+
+Three bounded functional cases passed:
+
+- One adapted-source build and a same-image pair of originals, all twelve
+  assertions and a reconstructed 91-file report.
+- A deliberate count-preserving substitution of `100.0.0.1/32` with
+  `198.18.0.1/32` and an explicit rollback: public-run comparison/investigation
+  reports, native minimization to one peer/two prefixes, and source-bound
+  external-trial bisection with fresh confirmations of the adjacent boundary.
+- The same history through five combined `step --execute` trials (three build
+  invocations, two cache hits, fresh workers) and one four-original alternating
+  `compare` command, with reconstructed and relocated reports.
+
+Compilation was cached in most builds. None of these qualifies the full-search
+`run --execute` loop, crash predicates, cancellation/recovery paths, pristine,
+hermetic or reproducible builds, other FRR versions or performance.

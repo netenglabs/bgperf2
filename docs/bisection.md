@@ -13,14 +13,18 @@ capture on every fresh trial and confirmation. The original `assertions` and
 `target_crash` predicates retain their existing selection and runner defaults.
 
 This implementation is validated with controlled, Docker-free histories and one
-[bounded live count-fault case](plans/milestone-d-runtime-validation.md#approved-waited-execution-completed--2026-10-26).
-The deliberately introduced local fault confirmed its boundary with fresh workers;
-its record retains source/build, contention and diagnostic limitations. Broader
-source-build and live crash-bisection qualification remain deferred; the
-[milestone B record](plans/milestone-b-runtime-validation.md) covers one validated
-packaging-patched BIRD source/build case. No selected
-daemon range, source build, download or benchmark is authorized by this guide.
-The completed case consumes its execution authorization and authorizes no new
+bounded live count-fault case. Three consecutive packaging-adapted BIRD 2.19.2
+revisions added an inert comment and then rejected export of exactly
+`100.0.0.0/32`. With the one-peer/100-prefix recipe the faulty revision still
+completed under the legacy 99-route convergence checkpoint but failed the exact
+observer-count assertion, so `assertions` classified it bad. Three public
+builds and five workers confirmed the adjacent boundary with fresh workers on
+both sides; the good endpoint's build reused cached compilation. Broader
+source-build, interrupted-search recovery and live crash-bisection
+qualification remain deferred (see
+[engine decisions](decisions.md#not-qualified)). No selected daemon range,
+source build, download or benchmark is authorized by this guide. The completed
+case consumes its execution authorization and authorizes no new
 build, worker or revision range.
 
 ## Inspect a controlled history
@@ -131,6 +135,12 @@ new worker. Every source attempt ID must be unique, including confirmations.
 There are no arbitrary predicate scripts, automatic repairs, budget extensions
 or measurement retries. Original work, results and build logs remain local.
 
+Use one `step --execute` at a time when each trial needs an external review or
+fresh host admission before the next. `run --execute` continues through the
+search, including past a skipped build, without pausing for such gates. To
+separate builds from worker admission entirely, preview with `step`, run the
+worker yourself and import it with `record --result` (below).
+
 `assertions` means session establishment, injection completion, exact observer
 count and experiment completion, all within the selected worker budget. These
 are the [existing named observable assertions](comparisons.md), not route or
@@ -156,10 +166,10 @@ supporting observer image or grant trial execution authority. Original source
 bindings, cache controls, reservation recovery, distinct original identities and
 fresh boundary confirmations are unchanged. Real prefix-localization runtime
 qualification is recorded separately from the maintained simulated walkthrough.
-The [controlled FRR case](plans/frr-correctness-localization-validation.md)
-uses fresh source-bound external trials and `record --result` to confirm a
-deliberately introduced prefix-fault boundary on a reduced recipe. That case
-does not qualify the FRR combined build/run controller or its cache path.
+A controlled FRR case used fresh source-bound external trials and
+`record --result` to confirm a deliberately introduced prefix-fault boundary
+on a reduced recipe. It does not qualify the FRR combined build/run controller
+or its cache path.
 
 `target_crash` requires a recipe whose expected outcome is `target_crash`, basic
 diagnostics, a clean process-presence observation followed by absence and a
@@ -238,8 +248,8 @@ successful report verification proves consistency, not a successful regression
 search. Review the trial classifications and limitations before interpreting
 any boundary. Nothing posts an upstream issue or enables performance policy.
 
-The [combined FRR controller case](plans/frr-controller-runtime-validation.md)
-separately completed five public `step --execute` trials from an empty cache:
-three native build invocations, two cache hits and five fresh workers confirmed
-the controlled adjacent prefix-fault boundary. Compilation was cached; the
-full-search `run --execute` loop remains outside that bounded qualification.
+A separate combined FRR controller case completed five public `step --execute`
+trials from an empty cache: three native build invocations, two cache hits and
+five fresh workers confirmed the controlled adjacent prefix-fault boundary.
+Compilation was cached; the full-search `run --execute` loop remains outside
+that bounded qualification.

@@ -175,6 +175,28 @@ Cross-attempt table compaction, chunk-level deduplication, remote object stores
 and evidence expiry are not implemented. This version removes full-file copies
 at the producers while preserving existing result and report semantics.
 
+## Design decisions and known limits
+
+- Engine and lab split: the engine owns the versioned transport, attempt
+  collection, reference-aware readers, exports and optional Parquet tables. The
+  lab owns store bindings, post-container cleanup integration and idle-host
+  maintenance scheduling. Frozen controller pins keep their original transport.
+- Content addressing is whole-file, not chunked, and evidence is never shared
+  through writable hard links, since a write through one path would alter
+  every linked copy.
+- Full source/archive readback deliberately uses independent passes rather
+  than one combined pass, preserving the existing integrity contract.
+- Durability failures stop publication and retain work. A written experiment
+  manifest is never rewritten afterward to claim durable storage.
+- Parquet publication copies to a temporary file on the work volume and then
+  links atomically on that volume; cross-volume links are refused.
+- The scheduled maintenance budget fails closed for a store that needs a longer
+  idle window than selected. It never expires registered evidence.
+- Each read parses its package catalog again. Caching catalog parses is a
+  performance-only follow-up and would not weaken checksum verification.
+- Historical frozen campaign sealers must use materialized exports, or migrate
+  to reference-aware preservation, before they can read stored packages.
+
 ## Offline storage smoke
 
 ```sh

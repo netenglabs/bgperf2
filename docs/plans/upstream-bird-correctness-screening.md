@@ -1,6 +1,13 @@
 # Upstream BIRD correctness case screening
 
-Updated 2026-11-02 UTC. Status: investigation resumed; **no execution-ready
+Status: paused
+Strand: Shelf
+Updated: 2026-11-20
+Next: If resumed, resolve the issue 436 original-report evidence limit or select another documented BIRD fix with a supported trigger and observable witness.
+Blocked on: operator decision to resume the upstream investigation
+Done when: A deterministic distinguishing upstream case is selected with an execution-ready packet, or the investigation is closed.
+
+Updated 2026-11-02 UTC. Status: investigation paused; **no execution-ready
 upstream bug/fix case selected**. This record is the source-bug investigation,
 separate from the neutral release-transition validation and prefix-identity
 implementation. Neither establishes an upstream reproduction.

@@ -109,3 +109,22 @@ explicit and status `paused`; it is not automatic scheduling. Saved `columns`
 define the native row layout for standalone offline readers.
 
 These are locally modeled contracts, not live daemon interruption qualification.
+
+## Ownership and known limits
+
+The engine owns the serial batch, durable attempts/results, explicit resume,
+owned cleanup, calibration dependencies and machine-readable status. The lab
+owns installation, host preparation and deployment; research owns frozen
+comparisons, acceptance and reports. An agent selects work and reviews results
+but is never part of the execution or recovery state machine, so a campaign
+never depends on reconstructing state from an agent session.
+
+Host/boot and source facts are recorded per attempt for research to form
+comparison cohorts. Incidental differences such as hostname or MemTotal bytes
+do not gate generic execution. A stopped or incomplete original never becomes
+an accepted timing through a report or resume operation.
+
+Open follow-ups from review: the legacy native bench/batch `--control-dir` path
+validates its control directory less strictly before side effects than the
+managed durable path, which canonicalizes and checks its generated absolute
+control root.

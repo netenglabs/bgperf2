@@ -96,6 +96,9 @@ stderr and no check JSON. Legacy unselected reports cannot pass implicitly.
 Use `investigation-status` for inspection that exits 0 regardless of assertion
 results. Neither command replaces original outer-exit and case acceptance
 evidence, establishes a general fix verdict or starts new work.
+Selecting one side never narrows integrity verification: altered evidence on
+the unchecked side still refuses the report. Text output escapes control
+characters from report fields.
 
 An unavailable capture is unmeasured, not an empty set, mismatch or pass. A
 missing attempt keeps its original reason and an inconclusive correctness
@@ -132,6 +135,14 @@ combined `prefix_assertions` predicate. The
 [exact-prefix walkthrough](maintainer-workflow.md#exact-prefix-regression-workflow)
 connects these paths using modeled evidence. Performance policy is disabled and
 formal 10% calibration deferred.
+
+The two-side capture/report/rebuild path is qualified for one real same-image
+A/A pair: BIRD 2.19.2 target and generator, sink 0.2.0, one peer and 100 IPv4
+host routes. Both originals passed all six assertions with zero missing or
+unexpected prefixes. Its run record is in Git history
+at `docs/plans/investigation-prefix-identity.md`. That case
+establishes no changed-binary verdict, calibrated capture overhead, or other
+workload/UID qualification.
 
 For repeated target comparisons and named observable correctness checks, follow
 the [comparison guide](comparisons.md). The single-pair workflow here preserves
@@ -233,11 +244,15 @@ Git replacement objects cannot redefine the selected original commit. A changed
 work tree still needs explicit dirty inclusion and retains its patch identity.
 
 Pristine BIRD release trees containing BSD symlink aliases do not meet this
-regular-file-only source contract. The approved
-[BIRD 2.19.2 validation](plans/milestone-b-runtime-validation.md#approved-packaging-source-validation-completed--2026-10-26)
-used an explicitly reviewed local packaging commit that materialized the two
-aliases as byte-identical regular files. It validates that adapted case;
-unmodified-release support is not claimed and the guard remains enabled.
+regular-file-only source contract. BIRD 2.19.2, 2.13 and 2.0.12 all track
+`sysdep/bsd-netlink/netlink.Y` and `netlink.c` as links to their `sysdep/linux`
+counterparts, so planning refuses them. The maintained
+`scripts/bird_alias_source.py` prepares a separate derived history that replaces
+only those two links with regular files holding the exact target blob bytes;
+Linux build selection is unchanged. Report derived commits as derived, never as
+upstream revisions. The 2.19.2 build, functional pair and interruption check
+below used such an adaptation; unmodified-release support is not claimed and
+the guard remains enabled.
 
 The toolchain image must contain Bash, tar, autoreconf, a C compiler, make and all
 BIRD development dependencies. The runtime base must contain Bash, iproute2 and
@@ -281,6 +296,11 @@ Existing result images are never retagged. Keep this build evidence; the
 investigation packages retain its identity hashes, not an automatic copy of
 source archives or patches for redistribution.
 
+A successful `target-build` is not proof of fresh compilation. Docker can reuse
+cached configure/compile layers and return an existing image ID under a new
+tag; read the build log to see what actually ran. BIRD prints its version
+banner on stderr, so version checks must read both streams.
+
 ## Run one serial investigation
 
 After host suitability, images and any intended build are explicitly resolved:
@@ -304,6 +324,12 @@ inconclusive attempt stops further execution and leaves a report distinguishing
 the failed attempt from a candidate that never ran. There is no automatic retry.
 The outer CLI preserves setup/harness/stop/inconclusive exit codes; exit 0 means
 the planned functional pair was recorded, not that a bug is fixed.
+
+When a case must stop on any failed baseline, including a normal failed
+experiment, run each side with its own `run --target` command, check it and
+then build the pair with `investigation-report` and `investigation-verify`.
+`investigate` deliberately continues to the candidate after an evidenced
+baseline failure.
 
 The report directory bundles verified copies of both available result packages,
 `investigation.json`, `REPORT.md` and a file checksum manifest. It shows exact
@@ -452,7 +478,15 @@ setup. `ending_bytes` is `memory.current` at the final pre-cleanup observation.
 an unsampled extreme. Daemon-only RSS remains explicitly unavailable; container
 memory is not relabeled as process RSS. Missing cgroup reads remain null with
 reasons. Lower memory in a candidate is not a leak diagnosis or calibrated
-regression conclusion.
+regression conclusion. In real BIRD runs, optional live memory reads of the
+generator container often time out; those samples stay null with errors and
+the generator's sampled peak is then null.
+
+Live interruption has been exercised only while setup containers were running:
+SIGTERM to the public controller gave exit 143, `interrupted`, a verified partial
+package, `completed_within_budget` null and no owned resources left. Interruption
+during target operation, timeout termination of running containers and crash
+diagnosis remain qualified only by fake-runtime tests.
 
 Collector/cleanup failures retain supported reproduction evidence and available
 work while reporting harness failure. Background health-monitor failures

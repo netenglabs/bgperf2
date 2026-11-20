@@ -1,12 +1,19 @@
 # Future BGP testing workloads
 
+Status: paused
+Strand: 6 Test capabilities (IPv6, BGP policy, new workloads)
+Updated: 2026-11-20
+Next: When Strand 6 is selected, write a scoped design for one family (IPv6 or policy phase 1) with acceptance criteria.
+Blocked on: operator selection of a workload family
+Done when: Each retained family is either scoped into its own design plan or explicitly dropped.
+
 Created 2026-10-23. Status: retained ideas; explicitly deferred. This is the
 public engine's authoritative list of deferred workload directions. It neither
 queues implementation nor authorizes experiments. Reopen a family only through
 an explicitly scoped design with acceptance criteria.
 
 The immediate priority is the
-[developer performance testing plan](performance-testing-development-plan.md):
+delivered A–D workflow summarized in [engine decisions](../decisions.md):
 make existing tests reproducible, diagnosable and useful to daemon maintainers.
 Its recipe/result/assertion interfaces should accommodate future families,
 without pulling their implementation into that work. See the

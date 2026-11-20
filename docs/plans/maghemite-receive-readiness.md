@@ -1,5 +1,12 @@
 # Maghemite receive/table-loading readiness contract
 
+Status: paused
+Strand: 1 Daemon coverage
+Updated: 2026-11-20
+Next: Decide whether to design receive-side loading beyond the 4,096-prefix synthetic ceiling (MRT or full-table API feasibility), or close the plan and move its contract into docs/recipes.md.
+Blocked on: operator selection of a larger receive-side workload
+Done when: Bounded synthetic receive qualification and loading receipts are natively qualified and any larger receive workload is selected or declined.
+
 Prepared 2026-11-12 for the frozen Maghemite source
 `277f4368d7b6e6c75bf339db132f8de1ac9b019a`. Image and workload selections
 belong to the eventual explicit experiment, outside this portable design.
@@ -89,11 +96,11 @@ unmeasured loading case has no successful loading-time statistic.
 
 ## Readiness disposition
 
-Source/API review supports a concrete receive-side design. Implementation,
-modeled refusal tests, required code review, small native qualification, API
-size/atomicity/overhead assessment and a separately approved finite experiment
-selection remain. This scheduled follow-up authorizes this preparation only;
-no receive-side original is charged to or launched within the transit ceiling.
+Source/API review supports a concrete receive-side design. The implementation,
+small native qualification and a finite loading experiment have since been
+completed (see below); larger receive workloads remain unselected. This
+scheduled follow-up authorizes this preparation only; no receive-side original
+is charged to or launched within the transit ceiling.
 
 ## Small post-worker qualification implementation
 
@@ -177,5 +184,6 @@ readiness. A passing loading receipt must be assessed separately alongside the
 execution budget, final health, pressure, integrity and cleanup receipts. A
 parent timeout, interruption, health failure or cleanup error can invalidate an
 otherwise retained loading observation. There is no automatic receive comparison
-or successful transit statistic. Native completion/timing qualification and
-capacity calibration remain unrun; no full-table API feasibility is inferred.
+or successful transit statistic. Small native receive qualification and native
+loading originals up to 4,096 prefixes have since passed in the research
+campaign; no full-table API feasibility is inferred.

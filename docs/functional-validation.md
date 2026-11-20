@@ -85,11 +85,32 @@ failure into a pass. Preserve partial packages, logs, observed load and cleanup
 state. Do not automatically retry a consumed finite attempt. An uncertain
 launch/cleanup requires reconciliation before another worker.
 
-The [real-BIRD prefix validation](plans/observer-prefix-runtime-validation.md#successful-existing-image-worker--2026-11-03)
-passed one 100-prefix worker in 12.088 seconds. Earlier attempts incurred hours
-of admission waiting; the successful case05 waited about 28 minutes from
-enrollment to dispatch at the next hourly check. Those waits were orchestration
-costs of the selected lab policy, not requirements of this public CLI. That
-historical run retains its original quiet-host policy.
-Future small functional checks should select this immediate protocol explicitly.
-Performance policy remains disabled and formal 10% calibration deferred.
+The real-BIRD prefix validation passed one 100-prefix worker in 12.088 seconds.
+Earlier attempts incurred hours of admission waiting; the successful case05
+waited about 28 minutes from enrollment to dispatch at the next hourly check.
+Those waits were orchestration costs of the selected lab policy, not
+requirements of this public CLI. That historical run retains its original
+quiet-host policy. Future small functional checks should select this immediate
+protocol explicitly. Performance policy remains disabled and formal 10%
+calibration deferred.
+
+## Gotchas from live validation
+
+- Compare container mount lists as sets. Docker can reorder them between
+  inspections, so a positional before/after comparison reports false changes.
+- An activity check that lists only your own processes misses root-owned work.
+  Inspect all readable UIDs and cross-check aggregate `/proc/stat` busy ticks.
+  A passing check also cannot stop work that starts after it.
+- `ps` CPU percentages are lifetime averages. Measure an interval delta of
+  `/proc` ticks when you need current CPU use.
+- Rounded `max foreign cpu %` values hide small excesses: compare the raw value
+  against any cap, since 100.0001% rounds to 100.
+- Do not import modules from a frozen engine checkout with a Python that writes
+  bytecode. Set `sys.dont_write_bytecode` (or use `-B`) before any import, then
+  confirm the checkout's file set is unchanged; new `__pycache__` files break
+  frozen-input verification.
+- A Docker socket permission denial inside a sandbox is not a host verdict; see
+  the [environment guide](python-environment.md).
+- With the legacy builder and retained intermediates, put case labels first in
+  every stage so intermediate containers carry them and owned-inventory checks
+  can recognize them.

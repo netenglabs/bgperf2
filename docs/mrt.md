@@ -35,10 +35,11 @@ truncation fail rather than producing a partial inventory.
 
 Run inspection on an idle host under the operator's normal preparation locks
 and resource guards. It does not authorize a route worker or add MRT support to
-the synthetic recipe interface. The
-[inventory plan](plans/mrt-input-inventory.md) tracks that separation; explicit
-fixed peer sets, expected route semantics and native replay qualification remain
-unfinished. The legacy injection workflow below retains its existing behavior.
+the synthetic recipe interface. Explicit fixed peer sets, source-derived expected
+prefix sets and bounded replay belong to the
+[input-bound MRT recipe guide](mrt-recipes.md). Never treat the legacy dynamic
+eligible-peer mapping as a fixed peer set. The legacy injection workflow below
+retains its existing behavior.
 
 Optionally add `--attribute-peers 0,2 --check-asns 64512,64513` to inventory
 selected encoded IPv4 RIB attributes. Both flags are required together. The

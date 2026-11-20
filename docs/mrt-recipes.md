@@ -111,10 +111,11 @@ release. The retained source commit remains upstream's commit, with an explicit
 local one-call patch; queried versions include `[pa-exact-v1]`. Preserve the
 recipe, complete upstream commit, actual source diff, patch identity, image ID,
 binary hash and build logs. The image marker is a build record, not independent
-binary-to-source proof. Existing images/results stay intact, and fresh native
-qualification is necessary before adopting the corrected generator. This fixes
-only the identified grouping defect; it does not qualify every BGP attribute,
-remove next-hop-self or expand the injector's supported attribute set.
+binary-to-source proof. Existing images/results stay intact. Fresh native
+community controls with a `*-pa-exact-v1-*` image report distinct attribute
+paths; each new image still needs its own controls before full-table use. This
+fixes only the identified grouping defect; it does not qualify every BGP
+attribute, remove next-hop-self or expand the injector's supported attribute set.
 
 ## Prepare exact source-prefix profiles
 
@@ -171,19 +172,34 @@ existing limits; this does not broaden investigation/comparison workloads or
 change original experiment outcomes.
 
 
-An observer must accept valid unknown extended-community subtypes. Sink 0.3.0's
-GoBGP v4.9.0 parser can treat unknown EVPN subtype 249 as withdraw, losing a route
-that the target exported. The [0.4.0 correction](plans/sink-unknown-evpn.md)
-uses the explicit `unknown-ec-v1` dependency correction and reports that profile.
-It differs deliberately from the unpatched reference for this RFC 7606 defect.
-Original inputs and declared sets stay intact; native qualification and fresh
-instrument-bound originals remain necessary. Go vet/race tests use
-`scripts/sink_go_test.sh`, which applies the same guarded dependency copy as the build;
-a direct unpatched `go test` exposes the dependency's counterexample instead.
+## Observer unknown extended communities
 
-Dependency-copy mechanics and source-integrity guarantees are documented in the
-[observer correction plan](plans/sink-unknown-evpn.md).
+An observer must accept valid unknown extended-community subtypes
+([RFC 7606 section 7.14](https://www.rfc-editor.org/rfc/rfc7606.html#section-7.14)).
+Sink 0.3.0's GoBGP v4.9.0 parser treats unknown EVPN subtype 249 as withdraw,
+losing a route that the target exported. Sink 0.4.0 applies the `unknown-ec-v1`
+dependency correction: it replaces only the unknown-EVPN fallback error with
+GoBGP's existing opaque unknown-community constructor. All eight bytes, known
+subtype validation, malformed-length handling, framing and session behavior are
+unchanged. The binary banner reports the parser profile and the image recipe
+identity binds it. This deliberately differs from unpatched GoBGP for this
+standards defect; it is not a claim of general GoBGP parity, and 0.3.0 and 0.4.0
+results are different instruments that must not be pooled.
 
+Go forbids overlays inside `GOMODCACHE`, so the build verifies the complete
+pinned dependency file hash and the exact old statement, copies the module into
+a fresh private directory, re-checks the copied hash, patches the copy and
+builds with a private `-modfile` holding one explicit local replacement. That
+modfile keeps the pinned dependency declaration and refuses to override an
+existing replacement. The project `go.mod`/`go.sum`, the module cache and
+attribution/license files stay unchanged. Vet, tests and builds use
+`-mod=readonly`; source drift or a missing statement refuses. The modfile
+separator is generated with printf escapes and build commands must be single
+lines: a literal newline would expose `replace` as a Dockerfile instruction.
+Go vet/race tests use `scripts/sink_go_test.sh`, which applies the same guarded
+copy; a direct unpatched `go test` exposes the dependency's counterexample.
+Sink 0.4.0 passes the small unknown-extension control and a fresh exact
+full-table original. Original inputs and declared sets stay intact.
 
 Additional controlled fixtures are `unknown-extended-community` (ordinary route,
 the original correctly sized unknown-EVPN community payload, and an unrelated

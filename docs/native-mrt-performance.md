@@ -5,6 +5,13 @@ cell uses the existing benchmark lifecycle directly; it does not export a
 portable recipe, spawn a recipe worker or package/verify one portable result per
 repetition. Recipes remain available for portable reproduction and investigation.
 
+Implemented at `8b81540`, with exact full image-ID preflight in `0e7ea9d`. One
+live fixed-input 24-peer batch qualified the interface and its fail-closed
+lifecycle: serial admission/replay, exact-prefix capture, owned cleanup and
+stop-on-failure after a failed final prefix identity. That does not qualify
+every daemon/workload combination or a performance comparison. The run record
+is in Git history at `docs/plans/native-mrt-performance.md`.
+
 Select a source-only [MRT workload specification](mrt-recipes.md#input-bound-mrt-recipes)
 before measurement. It binds the complete input's byte size/SHA-256, ordered
 source peers and ASNs, offered counts, role ASNs and explicit expected prefix set.

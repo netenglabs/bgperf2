@@ -173,7 +173,7 @@ def commands(case, execution):
 def runbook(case, meta, graph):
     lines = ['# Prefix-identity execution case', '',
         'PREPARED ONLY. One execution approval is required; no command has run.', '',
-        'Authoritative conditions: ' + str(ROOT/'docs/plans/observer-prefix-runtime-validation.md'), '',
+        'Capture contract and validated scope: ' + str(ROOT/'docs/observer-prefixes.md'), '',
         f'Engine: `{meta["engine_revision"]}`; source archive SHA-256: `{meta["source_sha256"]}`.', '',
         'Budget: one 900-second offline sink build, one 15-second version probe container,',
         'one 120-second BIRD worker; 30-minute overall operator ceiling; zero retries.', '',

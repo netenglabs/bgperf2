@@ -15,11 +15,16 @@ code, builds, Docker probes and workers remain separate operations. Image
 availability, host suitability and execution authorization remain unassessed.
 Performance policy stays disabled and calibration deferred.
 
-For a concrete real-source example awaiting execution approval, see the
-[neutral BIRD release-transition case](plans/real-bird-maintainer-validation.md).
-It explicitly adapts the two BSD aliases into a separately identified packaging
-history and then uses this unchanged preparation/handoff workflow. It alleges
-no upstream bug and does not enable general symlink support.
+This path has been exercised on real source: the adjacent upstream BIRD
+commits `62d6c38` (pre-2.19.2) and `1d201ed` (2.19.2). `scripts/bird_alias_source.py`
+first adapts their two BSD aliases into a separately identified packaging
+history, and `scripts/prepare_real_bird_case.py` then runs this unchanged
+preparation/handoff workflow; its `--verify` refuses a packet once its
+execution destinations exist. Both builds and three functional workers passed.
+The range contract still declares the endpoints good and bad and requires a
+search plan, even for a neutral transition; those are unobserved declarations,
+and the case executed no search. It alleges no upstream bug and does not enable
+general symlink support.
 
 ## Select the question and source history
 

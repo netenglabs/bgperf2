@@ -13,8 +13,10 @@ The workflow uses the recipe's immutable supplied role images and fixes their
 observed physical image IDs from the fresh baseline; it offers no
 target override, build, acquisition or source-history search. See the
 [recipe guide](recipes.md) for supported workloads, prerequisite checks and
-verified result packages. The [implementation plan](plans/reproducer-minimization.md)
-records the selected scope and acceptance receipts.
+verified result packages. A rehashed journal edit cannot change the selected
+assertion's capability, expected value or deadline, and missing images, wrong
+worker budgets, inconsistent clock anchors, incomplete cleanup or an unmeasured
+selected observation cannot establish preservation.
 
 For a source-built image, explicitly export a recipe selecting its returned
 immutable image before minimization. Replan source targets for a reduced recipe;
@@ -24,8 +26,8 @@ adding builds to the minimizer.
 
 The [FRR walkthrough](frr-maintainer-workflow.md) includes modeled minimization
 through the same interface. Its simulated observations establish no FRR failure
-or live qualification. The separate [controlled FRR case](plans/frr-correctness-localization-validation.md)
-records five real native steps and a fresh one-peer/two-prefix confirmation of
+or live qualification. A separate controlled FRR case
+recorded five real native steps and a fresh one-peer/two-prefix confirmation of
 an explicitly introduced local identity fault, with the same bounded-greedy limits.
 
 ## Freeze a search

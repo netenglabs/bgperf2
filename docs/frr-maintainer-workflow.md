@@ -6,14 +6,14 @@ with bgperf2's compiled FRR adapter: its executable paths, generated configurati
 startup commands and version/neighbor queries. It does not promise compatibility
 with all FRR images or arbitrary registry images. BIRD remains the default target.
 
-Implemented and reviewed at `f81404b`; the native repository gate passed 3,071
-tests with one skipped. The [delivery plan](plans/frr-maintainer-workflow.md)
-records modeled acceptance and the separately approved
-[successful real-image functional pair](plans/frr-maintainer-workflow.md#approved-same-image-functional-pair-completed--2026-11-04-utc).
-Both originals passed all six assertions, exact-prefix checks, independent review
-and owned cleanup; original and reconstructed reports verified. This qualifies
-that selected same-image functional path. Broader live comparison/minimization,
-performance and source/build qualification remain separate.
+Implemented and reviewed at `f81404b`. A same-image real FRR A/A pair (FRR
+10.7.0 target, BIRD 2.19.2 generator, sink 0.2.0, one peer, 100 prefixes) passed
+all six assertions, exact-prefix checks, independent review and owned cleanup on
+both originals; original and reconstructed reports verified. Its run record is
+in Git history at `docs/plans/frr-maintainer-workflow.md`. This qualifies only that
+selected same-image functional path. Broader live comparison/minimization,
+performance, crash reproduction, thread controls and source/build qualification
+remain separate.
 
 Supply immutable image IDs (`sha256:…`) or repository digests for all three roles.
 An image pin identifies selected bytes; it does not establish FRR source revision,
@@ -98,8 +98,16 @@ The emitted `commands.json` in the modeled example records complete runnable CLI
 shapes for these stages, including assertion selection, investigation CI checks,
 rebuilding and verification. Use fresh owned destinations for real execution.
 
+Strict recipes infer the `bird` or `frr_c` adapter from the selected source cell
+and bind role/image identity to it; a supplied target override cannot cross
+adapters. FRR source-build and revision-search plans in this supplied-image path
+refuse before any source or host probe. Scoped execution uses the existing
+compiled FRR class and its `_frrouting_compiled_target` container suffix.
 Basic FRR diagnostics retain scoped container state, target memory and failures;
 they do not manufacture daemon-exit evidence from FRR's daemonizing startup.
+BIRD's foreground-daemon exit witness is not reused for FRR, and a running shell
+container cannot establish bgpd liveness or crash reproduction. FRR zclient
+warnings appear in ordinary target logs.
 FRR `target_crash` and target thread controls remain unsupported. The separate
 [FRR source workflow](frr-source-workflow.md) adds trusted-local-source builds,
 correctness bisection, source-range preparation and source handoffs. The completed

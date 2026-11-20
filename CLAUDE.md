@@ -145,34 +145,25 @@ with BIRD generators and sink observer; recipe
 execution requires the explicit `run` operation. Declared identities are not verified images or
 host qualification, and experiment status is separate from reproduction outcome.
 
-Read `docs/frr-maintainer-workflow.md` for the supplied-image FRR scope and
-`docs/plans/frr-maintainer-workflow.md` for its delivery record. FRR uses its
+Read `docs/frr-maintainer-workflow.md` for the supplied-image FRR scope. FRR uses its
 existing compiled adapter and container names. Daemon-crash witnesses and target thread controls remain BIRD-only.
-Read `docs/frr-source-workflow.md` and `docs/plans/frr-source-workflow.md` for the
+Read `docs/frr-source-workflow.md` for the
 `frr-local/v1` trusted local build and correctness revision-search extension.
 `scripts/frr_workflow_smoke.py` exercises FRR contracts with simulated runtimes.
 `scripts/first_run.py` is the newcomer entry point to the maintained FRR source
 simulation. Its prerequisites, expected result and own-input handoff are in
 `docs/first-run.md`; it runs no daemon, build, download or benchmark.
 
-Read `docs/plans/supplied-daemon-admission.md` for supplied-image OpenBGPD and
-RustyBGP recipe admission. Their existing adapters own configuration/startup;
-local-source builds and revision search remain restricted to BIRD/FRR.
-
-Read `docs/plans/new-daemon-adapters.md` for rustbgpd's supplied-release wrapper,
-permit-all IPv4 scope and accepted-prefix-only counter. It is distinct from
-RustyBGP. Unsupported filters, thread overrides and custom files refuse early.
-The same plan governs Holo's locked source build and transactional native gRPC
-adapter. Preserve the difference between installed/accepted and selected routes.
-It also governs zebra-rs's checksummed official packages, native YAML/VTY
-adapter and received-only Adj-RIB-In observation.
-It also governs Bio-Routing's pinned Go source build and native YAML. Its selected
-service does not register the library's BGP metric collector and ListSessions is
-unimplemented. Version, received/accepted and selected-path counts remain
-unavailable; never infer them from requested tags or unused API/library code.
-The plan also governs Maghemite's frozen source build, native versioned local
-API and explicit unavailable prefix gauges. Source/API implementation is not
-proof of Linux build or native route qualification; preserve those separate gates.
+Read the target adapter scope in `docs/recipes.md` before changing the OpenBGPD,
+RustyBGP, rustbgpd, Holo, zebra-rs, Bio-Routing or Maghemite adapters. Their
+supplied or pinned images run permit-all IPv4 only; local-source builds and
+revision search remain BIRD/FRR-only, and unsupported filters, thread overrides
+and custom files refuse early. rustbgpd is distinct from RustyBGP. Preserve each
+adapter's counter meaning (accepted, received/pre-policy or unavailable) and
+never infer counts from requested tags or unused API/library code. Build, API
+or session compatibility is not route-export admission: Maghemite's frozen
+source does not redistribute learned routes, so it supports only receive-side
+contracts.
 
 `recipe_assertions.py` evaluates named observable correctness witnesses against
 verified packages. `recipe_comparison.py` freezes and executes explicit serial
@@ -561,10 +552,15 @@ default), which bgperf2 then cannot clean up; `sudo rm -rf /var/tmp/bgperf2` whe
 
 ### Development plans and project boundaries
 
-The [public roadmap](docs/roadmap.md) is the authoritative index of active engine
-plans and deferred ideas. Detailed plans live in `docs/plans/`; keep their
-statuses, acceptance checks, implementation decisions and commit references with
-the code. Read the relevant plan before implementation. The current direction is
+The [public roadmap](docs/roadmap.md) is the authoritative index of open engine
+plans and delivered capabilities; [engine decisions](docs/decisions.md) holds
+milestone status and the decisions in force. `docs/plans/` holds open plans
+only, each starting with the status header (`Status`, `Strand`, `Updated`,
+`Next`, `Blocked on`, `Done when`). Read the relevant plan before implementation.
+When a plan completes, distill its durable contracts, limits and outcomes into
+the guide next to the code and delete the plan rather than archiving it; the
+deleting commit's message records the plan's final commit SHA. Run records go to
+the consuming project's evidence store. The current direction is
 accessible performance comparisons for a general BGP audience, with maintainer
 workflows as advanced options. Feature expansion is paused pending a concrete
 need from use of the existing comparison workflow; policy, IPv6 and other

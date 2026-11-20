@@ -1,9 +1,16 @@
 # Engine architecture design
 
+Status: reference
+Strand: Shelf
+Updated: 2026-11-20
+Next: Consult and reconcile when the next engine seam (typed records, staging or narrow runtime interfaces) is selected.
+Blocked on: none
+Done when: Not applicable; supporting design reference.
+
 Status: supporting design, reconciled 2026-10-23. The [public roadmap](../roadmap.md)
-and [developer performance testing plan](performance-testing-development-plan.md)
-own the delivery sequence. The architectural proposals below are introduced
-incrementally through that plan, not as a parallel rewrite or execution queue.
+owns direction and [engine decisions](../decisions.md) records delivered status.
+The architectural proposals below are introduced incrementally, not as a
+parallel rewrite or execution queue.
 Policy, IPv6 and other [workload expansions](future-testing-workloads.md) remain
 deferred.
 

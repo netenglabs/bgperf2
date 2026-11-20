@@ -99,6 +99,39 @@ Output must be outside the immutable source package; existing output files
 are never overwritten. Keep supplements separate from original report bundles
 and include them in the new analysis version's preservation inventory.
 
-The [calibration proposal](plans/milestone-c-calibration-proposal.md) records
-the prior experiment and the revised workload/gates. This tool authorizes no
-new measurement, scheduled launch, evidence transfer or policy activation.
+## Why the legacy clock is not enough
+
+On the 200,000-prefix `comparison-pilot` cell every legacy monitor `elapsed (s)`
+value was exactly 4 seconds. That value includes lifecycle time outside useful
+delivery, so it cannot be scaled by a route-count ratio, and padding the run
+does not improve its one-second resolution. The 10%-to-90% windows of those
+packages were only about 0.11–0.15 seconds and all failed the screen above.
+The 2,000,000-prefix [resolution pilot](../examples/recipes/comparison-resolution-pilot.yaml)
+cell `e340b76986938b1c` passes: its windows had conservative lower bounds of
+about 1.5–3.3 seconds, bracket widths of 0.7–1.7% of the lower bound and 65–232
+interior records. The same workload on the repeatability recipe (cell
+`8d043e8dc2f9f660`) behaves similarly.
+
+## Comparing paired windows
+
+Research analyses of repeated pairs use these definitions; the engine does not
+compute them in reports. For a natural pair with windows `W_A` and `W_B` in
+integer nanoseconds:
+
+```text
+d = log(W_B / W_A)
+geometric change % = 100 * (exp(mean(d)) - 1)
+crossing ratio bounds = [L_B / U_A, U_B / L_A]
+```
+
+`L` and `U` are each window's conservative lower and upper durations. The ratio
+bounds describe timestamp resolution, not statistical confidence. For a local
+same-image reference, the two-sided A/A envelope over that reference's pairs is
+`E = max(1, upper_ratio_i, 1/lower_ratio_i)`; a candidate pair whose lower ratio
+exceeds `E` shows observed sample separation only. Report every pair, keep
+conditions, orders and chronological blocks separate, and do not pool cases,
+fit order corrections, trim outliers or impute missing pairs. The sample SD of
+`d` is a log-ratio dispersion, not a percentage coefficient of variation.
+
+This tool authorizes no new measurement, scheduled launch, evidence transfer
+or policy activation.

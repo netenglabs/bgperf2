@@ -15,18 +15,17 @@ accounting boundaries; no measurement definition changes here.
 
 The [FRR guide](frr-maintainer-workflow.md) documents its supplied-image scope
 and modeled comparison evidence. Cross-daemon image overrides are refused;
-actual FRR runtime qualification remains separate from modeled checks. The
-[controlled FRR case](plans/frr-correctness-localization-validation.md) collects
+actual FRR runtime qualification remains separate from modeled checks. A
+controlled FRR case collected
 two fresh public-run originals for an introduced prefix fault and explicit
-rollback, then verifies comparison/investigation reports and reconstruction.
+rollback, then verified comparison/investigation reports and reconstruction.
 It does not qualify the combined `compare` execution controller or repetition
 adequacy; all timing observations remain descriptive and uncalibrated.
 
 This descriptive workflow is delivered for the supported recipe. Formal reliable
 10% regression detection is deferred and is not a release blocker; automated
-performance verdicts remain disabled. See the
-[development decision](plans/performance-testing-development-plan.md#operator-decision-descriptive-comparisons-first--2026-10-31)
-for the conditions of any later calibration campaign. Recorded differences,
+performance verdicts remain disabled. See [engine decisions](decisions.md#decisions-in-force)
+for why, and for the conditions of any later calibration campaign. Recorded differences,
 including large ones, do not establish a general detection guarantee.
 
 For preparation, synchronous assessment, explicit first-attempt and final
@@ -262,8 +261,7 @@ the [observer delivery timing supplement](observer-timing.md). It retains
 observed crossing bounds and an explicit discovery screen, while leaving this
 comparison report and all legacy timing definitions unchanged.
 
-The [FRR combined-controller case](plans/frr-controller-runtime-validation.md)
-separately exercised the public comparison command with two alternating pairs
+A separate FRR combined-controller case exercised the public comparison command with two alternating pairs
 and four fresh bad/good/good/bad originals, exact prefix witnesses, owned cleanup
 and rebuilt/relocated reports. This validates the selected functional controller
 path, not statistical repetition adequacy or performance sensitivity.

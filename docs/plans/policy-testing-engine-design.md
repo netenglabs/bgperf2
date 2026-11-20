@@ -1,8 +1,15 @@
 # Policy testing engine design
 
+Status: paused
+Strand: 6 Test capabilities (IPv6, BGP policy, new workloads)
+Updated: 2026-11-20
+Next: When selected, scope phase 1: the policy/corpus schema and one adapter renderer with contract tests.
+Blocked on: operator selection of policy work
+Done when: Semantic policy rules render equivalently for selected daemons and a route-level oracle verifies them on a controlled corpus.
+
 Status: deferred proposal. Reopen only through an explicitly scoped design and
 validation decision; the current priority is the
-[developer performance testing plan](performance-testing-development-plan.md).
+delivered A–D workflow summarized in [engine decisions](../decisions.md).
 See [future workloads](future-testing-workloads.md) for the deferred families.
 
 Adapted from the policy engine proposal at

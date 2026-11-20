@@ -60,8 +60,22 @@ prefixes per peer and a three-prefix plain MRT control. The run verified serial
 cleanup, exact final sets, offering, canonical matrix bindings, deferred rendering
 and automatic external stage transitions. This does not qualify larger tables,
 new daemons/hosts or cancellation behavior; select those separately.
+The live run record is in Git history at
+`docs/plans/native-suite-throughput.md`.
 
 Batch-native receipts also carry the full canonical `cell_id`, binding repeated
 target labels across peer/prefix axes and tests to their actual attempt. Labels
 remain display names; consumers must not use them as unique matrix keys. Older
 fixed-axis receipts can be read only when their label resolves unambiguously.
+
+## Deliberate limits
+
+Throughput work never weakens input hashing, exact prefix identity, offering
+witnesses, pressure checks, cleanup, immutable source/image bindings or serial
+measurement. Live image or input identity is never cached on path, mtime or tag
+alone; reusing a parsed spec or verification receipt would need an explicit
+content/implementation/coverage binding with its own mutation and refusal tests.
+Calibration reduction, trial counts, scientific exclusions, export expectations
+and continuing past an isolated daemon identity failure are experiment or
+orchestration decisions, not engine throughput defaults. Cross-stage suite
+coordination belongs to the consumer.

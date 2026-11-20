@@ -1,5 +1,12 @@
 # Exact-prefix maintainer workflow across comparison and localization
 
+Status: paused
+Strand: Shelf
+Updated: 2026-11-20
+Next: Decide whether the completed FRR correctness-localization case satisfies the remaining localization step, then close or rescope the plan.
+Blocked on: operator decision; the upstream BIRD investigation it excludes is paused
+Done when: Comparison, staged review and source localization with exact-prefix evidence each have a qualified live path.
+
 Selected 2026-11-03 after the operator requested a larger complete goal than
 individual inspection/CI helpers. Starting checkpoint: `1c3edeb` on the explicit
 development checkout. The upstream BIRD investigation remains paused.

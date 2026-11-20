@@ -117,11 +117,15 @@ enabling capture does not qualify performance comparisons. No new timing column
 or convergence rule is introduced. Performance policy remains disabled and
 formal 10% calibration deferred.
 
-Implementation and offline validation are tracked in the
-[milestone plan](plans/observer-prefix-identity.md). Real image/build/worker
+Capture happens once after measurement by design. Per-UPDATE logging would add
+cost inside the measured lifecycle, and an End-of-RIB-only snapshot could leave
+stale evidence. Broader workload/UID qualification is separate work. Real image/build/worker
 compatibility is separate validation and has not been established by unit tests.
-The [bounded runtime validation](plans/observer-prefix-runtime-validation.md#successful-existing-image-worker--2026-11-03)
-passed one real-BIRD 100-prefix worker with exact identities, observed UID/mode
-evidence, verified package and owned cleanup. This qualifies that case only.
+One bounded runtime validation passed a real BIRD 2.19.2 target/generator
+100-prefix worker with sink 0.2.0: exact identities, verified package and owned
+cleanup. On that host the collector (UID/GID 1000) owned the mode-0700 monitor
+directory and the container-root socket had mode 0666, inspected with `lstat`
+only. This qualifies that case only; other UID mappings, convergence-time
+identity and attributes remain unqualified.
 Use the [immediate functional protocol](functional-validation.md) when preparing
 future small correctness checks; timing comparisons keep their separate rules.

@@ -52,7 +52,7 @@ network:
   neighbors only; it lacks some of the policy bgperf2 uses), rustbgpd
   (`rustbgpd`), Holo (`holo`), zebra-rs (`zebra-rs`) and Bio-Routing
   (`bio-routing`) and Maghemite (`maghemite`), with permit-all IPv4 loading; see
-  [adapter scope](docs/plans/new-daemon-adapters.md). Flock (`flock`) and the
+  [adapter scope](docs/recipes.md#target-adapter-scope). Flock (`flock`) and the
   commercial Arista cEOS (`eos`), Juniper cRPD (`junos`) and Nokia SR Linux
   (`srlinux`) are also selectable.
 - **testers** — route generators. BIRD (default) or ExaBGP synthesise prefixes,
@@ -843,7 +843,7 @@ per-attempt checks and explicit review gates. The
 [deterministic bisection guide](docs/bisection.md) covers local revision searches
 with fresh boundary confirmations; its controlled walkthrough needs no Docker
 or quiet measurement window. Live bisection qualification remains deferred;
-the [milestone B record](docs/plans/milestone-b-runtime-validation.md) describes
+[engine decisions](docs/decisions.md#qualified-on-real-daemons) lists
 the successfully exercised packaging-patched source-build case and its limits.
 
 The [public roadmap](docs/roadmap.md) indexes current priorities, detailed plans

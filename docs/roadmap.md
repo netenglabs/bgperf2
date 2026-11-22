@@ -1,6 +1,6 @@
 # bgperf2 roadmap
 
-Updated 2026-11-20 UTC. This is the public index of open engine plans and
+Updated 2026-11-21 UTC. This is the public index of open engine plans and
 delivered capabilities. Everything needed to understand, use and contribute to
 bgperf2 belongs in this repository. Other projects can build campaigns and
 services on its documented CLI and versioned artifacts; none is required to use
@@ -28,7 +28,8 @@ decisions in force are in [engine decisions](decisions.md).
 | [Exact-prefix maintainer workflow](plans/prefix-maintainer-workflow.md) | paused | Decide whether the completed FRR correctness-localization case satisfies the remaining localization step, then close or rescope. | Operator decision; the upstream BIRD investigation it excludes is paused |
 | [Upstream BIRD correctness screening](plans/upstream-bird-correctness-screening.md) | paused | If resumed, resolve the issue 436 evidence limit or select another documented BIRD fix with a supported trigger and witness. | Operator decision to resume |
 | [Future testing workloads](plans/future-testing-workloads.md) | paused | When selected, write a scoped design for one family (IPv6 or policy phase 1). | Operator selection of a workload family |
-| [Policy testing engine design](plans/policy-testing-engine-design.md) | paused | When selected, scope phase 1: the policy/corpus schema and one adapter renderer. | Operator selection of policy work |
+| [Policy phase 1](plans/policy-phase1.md) | accepted | Implement `--prefix-length`, then the generated policy model. | none |
+| [Policy testing engine design](plans/policy-testing-engine-design.md) | selected (phase 1 scoped) | Carry out phase 1; later phases stay unauthorized until scoped. | Phase 1 |
 | [Engine architecture design](plans/architecture-design.md) | reference | Consult when the next engine seam (typed records, staging or runtime interfaces) is selected. | none |
 
 A plan describes proposed or in-progress work. It never documents a supported

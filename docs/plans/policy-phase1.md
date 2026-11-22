@@ -1,0 +1,184 @@
+# Policy phase 1: import-policy cost on initial table load
+
+Status: accepted
+Strand: 6 Test capabilities (IPv6, BGP policy, new workloads)
+Updated: 2026-11-21
+Next: Implement step 1 (`--prefix-length`) with its pure tests.
+Blocked on: none
+Done when: `bench` and `batch` run a generated import policy of selected size, match type and match position on BIRD and FRR targets at `/24` and `/32`, publish convergence, CPU and memory beside a no-policy baseline, and withhold timing by name whenever the monitor's count differs from the policy's expected count.
+
+Selected 2026-11-21 as the first scoped step of the
+[policy testing engine design](policy-testing-engine-design.md). That document
+stays the long-range proposal; this one is the only part of it authorized for
+implementation.
+
+**This phase measures performance, not correctness.** It answers one
+question: what does an import policy cost a daemon that is loading a table?
+Proving that a daemon evaluates policy correctly is left to separate tools,
+built later. Phase 1 keeps only the minimum guard that comparison requires:
+a run whose daemon did not do the work it was asked to do may not be
+published as if it had. That guard is an exact route count, never a claim of
+correctness.
+
+## What the engine already has
+
+| Engine fact | Consequence |
+| --- | --- |
+| `--policy-reload-blocks` (BIRD-only, `policy.py`) measures *changing* policy on a table the target already holds. | That is a different question from this phase's. Phase 1 measures the cost of a policy in place **during the initial load**. The two are refused together. |
+| `filter_test` (opaque `transit`/`ixp` snippets) and the inherited scenario `filter` matrix (`gen_*_filter` in `bird.py`) render daemon-specific text of unknown, unequal size. | Neither one is a controlled policy-size dimension, and neither can be compared across daemons. Phase 1 adds a generated renderer and refuses both alongside it. |
+| A filtered run never reaches the monitor checkpoint: the checkpoint is the configured prefix count (`convergence.py` names "a filtered run" as that case). | Checkpoints must be the policy's expected accepted counts. See Decision 1. |
+| BIRD's per-neighbour `received` is pre-policy and reaches the full table regardless of the filter, and that opens the convergence gate (`convergence.py:604`). A run whose daemon rejects too much therefore still ends by stability. It does not hang. | Using expected counts as checkpoints is safe. A shortfall run ends, and the count guard then withholds its timing. |
+| The synthetic generator sends contiguous `/32` host routes as BIRD static routes with no attributes. Churn already splits those statics into named protocols (`split_churn_paths`). | Attribute-dependent matches need attributes at table scale. Phase 1 attaches them **per block**, from one export filter for each static protocol, never one block per route. |
+| Synthetic prefixes are `/32`s walked from 100.0.0.0 to 160.0.0.0 (`gen_paths()` in `bgperf2.py`). | That range holds about 1 billion `/32`s but only about 3.9M `/24`s, and it crosses 100.64.0.0/10 (CGNAT) and 127.0.0.0/8 (loopback). Shorter prefixes need a capacity refusal and a walk that skips reserved space. |
+| The sink counts NLRI and reads no attributes. | That is enough for a count guard. Phase 1 needs no observer change. |
+| The primary comparison path is `bench`/`batch` to CSV, summary and graphs (README). | Phase 1 belongs on that path: it is a workload control, governed by `docs/invariants/workload-controls.md`. |
+
+## Scope
+
+### Workload controls
+
+There are three new dimensions and one fixed shape:
+
+- `--policy-rules N` (default 0 = no policy, which is today's run unchanged):
+  the number of terminating rules in the target's import policy.
+- `--policy-match prefix|as-path|community`: what every rule matches on. One
+  match type per run, so that a cost difference can be attributed to it.
+  (Large communities are a phase-1b candidate; see Decision 3.)
+- `--policy-hit first|last|miss`: which rule the routes meet. With `first`, the
+  first rule decides; with `last`, every rule before the last is evaluated and
+  fails; with `miss`, no rule matches and the default action decides. This is
+  the match-position dimension the engine design lists.
+- **Fixed shape:** a fixed, deterministic fraction of the fleet's prefix
+  blocks is rejected, and the rest is accepted. The default action is explicit
+  and is the same on every daemon. Every rule's action terminates.
+
+Every dimension is rebuildable from the command line alone. No seed and no
+external file is needed. Every dimension reaches `bench_output_prefix()` and
+the batch cell identity, so two cells cannot overwrite each other's artifacts.
+
+### Prefix length
+
+- `--prefix-length L` (default 32, which leaves today's runs, cell ids and
+  artifact names unchanged): every synthetic prefix has length `L`, one length
+  per run. Phase 1 supports 32 and 24. A realistic mix of lengths is left to
+  MRT playback in a later phase, because choosing a synthetic distribution
+  would add an unstated variable.
+- The prefix walk skips 100.64.0.0/10, 127.0.0.0/8 and the other reserved
+  ranges at every length. A fleet table that does not fit in the remaining
+  space is refused before any container starts, never wrapped around. The `/32`
+  walk must produce the same prefixes it does today, unless a run reaches a
+  skipped range; no current workload does.
+- This is a workload control in its own right and is useful without a policy.
+  At `L` ≠ 32 it is refused with churn, `--policy-reload-blocks`, MRT testers
+  and recipes (whose `contiguous_ipv4_host_routes` identity layout assumes
+  `/32`), until each supports it.
+- Prefix rules match ranges at the run's length (BIRD `{L,L}`; FRR
+  `ge L le L`), so `first`, `last` and `miss` hold exactly as they do for the
+  other match types.
+
+### Generated attributes
+
+The tester gives each prefix block a deterministic AS path (prepending
+generated ASNs) and a deterministic standard community, set by that block's
+static-protocol export filter. Rules are generated against those values so
+that `first`, `last` and `miss` hold exactly. Under `miss`, no attribute in the
+corpus matches any rule.
+
+An AS-path rule matches **ASN containment**: a path mask in BIRD and a
+boundary-anchored access-list in FRR. The renderers' fixture tests must show
+that the two forms select the same blocks, because two daemons doing different
+amounts of work is not a comparison. That is the one equivalence proof phase 1
+requires. It is a test on fixtures, not a live correctness check.
+
+### Daemons
+
+BIRD (2.19.x and 3.x) and FRR (`frr_c`). A single-daemon policy result is only
+a version comparison, and both of these daemons have post-policy accepted
+counters. Every other target refuses `--policy-rules` > 0 until it has a
+renderer.
+
+## Implementation steps
+
+1. **Prefix length.** Add `--prefix-length` with its reserved-range skip,
+   capacity refusal and four-entry-point guards. Pure tests prove that the
+   `/32` output is byte-identical to today's. Live-check that BIRD and FRR
+   accept and count a `/24` table with no policy before any policy run.
+2. **Model and expected counts.** In pure code, generate rules and block
+   attributes from `(N, match, hit, peers, prefixes)`, and derive the expected
+   accepted prefix count, per peer and in total. Tests cover determinism, each
+   `hit` position, the guarantee that no rule matches under `miss`, and the
+   rejected fraction.
+3. **Tester attributes.** Implement per-block export filters on the BIRD
+   generator, so that offering counters still report the full table per peer
+   (`docs/invariants/tester-offering.md`). Measure the generator's own send
+   rate with and without attributes, so that attribute cost is not charged to
+   the target.
+4. **BIRD and FRR renderers.** BIRD renders a filter function; FRR renders a
+   route-map backed by prefix-lists, as-path access-lists and community-lists.
+   Fixture tests check the exact native text. The equivalence fixtures above
+   apply to every match type. Rendered policy size (rules, bytes) goes into the
+   provenance or stats row.
+5. **Lifecycle wiring.** Monitor and per-neighbour checkpoints come from the
+   expected counts (Decision 1). When the final monitor count differs from the
+   expected total, the run is published with timing withheld and its reason
+   named. Refusals apply at all four entry points (Decision 2). The new stats
+   columns are added per the stats contract, and `create_batch_graphs()`
+   indices updated.
+6. **Policy-loaded check.** Each target confirms, once and before injection,
+   that the rendered policy is the one attached (BIRD `show protocols all`
+   filter name; FRR `show route-map`). A daemon that silently ignored the
+   policy would otherwise look fast.
+7. **Batch dimensions and graphs.** `policy_rules`, `policy_match` and
+   `policy_hit` become batch matrix keys, as does `prefix_length`,, with `policy_rules: 0` as the
+   in-matrix baseline. Graphs plot cost against rule count for each match type
+   and hit position.
+8. **Live qualification.** One bounded small matrix, separately authorized:
+   BIRD and FRR at `/24`, N ∈ {0, 1000}, each match type, `first` and
+   `last`, plus `/32` bridge cells at N ∈ {0, 1000} that tie the new results
+   to every historical `/32` run and separate table-shape cost from policy
+   cost. It
+   establishes that the workload runs and the guards fire. Results are
+   descriptive only: performance policy stays `disabled` and calibration stays
+   deferred ([decisions](../decisions.md)).
+
+## Decisions
+
+1. **Checkpoints are the expected accepted counts.** Configured counts would
+   leave every filtered run short of its checkpoint, as today's `filter_test`
+   runs are. A shortfall ends by the `received` gate plus stability (verified
+   above), and the count guard withholds its timing. An over-acceptance
+   converges early and is withheld the same way. A policy that accepts nothing
+   is impossible by construction: the rejected fraction is fixed below 1,
+   because a monitor count of zero never attests.
+2. **Entry is `bench`/`batch`, not recipes.** That is where comparisons, CSV
+   and graphs live. The cost is the four-entry-point guard set. `--policy-rules`
+   > 0 is refused with `--policy-reload-blocks`, `filter_test` or the scenario
+   `filter` matrix, `--path-diversity` > 1 (best-path selection would change
+   what the monitor counts), churn, `--receivers`, MRT testers, ExaBGP testers
+   (no per-block attribute filter), and unsupported targets. Recipes refuse
+   policy fields until a later phase selects them.
+3. **Support is declared per adapter and per match type**, as a set (BIRD and
+   FRR: `prefix`, `as-path`, `community`), and unsupported combinations are
+   refused before any container starts. Per-version qualification is recorded
+   only by step 8's run, in decisions.md. Large communities are added when both
+   renderers and the tester support them.
+
+## Explicit non-goals
+
+- Policy correctness: no per-route oracle, no attribute verification. Equal
+  counts are a guard against unequal work, not evidence of correct evaluation.
+- Attribute-modifying actions (MED, local preference, community edits),
+  continue semantics, export policy, mixed match types in one policy.
+- Policy changes on a populated table. `--policy-reload-blocks` already covers
+  BIRD, and extending it is a separate phase.
+- MRT corpora, IPv6, mixed prefix lengths within one run, and lengths other
+  than 24 and 32.
+
+## Next phases (not authorized)
+
+- Attribute-modifying actions (cost only), once a daemon-side witness
+  confirms that the action was applied.
+- Policy reload and re-evaluation across BIRD and FRR, unified with
+  `--policy-reload-blocks`.
+- Large communities, regex AS-path matches, and mixed match types.
+- Further renderers (OpenBGPD, RustyBGP, rustbgpd, Holo, …) by adapter scope.

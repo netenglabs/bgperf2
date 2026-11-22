@@ -1,14 +1,15 @@
 # Policy testing engine design
 
-Status: paused
+Status: selected (phase 1 scoped)
 Strand: 6 Test capabilities (IPv6, BGP policy, new workloads)
-Updated: 2026-11-20
-Next: When selected, scope phase 1: the policy/corpus schema and one adapter renderer with contract tests.
-Blocked on: operator selection of policy work
+Updated: 2026-11-21
+Next: Carry out [phase 1](policy-phase1.md); later phases stay unauthorized until scoped.
+Blocked on: phase 1
 Done when: Semantic policy rules render equivalently for selected daemons and a route-level oracle verifies them on a controlled corpus.
 
-Status: deferred proposal. Reopen only through an explicitly scoped design and
-validation decision; the current priority is the
+Status: long-range proposal. Policy work was selected on 2026-11-21 and only
+[phase 1](policy-phase1.md) is scoped for implementation; everything else here
+reopens only through its own scoped design and validation decision; the current priority is the
 delivered A–D workflow summarized in [engine decisions](../decisions.md).
 See [future workloads](future-testing-workloads.md) for the deferred families.
 

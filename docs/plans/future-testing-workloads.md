@@ -21,6 +21,10 @@ without pulling their implementation into that work. See the
 
 ## Policy: a detailed engine design exists
 
+Selected 2026-11-21: [phase 1](policy-phase1.md) scopes the cost of a
+generated import policy on initial load for BIRD and FRR; correctness
+checking is left to separate later tools.
+
 The [policy engine design](policy-testing-engine-design.md) proposes semantic
 ordered rules, equivalent daemon renderers, capability declarations,
 attribute-capable generation, route-level observation and phased re-evaluation.

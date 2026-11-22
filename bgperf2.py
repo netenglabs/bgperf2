@@ -77,6 +77,8 @@ from convergence import ConvergenceTracker
 from role_cpu import (ROLE_CPU_INTERVAL_S, RoleCpuRecorder, cgroup_dir_for_pid,
                       read_effective_cpuset, read_members)
 from stop import StopRequested, StopSignal
+from prefix_length import (DEFAULT_PREFIX_LENGTH,
+                           resolve_prefix_length as _resolve_prefix_length)
 from policy import (DEFAULT_POLICY_RELOAD_BLOCKS,
                     PolicyReloadConfigurationError, PolicyReloadTracker,
                     policy_reload_counts, rejected_block_indexes,
@@ -285,6 +287,12 @@ def bench_output_prefix(args):
     receivers = getattr(args, 'receivers', None) or DEFAULT_RECEIVERS
     if receivers != DEFAULT_RECEIVERS:
         parts.append('rx{0}'.format(receivers))
+    # And the prefix length, on the same rule: a /24 table and a /32 table of
+    # one shape are the same peers and the same per-peer count everywhere else
+    # in this stem. Only away from /32, so every existing name is unchanged.
+    prefix_length = getattr(args, 'prefix_length', None) or DEFAULT_PREFIX_LENGTH
+    if prefix_length != DEFAULT_PREFIX_LENGTH:
+        parts.append('pl{0}'.format(prefix_length))
     # And the churn workload, on the same rule: two tests in one batch config
     # differing only in how much of the table they withdraw, or in how many
     # times, are the same peers and the same per-peer prefix count everywhere
@@ -948,7 +956,50 @@ def describe_churn_workload(churn_prefixes, churn_bursts, neighbor_num,
                 counts['distinct_withdrawals']))
 
 
-def gen_mako_macro():
+def resolve_prefix_length(length, tester_type=None, distinct_prefixes=None,
+                          local_address_prefix=None, prefix_list_num=0):
+    '''`prefix_length.resolve_prefix_length()` with this tool's MRT generators.'''
+    return _resolve_prefix_length(length, tester_type, distinct_prefixes,
+                                  local_address_prefix, MRT_TESTER_TYPES,
+                                  prefix_list_num)
+
+
+def recorded_prefix_length(args):
+    '''The length a run's manifests record, or None where bgperf2 built none.
+
+    A scenario file states its own prefixes and an MRT generator plays back
+    the file's, so neither run had a synthetic length; recording the default
+    would file an MRT run with the `/32` synthetic ones.
+    '''
+    if (getattr(args, 'file', None)
+            or getattr(args, 'tester_type', None) in MRT_TESTER_TYPES):
+        return None
+    return getattr(args, 'prefix_length', None) or DEFAULT_PREFIX_LENGTH
+
+
+def gen_mako_macro(prefix_length=DEFAULT_PREFIX_LENGTH, exclude=()):
+    # A prefix length other than the historical /32 draws its walk from
+    # `prefix_length.walk()`, the same code the capacity check counted, so
+    # what a run announces and what it was checked against cannot drift. The
+    # /32 preamble below is returned unchanged, byte for byte: it is the walk
+    # every published synthetic run used, and it is not the same walk -- it
+    # starts at 100.0.0.0 and does not skip reserved space.
+    if prefix_length != DEFAULT_PREFIX_LENGTH:
+        return '''<%
+    import prefix_length as _bgperf_prefix_length
+    from itertools import islice
+
+    it = _bgperf_prefix_length.walk({0}, {1!r})
+    blocks = {{}}
+
+    def gen_paths(num, block=None):
+        if block is None:
+            return list(islice(it, num))
+        if block not in blocks:
+            blocks[block] = list(islice(it, num))
+        return blocks[block]
+%>
+'''.format(int(prefix_length), tuple(str(e) for e in exclude))
     # `block` is what makes several peers announce competing paths for the same
     # prefixes: called without one, every call takes the next `num` addresses
     # off the shared iterator and the peers are disjoint, which is what bgperf
@@ -2649,6 +2700,10 @@ def write_provenance(args, provenance, prefix):
                            or DEFAULT_PATH_DIVERSITY),
         'receivers': (None if getattr(args, 'file', None) else
                       getattr(args, 'receivers', None) or DEFAULT_RECEIVERS),
+        # The length of every synthetic prefix, and only where bgperf2 built
+        # the table: a scenario file states its own prefixes. Both blocks,
+        # for the reason `path_diversity` is in both.
+        'prefix_length': recorded_prefix_length(args),
         # The cores each role was confined to, or None for every core. Known
         # under `-f` too, unlike the workload keys around it: bgperf2 starts
         # the containers whatever wrote the scenario.
@@ -2877,6 +2932,10 @@ def write_event_artifact(args, events, prefix, status, testers=None,
                            or DEFAULT_PATH_DIVERSITY),
         'receivers': (None if getattr(args, 'file', None) else
                       getattr(args, 'receivers', None) or DEFAULT_RECEIVERS),
+        # The length of every synthetic prefix, and only where bgperf2 built
+        # the table: a scenario file states its own prefixes. Both blocks,
+        # for the reason `path_diversity` is in both.
+        'prefix_length': recorded_prefix_length(args),
         # Both blocks, for the reason `receivers` is in both.
         'pin': pin_cpusets(getattr(args, 'pin', None)) or None,
         # Both blocks, for the same reason: `findings.py` and
@@ -4071,7 +4130,7 @@ BATCH_TEST_KEYS = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
 BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope',
                             'path_diversity', 'receivers', 'churn_prefixes',
                             'churn_bursts', 'policy_reload_blocks', 'pin',
-                            'monitor')
+                            'monitor', 'prefix_length')
 
 
 # Keys that mean something on a *test* and nothing on a target. There is no
@@ -4089,7 +4148,7 @@ BATCH_TEST_ONLY_KEYS = ('prefix_scope', 'repetitions', 'order', 'seed',
                         'neighbors', 'prefixes', 'filter_test',
                         'path_diversity', 'receivers', 'churn_prefixes',
                         'churn_bursts', 'policy_reload_blocks', 'pin',
-                        'monitor')
+                        'monitor', 'prefix_length')
 
 # Target keys whose absence means something other than `None`. `batch()`
 # otherwise gives every unset field `None`, and `gen_conf()` routes anything
@@ -4152,6 +4211,63 @@ def batch_target_field(target, field):
     """
     value = target.get(field)
     return batch_target_defaults(target).get(field) if value is None else value
+
+
+def batch_local_address_prefix(target):
+    '''The peering subnet a batch target's cells run on.
+
+    One reading for `batch_cell_args()` and the capacity check before it, so
+    the subnet the walk was checked against is the one the run excludes.
+    '''
+    return (target['local_address_prefix'] if 'local_address_prefix' in target
+            else '10.10.0.0/16')
+
+
+def check_batch_prefix_length(test, scenarios, scope, diversity):
+    '''`bench()`'s prefix-length refusals, reached before the first cell.
+
+    `batch()` synthesizes the args, so a refusal left to `bench()` would end
+    the matrix at whichever cell first reached it. Every target's generator
+    and peering subnet and every (peers, prefixes) combination on the axes is
+    checked, for the reason the scope is: a capacity that holds for the first
+    entry and not the last is hours lost.
+    '''
+    length = test.get('prefix_length')
+    if length in (None, DEFAULT_PREFIX_LENGTH):
+        try:
+            resolve_prefix_length(length)
+        except ValueError as e:
+            sys.exit("test '{0}': {1}".format(test['name'], e))
+        return
+    if scenarios:
+        sys.exit(
+            "test '{0}': prefix_length has nothing to shorten for {1}, which "
+            "name a scenario file: the file states each neighbour's prefixes "
+            'itself'.format(test['name'], ', '.join(scenarios)))
+    repeats = [t.get('label') or t['name'] for t in test['targets']
+               if t.get('repeat')]
+    if repeats:
+        sys.exit(
+            "test '{0}': prefix_length cannot be used with repeat on {1}: "
+            'repeat reuses the generator containers as they are, so they keep '
+            'announcing the prefixes they were started with'.format(
+                test['name'], ', '.join(repeats)))
+    for t in test['targets']:
+        for neighbors in test['neighbors']:
+            for prefixes in test['prefixes']:
+                try:
+                    per_peer = resolve_prefix_scope(
+                        scope, neighbors, prefixes,
+                        batch_target_field(t, 'tester_type'))
+                    resolve_prefix_length(
+                        length, batch_target_field(t, 'tester_type'),
+                        path_diversity_groups(
+                            neighbors, diversity or DEFAULT_PATH_DIVERSITY)
+                        * per_peer,
+                        batch_local_address_prefix(t),
+                        t.get('prefix_list_num', 0))
+                except ValueError as e:
+                    sys.exit("test '{0}': {1}".format(test['name'], e))
 
 
 def check_batch_test(test):
@@ -4404,6 +4520,7 @@ def check_batch_test(test):
                                      mrt[0] if mrt else None)
             except ValueError as e:
                 sys.exit("test '{0}': {1}".format(test['name'], e))
+    check_batch_prefix_length(test, scenarios, scope, diversity)
     churn_prefixes = test.get('churn_prefixes')
     churn_bursts = test.get('churn_bursts')
     churn_flags = churn_flags_set(churn_prefixes, churn_bursts)
@@ -4576,6 +4693,30 @@ def check_batch_pin_and_repeat(tests):
                          ', '.join(repeating), ', '.join(left)))
 
 
+def check_batch_prefix_length_and_repeat(tests):
+    '''A shortened table against `repeat` across a whole batch.
+
+    `check_batch_prefix_length()` sees one test at a time, so a `/24` test
+    followed by a test with a `repeat` target passed it, and the second test
+    then reused generators still announcing `/24`s while its stem and both
+    manifests said `/32`. Refused in either order, as `--pin` is:
+    `order: shuffle` and `--resume` both decide what runs first.
+    '''
+    shortened = [t['name'] for t in tests
+                 if t.get('prefix_length') not in (None, DEFAULT_PREFIX_LENGTH)]
+    repeating = [t['name'] for t in tests
+                 if any(target.get('repeat') for target in t['targets'])]
+    if shortened and repeating:
+        sys.exit('batch: {0} {1} prefix_length and {2} {3} a repeat target. A '
+                 'repeat reuses whatever tester containers the run before it '
+                 'left, and they keep announcing the prefixes they were '
+                 'started with. Split them into separate batches'.format(
+                     ', '.join(shortened),
+                     'sets' if len(shortened) == 1 else 'set',
+                     ', '.join(repeating),
+                     'has' if len(repeating) == 1 else 'have'))
+
+
 def target_run_name(target):
     """What `run_name()` will call a run of this target entry.
 
@@ -4666,12 +4807,14 @@ def expand_batch_cells(test, targets):
     # re-checked under GoBGP are different cells, and an edited monitor is a
     # different run.
     monitor = batch_test_monitor(test)
+    # And the prefix length: a /24 table and a /32 table are different cells.
+    prefix_length = test.get('prefix_length') or DEFAULT_PREFIX_LENGTH
     return construct_batch_cells(
         test, targets, repetitions=repetitions,
         prefix_resolver=resolve_prefix_scope, path_diversity=diversity,
         receivers=receivers, churn_prefixes=churn_prefixes,
         churn_bursts=churn_bursts, policy_reload_blocks=reload_blocks,
-        pin=pin, monitor=monitor)
+        pin=pin, monitor=monitor, prefix_length=prefix_length)
 
 
 # How a test may sequence its cells. `matrix` is the enumeration order
@@ -5082,6 +5225,7 @@ def batch(args):
     check_batch_images([t for _, targets, _, _, _ in expanded for t in targets])
     check_batch_monitor_images([test for test, _, _, _, _ in expanded])
     check_batch_pin_and_repeat([test for test, _, _, _, _ in expanded])
+    check_batch_prefix_length_and_repeat([test for test, _, _, _, _ in expanded])
 
     for test, _targets, cells, order, seed in expanded:
         repetitions = batch_repetitions(test)
@@ -5243,6 +5387,7 @@ def batch_cell_args(args, cell):
     # diversity its own id does not record.
     a.path_diversity = cell.get('path_diversity') or DEFAULT_PATH_DIVERSITY
     a.receivers = cell.get('receivers') or DEFAULT_RECEIVERS
+    a.prefix_length = cell.get('prefix_length') or DEFAULT_PREFIX_LENGTH
     # From the cell for the same reason the two above are: the cell is
     # what the id, the row and the artifact names were built from.
     a.churn_prefixes = cell.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
@@ -5264,7 +5409,7 @@ def batch_cell_args(args, cell):
     a.repetition = cell['repetition']
     a.defer_graphs = bool(cell.get('defer_graphs'))
     # read any config attribute that was specified in the yaml batch file
-    a.local_address_prefix = t['local_address_prefix'] if 'local_address_prefix' in t else '10.10.0.0/16'
+    a.local_address_prefix = batch_local_address_prefix(t)
     # Refused by `check_batch_test()` when true, so it is never copied.
     a.single_table = False
     for field in ['docker_network_name', 'repeat', 'file', 'target_local_address',
@@ -5375,6 +5520,7 @@ def run_selected_batch_cells(args, expanded):
     check_batch_images([cell['target'] for _test, cell in selected])
     check_batch_monitor_images(tests)
     check_batch_pin_and_repeat(tests)
+    check_batch_prefix_length_and_repeat(tests)
     for test, cell in selected:
         repetitions = batch_repetitions(test)
         if stop_signal.is_set():
@@ -5525,6 +5671,9 @@ def batch_cell_description(cell, repetitions=1):
     receivers = cell.get('receivers') or DEFAULT_RECEIVERS
     if receivers != DEFAULT_RECEIVERS:
         described = '{0}, receivers={1}'.format(described, receivers)
+    prefix_length = cell.get('prefix_length') or DEFAULT_PREFIX_LENGTH
+    if prefix_length != DEFAULT_PREFIX_LENGTH:
+        described = '{0}, prefix length=/{1}'.format(described, prefix_length)
     churn_prefixes = cell.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
     if churn_prefixes != DEFAULT_CHURN_PREFIXES:
         described = '{0}, churn={1}x{2}'.format(
@@ -5927,7 +6076,13 @@ def gen_conf(args):
             }
 
     yaml.Dumper.ignore_aliases = lambda *args : True
-    return gen_mako_macro() + yaml.dump(conf, default_flow_style=False)
+    # Validated at every entry point, as the diversity is; this reads what was
+    # asked for. The peering subnet is excluded from a shorter walk so that no
+    # route covers the next hop every route is announced with.
+    prefix_length = (getattr(args, 'prefix_length', None)
+                     or DEFAULT_PREFIX_LENGTH)
+    return (gen_mako_macro(prefix_length, (str(local_address_prefix),))
+            + yaml.dump(conf, default_flow_style=False))
 
 
 def check_generator_matches_workload(args):
@@ -6011,6 +6166,18 @@ def config(args):
             args.prefix_num, getattr(args, 'tester_type', None))
     except ValueError as e:
         sys.exit(str(e))
+    # After the scope and the diversity, as in `bench()`: the capacity it
+    # checks is blocks times the resolved per-peer count.
+    try:
+        args.prefix_length = resolve_prefix_length(
+            getattr(args, 'prefix_length', None),
+            getattr(args, 'tester_type', None),
+            path_diversity_groups(args.neighbor_num, args.path_diversity)
+            * args.prefix_num,
+            getattr(args, 'local_address_prefix', None),
+            getattr(args, 'prefix_list_num', 0))
+    except ValueError as e:
+        sys.exit(str(e))
     # After the scope for the reason `bench()` puts it there: the block is
     # taken out of each peer's own list, and the scope decides how long that
     # list is.
@@ -6090,6 +6257,15 @@ def create_args_parser(main=True):
         # met by argparse's bare `unrecognized arguments`.
         parser.add_argument('-s', '--single-table', action='store_true',
                             help='refused: no target implements it (bgperf2-0ma)')
+        parser.add_argument('--prefix-length', type=int,
+                            default=DEFAULT_PREFIX_LENGTH,
+                            help='length of every synthetic prefix. 32 (the '
+                                 'default, and what bgperf has always '
+                                 'generated) walks host routes up from '
+                                 '100.0.0.0 exactly as before. 24 walks '
+                                 'public unicast space from 1.0.0.0, skipping '
+                                 'special-purpose ranges and the peering '
+                                 'subnet. BIRD generator only')
         parser.add_argument('--prefix-scope', choices=PREFIX_SCOPES,
                             default='per-peer',
                             help='how to read --prefix-num. per-peer (the '

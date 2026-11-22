@@ -324,13 +324,14 @@ nowhere at all; `tests/test_docs_index.py` now runs the guard against every modu
 claims.
 
 **`docs/invariants/workload-controls.md`** — `bgperf2.py` argument guards, `check_batch_test()`,
-`bench_output_prefix()`; `cpu_pinning.py` (pure CPU-list and pinning helpers);
+`bench_output_prefix()`; `prefix_length.py` (synthetic prefix walks); `cpu_pinning.py` (pure CPU-list and pinning helpers);
 `recipes.py`, `recipe_minimization.py`, `recipe_worker.py`, `recipe_preflight.py` (portable CPU layout and recipe controls); `base.py`'s `gen_conf()`/`gen_paths()`/`scenario_neighbors()`; `churn.py`;
 `policy.py`; `bird.py`.
 
 - Session count and table size are one axis. `--prefix-scope total`, `--path-diversity D`,
-  `--receivers N`, `--churn-prefixes C`/`--churn-bursts B`, `--policy-reload-blocks N` and
-  `--threads N` are the controls that separate them, and each is refused for a named list of things.
+  `--receivers N`, `--churn-prefixes C`/`--churn-bursts B`, `--policy-reload-blocks N`,
+  `--prefix-length L` and `--threads N` are the controls that separate them, and each is refused
+  for a named list of things. The `/32` walk is historical and never changes.
   `-s/--single-table` is refused outright: no target has honoured it since 2021.
 - **A rule that refuses something must be applied at every entry point, and there are four**:
   `bench`, `bench -f`, `config`, and `batch`, which synthesizes args and bypasses argparse *and*

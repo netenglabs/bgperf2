@@ -2,7 +2,7 @@
 
 What `bench`/`batch` may be asked to run, and the guards that refuse the rest.
 
-**Read this before editing:** `cpu_pinning.py` (pure CPU lists and role-pinning validation), `recipes.py` (portable source validation), `recipe_worker.py` (recipe CPU layout forwarding), `recipe_preflight.py` (online CPU availability), `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `run_lifecycle.py` (run orchestration), `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`), `churn.py`, `policy.py`, `bird.py` (the churn protocol and the reload command)
+**Read this before editing:** `prefix_length.py` (the synthetic prefix walks and their refusals), `cpu_pinning.py` (pure CPU lists and role-pinning validation), `recipes.py` (portable source validation), `recipe_worker.py` (recipe CPU layout forwarding), `recipe_preflight.py` (online CPU availability), `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `run_lifecycle.py` (run orchestration), `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`), `churn.py`, `policy.py`, `bird.py` (the churn protocol and the reload command)
 `recipe_minimization.py` governs explicit selected-cell projection and bounded peer/prefix reductions.
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
@@ -343,6 +343,50 @@ withdraws the rejected ones from every export session, with the sessions staying
   reason `--path-diversity` is not. The evidence key is `reload_complete`, not `complete`:
   `policy_reload_metrics()` derives a `complete` off the event stream, and
   `_policy_reload_section()` refuses a caller that lands on a derived name.
+
+## `--prefix-length L` — the shape of every synthetic prefix
+
+`--prefix-length L` (batch: `prefix_length: L`, a *test* key) sets the length of every synthetic
+prefix. Every table before it was `/32` host routes, and a prefix-list over `/32`s does not cost
+what one over a real table's `/24`s does, so the policy workload needs the shape to be a dimension.
+Phase 1 supports 24 and 32 (`prefix_length.py`).
+
+- **The `/32` walk is the historical one and is not touched.** It starts at 100.0.0.0 and does not
+  skip reserved space, and it cannot start to: a 50 x 100,000 table already walks through
+  100.64.0.0/10, so a skip at `/32` would change the prefixes of runs that have been published.
+  `gen_mako_macro()` returns its preamble byte for byte at the default, the cell id, stem and
+  description omit the key there, and `prefix_length.walk()` refuses to produce a `/32` walk, so a
+  second definition of every published table cannot appear.
+- **A shorter walk skips special-purpose space and the peering subnet.** It is drawn from 1.0.0.0
+  up to multicast with `RESERVED_NETWORKS` taken out, because a daemon may drop a loopback or
+  link-local prefix without counting it and the run would read as route loss; and the run's own
+  `--local-address-prefix` is taken out, because a route covering it would capture the next hop
+  every route is announced with. The scenario preamble imports `prefix_length.walk()`, so what a
+  run announces and what the capacity check counted are one piece of code, and a `config -o`
+  scenario renders the same walk under `bench -f`.
+- **Capacity is checked against distinct prefixes, after the scope and the diversity.** The walk
+  holds 14,461,947 `/24`s, and a table needing more is refused before any container -- for a batch,
+  for every (target, peers, prefixes) combination on the axes, since each target may name its own
+  peering subnet.
+- **Refused, at all four entry points, for**: a value outside `SUPPORTED_PREFIX_LENGTHS` (`True`
+  and quoted values included), an MRT generator (it plays back the file's own prefixes), ExaBGP
+  (unpinned and unversioned images, so a run on one cannot say which generator it measured, and no
+  per-block attribute filters for the policy workload), `-f`/a scenario target (the file states
+  its prefixes), `-r/--repeat` (the reused generators keep announcing what they were started with,
+  and the counts would agree, which is what makes it silent; a batch refuses a shortened test and a
+  `repeat` target anywhere in it, in either order, as `--pin` does), `-e/--prefix-list-num` (its
+  entries are `/32`s from 90.0.0.0, which match no route of another length and sit inside the walk),
+  native controlled cells (`native_mrt.synthetic_spec()`, whose post-run inspection expects the
+  `/32` walk), and recipes (whose prefix-identity
+  layout is contiguous `/32` host routes; their strict key list refuses it). Churn, the policy
+  reload, path diversity and `--prefix-scope total` are length-agnostic -- they work on each peer's
+  path list and on peer ASNs -- and are allowed.
+- **Not detected**: a default-length `bench -r` run after a separate `/24` run reuses `/24`
+  generators. That is the existing `-p`-under-`-r` hazard the policy-reload section measured, not a
+  new one.
+- Stem gets `pl<L>`, both `run` blocks record `prefix_length` (`recorded_prefix_length()`), and `-f`
+  and MRT playback record `null`, since neither table was synthesised. Not a CSV
+  column, for the reason `--path-diversity` is not.
 
 ## `-s/--single-table` — refused, because nothing has honoured it since 2021
 

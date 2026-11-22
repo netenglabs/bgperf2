@@ -574,7 +574,7 @@ Either way, check the result without paying for a build:
 
 `-n` and `-p` scale one axis: each peer gets its own disjoint prefix block, so
 session count and table size move together and the target holds `n * p`
-routes, each learned over exactly one path. Five flags separate the things
+routes, each learned over exactly one path, all of them `/32` host routes. Six flags separate the things
 that hides. Each is also a batch key -- a *test* key, beside `neighbors` and
 `prefixes`, not a target key -- and each is refused rather than approximated
 where it cannot be honoured.
@@ -582,6 +582,7 @@ where it cannot be honoured.
 | flag | batch key | what it adds |
 |---|---|---|
 | `--prefix-scope total` | `prefix_scope: total` | reads `-p` as the whole table and splits it across the peers, so peer count can rise without the table rising with it |
+| `--prefix-length 24` | `prefix_length: 24` | announces `/24`s drawn from public unicast space instead of the historical `/32` host routes, so prefix-list and table costs reflect a realistic table shape |
 | `--path-diversity D` | `path_diversity: D` | deals the peers into groups of `D` sharing one prefix block, so the target has competing paths to choose between |
 | `--receivers N` | `receivers: N` | `N` extra sessions the target exports its whole table to and which announce nothing back |
 | `--churn-prefixes C --churn-bursts B` | `churn_prefixes` / `churn_bursts` | after convergence, withdraws and re-announces the last `C` prefixes of every peer, `B` times |
@@ -590,6 +591,9 @@ where it cannot be honoured.
 ```bash
 # 50 sessions holding the same 100,000 routes, not 5,000,000
 ./bgperf2.py bench -t bird -n 50 -p 100000 --prefix-scope total
+
+# the same table as /24s instead of /32 host routes
+./bgperf2.py bench -t bird -n 10 -p 100000 --prefix-length 24
 
 # 10 peers in pairs, so 500,000 paths compete for 250,000 prefixes
 ./bgperf2.py bench -t bird -n 10 -p 50000 --path-diversity 2
@@ -609,6 +613,10 @@ three: `--prefix-scope total` needs the peer count to divide the table exactly
 and is refused for the MRT generators (whose check-point is already the whole
 table); `--path-diversity` needs the diversity to divide the peer count
 exactly and is refused for MRT playback and beside `--prefix-scope total`;
+`--prefix-length 24` works only with the synthetic BIRD generator, is refused
+under `-r/--repeat`, beside `-e/--prefix-list-num` and in native controlled
+batches, and refuses a table larger than the 14,461,947 `/24`s
+left once special-purpose ranges and the peering subnet are skipped;
 churn works only with the synthetic BIRD generator (the burst is `birdc`
 switching a static protocol) and is refused under `-r/--repeat` and
 `--filter_test`; the policy reload needs a target with a reload mechanism
@@ -619,7 +627,7 @@ on its axes before the first container starts, not just the first.
 
 **None of these appear in the CSV.** `elapsed (s)` keeps meaning the monitor's
 convergence in every row. What a workload was is in the artifact filename
-(`pd2`, `rx11`, `ch1000x3`, `pr2`) and in the `run` block of both
+(`pl24`, `pd2`, `rx11`, `ch1000x3`, `pr2`) and in the `run` block of both
 `<prefix>.events.json` and `<prefix>.versions.json`; what it cost is in that
 artifact's own section — `export`, `churn`, `policy_reload`. The
 [measurement dictionary](docs/measurement-dictionary.md) lists the fields.

@@ -23,6 +23,7 @@ import yaml
 
 from churn import DEFAULT_CHURN_PREFIXES, DEFAULT_CHURN_BURSTS
 from policy import DEFAULT_POLICY_RELOAD_BLOCKS
+from prefix_length import DEFAULT_PREFIX_LENGTH
 
 # How many peers announce each block of prefixes. 1 is what bgperf has always
 # generated: every peer takes its own block off the shared iterator, so the
@@ -195,7 +196,8 @@ def cell_monitor(cell):
 
 def construct_batch_cells(test, targets, *, repetitions, prefix_resolver,
                           path_diversity, receivers, churn_prefixes,
-                          churn_bursts, policy_reload_blocks, pin, monitor):
+                          churn_bursts, policy_reload_blocks, pin, monitor,
+                          prefix_length=DEFAULT_PREFIX_LENGTH):
     """Construct cells from caller-validated and resolved workload controls.
 
     Defaults and argument guards remain at the existing batch entry point.
@@ -231,6 +233,7 @@ def construct_batch_cells(test, targets, *, repetitions, prefix_resolver,
                             'policy_reload_blocks': reload_blocks,
                             'pin': pin,
                             'monitor': monitor,
+                            'prefix_length': prefix_length,
                             'target': t,
                         })
                         ordinal += 1
@@ -271,6 +274,11 @@ def batch_cell_id(test_name, cell):
     receivers = cell.get('receivers') or DEFAULT_RECEIVERS
     if receivers != DEFAULT_RECEIVERS:
         identity['receivers'] = receivers
+    # Omitted at /32 for the reason the diversity is: every existing id, and
+    # every in-flight batch, keeps the shape it had.
+    prefix_length = cell.get('prefix_length') or DEFAULT_PREFIX_LENGTH
+    if prefix_length != DEFAULT_PREFIX_LENGTH:
+        identity['prefix_length'] = prefix_length
     # Both keys or neither, and only away from the default: a burst count with
     # no block is not a workload, so recording one on a cell that churns
     # nothing would put a key in the id that says nothing about what ran.

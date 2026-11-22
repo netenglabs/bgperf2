@@ -28,7 +28,7 @@ decisions in force are in [engine decisions](decisions.md).
 | [Exact-prefix maintainer workflow](plans/prefix-maintainer-workflow.md) | paused | Decide whether the completed FRR correctness-localization case satisfies the remaining localization step, then close or rescope. | Operator decision; the upstream BIRD investigation it excludes is paused |
 | [Upstream BIRD correctness screening](plans/upstream-bird-correctness-screening.md) | paused | If resumed, resolve the issue 436 evidence limit or select another documented BIRD fix with a supported trigger and witness. | Operator decision to resume |
 | [Future testing workloads](plans/future-testing-workloads.md) | paused | When selected, write a scoped design for one family (IPv6 or policy phase 1). | Operator selection of a workload family |
-| [Policy phase 1](plans/policy-phase1.md) | accepted | Implement `--prefix-length`, then the generated policy model. | none |
+| [Policy phase 1](plans/policy-phase1.md) | in progress | Live-check `/24` tables on BIRD and FRR, then implement the generated policy model. | none |
 | [Policy testing engine design](plans/policy-testing-engine-design.md) | selected (phase 1 scoped) | Carry out phase 1; later phases stay unauthorized until scoped. | Phase 1 |
 | [Engine architecture design](plans/architecture-design.md) | reference | Consult when the next engine seam (typed records, staging or runtime interfaces) is selected. | none |
 

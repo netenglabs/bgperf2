@@ -126,6 +126,13 @@ def bench(runtime, args):
         # than the silence about `-n` and `-p` it joins.
         runtime.sys.exit('--path-diversity has nothing to group under -f: a scenario '
                  "file states each neighbour's paths itself")
+    if args.file and getattr(args, 'prefix_length', None) not in (
+            None, runtime.DEFAULT_PREFIX_LENGTH):
+        # A scenario file states each neighbour's prefixes, lengths included,
+        # so the flag would change nothing while the stem and both manifests
+        # recorded it. Above the teardown like the refusals beside it.
+        runtime.sys.exit('--prefix-length has nothing to shorten under -f: a '
+                 "scenario file states each neighbour's prefixes itself")
     if args.file and getattr(args, 'prefix_scope', None) not in (None, 'per-peer'):
         # `-n`/`-p` are already ignored under `-f`, and this would be too --
         # but the whole point of the flag is that the number means something
@@ -140,6 +147,30 @@ def bench(runtime, args):
                 args.prefix_num, getattr(args, 'tester_type', None))
         except ValueError as e:
             runtime.sys.exit(str(e))
+        # After the scope and the diversity, because the capacity it checks is
+        # the number of distinct prefixes the fleet offers -- blocks times the
+        # resolved per-peer count -- and both decide that.
+        try:
+            args.prefix_length = runtime.resolve_prefix_length(
+                getattr(args, 'prefix_length', None),
+                getattr(args, 'tester_type', None),
+                runtime.path_diversity_groups(
+                    args.neighbor_num,
+                    getattr(args, 'path_diversity', None)
+                    or runtime.DEFAULT_PATH_DIVERSITY) * args.prefix_num,
+                getattr(args, 'local_address_prefix', None),
+                getattr(args, 'prefix_list_num', 0))
+        except ValueError as e:
+            runtime.sys.exit(str(e))
+        if (args.prefix_length != runtime.DEFAULT_PREFIX_LENGTH
+                and getattr(args, 'repeat', False)):
+            # `-r/--repeat` reuses the generator containers and the config they
+            # were started with, so they go on announcing whatever length the
+            # previous run gave them while the stem and both manifests say
+            # this one. The counts would agree, which is what makes it silent.
+            runtime.sys.exit('--prefix-length cannot be used with -r/--repeat: '
+                     'repeat reuses the generator containers as they are, so '
+                     'they keep announcing the prefixes they were started with')
         # After the scope, because the block is taken out of each peer's own
         # list and `--prefix-scope total` is what decides how long that list
         # is: `-n 10 -p 1000 --prefix-scope total` gives every peer 100

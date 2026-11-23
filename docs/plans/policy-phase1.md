@@ -2,8 +2,8 @@
 
 Status: in progress
 Strand: 6 Test capabilities (IPv6, BGP policy, new workloads)
-Updated: 2026-11-21
-Next: Live-check a `/24` table on BIRD and FRR with no policy (end of step 1), then implement step 2.
+Updated: 2026-11-23
+Next: Implement step 3, per-block attribute export filters on the BIRD generator, and measure its send rate with and without them. Steps 1 and 2 are done.
 Blocked on: none
 Done when: `bench` and `batch` run a generated import policy of selected size, match type and match position on BIRD and FRR targets at `/24` and `/32`, publish convergence, CPU and memory beside a no-policy baseline, and withhold timing by name whenever the monitor's count differs from the policy's expected count.
 
@@ -105,11 +105,19 @@ renderer.
    capacity refusal and four-entry-point guards. Pure tests prove that the
    `/32` output is byte-identical to today's. Live-check that BIRD and FRR
    accept and count a `/24` table with no policy before any policy run.
+   *Done 2026-11-23*: the `/24` live check with no policy passed on BIRD and
+   FRR.
 2. **Model and expected counts.** In pure code, generate rules and block
    attributes from `(N, match, hit, peers, prefixes)`, and derive the expected
    accepted prefix count, per peer and in total. Tests cover determinism, each
    `hit` position, the guarantee that no rule matches under `miss`, and the
    rejected fraction.
+   *Done 2026-11-23* in `import_policy.py`. Each peer's list is cut into four
+   blocks and the last block of every peer is rejected, so no neighbour's
+   expected count is 0. The rejection is a guard evaluated before the `N`
+   generated rules, in the run's own match type: under `miss` no generated
+   rule may match, so the rejection cannot come from them. The contract is in
+   `docs/invariants/workload-controls.md`.
 3. **Tester attributes.** Implement per-block export filters on the BIRD
    generator, so that offering counters still report the full table per peer
    (`docs/invariants/tester-offering.md`). Measure the generator's own send

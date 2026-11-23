@@ -326,7 +326,7 @@ claims.
 **`docs/invariants/workload-controls.md`** — `bgperf2.py` argument guards, `check_batch_test()`,
 `bench_output_prefix()`; `prefix_length.py` (synthetic prefix walks); `cpu_pinning.py` (pure CPU-list and pinning helpers);
 `recipes.py`, `recipe_minimization.py`, `recipe_worker.py`, `recipe_preflight.py` (portable CPU layout and recipe controls); `base.py`'s `gen_conf()`/`gen_paths()`/`scenario_neighbors()`; `churn.py`;
-`policy.py`; `bird.py`.
+`policy.py`; `import_policy.py` (generated import policy, expected counts); `bird.py`.
 
 - Session count and table size are one axis. `--prefix-scope total`, `--path-diversity D`,
   `--receivers N`, `--churn-prefixes C`/`--churn-bursts B`, `--policy-reload-blocks N`,

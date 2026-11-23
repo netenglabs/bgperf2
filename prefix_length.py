@@ -151,6 +151,62 @@ def capacity(length, exclude=()):
                for start, end in _allowed_spans(length, exclude))
 
 
+# The historical `/32` walk, stated as bounds so a policy can name a slice of
+# it without generating it. These are not a second definition of that walk:
+# `gen_mako_macro()` holds it, and the suite renders that preamble and checks
+# these bounds against what it announces.
+HISTORICAL_WALK_FIRST = int(ipaddress.IPv4Address('100.0.0.0'))
+# `iter_iprange()` includes its upper bound.
+HISTORICAL_WALK_LAST = int(ipaddress.IPv4Address('160.0.0.0'))
+
+
+def walk_address_ranges(length, first, count, exclude=()):
+    '''The address ranges holding walk entries `first` .. `first + count - 1`.
+
+    Half-open `(start, end)` integer ranges in ascending order, whose union is
+    exactly those `count` prefixes' addresses. One range unless the slice
+    crosses a span the walk skips. Works at every supported length, the
+    historical `/32` walk included, so a prefix-matching policy can cover a
+    block of the table without enumerating it.
+
+    `exclude` does not apply at `/32`, whose walk skips nothing.
+    '''
+    if not _is_whole_number(first) or first < 0:
+        raise ValueError('walk index must be a whole number of 0 or more, '
+                         'got {0!r}'.format(first))
+    if not _is_whole_number(count) or count < 1:
+        raise ValueError('walk slice must hold at least one prefix, '
+                         'got {0!r}'.format(count))
+    if length == DEFAULT_PREFIX_LENGTH:
+        start = HISTORICAL_WALK_FIRST + first
+        if start + count - 1 > HISTORICAL_WALK_LAST:
+            raise ValueError('the /32 walk ends at {0} and cannot supply '
+                             'entries {1} to {2}'.format(
+                                 ipaddress.IPv4Address(HISTORICAL_WALK_LAST),
+                                 first, first + count - 1))
+        return [(start, start + count)]
+    _check_walk_length(length)
+    size = 1 << (32 - length)
+    ranges = []
+    skip, remaining = first, count
+    for start, end in _allowed_spans(length, exclude):
+        held = (end - start) // size
+        if skip >= held:
+            skip -= held
+            continue
+        take = min(held - skip, remaining)
+        lo = start + skip * size
+        ranges.append((lo, lo + take * size))
+        remaining -= take
+        skip = 0
+        if not remaining:
+            return ranges
+    raise ValueError('the /{0} walk can supply {1:,} prefixes and cannot '
+                     'supply entries {2} to {3}'.format(
+                         length, capacity(length, exclude), first,
+                         first + count - 1))
+
+
 # The one generator a shorter prefix is generated for. ExaBGP's route writer
 # would take any length, but its images are unpinned at both the interpreter
 # and the ExaBGP release and report no version, so a run on one cannot say

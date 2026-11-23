@@ -2,7 +2,7 @@
 
 What `bench`/`batch` may be asked to run, and the guards that refuse the rest.
 
-**Read this before editing:** `prefix_length.py` (the synthetic prefix walks and their refusals), `cpu_pinning.py` (pure CPU lists and role-pinning validation), `recipes.py` (portable source validation), `recipe_worker.py` (recipe CPU layout forwarding), `recipe_preflight.py` (online CPU availability), `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `run_lifecycle.py` (run orchestration), `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`), `churn.py`, `policy.py`, `bird.py` (the churn protocol and the reload command)
+**Read this before editing:** `prefix_length.py` (the synthetic prefix walks and their refusals), `cpu_pinning.py` (pure CPU lists and role-pinning validation), `recipes.py` (portable source validation), `recipe_worker.py` (recipe CPU layout forwarding), `recipe_preflight.py` (online CPU availability), `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `run_lifecycle.py` (run orchestration), `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`), `churn.py`, `policy.py`, `import_policy.py` (the generated import policy and its expected counts), `bird.py` (the churn protocol and the reload command)
 `recipe_minimization.py` governs explicit selected-cell projection and bounded peer/prefix reductions.
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
@@ -387,6 +387,45 @@ Phase 1 supports 24 and 32 (`prefix_length.py`).
 - Stem gets `pl<L>`, both `run` blocks record `prefix_length` (`recorded_prefix_length()`), and `-f`
   and MRT playback record `null`, since neither table was synthesised. Not a CSV
   column, for the reason `--path-diversity` is not.
+
+## The generated import policy — model and expected counts (policy phase 1)
+
+`import_policy.py` builds the import policy for policy phase 1
+([plan](../plans/policy-phase1.md)) from the rule count, match type, hit position, peers and
+prefixes per peer, and states the exact accepted count a target must reach. It is the model only:
+no flag reaches it yet, and the renderers, tester attributes and lifecycle wiring are later steps.
+
+- **The shape is fixed: guard, then the `N` generated rules, then default accept.** Each peer's list
+  is cut into `BLOCKS_PER_PEER` (4) contiguous blocks and the **last block of every peer** is
+  rejected by a guard evaluated before the generated rules. The guard has to be outside the `N`:
+  under `miss` no generated rule may match, so a policy of generated rules alone decides every
+  route by one default action, and rejects all or nothing. It goes *first* so the rejected routes
+  leave before the generated rules, and every route that reaches them meets them exactly as `hit`
+  says; last, it would make every rejected route evaluate all `N` whatever `hit` was. It uses the
+  run's own match type, since mixed match types are a non-goal.
+- **The tail of every peer, not the tail of the fleet.** Rejecting whole peers would give some
+  neighbour an expected count of 0, which cannot be told from a session that delivered nothing —
+  `--policy-reload-blocks`' empty-table rule, applied per checkpoint. Every peer therefore expects
+  `p - p // 4` and loses `p // 4`, and fewer than 4 prefixes per peer is refused: the rejected
+  block would be empty and the policy invisible.
+- **The expected count depends on the fleet alone**, never on `N`, the match type or the hit, so
+  every policy cell of one fleet shape expects the same count. With no policy it is the whole table.
+- **Block attributes do not depend on the policy.** Each block carries an AS path of its own ASN
+  and its class's ASN (private 32-bit), and communities naming the block and its class (private
+  16-bit ASNs), so changing the policy never changes what the generator sends. The block's own
+  value is there so the value a rule looks for is not the only one on the route. Those ASNs are
+  bogons to `filters/*.conf`' `reject_bogon_asns()`, so a `filter_test` beside a policy would
+  reject every route before the policy saw it — a second reason the two are refused together.
+- **A block's `peer` is its walk slice, never an AS position.** The scenario draws slices in
+  rendered neighbour order, which `yaml.dump` sorts by router-id text, so from ten peers on the
+  AS-1010 peer holds slice 0. A generator finds its blocks from its own `paths`.
+- **Filler rules reject values no route carries**: ASNs and communities from their own ranges, and
+  prefixes in class E, which neither walk reaches. Prefix rules name the walk's own addresses
+  through `prefix_length.walk_address_ranges()`, whose `/32` bounds are checked against the
+  scenario preamble rather than being a second definition of the historical walk.
+- `tests/test_import_policy.py` evaluates every route of a rendered `gen_conf()` table through
+  guard, rules and default, for every match type and hit position at both lengths, and checks the
+  deciding rule and the per-peer counts against the model.
 
 ## `-s/--single-table` — refused, because nothing has honoured it since 2021
 

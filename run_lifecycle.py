@@ -464,6 +464,18 @@ def bench(runtime, args):
             if tester_type == 'mrt' and mrt_injector == 'bgpdump2' and not valid_indexes:
                 print("finding asns and such from mrt file")
                 valid_indexes = t.get_index_valid(args.prefix_num)
+                try:
+                    skip = runtime.mrt_skip_peers(args)
+                except ValueError as e:
+                    runtime.sys.exit(str(e))
+                if skip:
+                    valid_indexes = [i for i in valid_indexes if i not in skip]
+                    print('skipping MRT peers', sorted(skip), '->', valid_indexes)
+                    # Fewer peers than injectors would wrap and send one
+                    # source peer twice, which is a different workload.
+                    if len(valid_indexes) < len(conf['testers']):
+                        runtime.sys.exit('{0} MRT peers left after --mrt-skip-peers, {1} injectors '
+                                         'need one each'.format(len(valid_indexes), len(conf['testers'])))
                 asns = t.get_index_asns()
 
                 for test in conf['testers']:

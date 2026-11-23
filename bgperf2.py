@@ -1760,6 +1760,25 @@ def warn_if_log_dir_is_short_on_space(config_dir):
           'starting.')
 
 
+def mrt_skip_peers(args):
+    '''MRT peer-table indexes injectors must not use, from bench or batch.
+
+    Bench passes a comma string; a batch target may write a YAML list or a
+    single integer. Anything else refuses rather than being read as nothing.
+    '''
+    value = getattr(args, 'mrt_skip_peers', None)
+    if value is None or value == '':
+        return set()
+    items = value if isinstance(value, list) else str(value).split(',')
+    try:
+        peers = {int(str(i).strip()) for i in items}
+    except ValueError:
+        raise ValueError('mrt_skip_peers must be MRT peer indexes, got {0!r}'.format(value))
+    if any(p < 0 for p in peers):
+        raise ValueError('mrt_skip_peers must be non-negative, got {0!r}'.format(value))
+    return peers
+
+
 def warn_if_trace_io_reaches_no_generator(args, conf):
     '''Say when --tester-trace-io was asked for and nothing acts on it.
 
@@ -5271,7 +5290,8 @@ def batch_cell_args(args, cell):
                     'label', 'target_local_address', 'monitor_local_address', 'target_router_id',
                     'monitor_router_id', 'target_config_file', 'filter_type','mrt_injector', 'mrt_file',
                     'tester_type', 'license_file', 'version', 'threads',
-                    'tester_trace_io', 'mrt_spec', 'mrt_spec_sha256', 'generator_image', 'observer_image']:
+                    'tester_trace_io', 'mrt_spec', 'mrt_spec_sha256', 'generator_image', 'observer_image',
+                    'mrt_skip_peers']:
         # Keyed on the value, not on the key being present: a target
         # written `tester_type:` with nothing after it parses as None,
         # which is the very slip the default exists to catch, and a
@@ -6160,6 +6180,12 @@ def create_args_parser(main=True):
                                  'is timing) and injection_s (the log outgrows what one poll '
                                  'reads). Use it to find out whether a generator was blocked, '
                                  'not to time one, and never compare timings across it')
+
+        parser.add_argument('--mrt-skip-peers', type=str,
+                            help='comma-separated MRT peer-table indexes bgpdump2 injectors must '
+                                 'not use. For a source peer whose routes carry well-known '
+                                 'export-scope communities (no-export): a target that honors '
+                                 'them advertises fewer routes, so its timing is not comparable')
 
         parser.add_argument('--target-config-file', type=str,
                             help='target BGP daemon\'s configuration file')

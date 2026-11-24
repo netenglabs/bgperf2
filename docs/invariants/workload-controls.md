@@ -361,7 +361,9 @@ Phase 1 supports 24 and 32 (`prefix_length.py`).
   up to multicast with `RESERVED_NETWORKS` taken out, because a daemon may drop a loopback or
   link-local prefix without counting it and the run would read as route loss; and the run's own
   `--local-address-prefix` is taken out, because a route covering it would capture the next hop
-  every route is announced with. The scenario preamble imports `prefix_length.walk()`, so what a
+  every route is announced with. So is an explicitly set target or monitor address, which may lie
+  outside that subnet: `prefix_length.walk_exclusions()` is the one list `gen_conf()` and every
+  capacity check use. The scenario preamble imports `prefix_length.walk()`, so what a
   run announces and what the capacity check counted are one piece of code, and a `config -o`
   scenario renders the same walk under `bench -f`.
 - **Capacity is checked against distinct prefixes, after the scope and the diversity.** The walk
@@ -376,14 +378,23 @@ Phase 1 supports 24 and 32 (`prefix_length.py`).
   and the counts would agree, which is what makes it silent; a batch refuses a shortened test and a
   `repeat` target anywhere in it, in either order, as `--pin` does), `-e/--prefix-list-num` (its
   entries are `/32`s from 90.0.0.0, which match no route of another length and sit inside the walk),
-  native controlled cells (`native_mrt.synthetic_spec()`, whose post-run inspection expects the
+  `--filter_test` (`filters/*` select by length -- `ixp` drops anything longer than `/24`, so it
+  rejects a `/32` table whole and accepts a `/24` one whole; a batch checks every filter on the
+  axis), native controlled cells (`native_mrt.synthetic_spec()`, whose post-run inspection expects the
   `/32` walk), and recipes (whose prefix-identity
   layout is contiguous `/32` host routes; their strict key list refuses it). Churn, the policy
   reload, path diversity and `--prefix-scope total` are length-agnostic -- they work on each peer's
   path list and on peer ASNs -- and are allowed.
-- **Not detected**: a default-length `bench -r` run after a separate `/24` run reuses `/24`
-  generators. That is the existing `-p`-under-`-r` hazard the policy-reload section measured, not a
-  new one.
+- **`-r` is also refused the other way round**: a default-length `bench -r` after a separate `/24`
+  run would reuse `/24` generators under a `/32` stem. `-r` rewrites no generator config, so the
+  length a reused generator announces is the first `route` line of the config in the directory
+  *that container* has bind-mounted (`reused_generator_prefix_lengths()`), read beside the
+  reused-cpuset check and before the teardown. Through the container, never `--dir`/`--bench-name`:
+  container names are fixed, so the generators may have been started from another directory. A
+  route that cannot be read refuses rather than passing the check unmade. A batch meets this per
+  cell rather than up front, because an earlier non-`repeat` cell rebuilds the generators and an
+  up-front read would refuse batches that run correctly. A `-p` mismatch under `-r` remains the
+  undetected hazard the policy-reload section measured.
 - Stem gets `pl<L>`, both `run` blocks record `prefix_length` (`recorded_prefix_length()`), and `-f`
   and MRT playback record `null`, since neither table was synthesised. Not a CSV
   column, for the reason `--path-diversity` is not.

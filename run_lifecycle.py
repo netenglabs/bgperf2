@@ -159,7 +159,9 @@ def bench(runtime, args):
                     getattr(args, 'path_diversity', None)
                     or runtime.DEFAULT_PATH_DIVERSITY) * args.prefix_num,
                 getattr(args, 'local_address_prefix', None),
-                getattr(args, 'prefix_list_num', 0))
+                getattr(args, 'prefix_list_num', 0),
+                getattr(args, 'filter_test', None),
+                runtime.run_peering_addresses(args))
         except ValueError as e:
             runtime.sys.exit(str(e))
         if (args.prefix_length != runtime.DEFAULT_PREFIX_LENGTH
@@ -306,13 +308,48 @@ def bench(runtime, args):
         # cpuset, and be published as unpinned. A Docker call, so after every
         # guard that reads only the command line; before the teardown, so the
         # refusal costs nothing.
+        names = runtime.get_ctn_names()
+        inspected = {}
+
+        def host_config(name):
+            # Once per container: the cpuset and the binds below read the
+            # same inspection.
+            if name not in inspected:
+                inspected[name] = runtime.dckr.inspect_container(name)['HostConfig']
+            return inspected[name]
         pinned = runtime.pinned_tester_containers(
-            runtime.get_ctn_names(),
-            lambda name: runtime.dckr.inspect_container(name)['HostConfig'].get('CpusetCpus'))
+            names, lambda name: host_config(name).get('CpusetCpus'))
         if pinned:
             runtime.sys.exit('-r/--repeat would reuse tester containers a pinned run '
                      'created ({0}), and they keep its cores. Run once without '
                      '-r to rebuild them'.format(', '.join(pinned)))
+        if not args.file:
+            # The other half of the `--prefix-length` refusal under `--repeat`:
+            # a default-length run reusing generators a `/24` run started
+            # would announce `/24`s under a `/32` stem and manifest, with
+            # counts that agree. `-r` builds no tester objects, so nothing
+            # rewrites a reused generator's config: the one in the directory
+            # each container has mounted is what it announces. Read through
+            # the container, not `config_dir`, because a previous run with
+            # another `-d`/`-b` left the same fixed-name containers. A Docker
+            # call and a file read, so here beside the cpuset read.
+            try:
+                stale = runtime.reused_generator_prefix_lengths(
+                    names,
+                    lambda name: host_config(name).get('Binds'),
+                    args.prefix_length)
+            except ValueError as e:
+                runtime.sys.exit('-r/--repeat cannot tell what the reused '
+                                 'generators announce: {0}. Run once without '
+                                 '-r to rebuild them'.format(e))
+            if stale:
+                runtime.sys.exit(
+                    '-r/--repeat would reuse generators announcing {0} '
+                    'prefixes ({1}) for a /{2} run. Run once without -r to '
+                    'rebuild them'.format(
+                        ', '.join(sorted({'/{0}'.format(n)
+                                          for n in stale.values()})),
+                        ', '.join(sorted(stale)), args.prefix_length))
     runtime.remove_target_containers()
 
     if not args.repeat:

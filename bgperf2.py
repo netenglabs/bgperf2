@@ -78,7 +78,8 @@ from role_cpu import (ROLE_CPU_INTERVAL_S, RoleCpuRecorder, cgroup_dir_for_pid,
                       read_effective_cpuset, read_members)
 from stop import StopRequested, StopSignal
 from prefix_length import (DEFAULT_PREFIX_LENGTH,
-                           resolve_prefix_length as _resolve_prefix_length)
+                           resolve_prefix_length as _resolve_prefix_length,
+                           announced_prefix_length, walk_exclusions)
 from policy import (DEFAULT_POLICY_RELOAD_BLOCKS,
                     PolicyReloadConfigurationError, PolicyReloadTracker,
                     policy_reload_counts, rejected_block_indexes,
@@ -509,6 +510,56 @@ def pinned_tester_containers(names, cpuset_of):
     return sorted((name for name in names
                    if name.startswith(prefixes) and cpuset_of(name)),
                   key=natural_key)
+
+
+def reused_generator_prefix_lengths(names, binds_of, length):
+    '''Reused generators announcing a length other than `length`.
+
+    `{'<container>:<config>': announced length}`, for the tester containers
+    among `names`. Each is read through the directory *that container* has
+    bind-mounted, from `binds_of(name)` (Docker's `HostConfig.Binds`), never
+    through this run's `--dir`/`--bench-name`: container names are fixed, so
+    the generators `-r` reuses may have been started by a run in another
+    directory. Reading only theirs also leaves alone a config some other
+    generator left in a role directory this run does not reuse.
+
+    Each config is read up to its first route by
+    `prefix_length.announced_prefix_length()`, which raises for a route it
+    cannot read. A synthetic generator (BIRD, ExaBGP) none of whose configs
+    yields a route raises too: its directory was cleaned or never mounted,
+    and the daemon is still announcing what it was started with, so finding
+    nothing is not evidence of nothing stale. An MRT generator's configs hold
+    no synthetic routes and are not required to.
+    '''
+    prefixes = tuple(cls.CONTAINER_NAME_PREFIX for cls in TESTER_CLASSES.values())
+    synthetic = (BIRDTester.CONTAINER_NAME_PREFIX,
+                 ExaBGPTester.CONTAINER_NAME_PREFIX)
+    stale = {}
+    for name in sorted((n for n in names if n.startswith(prefixes)),
+                       key=natural_key):
+        read = False
+        for bind in binds_of(name) or ():
+            host_dir = bind.split(':', 1)[0]
+            if not os.path.isabs(host_dir):
+                # A named volume, not a directory on this host.
+                continue
+            for path in sorted(glob.glob(
+                    os.path.join(glob.escape(host_dir), '*.conf'))):
+                try:
+                    with open(path, errors='replace') as f:
+                        announced = announced_prefix_length(f)
+                except OSError:
+                    continue
+                if announced is None:
+                    continue
+                read = True
+                if announced != length:
+                    stale['{0}:{1}'.format(name, os.path.basename(path))] = \
+                        announced
+        if not read and name.startswith(synthetic):
+            raise ValueError('{0} has no readable generator config in the '
+                             'directory it mounts'.format(name))
+    return stale
 
 
 def surplus_receiver_names(container_names, wanted):
@@ -957,11 +1008,23 @@ def describe_churn_workload(churn_prefixes, churn_bursts, neighbor_num,
 
 
 def resolve_prefix_length(length, tester_type=None, distinct_prefixes=None,
-                          local_address_prefix=None, prefix_list_num=0):
+                          local_address_prefix=None, prefix_list_num=0,
+                          filter_test=None, addresses=()):
     '''`prefix_length.resolve_prefix_length()` with this tool's MRT generators.'''
     return _resolve_prefix_length(length, tester_type, distinct_prefixes,
                                   local_address_prefix, MRT_TESTER_TYPES,
-                                  prefix_list_num)
+                                  prefix_list_num, filter_test, addresses)
+
+
+def run_peering_addresses(args):
+    '''The target and monitor addresses a run configured explicitly.
+
+    What `prefix_length.walk_exclusions()` keeps a shorter walk clear of
+    beside the peering subnet. Read from the args, so `gen_conf()`, `config`,
+    `bench()` and the batch check name the same addresses.
+    '''
+    return (getattr(args, 'target_local_address', None),
+            getattr(args, 'monitor_local_address', None))
 
 
 def recorded_prefix_length(args):
@@ -4252,7 +4315,10 @@ def check_batch_prefix_length(test, scenarios, scope, diversity):
             'repeat reuses the generator containers as they are, so they keep '
             'announcing the prefixes they were started with'.format(
                 test['name'], ', '.join(repeats)))
-    for t in test['targets']:
+    # `'None'` is how a filter axis spells no filter.
+    filters = sorted({None if f in (None, 'None') else f
+                      for f in test['filter_test']}, key=str)
+    for t, filter_test in product(test['targets'], filters):
         for neighbors in test['neighbors']:
             for prefixes in test['prefixes']:
                 try:
@@ -4265,7 +4331,9 @@ def check_batch_prefix_length(test, scenarios, scope, diversity):
                             neighbors, diversity or DEFAULT_PATH_DIVERSITY)
                         * per_peer,
                         batch_local_address_prefix(t),
-                        t.get('prefix_list_num', 0))
+                        t.get('prefix_list_num', 0), filter_test,
+                        (batch_target_field(t, 'target_local_address'),
+                         batch_target_field(t, 'monitor_local_address')))
                 except ValueError as e:
                     sys.exit("test '{0}': {1}".format(test['name'], e))
 
@@ -6077,11 +6145,18 @@ def gen_conf(args):
 
     yaml.Dumper.ignore_aliases = lambda *args : True
     # Validated at every entry point, as the diversity is; this reads what was
-    # asked for. The peering subnet is excluded from a shorter walk so that no
-    # route covers the next hop every route is announced with.
+    # asked for. The peering subnet, and any target or monitor address set
+    # explicitly outside it, are excluded from a shorter walk so that no route
+    # covers the next hop of a session the run depends on.
     prefix_length = (getattr(args, 'prefix_length', None)
                      or DEFAULT_PREFIX_LENGTH)
-    return (gen_mako_macro(prefix_length, (str(local_address_prefix),))
+    # Only a shorter walk is told what to skip: the /32 preamble takes no
+    # exclusions, and parsing addresses for it would add a failure every
+    # historical run never had.
+    exclude = (() if prefix_length == DEFAULT_PREFIX_LENGTH
+               else walk_exclusions(local_address_prefix,
+                                    run_peering_addresses(args)))
+    return (gen_mako_macro(prefix_length, exclude)
             + yaml.dump(conf, default_flow_style=False))
 
 
@@ -6175,7 +6250,9 @@ def config(args):
             path_diversity_groups(args.neighbor_num, args.path_diversity)
             * args.prefix_num,
             getattr(args, 'local_address_prefix', None),
-            getattr(args, 'prefix_list_num', 0))
+            getattr(args, 'prefix_list_num', 0),
+            getattr(args, 'filter_test', None),
+            run_peering_addresses(args))
     except ValueError as e:
         sys.exit(str(e))
     # After the scope for the reason `bench()` puts it there: the block is

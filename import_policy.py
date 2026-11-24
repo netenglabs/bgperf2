@@ -360,10 +360,13 @@ def build_policy(rules, match, hit, peers, prefixes, prefix_length=None,
                  exclude=()):
     '''The import policy for one run, deterministic from its arguments alone.
 
-    `prefix_length` and `exclude` (the run's peering subnet) only shape the
-    `prefix` match type, whose rules name the walk's own addresses. The length
-    is validated for every type, so a run's arguments are checked the same way
-    whatever it matches on.
+    `prefix_length` and `exclude` only shape the `prefix` match type, whose
+    rules name the walk's own addresses. `exclude` must be exactly what the
+    run's walk skips -- `prefix_length.walk_exclusions()` over the peering
+    subnet and the explicitly set target and monitor addresses, the list
+    `gen_conf()` renders with -- or every cover after the first difference is
+    shifted onto the wrong prefixes. The length is validated for every type,
+    so a run's arguments are checked the same way whatever it matches on.
     '''
     _check_rules(rules, match, hit)
     _check_fleet(peers, prefixes)

@@ -438,3 +438,202 @@ class TestTheBatch:
         with pytest.raises(recipes.ContractError) as raised:
             recipes._source_tests(source)
         assert 'prefix_length' in str(raised.value)
+
+
+class TestFilters:
+    '''`filters/*` select by length: `ixp` drops anything longer than /24, so
+    it rejects a /32 table outright and accepts a /24 one whole.'''
+
+    def test_resolving_refuses_a_filter(self):
+        with pytest.raises(ValueError, match='--filter_test ixp'):
+            pl.resolve_prefix_length(24, 'bird', filter_test='ixp')
+
+    @pytest.mark.parametrize('none', [None, 'None'])
+    def test_no_filter_is_untouched(self, none):
+        assert pl.resolve_prefix_length(24, 'bird', filter_test=none) == 24
+
+    def test_the_default_length_keeps_its_filters(self):
+        assert pl.resolve_prefix_length(32, 'bird', filter_test='ixp') == 32
+
+    def test_bench_refuses_it(self):
+        args = TestTheCommandLineEntryPoints().bench_args(filter_test='transit')
+        with pytest.raises(SystemExit, match='--filter_test transit'):
+            bgperf2.bench(args)
+
+    def test_config_refuses_it(self):
+        args = TestTheCommandLineEntryPoints().bench_args(
+            output='/dev/null', filter_test='ixp')
+        with pytest.raises(SystemExit, match='--filter_test ixp'):
+            bgperf2.config(args)
+
+    def test_a_batch_refuses_any_filter_on_the_axis(self):
+        with pytest.raises(SystemExit, match='--filter_test ixp'):
+            bgperf2.check_batch_test(a_test(prefix_length=24,
+                                            filter_test=['None', 'ixp']))
+
+    def test_a_batch_axis_of_none_is_untouched(self):
+        bgperf2.check_batch_test(a_test(prefix_length=24, filter_test=['None']))
+
+
+class TestExplicitAddresses:
+    '''A target or monitor address set outside the peering subnet must not be
+    covered by a walked /24.'''
+
+    def test_exclusions_name_the_subnet_and_set_addresses(self):
+        assert pl.walk_exclusions('10.10.0.0/16', ('1.0.0.5', None)) == \
+            ('10.10.0.0/16', '1.0.0.5/32')
+        assert pl.walk_exclusions('10.10.0.0/16') == ('10.10.0.0/16',)
+
+    def test_the_walk_steps_over_an_explicit_address(self):
+        exclude = pl.walk_exclusions('10.10.0.0/16', ('1.0.1.9',))
+        assert list(islice(pl.walk(24, exclude), 2)) == \
+            ['1.0.0.0/24', '1.0.2.0/24']
+        assert pl.capacity(24, exclude) == pl.capacity(24, ('10.10.0.0/16',)) - 1
+
+    def test_the_scenario_steps_over_them(self):
+        conf = render(scenario_args(
+            neighbor_num=2, prefix_num=2, prefix_length=24,
+            target_local_address='1.0.0.1', monitor_local_address='1.0.2.1'))
+        routes = [r for paths in offered(conf) for r in paths]
+        assert '1.0.0.0/24' not in routes and '1.0.2.0/24' not in routes
+        assert routes[0] == '1.0.1.0/24'
+
+    def test_the_historical_scenario_ignores_them(self):
+        '''The /32 walk skips nothing and its preamble takes no exclusions.'''
+        preamble = bgperf2.gen_mako_macro()
+        assert bgperf2.gen_conf(
+            scenario_args(target_local_address='100.0.0.1')).startswith(preamble)
+
+    def test_a_batch_capacity_check_counts_them(self):
+        ok = pl.capacity(24, ('10.10.0.0/16',))
+        bgperf2.check_batch_test(a_test(prefix_length=24, neighbors=[1],
+                                        prefixes=[ok]))
+        with pytest.raises(SystemExit, match='can supply'):
+            bgperf2.check_batch_test(a_test(
+                prefix_length=24, neighbors=[1], prefixes=[ok],
+                targets=[{'name': 'bird', 'target_local_address': '1.0.0.1'}]))
+
+
+TESTER = 'bgperf_bird_tester_bgperf_bird_tester'
+
+
+def write_generator(directory, *routes, name='10.10.0.3.conf'):
+    '''A generator config dir; returns the bind Docker would report for it.'''
+    directory.mkdir(parents=True, exist_ok=True)
+    body = 'router id 10.10.0.3;\nprotocol static { ipv4;\n' + ''.join(
+        '      route {0} via 10.10.0.3;\n'.format(r) for r in routes) + '}'
+    (directory / name).write_text(body)
+    return '{0}:/root/config'.format(directory)
+
+
+class TestReusedGenerators:
+    '''`-r` after a /24 run would reuse generators still announcing /24s.'''
+
+    def test_the_first_route_line_is_the_length(self):
+        assert pl.announced_prefix_length(
+            ['router id 1.1.1.1;', '      route 1.0.0.0/24 via 10.10.0.3;']) == 24
+        assert pl.announced_prefix_length(
+            ['    route 100.0.0.1/32 next-hop 10.10.0.3;']) == 32
+        assert pl.announced_prefix_length(['protocol device {}']) is None
+
+    def test_a_filter_set_is_not_a_route(self):
+        assert pl.announced_prefix_length(
+            ['  if net ~ [ 1.0.0.0/21{24,24} ] then accept;']) is None
+
+    def test_another_family_is_a_length_too(self):
+        assert pl.announced_prefix_length(['  route 2001:db8::/64 via x;']) == 64
+
+    def test_an_unreadable_route_is_refused_not_skipped(self):
+        with pytest.raises(ValueError, match='unreadable route'):
+            pl.announced_prefix_length(['  route somewhere via 10.10.0.3;'])
+
+    def test_stale_generators_are_named(self, tmp_path):
+        bind = write_generator(tmp_path / 'tester', '1.0.0.0/24')
+        binds = {TESTER: [bind]}
+        assert bgperf2.reused_generator_prefix_lengths(
+            [TESTER], binds.get, 32) == {TESTER + ':10.10.0.3.conf': 24}
+        assert bgperf2.reused_generator_prefix_lengths(
+            [TESTER], binds.get, 24) == {}
+
+    def test_only_tester_containers_are_read(self, tmp_path):
+        bind = write_generator(tmp_path / 'tester', '1.0.0.0/24')
+        assert bgperf2.reused_generator_prefix_lengths(
+            ['bgperf_monitor'], lambda name: [bind], 32) == {}
+
+    def test_a_directory_no_reused_generator_mounts_is_not_read(self, tmp_path):
+        '''An MRT generator reused under -r is not blamed for a BIRD config
+        an earlier run left beside it.'''
+        write_generator(tmp_path / 'tester', '1.0.0.0/24')
+        mrt = tmp_path / 'mrt'
+        mrt.mkdir()
+        binds = {'bgperf_bgpdump2_tester_0': ['{0}:/root/config'.format(mrt)]}
+        assert bgperf2.reused_generator_prefix_lengths(
+            list(binds), binds.get, 32) == {}
+
+    @pytest.mark.parametrize('binds', [None, [], ['cfg:/root/config'],
+                                       ['{absent}:/root/config']])
+    def test_a_synthetic_generator_with_nothing_readable_is_refused(
+            self, tmp_path, binds):
+        '''A cleaned bench directory leaves the daemon announcing what it was
+        started with; finding nothing is not finding nothing stale. A named
+        volume is not a host directory and is not read.'''
+        binds = binds and [b.format(absent=tmp_path / 'absent') for b in binds]
+        with pytest.raises(ValueError, match='no readable generator config'):
+            bgperf2.reused_generator_prefix_lengths(
+                [TESTER], lambda name: binds, 32)
+
+    def test_an_mrt_generator_need_not_have_routes(self):
+        assert bgperf2.reused_generator_prefix_lengths(
+            ['bgperf_bgpdump2_tester_0'], lambda name: None, 32) == {}
+
+    def test_a_directory_name_is_not_a_pattern(self, tmp_path):
+        bind = write_generator(tmp_path / 'run[1]' / 'tester', '1.0.0.0/24')
+        assert bgperf2.reused_generator_prefix_lengths(
+            [TESTER], lambda name: [bind], 32) == {TESTER + ':10.10.0.3.conf': 24}
+
+    @pytest.fixture
+    def bench_reaches_the_check(self, monkeypatch):
+        class Image:
+            @staticmethod
+            def require_image():
+                pass
+        mounts = {}
+
+        class Dckr:
+            def inspect_container(self, name):
+                return {'HostConfig': {'CpusetCpus': '', 'Binds': mounts[name]}}
+        monkeypatch.setattr(bgperf2, 'target_image', lambda *a, **k: 'img')
+        monkeypatch.setitem(bgperf2.MONITOR_CLASSES, 'sink', Image)
+        monkeypatch.setattr(bgperf2, 'dckr', Dckr())
+        monkeypatch.setattr(bgperf2, 'get_ctn_names', lambda: list(mounts))
+
+        def torn_down():
+            raise AssertionError('reached the teardown')
+        monkeypatch.setattr(bgperf2, 'remove_target_containers', torn_down)
+        return mounts
+
+    def repeat_args(self, tmp_path):
+        return TestTheCommandLineEntryPoints().bench_args(
+            dir=str(tmp_path / 'this-run'), repeat=True, prefix_length=32,
+            monitor='sink')
+
+    def test_bench_refuses_reusing_them(self, tmp_path, bench_reaches_the_check):
+        '''Started by a run in another directory: the fixed container name is
+        what -r reuses, so its own mount is what is read.'''
+        bench_reaches_the_check[TESTER] = [
+            write_generator(tmp_path / 'other-run' / 'tester', '1.0.0.0/24')]
+        with pytest.raises(SystemExit, match=r'announcing /24 prefixes'):
+            bgperf2.bench(self.repeat_args(tmp_path))
+
+    def test_bench_refuses_what_it_cannot_read(self, tmp_path,
+                                               bench_reaches_the_check):
+        bench_reaches_the_check[TESTER] = [
+            write_generator(tmp_path / 'tester', 'somewhere')]
+        with pytest.raises(SystemExit, match='cannot tell what the reused'):
+            bgperf2.bench(self.repeat_args(tmp_path))
+
+    def test_bench_reuses_matching_ones(self, tmp_path, bench_reaches_the_check):
+        bench_reaches_the_check[TESTER] = [
+            write_generator(tmp_path / 'tester', '100.0.0.0/32')]
+        with pytest.raises(AssertionError, match='reached the teardown'):
+            bgperf2.bench(self.repeat_args(tmp_path))

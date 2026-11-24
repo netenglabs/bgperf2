@@ -270,6 +270,23 @@ class TestTheOracle:
                 for rule in policy.rules:
                     assert not rule_matches(policy, rule, block, route)
 
+    def test_covers_follow_a_walk_that_skips_an_explicit_address(self):
+        '''`exclude` is the walk's own exclusions, explicit addresses
+        included; with the subnet alone every cover after 1.0.1.0/24 would
+        sit one /24 off the routes the generators announce.'''
+        exclude = pl.walk_exclusions(PEERING, ('1.0.1.9', None))
+        policy = ip.build_policy(3, 'prefix', 'first', 2, 8, 24, exclude)
+        conf = yaml.safe_load(Template(bgperf2.gen_conf(scenario_args(
+            neighbor_num=2, prefix_num=8, prefix_length=24,
+            target_local_address='1.0.1.9'))).render())
+        peer_paths = [n['paths'] for n in conf['testers'][0]['neighbors'].values()]
+        assert '1.0.1.0/24' not in peer_paths[0]
+        for block in ip.policy_blocks(2, 8):
+            for route in block_routes(block, peer_paths):
+                expected = ((ip.REJECT, 'guard') if block.rejected
+                            else (ip.ACCEPT, 0))
+                assert evaluate(policy, block, route) == expected
+
     @pytest.mark.parametrize('length', [32, 24])
     @pytest.mark.parametrize('hit', ['first', 'last'])
     def test_rules_before_the_deciding_one_match_nothing(self, hit, length):

@@ -37,6 +37,7 @@ what the capacity check counted are one piece of code.
 '''
 
 import ipaddress
+import re
 
 
 # Every synthetic run before this control existed, and the one rendered
@@ -215,9 +216,52 @@ def walk_address_ranges(length, first, count, exclude=()):
 PREFIX_LENGTH_TESTER_TYPES = ('bird',)
 
 
+def walk_exclusions(local_address_prefix=None, addresses=()):
+    '''Everything a shorter walk must stay clear of beyond reserved space.
+
+    The run's peering subnet, and any target or monitor address configured
+    explicitly -- one outside that subnet is allowed, and a `/24` covering it
+    would capture the next hop of the session it carries partway through the
+    run. Unset addresses are skipped; the defaults lie inside the subnet.
+    One helper, so `gen_conf()`'s walk and every capacity check exclude the
+    same space.
+    '''
+    exclude = [str(local_address_prefix)] if local_address_prefix else []
+    exclude.extend(str(ipaddress.IPv4Address(str(a))) + '/32'
+                   for a in addresses if a)
+    return tuple(exclude)
+
+
+# A generator config's announced route: BIRD's `route P via A;` and ExaBGP's
+# `route P next-hop A;` are the forms bgperf2 writes. Any line opening with
+# `route` is taken as one, so a form nobody expected is refused rather than
+# skipped.
+_ROUTE_LINE = re.compile(r'^\s*route\s+(\S+)')
+
+
+def announced_prefix_length(lines):
+    '''The length of the first route a generator config announces, or None.
+
+    Every synthetic route a generator holds has one length, so the first is
+    the table's. Reads only up to it: a config holds one line per prefix.
+    A route whose prefix cannot be read raises `ValueError`: skipping it
+    would let the check that asked pass without having been made.
+    '''
+    for line in lines:
+        match = _ROUTE_LINE.match(line)
+        if match:
+            try:
+                return ipaddress.ip_network(match.group(1),
+                                            strict=False).prefixlen
+            except ValueError:
+                raise ValueError('unreadable route {0!r}'.format(
+                    line.strip())) from None
+    return None
+
+
 def resolve_prefix_length(length, tester_type=None, distinct_prefixes=None,
                           local_address_prefix=None, mrt_tester_types=(),
-                          prefix_list_num=0):
+                          prefix_list_num=0, filter_test=None, addresses=()):
     '''The validated prefix length, checked before any container starts.
 
     Refused rather than interpreted, each because it would otherwise be
@@ -233,6 +277,10 @@ def resolve_prefix_length(length, tester_type=None, distinct_prefixes=None,
       at another length they could never match a route, and a large walk
       runs through 90.0.0.0/8 and would cover them. It would publish the
       cost of a list unlike the table it was measured against.
+    - **A `--filter_test` policy**: `filters/*` were written against `/32`
+      tables and select by length -- `ixp` drops anything longer than `/24`,
+      so at `/32` it rejects the whole table and at `/24` it accepts all of
+      it, and the two runs would differ by more than the length they name.
     - **A table larger than the walk can supply**, which would otherwise end
       with the generators announcing fewer prefixes than the check-point the
       monitor waits for.
@@ -265,8 +313,14 @@ def resolve_prefix_length(length, tester_type=None, distinct_prefixes=None,
             '--prefix-length {0} cannot be used with -e/--prefix-list-num: '
             'its entries are /32s and would match none of a /{0} '
             'table'.format(length))
+    if filter_test not in (None, 'None'):
+        raise ValueError(
+            '--prefix-length {0} cannot be used with --filter_test {1}: the '
+            'filters select by prefix length, so the same filter does '
+            'different work on a /{0} table than on a /32 one'.format(
+                length, filter_test))
     if distinct_prefixes is not None:
-        exclude = (local_address_prefix,) if local_address_prefix else ()
+        exclude = walk_exclusions(local_address_prefix, addresses)
         available = capacity(length, exclude)
         if distinct_prefixes > available:
             raise ValueError(

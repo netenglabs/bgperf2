@@ -2,7 +2,7 @@
 
 What `bench`/`batch` may be asked to run, and the guards that refuse the rest.
 
-**Read this before editing:** `prefix_length.py` (the synthetic prefix walks and their refusals), `cpu_pinning.py` (pure CPU lists and role-pinning validation), `recipes.py` (portable source validation), `recipe_worker.py` (recipe CPU layout forwarding), `recipe_preflight.py` (online CPU availability), `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `run_lifecycle.py` (run orchestration), `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`), `churn.py`, `policy.py`, `import_policy.py` (the generated import policy and its expected counts), `bird.py` (the churn protocol and the reload command)
+**Read this before editing:** `prefix_length.py` (the synthetic prefix walks and their refusals), `cpu_pinning.py` (pure CPU lists and role-pinning validation), `recipes.py` (portable source validation), `recipe_worker.py` (recipe CPU layout forwarding), `recipe_preflight.py` (online CPU availability), `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `run_lifecycle.py` (run orchestration), `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`), `churn.py`, `policy.py`, `import_policy.py` (the generated import policy and its expected counts), `bird.py` (the churn protocol and the reload command), `tester.py` (`check_policy_blocks()`, `write_policy_block_protocols()`, `carries_policy_blocks()`, `BIRDTester.configure_neighbors()`)
 `recipe_minimization.py` governs explicit selected-cell projection and bounded peer/prefix reductions.
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
@@ -404,7 +404,8 @@ Phase 1 supports 24 and 32 (`prefix_length.py`).
 `import_policy.py` builds the import policy for policy phase 1
 ([plan](../plans/policy-phase1.md)) from the rule count, match type, hit position, peers and
 prefixes per peer, and states the exact accepted count a target must reach. It is the model only:
-no flag reaches it yet, and the renderers, tester attributes and lifecycle wiring are later steps.
+only `--tester-attributes` reaches it so far, which puts the block attributes on the generator
+(below). The renderers and lifecycle wiring are later steps.
 
 - **The shape is fixed: guard, then the `N` generated rules, then default accept.** Each peer's list
   is cut into `BLOCKS_PER_PEER` (4) contiguous blocks and the **last block of every peer** is
@@ -429,7 +430,37 @@ no flag reaches it yet, and the renderers, tester attributes and lifecycle wirin
   reject every route before the policy saw it — a second reason the two are refused together.
 - **A block's `peer` is its walk slice, never an AS position.** The scenario draws slices in
   rendered neighbour order, which `yaml.dump` sorts by router-id text, so from ten peers on the
-  AS-1010 peer holds slice 0. A generator finds its blocks from its own `paths`.
+  AS-1010 peer holds slice 0. `gen_conf()` therefore deals each neighbour its blocks with
+  `scenario_policy_blocks()`, in sorted router-id text order, as a `policy-blocks` list in the
+  scenario; the generator renders that list and derives nothing from its AS or its addresses.
+- **The generator sets the attributes once per route, at load.** `BIRDTester` writes one static
+  protocol per block (`policy_block<k>`) whose own import filter prepends the block's path and adds
+  its communities, never a filter on the BGP session that would run again on every export. It
+  accepts every route, so the static `imported` counts still sum to the peer's whole table and the
+  offering counters are unchanged. A scenario with no `policy-blocks` writes the one unnamed static
+  protocol byte for byte as before.
+- **`--tester-attributes` (batch: `tester_attributes: true` on a test) turns them on with no
+  policy on the target**, so what carrying them costs the generator is measured before any policy
+  cost is read beside it. `import_policy.resolve_tester_attributes()` holds the refusals, applied by
+  `bench`, `config` and `check_batch_tester_attributes()` over every target, filter and fleet on
+  the axes: any generator but BIRD, `--path-diversity` (a shared prefix would carry two blocks'
+  attributes), churn (its tail cuts across the blocks), `filter_test` (the private ASNs are bogons),
+  `--policy-reload-blocks` and the scenario filter counts `-a`/`-e`/`-c`/`-x` (each a policy on the
+  target, a second variable), and a fleet the blocks cannot number. `-f` has nothing to attach and
+  is refused at `bench` and in batch; native controlled cells refuse it. A scenario file that
+  carries `policy-blocks` itself is checked before the teardown (`check_scenario_policy_blocks()`):
+  the counts must partition each peer's paths, with no churn block, on a BIRD generator, since any
+  other drops them silently.
+- **Under `-r` it is refused in both directions**, as `--prefix-length` is: with the flag outright,
+  and without it when a reused generator's config, read through that container's own bind mount,
+  holds a `policy_block` protocol (`reused_generators_with_attributes()`). Across a batch,
+  `check_batch_prefix_length_and_repeat()` refuses a `tester_attributes` test beside a test with a
+  `repeat` target, in either order. It reaches the stem as `ta`, both manifests' `run` blocks as
+  `tester_attributes` (`null` under `-f` and for MRT playback), and the cell identity only when
+  set, so every existing id is unchanged. `gen_conf()` keeps its own refusal of a non-BIRD
+  generator, diversity and churn as a last line. **Not covered: `-f` with `-r`.** Neither reused
+  generator check runs for a scenario file, so `bench -f plain.yaml -r` after a `ta` (or `/24`) run
+  sends what the reused generators were started with while the manifests record `null`.
 - **Filler rules reject values no route carries**: ASNs and communities from their own ranges, and
   prefixes in class E, which neither walk reaches. Prefix rules name the walk's own addresses
   through `prefix_length.walk_address_ranges()`, whose `/32` bounds are checked against the

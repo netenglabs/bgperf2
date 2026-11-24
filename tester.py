@@ -37,6 +37,74 @@ index($0, "<RMT>") && (index($0, "NEXT_HOP") || index($0, "Invalid route")) { ne
 '''
 
 
+# Each policy block's static protocol is this followed by its position in the
+# peer's list.
+POLICY_BLOCK_PROTOCOL = 'policy_block'
+
+
+def carries_policy_blocks(lines):
+    '''Whether a BIRD generator config sets per-block attributes.
+
+    Read up to the first route only: the block protocols open before any route
+    they hold, and a config is millions of lines long.
+    '''
+    header = 'protocol static {0}'.format(POLICY_BLOCK_PROTOCOL)
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(header):
+            return True
+        if stripped.startswith('route '):
+            return False
+    return False
+
+
+def check_policy_blocks(blocks, paths, churn_prefixes=None):
+    '''Refuse blocks that do not partition this peer's list, or a churn block
+    beside them, which would cut across them.'''
+    if churn_prefixes:
+        raise ValueError('policy blocks and a churn block cannot be combined '
+                         'on one peer')
+    covered = sum(b['count'] for b in blocks)
+    if covered != len(paths):
+        raise ValueError(
+            'policy blocks cover {0} prefix(es) but this peer announces '
+            '{1}'.format(covered, len(paths)))
+
+
+def write_policy_block_protocols(f, blocks, paths, via):
+    '''One static protocol per policy block, each setting that block's attributes.
+
+    The attributes are set by the static protocol's own import filter, once per
+    route as the table is loaded, never by a filter on the BGP session that
+    would run again for every export. Every route is accepted, so the static
+    protocols' `imported` counts still sum to the peer's whole table, and the
+    offering counters still report it.
+
+    `as-path` is outermost first, so it is prepended innermost first: BIRD's
+    `prepend` puts each ASN in front of the ones already there.
+
+    Written line by line to `f`, as the plain static protocol is, so a large
+    table is never held as one string. `check_policy_blocks()` must have
+    passed first.
+    '''
+    start = 0
+    for position, block in enumerate(blocks):
+        if position:
+            f.write('\n')
+        f.write('protocol static {0}{1} {{ ipv4 {{ import filter {{\n'.format(
+            POLICY_BLOCK_PROTOCOL, position))
+        for asn in reversed(block['as-path']):
+            f.write('        bgp_path.prepend({0});\n'.format(int(asn)))
+        for asn, value in block['communities']:
+            f.write('        bgp_community.add(({0}, {1}));\n'.format(
+                int(asn), int(value)))
+        f.write('        accept;\n    }; };\n')
+        for i in range(start, start + block['count']):
+            f.write('      route {0} via {1};\n'.format(paths[i], via))
+        f.write('}')
+        start += block['count']
+
+
 class ExaBGPTester(Tester, ExaBGP):
 
     CONTAINER_NAME_PREFIX = 'bgperf_exabgp_tester_'
@@ -126,9 +194,19 @@ protocol bgp {{
     local {3} as {4};
 neighbor {0} as {1};
 }}
-protocol static {{ ipv4;
 '''.format(target_conf['local-address'], target_conf['as'],
                p['router-id'], local_address, p['as'], self.guest_dir, self.dev)
+                blocks = p.get('policy-blocks')
+                if blocks:
+                    # `bench -f` checks a scenario's blocks before the
+                    # teardown; this is the last line for every other caller.
+                    check_policy_blocks(blocks, p['paths'],
+                                        p.get('churn-prefixes'))
+                    f.write(config)
+                    write_policy_block_protocols(
+                        f, blocks, p['paths'], local_address)
+                    continue
+                config += 'protocol static { ipv4;\n'
                 # The churn block is the tail of this peer's own list, and it
                 # goes into a protocol of its own so a burst can withdraw and
                 # re-announce exactly it. At the default -- no churn -- the

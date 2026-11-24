@@ -330,7 +330,8 @@ claims.
 
 - Session count and table size are one axis. `--prefix-scope total`, `--path-diversity D`,
   `--receivers N`, `--churn-prefixes C`/`--churn-bursts B`, `--policy-reload-blocks N`,
-  `--prefix-length L` and `--threads N` are the controls that separate them, and each is refused
+  `--prefix-length L`, `--tester-attributes` and `--threads N` are the controls that separate
+  them, and each is refused
   for a named list of things. The `/32` walk is historical and never changes.
   `-s/--single-table` is refused outright: no target has honoured it since 2021.
 - **A rule that refuses something must be applied at every entry point, and there are four**:

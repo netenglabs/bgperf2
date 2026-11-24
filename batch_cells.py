@@ -197,7 +197,8 @@ def cell_monitor(cell):
 def construct_batch_cells(test, targets, *, repetitions, prefix_resolver,
                           path_diversity, receivers, churn_prefixes,
                           churn_bursts, policy_reload_blocks, pin, monitor,
-                          prefix_length=DEFAULT_PREFIX_LENGTH):
+                          prefix_length=DEFAULT_PREFIX_LENGTH,
+                          tester_attributes=False):
     """Construct cells from caller-validated and resolved workload controls.
 
     Defaults and argument guards remain at the existing batch entry point.
@@ -213,7 +214,7 @@ def construct_batch_cells(test, targets, *, repetitions, prefix_resolver,
             for p in test['prefixes']:
                 for filter_test in test['filter_test']:
                     for t in targets:
-                        cells.append({
+                        cell = {
                             'repetition': repetition if repetitions > 1 else None,
                             'ordinal': ordinal,
                             'neighbors': n,
@@ -235,7 +236,12 @@ def construct_batch_cells(test, targets, *, repetitions, prefix_resolver,
                             'monitor': monitor,
                             'prefix_length': prefix_length,
                             'target': t,
-                        })
+                        }
+                        # Only when set, so every other cell keeps the
+                        # fields it has always had.
+                        if tester_attributes:
+                            cell['tester_attributes'] = True
+                        cells.append(cell)
                         ordinal += 1
     return cells
 
@@ -279,6 +285,10 @@ def batch_cell_id(test_name, cell):
     prefix_length = cell.get('prefix_length') or DEFAULT_PREFIX_LENGTH
     if prefix_length != DEFAULT_PREFIX_LENGTH:
         identity['prefix_length'] = prefix_length
+    # Only when set, on the same rule: a cell with and one without generator
+    # attributes are otherwise the same cell.
+    if cell.get('tester_attributes'):
+        identity['tester_attributes'] = True
     # Both keys or neither, and only away from the default: a burst count with
     # no block is not a workload, so recording one on a cell that churns
     # nothing would put a key in the id that says nothing about what ran.

@@ -2,8 +2,8 @@
 
 Status: in progress
 Strand: 6 Test capabilities (IPv6, BGP policy, new workloads)
-Updated: 2026-11-23
-Next: Implement step 3, per-block attribute export filters on the BIRD generator, and measure its send rate with and without them. Steps 1 and 2 are done.
+Updated: 2026-11-24
+Next: Measure the BIRD generator's send rate with and without `--tester-attributes` (step 3), which also live-checks that BIRD carries the attributes. Steps 1 and 2, and step 3's generator side and flag, are done.
 Blocked on: none
 Done when: `bench` and `batch` run a generated import policy of selected size, match type and match position on BIRD and FRR targets at `/24` and `/32`, publish convergence, CPU and memory beside a no-policy baseline, and withhold timing by name whenever the monitor's count differs from the policy's expected count.
 
@@ -123,6 +123,12 @@ renderer.
    (`docs/invariants/tester-offering.md`). Measure the generator's own send
    rate with and without attributes, so that attribute cost is not charged to
    the target.
+   *Generator side done 2026-11-24*: `gen_conf()` writes each neighbour's
+   `policy-blocks` and `BIRDTester` renders one static protocol per block
+   whose import filter sets the attributes. `--tester-attributes` (batch:
+   `tester_attributes: true`) turns it on with no policy on the target, with
+   its refusals at all four entry points. The send-rate measurement is
+   outstanding.
 4. **BIRD and FRR renderers.** BIRD renders a filter function; FRR renders a
    route-map backed by prefix-lists, as-path access-lists and community-lists.
    Fixture tests check the exact native text. The equivalence fixtures above

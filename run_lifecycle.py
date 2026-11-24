@@ -133,6 +133,11 @@ def bench(runtime, args):
         # recorded it. Above the teardown like the refusals beside it.
         runtime.sys.exit('--prefix-length has nothing to shorten under -f: a '
                  "scenario file states each neighbour's prefixes itself")
+    if args.file and getattr(args, 'tester_attributes', False):
+        # A scenario file states what each peer announces, attributes
+        # included, so the flag would change nothing while the stem said `ta`.
+        runtime.sys.exit('--tester-attributes has nothing to attach under -f: '
+                         "a scenario file states each neighbour's routes itself")
     if args.file and getattr(args, 'prefix_scope', None) not in (None, 'per-peer'):
         # `-n`/`-p` are already ignored under `-f`, and this would be too --
         # but the whole point of the flag is that the number means something
@@ -217,6 +222,20 @@ def bench(runtime, args):
                 getattr(args, 'repeat', False))
         except ValueError as e:
             runtime.sys.exit(str(e))
+        # Last, because it is refused beside churn, the diversity and the
+        # reload, and checks the resolved per-peer count.
+        try:
+            args.tester_attributes = runtime.resolve_tester_attributes_args(args)
+        except ValueError as e:
+            runtime.sys.exit(str(e))
+        if args.tester_attributes and getattr(args, 'repeat', False):
+            # Repeat reuses the generators with the config they were started
+            # with, so they would go on sending whichever attributes the
+            # previous run gave them while the stem said `ta`.
+            runtime.sys.exit('--tester-attributes cannot be used with '
+                             '-r/--repeat: repeat reuses the generator '
+                             'containers as they are, so they keep the '
+                             'attributes they were started with')
 
     if args.file:
         # A scenario's generators are otherwise only checked in the dispatch
@@ -228,6 +247,7 @@ def bench(runtime, args):
             for tester in early.get('testers') or []:
                 if tester.get('type') == 'mrt':
                     runtime.scenario_mrt_tester_class(tester)
+            runtime.check_scenario_policy_blocks(early)
         except ValueError as e:
             runtime.sys.exit(str(e))
 
@@ -350,6 +370,16 @@ def bench(runtime, args):
                         ', '.join(sorted({'/{0}'.format(n)
                                           for n in stale.values()})),
                         ', '.join(sorted(stale)), args.prefix_length))
+            # And the other direction of the `--tester-attributes` refusal,
+            # which `-r` with the flag has already met above.
+            carrying = runtime.reused_generators_with_attributes(
+                names, lambda name: host_config(name).get('Binds'))
+            if carrying:
+                runtime.sys.exit(
+                    '-r/--repeat would reuse generators carrying per-block '
+                    'policy attributes ({0}) for a run without '
+                    '--tester-attributes. Run once without -r to rebuild '
+                    'them'.format(', '.join(carrying)))
     runtime.remove_target_containers()
 
     if not args.repeat:

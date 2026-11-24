@@ -68,7 +68,8 @@ from flock import Flock, FlockTarget
 from srlinux import SRLinux, SRLinuxTarget
 from junos import Junos, JunosTarget
 from eos import Eos, EosTarget
-from tester import ExaBGPTester, BIRDTester
+from tester import (ExaBGPTester, BIRDTester, carries_policy_blocks,
+                    check_policy_blocks)
 from mrt_tester import ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
 from monitor import Monitor, Receiver, SinkMonitor, SinkReceiver
@@ -80,6 +81,8 @@ from stop import StopRequested, StopSignal
 from prefix_length import (DEFAULT_PREFIX_LENGTH,
                            resolve_prefix_length as _resolve_prefix_length,
                            announced_prefix_length, walk_exclusions)
+from import_policy import (scenario_policy_blocks,
+                           resolve_tester_attributes as _resolve_tester_attributes)
 from policy import (DEFAULT_POLICY_RELOAD_BLOCKS,
                     PolicyReloadConfigurationError, PolicyReloadTracker,
                     policy_reload_counts, rejected_block_indexes,
@@ -294,6 +297,11 @@ def bench_output_prefix(args):
     prefix_length = getattr(args, 'prefix_length', None) or DEFAULT_PREFIX_LENGTH
     if prefix_length != DEFAULT_PREFIX_LENGTH:
         parts.append('pl{0}'.format(prefix_length))
+    # And the generator's per-block attributes, on the same rule: a run that
+    # carries them and one that does not are the same table everywhere else in
+    # this stem, and the comparison between them is the reason the flag exists.
+    if getattr(args, 'tester_attributes', False):
+        parts.append('ta')
     # And the churn workload, on the same rule: two tests in one batch config
     # differing only in how much of the table they withdraw, or in how many
     # times, are the same peers and the same per-peer prefix count everywhere
@@ -531,35 +539,67 @@ def reused_generator_prefix_lengths(names, binds_of, length):
     nothing is not evidence of nothing stale. An MRT generator's configs hold
     no synthetic routes and are not required to.
     '''
-    prefixes = tuple(cls.CONTAINER_NAME_PREFIX for cls in TESTER_CLASSES.values())
     synthetic = (BIRDTester.CONTAINER_NAME_PREFIX,
                  ExaBGPTester.CONTAINER_NAME_PREFIX)
     stale = {}
+    for name, paths in _reused_generator_configs(names, binds_of):
+        read = False
+        for path in paths:
+            try:
+                with open(path, errors='replace') as f:
+                    announced = announced_prefix_length(f)
+            except OSError:
+                continue
+            if announced is None:
+                continue
+            read = True
+            if announced != length:
+                stale['{0}:{1}'.format(name, os.path.basename(path))] = \
+                    announced
+        if not read and name.startswith(synthetic):
+            raise ValueError('{0} has no readable generator config in the '
+                             'directory it mounts'.format(name))
+    return stale
+
+
+def _reused_generator_configs(names, binds_of):
+    '''`(container, [config path, ...])` for each tester container in `names`,
+    read through the directories it bind-mounts, in natural name order.'''
+    prefixes = tuple(cls.CONTAINER_NAME_PREFIX for cls in TESTER_CLASSES.values())
     for name in sorted((n for n in names if n.startswith(prefixes)),
                        key=natural_key):
-        read = False
+        paths = []
         for bind in binds_of(name) or ():
             host_dir = bind.split(':', 1)[0]
             if not os.path.isabs(host_dir):
                 # A named volume, not a directory on this host.
                 continue
-            for path in sorted(glob.glob(
-                    os.path.join(glob.escape(host_dir), '*.conf'))):
-                try:
-                    with open(path, errors='replace') as f:
-                        announced = announced_prefix_length(f)
-                except OSError:
-                    continue
-                if announced is None:
-                    continue
-                read = True
-                if announced != length:
-                    stale['{0}:{1}'.format(name, os.path.basename(path))] = \
-                        announced
-        if not read and name.startswith(synthetic):
-            raise ValueError('{0} has no readable generator config in the '
-                             'directory it mounts'.format(name))
-    return stale
+            paths.extend(sorted(glob.glob(
+                os.path.join(glob.escape(host_dir), '*.conf'))))
+        yield name, paths
+
+
+def reused_generators_with_attributes(names, binds_of):
+    '''Reused generator configs that carry per-block policy attributes.
+
+    The other direction of the `--tester-attributes` refusal under `-r`: a run
+    without the flag reusing generators a `ta` run started would send the
+    attributes under a stem and manifests that say it did not. Read through
+    each container's own bind mount, as `reused_generator_prefix_lengths()`
+    reads, which has already refused a synthetic generator with nothing
+    readable.
+    '''
+    carrying = []
+    for name, paths in _reused_generator_configs(names, binds_of):
+        for path in paths:
+            try:
+                with open(path, errors='replace') as f:
+                    if carries_policy_blocks(f):
+                        carrying.append('{0}:{1}'.format(
+                            name, os.path.basename(path)))
+            except OSError:
+                continue
+    return carrying
 
 
 def surplus_receiver_names(container_names, wanted):
@@ -1038,6 +1078,79 @@ def recorded_prefix_length(args):
             or getattr(args, 'tester_type', None) in MRT_TESTER_TYPES):
         return None
     return getattr(args, 'prefix_length', None) or DEFAULT_PREFIX_LENGTH
+
+
+def resolve_tester_attributes_args(args):
+    '''`import_policy.resolve_tester_attributes()` over one run's arguments.
+
+    Called after the prefix scope is resolved, so the fleet it checks is the
+    per-peer count the generator will actually be given.
+    '''
+    return _resolve_tester_attributes(
+        getattr(args, 'tester_attributes', False),
+        getattr(args, 'tester_type', None),
+        getattr(args, 'path_diversity', None),
+        getattr(args, 'churn_prefixes', None),
+        getattr(args, 'filter_test', None),
+        getattr(args, 'policy_reload_blocks', None),
+        getattr(args, 'neighbor_num', None),
+        getattr(args, 'prefix_num', None),
+        scenario_filter_flags(args))
+
+
+# The scenario `filter` matrix: each nonzero count puts a policy on the target.
+SCENARIO_FILTER_FLAGS = (('as_path_list_num', '-a/--as-path-list-num'),
+                         ('prefix_list_num', '-e/--prefix-list-num'),
+                         ('community_list_num', '-c/--community-list-num'),
+                         ('ext_community_list_num',
+                          '-x/--ext-community-list-num'))
+
+
+def scenario_filter_flags(source):
+    '''The scenario-filter flags a run (args) or batch target (dict) sets.'''
+    if isinstance(source, dict):
+        def read(field):
+            return batch_target_field(source, field)
+    else:
+        def read(field):
+            return getattr(source, field, 0)
+    return tuple(flag for field, flag in SCENARIO_FILTER_FLAGS
+                 if read(field))
+
+
+def check_scenario_policy_blocks(scenario):
+    '''Refuse `policy-blocks` a scenario file's generators cannot send as given.
+
+    Before the teardown, unlike the generator's own check: a hand-edited
+    count, a churn block beside them, or a generator other than BIRD (which
+    would drop them without a word) is otherwise found only after the previous
+    run's containers are gone.
+    '''
+    for tester in scenario.get('testers') or []:
+        for neighbor in (tester.get('neighbors') or {}).values():
+            blocks = neighbor.get('policy-blocks')
+            if not blocks:
+                continue
+            name = neighbor.get('router-id', '?')
+            if tester.get('type') != 'bird':
+                raise ValueError(
+                    'neighbour {0} carries policy-blocks but its {1!r} '
+                    'generator cannot send them; only the BIRD generator '
+                    'can'.format(name, tester.get('type')))
+            try:
+                check_policy_blocks(blocks, neighbor.get('paths') or [],
+                                    neighbor.get('churn-prefixes'))
+            except (ValueError, KeyError, TypeError) as e:
+                raise ValueError('neighbour {0}: {1}'.format(name, e)) from e
+
+
+def recorded_tester_attributes(args):
+    '''Whether a run's generator carried per-block attributes, or None where
+    bgperf2 built no table (`-f`, or an MRT generator playing back a file).'''
+    if (getattr(args, 'file', None)
+            or getattr(args, 'tester_type', None) in MRT_TESTER_TYPES):
+        return None
+    return bool(getattr(args, 'tester_attributes', False))
 
 
 def gen_mako_macro(prefix_length=DEFAULT_PREFIX_LENGTH, exclude=()):
@@ -2767,6 +2880,9 @@ def write_provenance(args, provenance, prefix):
         # the table: a scenario file states its own prefixes. Both blocks,
         # for the reason `path_diversity` is in both.
         'prefix_length': recorded_prefix_length(args),
+        # Whether the generator carried per-block policy attributes. `None`
+        # under `-f`, where the scenario file states what is announced.
+        'tester_attributes': recorded_tester_attributes(args),
         # The cores each role was confined to, or None for every core. Known
         # under `-f` too, unlike the workload keys around it: bgperf2 starts
         # the containers whatever wrote the scenario.
@@ -2999,6 +3115,9 @@ def write_event_artifact(args, events, prefix, status, testers=None,
         # the table: a scenario file states its own prefixes. Both blocks,
         # for the reason `path_diversity` is in both.
         'prefix_length': recorded_prefix_length(args),
+        # Whether the generator carried per-block policy attributes. `None`
+        # under `-f`, where the scenario file states what is announced.
+        'tester_attributes': recorded_tester_attributes(args),
         # Both blocks, for the reason `receivers` is in both.
         'pin': pin_cpusets(getattr(args, 'pin', None)) or None,
         # Both blocks, for the same reason: `findings.py` and
@@ -4193,7 +4312,7 @@ BATCH_TEST_KEYS = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
 BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope',
                             'path_diversity', 'receivers', 'churn_prefixes',
                             'churn_bursts', 'policy_reload_blocks', 'pin',
-                            'monitor', 'prefix_length')
+                            'monitor', 'prefix_length', 'tester_attributes')
 
 
 # Keys that mean something on a *test* and nothing on a target. There is no
@@ -4211,7 +4330,7 @@ BATCH_TEST_ONLY_KEYS = ('prefix_scope', 'repetitions', 'order', 'seed',
                         'neighbors', 'prefixes', 'filter_test',
                         'path_diversity', 'receivers', 'churn_prefixes',
                         'churn_bursts', 'policy_reload_blocks', 'pin',
-                        'monitor', 'prefix_length')
+                        'monitor', 'prefix_length', 'tester_attributes')
 
 # Target keys whose absence means something other than `None`. `batch()`
 # otherwise gives every unset field `None`, and `gen_conf()` routes anything
@@ -4336,6 +4455,46 @@ def check_batch_prefix_length(test, scenarios, scope, diversity):
                          batch_target_field(t, 'monitor_local_address')))
                 except ValueError as e:
                     sys.exit("test '{0}': {1}".format(test['name'], e))
+
+
+def check_batch_tester_attributes(test, scenarios, repeated, filters, scope,
+                                  diversity, churn_prefixes, reload_blocks):
+    '''`bench()`'s `--tester-attributes` refusals, reached before the first cell.
+
+    Every target, filter and fleet on the axes, for the reason the churn check
+    covers the whole grid; `-f` and `repeat` are refused here rather than at
+    the cell, where the refusal would come after a teardown.
+    '''
+    enabled = test.get('tester_attributes')
+    # The value first, so a bad one is named as bad rather than as whichever
+    # rule below it would trip.
+    try:
+        enabled = _resolve_tester_attributes(enabled)
+    except ValueError as e:
+        sys.exit("test '{0}': {1}".format(test['name'], e))
+    if not enabled:
+        return
+    if scenarios:
+        sys.exit("test '{0}': tester_attributes has nothing to attach for "
+                 "{1}, which name a scenario file: the file states each "
+                 "neighbour's routes itself".format(
+                     test['name'], ', '.join(scenarios)))
+    if repeated:
+        sys.exit("test '{0}': tester_attributes cannot be used with repeat, "
+                 'which {1} {2} set: repeat reuses the generator containers '
+                 'as they are, so they keep the attributes they were started '
+                 'with'.format(test['name'], ', '.join(repeated),
+                               'has' if len(repeated) == 1 else 'have'))
+    for target, filter_test, neighbors, prefixes in product(
+            test['targets'], filters, test['neighbors'], test['prefixes']):
+        try:
+            _resolve_tester_attributes(
+                enabled, batch_target_field(target, 'tester_type'),
+                diversity, churn_prefixes, filter_test, reload_blocks,
+                neighbors, resolve_prefix_scope(scope, neighbors, prefixes),
+                scenario_filter_flags(target))
+        except ValueError as e:
+            sys.exit("test '{0}': {1}".format(test['name'], e))
 
 
 def check_batch_test(test):
@@ -4685,6 +4844,8 @@ def check_batch_test(test):
                              for f in churn_flags),
                 ', '.join(repeated),
                 'has' if len(repeated) == 1 else 'have'))
+    check_batch_tester_attributes(test, scenarios, repeated, filters, scope,
+                                  diversity, churn_prefixes, reload_blocks)
     check_batch_pin(test, repeated)
     monitor = test.get('monitor')
     if monitor is not None and monitor not in MONITOR_TYPES:
@@ -4781,6 +4942,19 @@ def check_batch_prefix_length_and_repeat(tests):
                  'started with. Split them into separate batches'.format(
                      ', '.join(shortened),
                      'sets' if len(shortened) == 1 else 'set',
+                     ', '.join(repeating),
+                     'has' if len(repeating) == 1 else 'have'))
+    # The same trap with the generator's per-block attributes: a test without
+    # them reusing generators a `tester_attributes` test started would send
+    # the attributes under a stem and manifests that say it did not.
+    attributed = [t['name'] for t in tests if t.get('tester_attributes') is True]
+    if attributed and repeating:
+        sys.exit('batch: {0} {1} tester_attributes and {2} {3} a repeat '
+                 'target. A repeat reuses whatever tester containers the run '
+                 'before it left, and they keep the attributes they were '
+                 'started with. Split them into separate batches'.format(
+                     ', '.join(attributed),
+                     'sets' if len(attributed) == 1 else 'set',
                      ', '.join(repeating),
                      'has' if len(repeating) == 1 else 'have'))
 
@@ -4882,7 +5056,8 @@ def expand_batch_cells(test, targets):
         prefix_resolver=resolve_prefix_scope, path_diversity=diversity,
         receivers=receivers, churn_prefixes=churn_prefixes,
         churn_bursts=churn_bursts, policy_reload_blocks=reload_blocks,
-        pin=pin, monitor=monitor, prefix_length=prefix_length)
+        pin=pin, monitor=monitor, prefix_length=prefix_length,
+        tester_attributes=bool(test.get('tester_attributes')))
 
 
 # How a test may sequence its cells. `matrix` is the enumeration order
@@ -5456,6 +5631,7 @@ def batch_cell_args(args, cell):
     a.path_diversity = cell.get('path_diversity') or DEFAULT_PATH_DIVERSITY
     a.receivers = cell.get('receivers') or DEFAULT_RECEIVERS
     a.prefix_length = cell.get('prefix_length') or DEFAULT_PREFIX_LENGTH
+    a.tester_attributes = bool(cell.get('tester_attributes'))
     # From the cell for the same reason the two above are: the cell is
     # what the id, the row and the artifact names were built from.
     a.churn_prefixes = cell.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
@@ -5742,6 +5918,8 @@ def batch_cell_description(cell, repetitions=1):
     prefix_length = cell.get('prefix_length') or DEFAULT_PREFIX_LENGTH
     if prefix_length != DEFAULT_PREFIX_LENGTH:
         described = '{0}, prefix length=/{1}'.format(described, prefix_length)
+    if cell.get('tester_attributes'):
+        described = '{0}, tester attributes'.format(described)
     churn_prefixes = cell.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
     if churn_prefixes != DEFAULT_CHURN_PREFIXES:
         described = '{0}, churn={1}x{2}'.format(
@@ -6080,6 +6258,22 @@ def gen_conf(args):
             neighbors[router_id]['churn-prefixes'] = churn_prefixes
         configured_neighbors_cnt += 1
 
+    # Per-block attributes for policy phase 1, written only when asked for so
+    # every other scenario stays byte-identical. Only a BIRD generator can
+    # carry them, and only on disjoint slices with one static protocol per
+    # block: shared groups would give one prefix two blocks' attributes, and a
+    # churn block would cut across the policy's blocks.
+    if getattr(args, 'tester_attributes', False):
+        if tester_type != 'bird':
+            raise ValueError('policy attributes need the BIRD generator, got '
+                             '{0!r}'.format(tester_type))
+        if diversity != DEFAULT_PATH_DIVERSITY or churn_prefixes:
+            raise ValueError('policy attributes cannot be combined with '
+                             '--path-diversity or churn')
+        for router_id, blocks in scenario_policy_blocks(
+                neighbors, prefix).items():
+            neighbors[router_id]['policy-blocks'] = blocks
+
     # Export fan-out: sessions the target advertises its table to and which
     # announce nothing back. They are a top-level key rather than entries in
     # `conf['testers']`, which is what keeps them from being route sources --
@@ -6267,6 +6461,10 @@ def config(args):
             getattr(args, 'filter_test', None))
     except ValueError as e:
         sys.exit(str(e))
+    try:
+        args.tester_attributes = resolve_tester_attributes_args(args)
+    except ValueError as e:
+        sys.exit(str(e))
     conf = gen_conf(args)
 
     with open(args.output, 'w') as f:
@@ -6343,6 +6541,15 @@ def create_args_parser(main=True):
                                  'public unicast space from 1.0.0.0, skipping '
                                  'special-purpose ranges and the peering '
                                  'subnet. BIRD generator only')
+        parser.add_argument('--tester-attributes', action='store_true',
+                            help='have the BIRD generator send each quarter '
+                                 'of every peer\'s prefixes with its own '
+                                 'AS path and communities, the attributes '
+                                 'the generated import policy matches on. '
+                                 'No policy is put on the target, so this '
+                                 'measures what carrying them costs. Refused '
+                                 'with churn, --path-diversity, filter_test, '
+                                 '--policy-reload-blocks, -a/-e/-c/-x, -f and -r')
         parser.add_argument('--prefix-scope', choices=PREFIX_SCOPES,
                             default='per-peer',
                             help='how to read --prefix-num. per-peer (the '

@@ -238,6 +238,100 @@ def policy_blocks(peers, prefixes):
     return tuple(blocks)
 
 
+def resolve_tester_attributes(enabled, tester_type='bird', path_diversity=1,
+                              churn_prefixes=0, filter_test=None,
+                              policy_reload_blocks=0, peers=None,
+                              prefixes=None, scenario_filters=()):
+    '''Whether the generator carries per-block attributes, or why it cannot.
+
+    `--tester-attributes` makes the BIRD generator send every block with the
+    AS path and communities `policy_blocks()` gives it, with no policy on the
+    target, so the cost of carrying them can be measured on its own. It is
+    refused wherever the blocks cannot be what the model says:
+
+    - **any generator but BIRD**: ExaBGP has no per-block filter and an MRT
+      generator plays back a file's own attributes;
+    - **`--path-diversity`**: a prefix shared by a group would be one block
+      to one peer and another to the next;
+    - **churn**: its tail block would cut across the policy's blocks;
+    - **`filter_test`**: the generated ASNs are private, so a bogon filter
+      would reject every route;
+    - **`--policy-reload-blocks`**, or the scenario `filter` matrix
+      (`-a`, `-e`, `-c`, `-x`, named in `scenario_filters`): a policy on the
+      target is a second variable in a run meant to measure the generator;
+    - **a fleet the blocks cannot number**: fewer than `BLOCKS_PER_PEER`
+      prefixes per peer, or more blocks than a community value holds.
+
+    Raises `ImportPolicyConfigurationError`, whose message names the flag.
+    '''
+    if enabled in (None, False):
+        return False
+    if enabled is not True:
+        raise ImportPolicyConfigurationError(
+            '--tester-attributes must be true or false, got {0!r}'.format(
+                enabled))
+    if (tester_type or 'bird') != 'bird':
+        raise ImportPolicyConfigurationError(
+            '--tester-attributes needs the BIRD generator: the {0!r} tester '
+            'cannot set attributes per block'.format(tester_type))
+    if (path_diversity or 1) != 1:
+        raise ImportPolicyConfigurationError(
+            '--tester-attributes and --path-diversity are not defined '
+            'together: a prefix several peers share would carry a different '
+            "block's attributes from each")
+    if churn_prefixes:
+        raise ImportPolicyConfigurationError(
+            '--tester-attributes and --churn-prefixes are not defined '
+            "together: the churn block would cut across the policy's blocks")
+    if filter_test not in (None, 'None'):
+        raise ImportPolicyConfigurationError(
+            '--tester-attributes and --filter_test {0} are not defined '
+            'together: the generated ASNs are private, so the bogon filter '
+            'would reject every route'.format(filter_test))
+    if policy_reload_blocks:
+        raise ImportPolicyConfigurationError(
+            '--tester-attributes and --policy-reload-blocks are not defined '
+            'together: a second policy on the target is a second variable')
+    if scenario_filters:
+        raise ImportPolicyConfigurationError(
+            '--tester-attributes and {0} are not defined together: they put '
+            'a policy on the target, a second variable in a run measuring '
+            'the generator'.format(', '.join(scenario_filters)))
+    if peers is not None and prefixes is not None:
+        try:
+            _check_fleet(peers, prefixes)
+        except ImportPolicyConfigurationError as e:
+            raise ImportPolicyConfigurationError(
+                '--tester-attributes: {0}'.format(e)) from e
+    return True
+
+
+def scenario_policy_blocks(router_ids, prefixes):
+    '''Each neighbour's blocks as the scenario carries them, keyed by router-id.
+
+    The generator renders these as given and derives nothing, so what it
+    announces is exactly what `policy_blocks()` modelled. Slices are dealt in
+    sorted router-id *text* order because that is the order the rendered
+    scenario draws them in: `yaml.dump` sorts the neighbour mapping before Mako
+    evaluates a single `gen_paths()`. Dealing them in any other order would
+    give a neighbour the attributes of a slice it does not announce.
+
+    Each entry is `{'count', 'as-path', 'communities'}` in the peer's list
+    order: `as-path` is outermost first, as it appears on the wire after the
+    peer's own AS, and `communities` are `[ASN, value]` pairs.
+    '''
+    router_ids = sorted(router_ids)
+    blocks = policy_blocks(len(router_ids), prefixes)
+    scenario = {rid: [] for rid in router_ids}
+    for block in blocks:
+        scenario[router_ids[block.peer]].append({
+            'count': block.count,
+            'as-path': list(block.as_path),
+            'communities': [list(c) for c in block.communities],
+        })
+    return scenario
+
+
 @dataclass(frozen=True)
 class ExpectedCounts:
     '''What the fleet offers and what a target applying the policy accepts.

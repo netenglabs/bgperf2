@@ -2,8 +2,8 @@
 
 Status: in progress
 Strand: 6 Test capabilities (IPv6, BGP policy, new workloads)
-Updated: 2026-11-24
-Next: Measure the BIRD generator's send rate with and without `--tester-attributes` (step 3), which also live-checks that BIRD carries the attributes. Steps 1 and 2, and step 3's generator side and flag, are done.
+Updated: 2026-11-25
+Next: The BIRD and FRR policy renderers (step 4). Steps 1–3 are done; step 3 found the target, not the generators, sets the pace with attributes on.
 Blocked on: none
 Done when: `bench` and `batch` run a generated import policy of selected size, match type and match position on BIRD and FRR targets at `/24` and `/32`, publish convergence, CPU and memory beside a no-policy baseline, and withhold timing by name whenever the monitor's count differs from the policy's expected count.
 
@@ -127,8 +127,31 @@ renderer.
    `policy-blocks` and `BIRDTester` renders one static protocol per block
    whose import filter sets the attributes. `--tester-attributes` (batch:
    `tester_attributes: true`) turns it on with no policy on the target, with
-   its refusals at all four entry points. The send-rate measurement is
-   outstanding.
+   its refusals at all four entry points.
+   *Measured 2026-11-25*: BIRD 2.17.1 target and generators, 10 peers ×
+   500,000 prefixes, `/32` and `/24`, two interleaved repetitions each, with
+   the tester's wire bytes, the generators' TCP send queues and per-role
+   cgroup CPU sampled at ~170 ms beside each `bench`. A live run first confirmed
+   the target receives each block's AS path and communities, including the
+   rejected block's `4200000002` and `(64512,2)`.
+   - **The target sets the pace, with or without attributes.** The
+     generators' sockets held over 1 MB unsent for 84–94% of every send
+     window, the target sat flat at ~1.24 cores, and the generators used less
+     CPU with attributes (8.3–8.5 cores against 9.5–9.8). The bridge carried
+     about 1.5 MB/s.
+   - **Attributes cost the target, not the generators.** Intake fell from
+     ~263k to ~222k prefixes/s at `/32` and from 264k to ~212k at `/24`
+     (taking the uncontended `/24` baseline), and elapsed time rose from
+     22–24 s to 26–27 s. Wire bytes rose only 5% at `/32` (6.0 → 6.4
+     bytes/prefix) and 13% at `/24` (4.8 → 5.5), so the extra time is the
+     target's per-route attribute handling, not update size. Bytes/prefix
+     include the testers' ACKs for the table the target re-advertises back to
+     them, so they are an upper bound.
+   - An earlier quieter set at the same shape measured a larger penalty,
+     ~270k to ~200k prefixes/s; the measured set ran at load average 8–10.
+   - **Consequence for phase 1:** a policy run's baseline is the
+     attributes-only run (`--tester-attributes`, no policy), not plain
+     permit-all, or attribute handling is charged to the policy.
 4. **BIRD and FRR renderers.** BIRD renders a filter function; FRR renders a
    route-map backed by prefix-lists, as-path access-lists and community-lists.
    Fixture tests check the exact native text. The equivalence fixtures above

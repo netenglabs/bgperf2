@@ -3,7 +3,7 @@
 Status: in progress
 Strand: 6 Test capabilities (IPv6, BGP policy, new workloads)
 Updated: 2026-11-25
-Next: The BIRD and FRR policy renderers (step 4). Steps 1–3 are done; step 3 found the target, not the generators, sets the pace with attributes on.
+Next: Lifecycle wiring (step 5). Steps 1–4 are done; step 4 found FRR reads a policy in time quadratic in its rule count.
 Blocked on: none
 Done when: `bench` and `batch` run a generated import policy of selected size, match type and match position on BIRD and FRR targets at `/24` and `/32`, publish convergence, CPU and memory beside a no-policy baseline, and withhold timing by name whenever the monitor's count differs from the policy's expected count.
 
@@ -157,12 +157,25 @@ renderer.
    Fixture tests check the exact native text. The equivalence fixtures above
    apply to every match type. Rendered policy size (rules, bytes) goes into the
    provenance or stats row.
+
+   *Done 2026-11-25* (`policy_render.py`):
+   - `MAX_POLICY_RULES` is now 65533, FRR's route-map entry range.
+   - The equivalence tests catch all six broken renderers tried.
+   - BIRD and FRR both read small policies (checked by hand).
+   - `rendered_size()` exists, but the stats column is added in step 5.
+   - **FRR's config read is quadratic in `N`** (22 s at 1,000 rules, 90 s at 2,000, over 300 s
+     from 4,000); BIRD reads 8,000 rules in under a second. Step 5 must scale FRR's startup wait
+     with `N` or cap FRR's `N`, and must check whether FRR's evaluation is quadratic too. See the
+     workload-controls invariants.
 5. **Lifecycle wiring.** Monitor and per-neighbour checkpoints come from the
    expected counts (Decision 1). When the final monitor count differs from the
    expected total, the run is published with timing withheld and its reason
    named. Refusals apply at all four entry points (Decision 2). The new stats
    columns are added per the stats contract, and `create_batch_graphs()`
-   indices updated.
+   indices updated. They include rendered policy size (rules, bytes, from
+   `policy_render.rendered_size()`), which step 4 deferred. FRR's startup wait
+   scales with `N`, or large FRR cells are refused before any call to the
+   world (see step 4's FRR parse measurement).
 6. **Policy-loaded check.** Each target confirms, once and before injection,
    that the rendered policy is the one attached (BIRD `show protocols all`
    filter name; FRR `show route-map`). A daemon that silently ignored the

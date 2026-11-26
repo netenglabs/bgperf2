@@ -69,10 +69,12 @@ import prefix_length as _prefix_length
 # Today's run, with no policy.
 DEFAULT_POLICY_RULES = 0
 
-# The most generated rules a policy may have. Every match type can supply this
-# many distinct values that no route carries: a standard community's value
-# half is 16 bits.
-MAX_POLICY_RULES = 65535
+# The most generated rules a policy may have, set by the tightest renderer so
+# that every daemon can run every rule count. FRR numbers route-map entries
+# 1 to 65535, and its rendering needs one entry for the guard, one per rule and
+# one for the default action. (Every match type could supply more: a standard
+# community's value half is 16 bits.)
+MAX_POLICY_RULES = 65533
 
 POLICY_MATCHES = ('prefix', 'as-path', 'community')
 POLICY_HITS = ('first', 'last', 'miss')

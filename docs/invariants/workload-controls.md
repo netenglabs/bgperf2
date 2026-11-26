@@ -2,7 +2,7 @@
 
 What `bench`/`batch` may be asked to run, and the guards that refuse the rest.
 
-**Read this before editing:** `prefix_length.py` (the synthetic prefix walks and their refusals), `cpu_pinning.py` (pure CPU lists and role-pinning validation), `recipes.py` (portable source validation), `recipe_worker.py` (recipe CPU layout forwarding), `recipe_preflight.py` (online CPU availability), `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `run_lifecycle.py` (run orchestration), `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`), `churn.py`, `policy.py`, `import_policy.py` (the generated import policy and its expected counts), `bird.py` (the churn protocol and the reload command), `tester.py` (`check_policy_blocks()`, `write_policy_block_protocols()`, `carries_policy_blocks()`, `BIRDTester.configure_neighbors()`)
+**Read this before editing:** `prefix_length.py` (the synthetic prefix walks and their refusals), `cpu_pinning.py` (pure CPU lists and role-pinning validation), `recipes.py` (portable source validation), `recipe_worker.py` (recipe CPU layout forwarding), `recipe_preflight.py` (online CPU availability), `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `run_lifecycle.py` (run orchestration), `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`), `churn.py`, `policy.py`, `import_policy.py` (the generated import policy and its expected counts), `policy_render.py` (its BIRD and FRR text), `bird.py` (the churn protocol and the reload command), `tester.py` (`check_policy_blocks()`, `write_policy_block_protocols()`, `carries_policy_blocks()`, `BIRDTester.configure_neighbors()`)
 `recipe_minimization.py` governs explicit selected-cell projection and bounded peer/prefix reductions.
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
@@ -405,7 +405,8 @@ Phase 1 supports 24 and 32 (`prefix_length.py`).
 ([plan](../plans/policy-phase1.md)) from the rule count, match type, hit position, peers and
 prefixes per peer, and states the exact accepted count a target must reach. It is the model only:
 only `--tester-attributes` reaches it so far, which puts the block attributes on the generator
-(below). The renderers and lifecycle wiring are later steps.
+(below). `policy_render.py` writes it as BIRD and FRR text (next section); attaching that text to
+a target is the lifecycle wiring, a later step.
 
 - **The shape is fixed: guard, then the `N` generated rules, then default accept.** Each peer's list
   is cut into `BLOCKS_PER_PEER` (4) contiguous blocks and the **last block of every peer** is
@@ -468,6 +469,50 @@ only `--tester-attributes` reaches it so far, which puts the block attributes on
 - `tests/test_import_policy.py` evaluates every route of a rendered `gen_conf()` table through
   guard, rules and default, for every match type and hit position at both lengths, and checks the
   deciding rule and the per-peer counts against the model.
+- **`MAX_POLICY_RULES` is 65533, set by the tightest renderer**: FRR numbers route-map entries 1 to
+  65535 and needs one for the guard, one per rule and one for the default. A cap one daemon could
+  not render would make that cell a single-daemon result.
+
+### The renderers — `policy_render.py`
+
+- **One model statement is one test in each language, in the model's order.** BIRD gets one
+  `filter` of one `if <test> then accept|reject;` per statement and a final action; FRR gets one
+  `route-map` whose entries each match one list of their own, and a final entry with no match. A
+  route therefore meets the same number of tests on both daemons and stops at the same one. Folding
+  several rules into one set, or one FRR list shared by several entries, would make the two daemons
+  do different amounts of work for the same `N`.
+- **The tests are the same predicate in both languages.** Prefix: inside a cover *and* exactly the
+  run's length (`P{L,L}`; `P ge L le L`, or plain `P` when the cover is `/L`, because FRR refuses a
+  `ge` equal to the prefix's own length). AS path: containment anywhere on the path (`[= * A * =]`;
+  `_A_`, whose `_` anchors at path boundaries so `4200000001` cannot match inside
+  `14200000001`). Community: membership (`(a, b) ~ bgp_community`; one standard community-list
+  line per value, because a line naming two communities requires both).
+- FRR lists are written before the route-map that names them. The text is yielded line by line.
+- `tests/test_policy_render.py` reads both renderings back with evaluators that accept exactly the
+  forms written and refuse anything else, and runs every route of a rendered `gen_conf()` table
+  through BIRD, FRR and the model: all three must decide at the same statement. Broken renderers
+  (an unanchored FRR regex, a BIRD set without the length, `ge`/`le` dropped, swapped actions, the
+  guard moved last, a denying default) each fail that test on its own. Exact-text fixtures pin
+  small policies.
+- **The daemons themselves were checked once, by hand, not by the suite**: `bird -p` on BIRD
+  2.19.2, 3.3.2 and 2.17.1 (`latest`), and `bgpd --dryrun` on FRR 8.5 and 10.7. Two traps for whoever
+  repeats that: FRR's dry run **exits 0 even when lines fail**, so read its output for `Config
+  Failed`/`Unknown command`; and it **aborts on any `neighbor` line** (`bgp_keepalives_off()`
+  assertion), so dry-run the policy without the session config.
+- **FRR's config read is quadratic in the rule count; BIRD's is not.** Measured 2026-11-25 with
+  `bgpd --dryrun` on FRR 10.7 and `bird -p` on BIRD `latest`, one parse per shape, 300 s cap.
+  - FRR as-path: 22 s at 1,000 rules and 90 s at 2,000, about 4× per doubling.
+  - Community went 16 → 62 → 255 s and prefix 42 → 122 s, about 4× and 2.9× per doubling. Those
+    runs overlapped earlier timed-out parses that `timeout` had left running, so their times and
+    their growth rates are both unreliable. Only the as-path pair is clean.
+  - Every FRR parse at 8,000 rules, and as-path and prefix at 4,000, exceeded the cap.
+  - Extrapolated, 65,533 as-path rules would take about a day.
+  - BIRD read every shape up to 8,000 in under a second.
+
+  So `MAX_POLICY_RULES` is what FRR can *represent*, not what it can start in a run's time. An FRR
+  cell's startup wait has to scale with `N`, or its large cells must be refused. FRR may also look
+  lists up by name when it evaluates a route; if so, evaluation is quadratic too. That is a
+  hypothesis for the step-5 measurement, not a finding.
 
 ## `-s/--single-table` — refused, because nothing has honoured it since 2021
 

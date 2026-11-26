@@ -953,6 +953,24 @@ class Container(object):
         return self.classify_neighbor_counts(neighbors_received,
                                              neighbors_accepted)
 
+    def get_offered_counts(self, tester_count):
+        '''What each neighbour's pre-policy `received` counter is held to.
+
+        Its `check-points` (`tester_count`), except under an import policy,
+        where that became the accepted count and `offered-check-point` holds
+        what the peer offers. Held to the accepted count, `received` would
+        report a peer fully received at three quarters of its table and open
+        the convergence gate early. A target with no scenario attached (a
+        test's stub of `get_test_counts()`) has no policy to read.
+        '''
+        offered_count = dict(tester_count)
+        scenario = getattr(self, 'scenario_global_conf', None) or {}
+        for tester in scenario.get('testers') or []:
+            for n, neighbor in (tester.get('neighbors') or {}).items():
+                if 'offered-check-point' in neighbor:
+                    offered_count[n] = neighbor['offered-check-point']
+        return offered_count
+
     def classify_neighbor_counts(self, neighbors_received, neighbors_accepted):
         '''Turn per-neighbour counts into the two all-sent verdicts.
 
@@ -960,6 +978,7 @@ class Container(object):
         table gauge out of one command can reuse it.
         '''
         tester_count, neighbors_checked = self.get_test_counts()
+        offered_count = self.get_offered_counts(tester_count)
         neighbors_received_full = neighbors_checked.copy()
         for n in neighbors_accepted.keys():
 
@@ -971,7 +990,7 @@ class Container(object):
         for n in neighbors_received.keys():
 
             #this will include the monitor, we don't want to check that
-            if (n in tester_count and neighbors_received[n] >= tester_count[n]) or neighbors_received[n] == True: 
+            if (n in offered_count and neighbors_received[n] >= offered_count[n]) or neighbors_received[n] == True:
                 neighbors_received_full[n] = True
 
         return neighbors_received_full, neighbors_checked 
@@ -979,6 +998,54 @@ class Container(object):
 class Target(Container):
 
     CONFIG_FILE_NAME = None
+
+    # The generated import policy's match types this adapter renders (policy
+    # phase 1), or None for none. Read by the entry points' refusals before
+    # any container starts, so a target without a renderer is never handed a
+    # policy it would silently not apply.
+    #
+    # An adapter that sets it must read its neighbour counters through
+    # `classify_neighbor_counts()`: under a policy `get_test_counts()` returns
+    # the *accepted* count, and only that method holds `received` to the
+    # offered one. flock and srlinux compare `received` with
+    # `get_test_counts()` directly, which would mark a peer received at three
+    # quarters of its table. tests/test_policy_wiring.py enforces it.
+    IMPORT_POLICY_MATCHES = None
+
+    def import_policy(self):
+        '''The generated import policy this target applies, or None.
+
+        Rebuilt from the scenario's `import-policy` entry, the arguments the
+        expected counts were derived from, by the same `build_policy()`.
+        '''
+        import import_policy as _import_policy
+        spec = self.conf.get(_import_policy.SCENARIO_KEY)
+        if spec is None:
+            return None
+        if not self.IMPORT_POLICY_MATCHES \
+                or spec.get('match') not in self.IMPORT_POLICY_MATCHES:
+            raise ValueError('{0} has no renderer for a {1!r} import '
+                             'policy'.format(type(self).__name__,
+                                             spec.get('match')))
+        return _import_policy.policy_from_scenario(spec)
+
+    # What the last `write_config()` wrote of the policy, a
+    # `policy_render.RenderedSize`, or None where it wrote none.
+    import_policy_size = None
+
+    def write_import_policy(self, f, policy, lines):
+        '''Write a rendered policy line by line and record how big it was.
+
+        Counted as written, so the size the row publishes is the text the
+        daemon was given, not a second rendering that could differ from it.
+        '''
+        import policy_render as _policy_render
+        written = 0
+        for line in lines:
+            f.write(line)
+            written += len(line.encode('utf-8'))
+        self.import_policy_size = _policy_render.RenderedSize(
+            rules=len(policy.rules), bytes=written)
 
     # Set by a target that can be told to re-evaluate its import policy
     # against the table it already holds, without resetting its sessions.

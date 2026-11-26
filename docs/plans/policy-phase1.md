@@ -2,8 +2,8 @@
 
 Status: in progress
 Strand: 6 Test capabilities (IPv6, BGP policy, new workloads)
-Updated: 2026-11-25
-Next: Lifecycle wiring (step 5). Steps 1–4 are done; step 4 found FRR reads a policy in time quadratic in its rule count.
+Updated: 2026-11-26
+Next: The policy-loaded check (step 6). Steps 1–5 are done: `bench --policy-rules` runs the policy on BIRD and FRR and publishes it in the stats row.
 Blocked on: none
 Done when: `bench` and `batch` run a generated import policy of selected size, match type and match position on BIRD and FRR targets at `/24` and `/32`, publish convergence, CPU and memory beside a no-policy baseline, and withhold timing by name whenever the monitor's count differs from the policy's expected count.
 
@@ -176,6 +176,21 @@ renderer.
    `policy_render.rendered_size()`), which step 4 deferred. FRR's startup wait
    scales with `N`, or large FRR cells are refused before any call to the
    world (see step 4's FRR parse measurement).
+
+   *Done 2026-11-25*:
+   - `--policy-rules`, `--policy-match` and `--policy-hit` put the policy on
+     a BIRD or `frr_c` target, and turn `--tester-attributes` on.
+   - Checkpoints come from the expected counts. The monitor's is exact.
+   - A converged run whose final count differs is published `FAILED`, with
+     the difference in `MSG` and the events artifact's intervals withheld.
+   - Live check at 2 × 1,000 `/24`s, 10 rules: BIRD 2.17.1 (as-path, `last`)
+     and FRR 10.7 (prefix, `last`) both received exactly 1,500 of 2,000.
+   - `-f`, `config`, batch, `-r` and native cells refuse the policy.
+   - FRR's startup wait already scales with `N`: the monitor's wait has no
+     deadline, so a slow parse is a long `monitor (s)`, not a failure.
+   - The stats row carries `policy rules`, `policy match`, `policy hit` and
+     `policy bytes` (the size as the target wrote it), before the provenance
+     columns. No graph index moved. Batch support is step 7's.
 6. **Policy-loaded check.** Each target confirms, once and before injection,
    that the rendered policy is the one attached (BIRD `show protocols all`
    filter name; FRR `show route-map`). A daemon that silently ignored the

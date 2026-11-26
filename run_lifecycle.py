@@ -138,6 +138,13 @@ def bench(runtime, args):
         # included, so the flag would change nothing while the stem said `ta`.
         runtime.sys.exit('--tester-attributes has nothing to attach under -f: '
                          "a scenario file states each neighbour's routes itself")
+    if args.file:
+        # The policy's checkpoints and count guard are built from the command
+        # line, and a scenario file states its own check-points.
+        runtime.refuse_import_policy_flags(
+            args, 'a policy cannot be put on a scenario file run: its '
+                  'checkpoints and count guard come from the command line, '
+                  'and the file states its own')
     if args.file and getattr(args, 'prefix_scope', None) not in (None, 'per-peer'):
         # `-n`/`-p` are already ignored under `-f`, and this would be too --
         # but the whole point of the flag is that the number means something
@@ -222,6 +229,16 @@ def bench(runtime, args):
                 getattr(args, 'repeat', False))
         except ValueError as e:
             runtime.sys.exit(str(e))
+        # The import policy before the attributes it turns on, so its own
+        # refusals name `--policy-rules`. Same position, for the same reason.
+        try:
+            runtime.resolve_import_policy_args(args)
+        except ValueError as e:
+            runtime.sys.exit(str(e))
+        if args.policy_rules and getattr(args, 'repeat', False):
+            runtime.sys.exit('--policy-rules cannot be used with -r/--repeat: '
+                             'it turns on --tester-attributes, and repeat '
+                             'reuses the generator containers as they are')
         # Last, because it is refused beside churn, the diversity and the
         # reload, and checks the resolved per-peer count.
         try:
@@ -248,6 +265,7 @@ def bench(runtime, args):
                 if tester.get('type') == 'mrt':
                     runtime.scenario_mrt_tester_class(tester)
             runtime.check_scenario_policy_blocks(early)
+            runtime.check_scenario_import_policy(early)
         except ValueError as e:
             runtime.sys.exit(str(e))
 
@@ -680,6 +698,10 @@ def bench(runtime, args):
         target.cpuset = pin.get('target')
 
         target.run(conf, dckr_net_name)
+
+    # What the target's config carried of the import policy, as written; None
+    # for a run with none (and for a remote target, which writes no config).
+    output_stats['policy_size'] = getattr(target, 'import_policy_size', None)
 
     runtime.time.sleep(1)
 
@@ -1184,9 +1206,29 @@ def bench(runtime, args):
                     # marked failed, so no summary is affected.
                     output_stats['fail_msg'] = churn_evidence[
                         'incomplete_reason'] or 'churn did not complete'
+                # The import policy's count guard (plan Decision 1). A run
+                # whose monitor did not end on exactly the expected count did
+                # not do the work it was asked to do -- an over-acceptance
+                # converges early, a shortfall ends by stability -- so it is
+                # published FAILED with the reason in MSG, and its events
+                # artifact's intervals are withheld. The CSV row keeps its
+                # times beside FAILED, as every failed row does. Refused
+                # beside churn and the reload, so nothing above has set MSG
+                # on a policy run.
+                policy_miss = runtime.policy_count_failure(
+                    getattr(args, 'policy_rules', None), int(recved),
+                    int(conf['monitor']['check-points'][0]))
+                if policy_miss:
+                    output_stats['fail_msg'] = policy_miss
+                    # The events artifact's intervals too, not only the row:
+                    # `MONITOR_REQUIRED_REACHED` was recorded when the count
+                    # crossed the check-point, so `convergence_s` would still
+                    # be derived from it.
+                    output_stats['timing_withheld_reason'] = policy_miss
+                    print('FAILED: {0}'.format(policy_miss))
                 return runtime.finish_bench(
                     args, output_stats, bench_stats, bench_start, target, m,
-                    testers,
+                    testers, fail=bool(policy_miss),
                     lifecycle_events=(list(lifecycle.events)
                                       + list(churn_events)
                                       + list(reload_events)),
@@ -1349,7 +1391,8 @@ def finish_bench(runtime, args, output_stats, bench_stats, bench_start, target, 
         target_table_witness_rule=target_table_witness_rule,
         convergence_rule=convergence_rule,
         instrument=runtime.sampler_read_failures(target, m),
-        role_cpu=role_cpu_section)
+        role_cpu=role_cpu_section,
+        timing_withheld_reason=output_stats.get('timing_withheld_reason'))
 
     # Scan the tester logs only after the clock has stopped. These used to run
     # in bench() before bench_stop, so walking every tester log line by line --

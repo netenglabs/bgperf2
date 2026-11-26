@@ -180,7 +180,8 @@ def synthetic_spec(args):
             or getattr(args,'single_table',False) or getattr(args,'prefix_scope',None) not in (None,'per-peer')
             or getattr(args,'churn_bursts',None) not in (None,1)
             or getattr(args,'prefix_length',None) not in (None,32)
-            or getattr(args,'tester_attributes',False)):
+            or getattr(args,'tester_attributes',False)
+            or getattr(args,'policy_rules',0)):
         raise ValueError('Controlled synthetic cells require generated fresh BIRD/sink plain transit')
     for image in (args.image,args.generator_image,args.observer_image):
         if not re.fullmatch(r'sha256:[0-9a-f]{64}',image or ''):

@@ -2487,8 +2487,14 @@ def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
                    churn=None, policy_reload=None, export=None,
                    target_table=None, target_table_unmeasured_reason=None,
                    target_table_witness_rule=None,
-                   convergence_rule=None, instrument=None, role_cpu=None):
+                   convergence_rule=None, instrument=None, role_cpu=None,
+                   timing_withheld_reason=None):
     '''Build the stable JSON-compatible event artifact document.
+
+    `timing_withheld_reason` nulls every monitor interval and names why, for
+    a run whose timing must not be read although its events were recorded --
+    an import policy run whose final count is not the expected one did other
+    work from the run it would be compared with. The events stay.
 
     `testers` maps a generator's producer name to whatever evidence it holds
     outside the event stream -- blocked-write availability, a poll that could
@@ -2507,6 +2513,11 @@ def event_artifact(events: Iterable[LifecycleEvent], status, testers=None,
         'measurements': monitor_metrics(events),
         'events': [event.to_dict() for event in events],
     }
+    # Absent unless set, so every other run keeps exactly the document it had.
+    if timing_withheld_reason:
+        artifact['measurements'] = {
+            key: None for key in artifact['measurements']}
+        artifact['measurements_withheld_reason'] = timing_withheld_reason
     # Beside `status`, because it qualifies the verdict rather than describing
     # the target's table -- and because `target_table` exists only for a
     # daemon that reports a table witness (BIRD and FRR). Filed there, the

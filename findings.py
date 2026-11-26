@@ -102,10 +102,25 @@ def derive_findings(artifact, host=None):
     to a component.
     '''
     findings = []
-    findings.extend(_timing_findings(
-        artifact.get('status'),
-        artifact.get('measurements') or {},
-        artifact.get('tester_fleet')))
+    withheld = artifact.get('measurements_withheld_reason')
+    if withheld:
+        # The intervals were measured and then nulled because the run did
+        # other work from the one it would be compared with.  Read as absent,
+        # they would say the monitor never reached the count, which a policy
+        # that accepted too much did reach.  Measured and not attributable is
+        # a confounder, not missing evidence.
+        findings.append(_finding(
+            'timing_withheld', CONFOUNDER,
+            'a run whose final count is not the expected one did different '
+            'work, and its intervals are not read',
+            'the run\'s timing was withheld: {0}'.format(withheld),
+            {'status': artifact.get('status'),
+             'measurements_withheld_reason': withheld}))
+    else:
+        findings.extend(_timing_findings(
+            artifact.get('status'),
+            artifact.get('measurements') or {},
+            artifact.get('tester_fleet')))
     findings.extend(_backpressure_findings(artifact.get('testers') or {}))
     findings.extend(_host_findings(host or {}))
     component, decided_by = _resolve(findings)

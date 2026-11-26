@@ -17,6 +17,8 @@ from base import *
 import json
 import os
 import re
+import import_policy
+import policy_render
 
 def neighbors_state(summary):
     '''The two per-neighbour dicts, from one parsed `sh ip bgp summary json`.
@@ -137,6 +139,7 @@ class FRRoutingTarget(FRRouting, Target):
 
     CONTAINER_NAME = 'bgperf_frrouting_target'
     CONFIG_FILE_NAME = 'bgpd.conf'
+    IMPORT_POLICY_MATCHES = import_policy.POLICY_MATCHES
 
     def write_config(self):
 
@@ -165,12 +168,30 @@ no bgp ebgp-requires-policy
             c +="    neighbor {0} soft-reconfiguration inbound\n".format(local_addr)
             if 'filter_test' in self.conf:
                 c +="    neighbor {0} route-map {1} in\n".format(local_addr, self.conf['filter_test'])
+            # On every session, as BIRD's one `neighbor range` protocol has it;
+            # the monitor and the receivers announce nothing for it to decide.
+            # Refused beside `filter_test` at every entry point, so at most one
+            # inbound route-map is ever written.
+            if policy is not None:
+                c += "    neighbor {0} route-map {1} in\n".format(
+                    local_addr, policy_render.FRR_ROUTE_MAP)
             return c
 
         neighbors = self.scenario_neighbors(sort=False)
-        
+        policy = self.import_policy()
+
         with open('{0}/{1}'.format(self.host_dir, self.CONFIG_FILE_NAME), 'w') as f:
-            f.write(config)
+            # The generated import policy goes before `router bgp`, so every
+            # list and the route-map exist before a session names them. Line
+            # by line: at 65,533 rules it is megabytes.
+            if policy is not None:
+                head, _, rest = config.partition('router bgp')
+                f.write(head)
+                self.write_import_policy(
+                    f, policy, policy_render.frr_policy_lines(policy))
+                f.write('router bgp' + rest)
+            else:
+                f.write(config)
 
             for n in neighbors:
                 f.write(gen_neighbor_config(n))

@@ -14,6 +14,8 @@
 # limitations under the License.
 
 from base import *
+import import_policy
+import policy_render
 
 
 # --- birdc 'show protocols all' --------------------------------------------
@@ -551,6 +553,7 @@ class BIRDTarget(BIRD, Target):
     CONTAINER_NAME = 'bgperf_bird_target'
     CONFIG_FILE_NAME = 'bird.conf'
     SUPPORTS_POLICY_RELOAD = True
+    IMPORT_POLICY_MATCHES = import_policy.POLICY_MATCHES
     POLICY_RELOAD_MECHANISM = 'birdc configure'
     # Verified on bgperf/bird:2.19.2 and bgperf/bird:3.3.2, two peers each: the
     # sessions' `Since` is unchanged across the reconfigure and both stay
@@ -586,6 +589,10 @@ class BIRDTarget(BIRD, Target):
         '''
         if reject_peer_asns:
             return 'filter {0}'.format(POLICY_RELOAD_FILTER)
+        # Refused beside the reload and `--filter_test` at every entry point,
+        # so it never has to compose with either.
+        if import_policy.SCENARIO_KEY in self.conf:
+            return 'filter {0}'.format(policy_render.BIRD_FILTER_NAME)
         if 'filter_test' in self.conf:
             return 'filter {0}'.format(self.conf['filter_test'])
         return 'all'
@@ -669,6 +676,12 @@ return true;
             # exactly the config it always has -- the same rule the churn
             # protocol and the diversity block follow.
             f.write(policy_reload_filter_config(reject_peer_asns))
+            # The generated import policy, written line by line: at 65,533
+            # rules it is megabytes, and is never held as one string.
+            policy = self.import_policy()
+            if policy is not None:
+                self.write_import_policy(
+                    f, policy, policy_render.bird_policy_lines(policy))
 
             if 'policy' in self.scenario_global_conf:
                 for k, v in self.scenario_global_conf['policy'].items():

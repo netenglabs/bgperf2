@@ -82,7 +82,13 @@ from prefix_length import (DEFAULT_PREFIX_LENGTH,
                            resolve_prefix_length as _resolve_prefix_length,
                            announced_prefix_length, walk_exclusions)
 from import_policy import (scenario_policy_blocks,
-                           resolve_tester_attributes as _resolve_tester_attributes)
+                           resolve_tester_attributes as _resolve_tester_attributes,
+                           resolve_import_policy as _resolve_import_policy,
+                           DEFAULT_POLICY_RULES, POLICY_MATCHES, POLICY_HITS,
+                           SCENARIO_KEY as IMPORT_POLICY_KEY,
+                           expected_counts as policy_expected_counts,
+                           scenario_import_policy,
+                           count_failure as policy_count_failure)
 from policy import (DEFAULT_POLICY_RELOAD_BLOCKS,
                     PolicyReloadConfigurationError, PolicyReloadTracker,
                     policy_reload_counts, rejected_block_indexes,
@@ -302,6 +308,21 @@ def bench_output_prefix(args):
     # this stem, and the comparison between them is the reason the flag exists.
     if getattr(args, 'tester_attributes', False):
         parts.append('ta')
+    # And the import policy, on the same rule: its three dimensions are the
+    # whole difference between a policy cell and its attributes-only baseline.
+    policy_rules = getattr(args, 'policy_rules', None) or DEFAULT_POLICY_RULES
+    if policy_rules:
+        match = getattr(args, 'policy_match', None)
+        hit = getattr(args, 'policy_hit', None)
+        if match not in POLICY_STEM_MATCH or hit not in POLICY_HITS:
+            # Only resolve_import_policy_args() makes these whole; a caller
+            # that skipped it must not get a name for a policy nobody chose.
+            raise ValueError(
+                '--policy-rules {0} needs a resolved --policy-match and '
+                '--policy-hit to name its run, got {1!r} and {2!r}'.format(
+                    policy_rules, match, hit))
+        parts.append('po{0}{1}{2}'.format(
+            policy_rules, POLICY_STEM_MATCH[match], hit))
     # And the churn workload, on the same rule: two tests in one batch config
     # differing only in how much of the table they withdraw, or in how many
     # times, are the same peers and the same per-peer prefix count everywhere
@@ -1096,6 +1117,106 @@ def resolve_tester_attributes_args(args):
         getattr(args, 'neighbor_num', None),
         getattr(args, 'prefix_num', None),
         scenario_filter_flags(args))
+
+
+# How each match type is spelled in a run's stem: `po1000asplast`. Fixed-width
+# and free of the `-` the stem's other parts are joined with.
+POLICY_STEM_MATCH = {'prefix': 'pfx', 'as-path': 'asp', 'community': 'com'}
+
+
+def target_policy_matches(target):
+    '''The match types a target's adapter renders, or None for no renderer.'''
+    cls = TARGET_CLASSES.get(target)
+    return getattr(cls, 'IMPORT_POLICY_MATCHES', None) if cls else None
+
+
+def resolve_import_policy_args(args):
+    '''`import_policy.resolve_import_policy()` over one run's arguments.
+
+    Called where `resolve_tester_attributes_args()` is, after the scope, so the
+    fleet it checks is the per-peer count the generator will be given. Sets
+    `policy_rules`, `policy_match` and `policy_hit` to their resolved values,
+    and turns `tester_attributes` on for a policy run.
+    '''
+    rules, match, hit = _resolve_import_policy(
+        getattr(args, 'policy_rules', None),
+        getattr(args, 'policy_match', None),
+        getattr(args, 'policy_hit', None),
+        getattr(args, 'target', None),
+        target_policy_matches(getattr(args, 'target', None)),
+        getattr(args, 'tester_type', None),
+        getattr(args, 'path_diversity', None),
+        getattr(args, 'churn_prefixes', None),
+        getattr(args, 'filter_test', None),
+        getattr(args, 'policy_reload_blocks', None),
+        getattr(args, 'receivers', None),
+        scenario_filter_flags(args),
+        getattr(args, 'neighbor_num', None),
+        getattr(args, 'prefix_num', None),
+        getattr(args, 'target_config_file', None))
+    args.policy_rules, args.policy_match, args.policy_hit = rules, match, hit
+    if rules:
+        args.tester_attributes = True
+
+
+def refuse_import_policy_flags(args, reason):
+    '''Exit naming every policy flag a run set where no policy can go.'''
+    named = [flag for flag, field in (('--policy-rules', 'policy_rules'),
+                                      ('--policy-match', 'policy_match'),
+                                      ('--policy-hit', 'policy_hit'))
+             if getattr(args, field, None) not in (None, DEFAULT_POLICY_RULES)]
+    if named:
+        sys.exit('{0}: {1}'.format(', '.join(named), reason))
+
+
+def check_scenario_import_policy(scenario):
+    '''Refuse a scenario file whose target carries a generated policy.
+
+    Before the teardown. The policy's checkpoints and count guard are built
+    from the command line in phase 1, so a file carrying one would run it
+    against whatever check-points the file states.
+    '''
+    if IMPORT_POLICY_KEY in ((scenario or {}).get('target') or {}):
+        raise ValueError(
+            'the scenario target carries {0!r}, which only `bench` without -f '
+            'may write: its checkpoints and count guard come from the '
+            'command line'.format(IMPORT_POLICY_KEY))
+    # Its companion on the neighbours too: left behind by an edited policy
+    # scenario, it would hold `received` to a count the file does not offer.
+    for tester in (scenario or {}).get('testers') or []:
+        for name, neighbor in ((tester or {}).get('neighbors') or {}).items():
+            if 'offered-check-point' in (neighbor or {}):
+                raise ValueError(
+                    "neighbour {0} carries 'offered-check-point', which only "
+                    'an import policy run writes'.format(name))
+
+
+def policy_row_values(args, size=None):
+    '''The stats row's `policy rules`, `policy match`, `policy hit` and
+    `policy bytes`. `size` is the target's `import_policy_size`; a policy run
+    whose target recorded none (a remote target) leaves `policy bytes` blank
+    rather than publishing a size nobody measured.'''
+    rules = getattr(args, 'policy_rules', None) or DEFAULT_POLICY_RULES
+    if not rules:
+        return [DEFAULT_POLICY_RULES, '', '', '']
+    return [rules, args.policy_match, args.policy_hit,
+            size.bytes if size is not None else '']
+
+
+def recorded_import_policy(args):
+    '''The policy a run's manifests record: its arguments and expected count.
+
+    `None` where the run had none, including `-f` and MRT playback, which
+    refuse it. The expected count is the one the run was checked against.
+    '''
+    rules = getattr(args, 'policy_rules', None) or DEFAULT_POLICY_RULES
+    if not rules or getattr(args, 'file', None):
+        return None
+    expected = policy_expected_counts(rules, args.neighbor_num,
+                                      args.prefix_num)
+    return {'rules': rules, 'match': args.policy_match,
+            'hit': args.policy_hit, 'expected_accepted': expected.accepted,
+            'expected_accepted_per_peer': expected.accepted_per_peer[0]}
 
 
 # The scenario `filter` matrix: each nonzero count puts a policy on the target.
@@ -2883,6 +3004,9 @@ def write_provenance(args, provenance, prefix):
         # Whether the generator carried per-block policy attributes. `None`
         # under `-f`, where the scenario file states what is announced.
         'tester_attributes': recorded_tester_attributes(args),
+        # The generated import policy and the count it was checked against,
+        # or `None` for a run with none.
+        'import_policy': recorded_import_policy(args),
         # The cores each role was confined to, or None for every core. Known
         # under `-f` too, unlike the workload keys around it: bgperf2 starts
         # the containers whatever wrote the scenario.
@@ -3042,7 +3166,7 @@ def write_event_artifact(args, events, prefix, status, testers=None,
                          target_table_unmeasured_reason=None,
                          target_table_witness_rule=None,
                          convergence_rule=None, instrument=None,
-                         role_cpu=None):
+                         role_cpu=None, timing_withheld_reason=None):
     '''Atomically preserve lifecycle evidence before post-run collection.
 
     Returns the document it wrote, so the caller can print the findings it
@@ -3081,7 +3205,8 @@ def write_event_artifact(args, events, prefix, status, testers=None,
         instrument=instrument,
         # No fallback: a run built before this sampler, or one that never
         # reached the clock, has no section rather than an empty one.
-        role_cpu=role_cpu)
+        role_cpu=role_cpu,
+        timing_withheld_reason=timing_withheld_reason)
     # Derived from the finished document rather than from the events, so the
     # policy can only ever reason about intervals this artifact published.
     #
@@ -3118,6 +3243,9 @@ def write_event_artifact(args, events, prefix, status, testers=None,
         # Whether the generator carried per-block policy attributes. `None`
         # under `-f`, where the scenario file states what is announced.
         'tester_attributes': recorded_tester_attributes(args),
+        # The generated import policy and the count it was checked against,
+        # or `None` for a run with none.
+        'import_policy': recorded_import_policy(args),
         # Both blocks, for the reason `receivers` is in both.
         'pin': pin_cpusets(getattr(args, 'pin', None)) or None,
         # Both blocks, for the same reason: `findings.py` and
@@ -4102,7 +4230,7 @@ def stats_header():
     # The provenance columns are appended at the END on purpose:
     # create_batch_graphs() indexes this row positionally, so inserting a column
     # anywhere earlier silently shifts every graph and every existing CSV.
-    return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date, cores, Mem (GB), tester errors, tester timeouts, failed, MSG, filters, max foreign cpu %, target image, tester version, monitor version")
+    return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date, cores, Mem (GB), tester errors, tester timeouts, failed, MSG, filters, max foreign cpu %, policy rules, policy match, policy hit, policy bytes, target image, tester version, monitor version")
 
 
 def row_message(value):
@@ -4192,6 +4320,13 @@ def create_output_stats(args, target_version, stats, fail=False, provenance=None
     # because bgperf's own load moves it too. Placed before the provenance
     # columns so those stay last, which test_provenance.py requires.
     out.extend([round(stats.get('max_foreign_cpu', 0))])
+    # The generated import policy (policy phase 1): its three dimensions, so a
+    # policy row and its attributes-only baseline are told apart in the CSV,
+    # and the bytes of the daemon's own rendering, which differ between daemons
+    # for one policy -- what each had to parse, not how much evaluating it
+    # costs. A run with no policy reads 0 and blanks. Before the provenance
+    # columns, which stay last.
+    out.extend(policy_row_values(args, stats.get('policy_size')))
     # Which builds produced this row. The target's own version already sits in
     # the 'version' column; these say which image it came from and which builds
     # generated and measured the load.
@@ -4457,6 +4592,20 @@ def check_batch_prefix_length(test, scenarios, scope, diversity):
                     sys.exit("test '{0}': {1}".format(test['name'], e))
 
 
+# The import policy's keys, refused in batch until policy phase 1 step 7 makes
+# them matrix dimensions: a cell needs them in its identity, its stem and its
+# report before one can run.
+BATCH_POLICY_KEYS = ('policy_rules', 'policy_match', 'policy_hit')
+
+
+def refuse_batch_policy_keys(test, source, where):
+    named = [key for key in BATCH_POLICY_KEYS if key in source]
+    if named:
+        sys.exit("test '{0}': {1} sets {2}, but batch does not run an import "
+                 'policy yet; run it with `bench --policy-rules`'.format(
+                     test.get('name', '<unnamed>'), where, ', '.join(named)))
+
+
 def check_batch_tester_attributes(test, scenarios, repeated, filters, scope,
                                   diversity, churn_prefixes, reload_blocks):
     '''`bench()`'s `--tester-attributes` refusals, reached before the first cell.
@@ -4512,6 +4661,7 @@ def check_batch_test(test):
         sys.exit("test '{0}': missing required {1}: {2}".format(
             test.get('name', '<unnamed>'),
             'key' if len(missing) == 1 else 'keys', ', '.join(missing)))
+    refuse_batch_policy_keys(test, test, 'the test')
     known = set(BATCH_TEST_KEYS) | set(BATCH_TEST_OPTIONAL_KEYS)
     unknown = sorted(key for key in test if key not in known)
     if unknown:
@@ -4657,8 +4807,23 @@ def check_batch_test(test):
                     'sets single-table, which'.format(
                         test['name'], target.get('label') or target.get('name'),
                         target['file']))
+                # `bench -f`'s import-policy refusal, here for the same reason.
+                try:
+                    check_scenario_import_policy(scenario)
+                except ValueError as e:
+                    raise ValueError("test '{0}': target {1!r}'s scenario file "
+                                     '{2!r}: {3}'.format(
+                                         test['name'],
+                                         target.get('label')
+                                         or target.get('name'),
+                                         target['file'], e)) from e
         except ValueError as e:
             sys.exit(str(e))
+        # Nothing reads a target's keys from a fixed list but `batch()`, so a
+        # policy key here would run the cell with no policy under a config
+        # that names one.
+        refuse_batch_policy_keys(test, target, 'target {0!r}'.format(
+            target.get('label') or target.get('name')))
         misplaced = sorted(k for k in target if k in BATCH_TEST_ONLY_KEYS)
         if misplaced:
             sys.exit(
@@ -5632,6 +5797,12 @@ def batch_cell_args(args, cell):
     a.receivers = cell.get('receivers') or DEFAULT_RECEIVERS
     a.prefix_length = cell.get('prefix_length') or DEFAULT_PREFIX_LENGTH
     a.tester_attributes = bool(cell.get('tester_attributes'))
+    # No policy: `check_batch_test()` refuses the keys until step 7 makes them
+    # cell dimensions. Set rather than left to `getattr` defaults, so every
+    # `bench` argument exists on a cell's args.
+    a.policy_rules = DEFAULT_POLICY_RULES
+    a.policy_match = None
+    a.policy_hit = None
     # From the cell for the same reason the two above are: the cell is
     # what the id, the row and the artifact names were built from.
     a.churn_prefixes = cell.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
@@ -6274,6 +6445,41 @@ def gen_conf(args):
                 neighbors, prefix).items():
             neighbors[router_id]['policy-blocks'] = blocks
 
+    # The generated import policy (policy phase 1). The scenario carries its
+    # arguments, and the target rebuilds the rules from them. Every checkpoint
+    # becomes the policy's expected accepted count (plan Decision 1): the
+    # configured counts would leave every policy run short of its checkpoint.
+    # The monitor's is exact, without the 0.99 allowance above, because the
+    # run's count guard compares the final count to it exactly. Each
+    # neighbour keeps its offered count as `offered-check-point`, for the
+    # pre-policy `received` counter, which a policy does not shorten.
+    #
+    # The walk's exclusions are computed here, once, and rendered below: a
+    # prefix rule names the walk's own addresses, so the two must skip exactly
+    # the same space. Only a shorter walk is told what to skip: the /32
+    # preamble takes no exclusions, and parsing addresses for it would add a
+    # failure every historical run never had. The peering subnet, and any
+    # target or monitor address set explicitly outside it, are excluded so
+    # that no route covers the next hop of a session the run depends on.
+    prefix_length = (getattr(args, 'prefix_length', None)
+                     or DEFAULT_PREFIX_LENGTH)
+    exclude = (() if prefix_length == DEFAULT_PREFIX_LENGTH
+               else walk_exclusions(local_address_prefix,
+                                    run_peering_addresses(args)))
+    policy_rules = getattr(args, 'policy_rules', None) or DEFAULT_POLICY_RULES
+    if policy_rules:
+        if not getattr(args, 'tester_attributes', False):
+            raise ValueError('an import policy needs the generator attributes; '
+                             'resolve it with resolve_import_policy_args()')
+        conf['target'][IMPORT_POLICY_KEY] = scenario_import_policy(
+            policy_rules, args.policy_match, args.policy_hit, neighbor_num,
+            prefix, prefix_length, exclude)
+        expected = policy_expected_counts(policy_rules, neighbor_num, prefix)
+        for neighbor in neighbors.values():
+            neighbor['offered-check-point'] = neighbor['check-points']
+            neighbor['check-points'] = expected.accepted_per_peer[0]
+        conf['monitor']['check-points'] = [expected.accepted]
+
     # Export fan-out: sessions the target advertises its table to and which
     # announce nothing back. They are a top-level key rather than entries in
     # `conf['testers']`, which is what keeps them from being route sources --
@@ -6338,18 +6544,9 @@ def gen_conf(args):
             }
 
     yaml.Dumper.ignore_aliases = lambda *args : True
-    # Validated at every entry point, as the diversity is; this reads what was
-    # asked for. The peering subnet, and any target or monitor address set
-    # explicitly outside it, are excluded from a shorter walk so that no route
-    # covers the next hop of a session the run depends on.
-    prefix_length = (getattr(args, 'prefix_length', None)
-                     or DEFAULT_PREFIX_LENGTH)
-    # Only a shorter walk is told what to skip: the /32 preamble takes no
-    # exclusions, and parsing addresses for it would add a failure every
-    # historical run never had.
-    exclude = (() if prefix_length == DEFAULT_PREFIX_LENGTH
-               else walk_exclusions(local_address_prefix,
-                                    run_peering_addresses(args)))
+    # `prefix_length` and `exclude` were resolved above, beside the policy.
+    # The length is validated at every entry point, as the diversity is; this
+    # reads what was asked for.
     return (gen_mako_macro(prefix_length, exclude)
             + yaml.dump(conf, default_flow_style=False))
 
@@ -6406,6 +6603,11 @@ def config(args):
                             '-s/--single-table')
     except ValueError as e:
         sys.exit(str(e))
+    # A policy is rendered per target and `config` names none; and the file it
+    # writes is for `bench -f`, which refuses a scenario carrying a policy.
+    # Refused rather than dropped, so the file never looks like a policy run's.
+    refuse_import_policy_flags(args, 'config writes a scenario for bench -f, '
+                                     'which cannot carry a policy in phase 1')
     # The same guard `bench()` applies, and this is the path that most needs
     # it: `bench -f` deliberately skips the check on the reasoning that a
     # scenario file states its own neighbours, so a scenario stating *none* --
@@ -6550,6 +6752,23 @@ def create_args_parser(main=True):
                                  'measures what carrying them costs. Refused '
                                  'with churn, --path-diversity, filter_test, '
                                  '--policy-reload-blocks, -a/-e/-c/-x, -f and -r')
+        parser.add_argument('--policy-rules', type=int,
+                            default=DEFAULT_POLICY_RULES,
+                            help='put a generated import policy of this many '
+                                 'rules on the target (0, the default, puts '
+                                 'none). Turns on --tester-attributes, and '
+                                 'needs --policy-match and --policy-hit. A '
+                                 'quarter of every peer\'s prefixes is '
+                                 'rejected, and the run is marked FAILED '
+                                 'unless the monitor receives exactly the '
+                                 'rest. BIRD and '
+                                 'frr_c targets only; `bench` only')
+        parser.add_argument('--policy-match', choices=POLICY_MATCHES,
+                            help='what every policy rule matches on')
+        parser.add_argument('--policy-hit', choices=POLICY_HITS,
+                            help='which rule the accepted routes meet: first, '
+                                 'last, or miss (no rule matches and the '
+                                 'default action decides)')
         parser.add_argument('--prefix-scope', choices=PREFIX_SCOPES,
                             default='per-peer',
                             help='how to read --prefix-num. per-peer (the '

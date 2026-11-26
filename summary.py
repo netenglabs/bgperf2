@@ -74,8 +74,8 @@ FAILED = 'failed'
 NOT_RUN = 'not run'
 # A row that cannot be read against this header at all. It is kept apart from
 # `failed` because it is not a result about the daemon: `--resume` onto a
-# cell result written before a column was appended is a supported path, and
-# such a row is one field short. One of them must cost that pass and not the
+# cell result written before a column was added is a supported path, and
+# such a row is short by the columns added since. One of them must cost that pass and not the
 # whole document.
 UNREADABLE = 'unreadable'
 

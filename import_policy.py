@@ -308,6 +308,82 @@ def resolve_tester_attributes(enabled, tester_type='bird', path_diversity=1,
     return True
 
 
+def resolve_import_policy(rules, match=None, hit=None, target=None,
+                          supported_matches=None, tester_type='bird',
+                          path_diversity=1, churn_prefixes=0,
+                          filter_test=None, policy_reload_blocks=0,
+                          receivers=0, scenario_filters=(), peers=None,
+                          prefixes=None, target_config_file=None):
+    '''`(rules, match, hit)` for one run, or `(0, None, None)` for no policy.
+
+    `--policy-rules N` puts the generated policy on the target's import, and
+    **turns `--tester-attributes` on**: the as-path and community rules match
+    the blocks' attributes, and the baseline a policy cell is read against is
+    the attributes-only run, so the attributes are on whatever the match type.
+    Every refusal of the attributes is therefore a refusal of the policy too.
+    Beyond those it is refused:
+
+    - with **no match type or no hit position named**: neither has a default,
+      because a default would be a third variable set by omission;
+    - with a match type or hit position but **no rules**, which would name a
+      policy the run does not have;
+    - on a **target with no renderer** for the match type
+      (`supported_matches` is the target's declared set, `None` for none);
+    - with **`--receivers`**: export fan-out is a second cost in the run;
+    - with **`--target_config_file`**: the target runs that file as given and
+      never writes its own config, so the policy would be recorded and never
+      rendered.
+
+    `peers`/`prefixes` are the resolved per-peer fleet, checked when given.
+    Raises `ImportPolicyConfigurationError`, whose message names the flag.
+    '''
+    if rules in (None, 0) or rules is False:
+        named = [flag for flag, value in (('--policy-match', match),
+                                          ('--policy-hit', hit))
+                 if value is not None]
+        if named:
+            raise ImportPolicyConfigurationError(
+                '{0} {1} nothing to describe without --policy-rules: the run '
+                'has no policy'.format(' and '.join(named),
+                                       'has' if len(named) == 1 else 'have'))
+        return DEFAULT_POLICY_RULES, None, None
+    _whole_number('--policy-rules', rules, minimum=1,
+                  maximum=MAX_POLICY_RULES)
+    if match is None or hit is None:
+        raise ImportPolicyConfigurationError(
+            '--policy-rules needs --policy-match ({0}) and --policy-hit ({1}) '
+            'named: neither has a default'.format(
+                '|'.join(POLICY_MATCHES), '|'.join(POLICY_HITS)))
+    _check_rules(rules, match, hit)
+    if not supported_matches or match not in supported_matches:
+        raise ImportPolicyConfigurationError(
+            '--policy-rules: the {0!r} target has no renderer for a {1!r} '
+            'policy{2}'.format(
+                target, match,
+                '' if not supported_matches else
+                '; it renders {0}'.format(', '.join(supported_matches))))
+    if receivers:
+        raise ImportPolicyConfigurationError(
+            '--policy-rules and --receivers are not defined together: '
+            'export fan-out is a second cost in a run measuring the policy')
+    if target_config_file:
+        raise ImportPolicyConfigurationError(
+            '--policy-rules and --target_config_file are not defined '
+            'together: the target would run {0} as given, and the policy '
+            'would be recorded without ever being rendered'.format(
+                target_config_file))
+    try:
+        resolve_tester_attributes(True, tester_type, path_diversity,
+                                  churn_prefixes, filter_test,
+                                  policy_reload_blocks, peers, prefixes,
+                                  scenario_filters)
+    except ImportPolicyConfigurationError as e:
+        raise ImportPolicyConfigurationError(
+            '--policy-rules turns on --tester-attributes, and {0}'.format(
+                e)) from e
+    return rules, match, hit
+
+
 def scenario_policy_blocks(router_ids, prefixes):
     '''Each neighbour's blocks as the scenario carries them, keyed by router-id.
 
@@ -502,3 +578,56 @@ def build_policy(rules, match, hit, peers, prefixes, prefix_length=None,
         match=match, hit=hit, prefix_length=length,
         guard=Rule(position=None, action=REJECT, values=guard_values),
         rules=generated, default_action=DEFAULT_ACTION, deciding=deciding)
+
+
+def count_failure(rules, received, expected):
+    '''Why a converged policy run's timing is withheld, or None.
+
+    The monitor's final count must be exactly the expected accepted count:
+    more means the target accepted routes the policy rejects, fewer that it
+    rejected or lost some it accepts, and either way it did different work
+    from the run it is compared with. Equal counts are a guard against
+    unequal work, never evidence of correct evaluation. A run with no policy
+    is not judged here.
+    '''
+    if not rules:
+        return None
+    if received == expected:
+        return None
+    return ('policy count guard: the monitor received {0:,} prefixes and the '
+            'policy accepts exactly {1:,} ({2:+,}); timing withheld'.format(
+                received, expected, received - expected))
+
+
+# The scenario's target key carrying the policy's arguments. The scenario holds
+# the arguments rather than the rules, which at 65,533 would be most of the
+# file, and the target rebuilds the policy from them with `build_policy()`, the
+# same code the expected counts were derived beside.
+SCENARIO_KEY = 'import-policy'
+_SCENARIO_FIELDS = ('rules', 'match', 'hit', 'peers', 'prefixes',
+                    'prefix-length', 'exclude')
+
+
+def scenario_import_policy(rules, match, hit, peers, prefixes, prefix_length,
+                           exclude=()):
+    '''The target's `import-policy` entry: everything `build_policy()` takes.'''
+    return {'rules': rules, 'match': match, 'hit': hit, 'peers': peers,
+            'prefixes': prefixes, 'prefix-length': prefix_length,
+            'exclude': list(exclude)}
+
+
+def policy_from_scenario(spec):
+    '''The policy a target's `import-policy` entry describes.
+
+    Exactly the fields `scenario_import_policy()` writes: a missing one would
+    be filled by a default nothing recorded, and an extra one is a field this
+    code would ignore while the file said it mattered.
+    '''
+    if not isinstance(spec, dict) or set(spec) != set(_SCENARIO_FIELDS):
+        raise ImportPolicyConfigurationError(
+            'a target {0} entry must hold exactly {1}, got {2!r}'.format(
+                SCENARIO_KEY, ', '.join(_SCENARIO_FIELDS),
+                sorted(spec) if isinstance(spec, dict) else spec))
+    return build_policy(spec['rules'], spec['match'], spec['hit'],
+                        spec['peers'], spec['prefixes'],
+                        spec['prefix-length'], tuple(spec['exclude']))

@@ -403,10 +403,10 @@ Phase 1 supports 24 and 32 (`prefix_length.py`).
 
 `import_policy.py` builds the import policy for policy phase 1
 ([plan](../plans/policy-phase1.md)) from the rule count, match type, hit position, peers and
-prefixes per peer, and states the exact accepted count a target must reach. It is the model only:
-only `--tester-attributes` reaches it so far, which puts the block attributes on the generator
-(below). `policy_render.py` writes it as BIRD and FRR text (next section); attaching that text to
-a target is the lifecycle wiring, a later step.
+prefixes per peer, and states the exact accepted count a target must reach. `--tester-attributes`
+puts the block attributes on the generator (below); `policy_render.py` writes the policy as BIRD
+and FRR text; and `--policy-rules` puts it on a `bench` run's target (both sections after this
+one).
 
 - **The shape is fixed: guard, then the `N` generated rules, then default accept.** Each peer's list
   is cut into `BLOCKS_PER_PEER` (4) contiguous blocks and the **last block of every peer** is
@@ -513,6 +513,75 @@ a target is the lifecycle wiring, a later step.
   cell's startup wait has to scale with `N`, or its large cells must be refused. FRR may also look
   lists up by name when it evaluates a route; if so, evaluation is quadratic too. That is a
   hypothesis for the step-5 measurement, not a finding.
+
+### On a run — `--policy-rules N --policy-match M --policy-hit H`
+
+- **It turns `--tester-attributes` on**, whatever the match type: the as-path and community rules
+  match the blocks' attributes, and a policy cell's baseline is the attributes-only run (step 3), so
+  a prefix policy without them would carry a different table from its baseline. Every refusal of
+  the attributes is therefore a refusal of the policy, re-raised naming `--policy-rules`
+  (`import_policy.resolve_import_policy()`), and so are `--receivers` (a second cost in the run)
+  and `--target_config_file` (the target runs that file and never writes its own config, so the
+  policy would be recorded in the stem, the row and both manifests without ever being rendered).
+  Neither `--policy-match` nor `--policy-hit` has a default — a default would be a dimension set by
+  omission — and naming either without rules is refused.
+- **Support is declared on the adapter**: `Target.IMPORT_POLICY_MATCHES`, set on `BIRDTarget` and
+  `FRRoutingTarget` (and so `frr_c`), `None` everywhere else. The entry point refuses an undeclared
+  target or match type before anything starts, and `Target.import_policy()` refuses again if a
+  scenario reaches a target that declares none.
+- **Where it is refused.** `bench` runs it. `bench -f` refuses the flags, and refuses a scenario
+  whose target carries `import-policy` before the teardown (`check_scenario_import_policy()`):
+  the checkpoints and the count guard come from the command line, and a file states its own.
+  `config` refuses the flags, since it names no target and writes for `-f`. `batch` refuses
+  `policy_rules`/`policy_match`/`policy_hit` on a test **and on a target**
+  (`refuse_batch_policy_keys()`), because a target key nothing reads would run the cell with no
+  policy under a config naming one; step 7 makes them matrix dimensions. `-r` is refused, as the
+  attributes are. Native controlled cells refuse it.
+- **The scenario carries the arguments, not the rules**: the target's `import-policy` entry is
+  exactly what `build_policy()` takes, including the walk's exclusions, which `gen_conf()` now
+  computes once and uses for both the walk and the policy. The target rebuilds the policy
+  (`import_policy.policy_from_scenario()`, which refuses a missing or extra field) and writes it
+  line by line. BIRD: the filter beside the others and `import filter bgperf_import_policy` on the
+  one `neighbor range` protocol. FRR: lists and route-map **before `router bgp`**, and
+  `route-map BGPERF-IMPORT in` on every session. Both apply it to the monitor's and receivers'
+  sessions too, which announce nothing.
+- **Every checkpoint is the expected accepted count** (plan Decision 1): each neighbour's
+  `check-points`, and the monitor's, which is exact — no 0.99 allowance — because the guard below
+  compares to it exactly. Each neighbour keeps its offered count as `offered-check-point`, and
+  `Target.get_offered_counts()` holds the pre-policy `received` counter to it. Held to the accepted
+  count, `received` would call a peer complete at three quarters of its table and open the
+  convergence gate early.
+- **The count guard** (`import_policy.count_failure()`): a converged run whose monitor's final
+  count is not exactly the expected count is published `FAILED`, with the received count, the
+  expected count and their difference in `MSG`. The events artifact's monitor intervals are
+  nulled and named in `measurements_withheld_reason`: `MONITOR_REQUIRED_REACHED` is recorded when
+  the count crosses the check-point, so `convergence_s` would otherwise still be derived.
+  `findings.py` reads that reason and publishes a `timing_withheld` confounder in place of the
+  timing findings, so `limiting_component` is `unresolved`: read as absent, the nulled intervals
+  would say the monitor never reached the count, which an over-accepting policy did reach. The CSV
+  row keeps its `elapsed (s)` beside `FAILED`, as every failed row does. It is a guard against
+  unequal work, never evidence of correct evaluation. A run that already failed keeps its own
+  reason.
+- **The exact check-point drops the 0.99 allowance** ("bird seems to reject several handfuls of
+  routes"). Checked live on 2026-11-25 at 2 peers × 1,000 `/24`s, 10 rules: BIRD 2.17.1 (as-path,
+  `last`) and FRR 10.7 (prefix, `last`) both ended at exactly 1,500, the expected count. That is
+  one small shape; a larger run that loses routes would now be published `FAILED`, which is the
+  guard doing its job rather than a reason to restore the allowance.
+- A scenario file carrying `offered-check-point` on a neighbour, which only a policy run writes, is
+  refused with `import-policy`, at `bench -f` and for a batch `file:` target up front.
+- Stem `po<N><pfx|asp|com><first|last|miss>` after `ta`; both manifests' `run.import_policy`
+  records the three dimensions and the expected counts, `null` without a policy.
+- **FRR's slow config read is waited out, not capped.** The monitor's establishment wait has no
+  deadline once the sink is writing, so an FRR target parsing a large policy shows as a long
+  `monitor (s)`, not a failed run. The clock starts after it, so convergence time excludes the
+  parse. No FRR-specific cap on `N` exists yet.
+- **The stats row carries `policy rules`, `policy match`, `policy hit` and `policy bytes`**, after
+  `max foreign cpu %` and before the provenance columns, which stay last. Without them a policy row
+  and its attributes-only baseline are the same row. `policy bytes` is counted as the target writes
+  its config (`Target.write_import_policy()`), so it is the text the daemon read, never a second
+  rendering; it is blank where no size was recorded (a remote target), never 0. A cell result
+  written before these columns is one field short and `summary.py` reports that pass
+  `unreadable`, the supported path for `--resume` across an appended column.
 
 ## `-s/--single-table` — refused, because nothing has honoured it since 2021
 

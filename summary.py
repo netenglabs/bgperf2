@@ -325,14 +325,18 @@ def _unobserved_because(cell, metric):
 def _comparison_key(cell):
     """The cells one graph draws side by side, which is what gets compared.
 
-    Peers, prefixes and filter -- every axis of the matrix except the target
+    Peers, prefixes, filter and import policy -- every axis of the matrix except the target
     itself, which is the thing being told apart. `create_graph()` groups its
     bars exactly this way, so the rule answers a question somebody is actually
     going to ask of the picture.
     """
     identity = cell.get('identity') or {}
+    # The import policy is an axis too, and the graphs keep its points in
+    # separate groups; absent for every cell without one.
+    policy = identity.get('policy') or {}
     return (identity.get('peers'), identity.get('prefixes'),
-            identity.get('filter'))
+            identity.get('filter'),
+            tuple(policy.get(k) for k in ('rules', 'match', 'hit')))
 
 
 def _decision_statistics(cell, metric):

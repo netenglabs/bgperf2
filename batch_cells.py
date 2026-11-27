@@ -18,6 +18,7 @@
 """Pure batch matrix construction and legacy identity; no runtime imports."""
 
 import hashlib
+from itertools import product
 import json
 import yaml
 
@@ -198,51 +199,59 @@ def construct_batch_cells(test, targets, *, repetitions, prefix_resolver,
                           path_diversity, receivers, churn_prefixes,
                           churn_bursts, policy_reload_blocks, pin, monitor,
                           prefix_length=DEFAULT_PREFIX_LENGTH,
-                          tester_attributes=False):
+                          tester_attributes=False, policy_points=None):
     """Construct cells from caller-validated and resolved workload controls.
 
     Defaults and argument guards remain at the existing batch entry point.
     This constructor is shared with the restricted declarative recipe reader.
+
+    `policy_points` is the import policy's `(rules, match, hit)` axis, inside
+    the filter axis and outside the targets, so the targets of one workload
+    still run side by side. Omitted, it is the one no-policy point, and every
+    ordinal is the one it has always been.
     """
     scope = test.get('prefix_scope')
     diversity = path_diversity
     reload_blocks = policy_reload_blocks
+    points = policy_points or [(0, None, None)]
     cells = []
     for repetition in range(1, repetitions + 1):
         ordinal = 0
-        for n in test['neighbors']:
-            for p in test['prefixes']:
-                for filter_test in test['filter_test']:
-                    for t in targets:
-                        cell = {
-                            'repetition': repetition if repetitions > 1 else None,
-                            'ordinal': ordinal,
-                            'neighbors': n,
-                            # The per-peer count, resolved here rather than
-                            # carried as a scope: `-n 50 -p 100000` under
-                            # `total` and `-n 50 -p 2000` are the same
-                            # workload, so they must produce the same cell
-                            # identity, the same row, the same artifact names
-                            # and the same bar. `check_batch_test()` has
-                            # already refused an inexact division.
-                            'prefixes': prefix_resolver(scope, n, p),
-                            'filter': filter_test,
-                            'path_diversity': diversity,
-                            'receivers': receivers,
-                            'churn_prefixes': churn_prefixes,
-                            'churn_bursts': churn_bursts,
-                            'policy_reload_blocks': reload_blocks,
-                            'pin': pin,
-                            'monitor': monitor,
-                            'prefix_length': prefix_length,
-                            'target': t,
-                        }
-                        # Only when set, so every other cell keeps the
-                        # fields it has always had.
-                        if tester_attributes:
-                            cell['tester_attributes'] = True
-                        cells.append(cell)
-                        ordinal += 1
+        for n, p, filter_test, (rules, match, hit), t in product(
+                test['neighbors'], test['prefixes'], test['filter_test'],
+                points, targets):
+            cell = {
+                'repetition': repetition if repetitions > 1 else None,
+                'ordinal': ordinal,
+                'neighbors': n,
+                # The per-peer count, resolved here rather than carried as a
+                # scope: `-n 50 -p 100000` under `total` and `-n 50 -p 2000`
+                # are the same workload, so they must produce the same cell
+                # identity, the same row, the same artifact names and the same
+                # bar. `check_batch_test()` has already refused an inexact
+                # division.
+                'prefixes': prefix_resolver(scope, n, p),
+                'filter': filter_test,
+                'path_diversity': diversity,
+                'receivers': receivers,
+                'churn_prefixes': churn_prefixes,
+                'churn_bursts': churn_bursts,
+                'policy_reload_blocks': reload_blocks,
+                'pin': pin,
+                'monitor': monitor,
+                'prefix_length': prefix_length,
+                'target': t,
+            }
+            # Only when set, so every other cell keeps the fields it has
+            # always had.
+            if tester_attributes:
+                cell['tester_attributes'] = True
+            if rules:
+                cell['policy_rules'] = rules
+                cell['policy_match'] = match
+                cell['policy_hit'] = hit
+            cells.append(cell)
+            ordinal += 1
     return cells
 
 
@@ -289,6 +298,12 @@ def batch_cell_id(test_name, cell):
     # attributes are otherwise the same cell.
     if cell.get('tester_attributes'):
         identity['tester_attributes'] = True
+    # All three only for a policy cell, on the same rule; a `0` baseline is
+    # told from a no-policy cell by `tester_attributes` above.
+    if cell.get('policy_rules'):
+        identity['policy_rules'] = cell['policy_rules']
+        identity['policy_match'] = cell['policy_match']
+        identity['policy_hit'] = cell['policy_hit']
     # Both keys or neither, and only away from the default: a burst count with
     # no block is not a workload, so recording one on a cell that churns
     # nothing would put a key in the id that says nothing about what ran.

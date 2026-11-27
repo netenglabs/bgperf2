@@ -162,16 +162,54 @@ def test_the_policy_is_confirmed_loaded_before_anything_is_measured(tmp_path):
         < calls.index('sample target') < calls.index('launch')
 
 
-def test_a_policy_not_loaded_stops_the_run_before_it_starts(tmp_path):
+def test_a_policy_not_loaded_is_a_failed_row_with_nothing_measured(tmp_path):
     runtime, args, calls, _ = fake_run(
         tmp_path, extra=POLICY_RUN, policy_unloaded='filter not attached')
-    with pytest.raises(SystemExit, match='policy-loaded check failed: '
-                                         'filter not attached'):
-        run_lifecycle.bench(runtime, args)
+    # A row, not an exit, so a batch records the cell and goes on.
+    row = run_lifecycle.bench(runtime, args)
+    assert bgperf2.row_failed(row)
+    header = [f.strip() for f in bgperf2.stats_header().split(',')]
+    assert len(row) == len(header)
+    assert row[header.index('MSG')].startswith(
+        'policy-loaded check failed: filter not attached')
+    assert row[header.index('received')] == 0
+    assert row[header.index('policy rules')] == 3
+    # Nothing was started or sampled, and no graph was drawn from no samples.
     assert 'launch' not in calls
     assert not any(c.startswith('sample') for c in calls)
     assert 'controller_idle_percent' not in calls
-    assert not (tmp_path / 'results').exists()
+    assert 'graphs' not in calls
+    assert calls[-1] == 'manifest'
+    artifact = json.loads(next((tmp_path / 'results').glob('*.events.json')).read_text())
+    assert artifact['status'] == 'failed'
+    assert 'policy-loaded check failed' in json.dumps(artifact)
+
+
+def test_a_policy_not_loaded_exits_1_from_the_command_line(tmp_path, monkeypatch):
+    runtime, args, _, _ = fake_run(
+        tmp_path, extra=POLICY_RUN, policy_unloaded='filter not attached')
+    monkeypatch.setattr(bgperf2, 'bench',
+                        lambda a: run_lifecycle.bench(runtime, a))
+    with pytest.raises(SystemExit) as caught:
+        bgperf2.bench_command(args)
+    assert caught.value.code == 1
+
+
+def test_a_batch_policy_cell_runs_its_point_through_bench(tmp_path):
+    runtime, args, calls, _ = fake_run(tmp_path, accepted=8)
+    test = {'name': 'policy', 'neighbors': [1], 'prefixes': [10],
+            'filter_test': ['None'], 'targets': [{'name': 'bird'}],
+            'monitor': 'gobgp', 'policy_rules': [0, 3],
+            'policy_match': ['as-path'], 'policy_hit': ['last']}
+    bgperf2.check_batch_test(test)
+    baseline, point = bgperf2.expand_batch_cells(test, test['targets'])
+    row = run_lifecycle.bench(runtime, bgperf2.batch_cell_args(args, point))
+    header = [f.strip() for f in bgperf2.stats_header().split(',')]
+    assert not bgperf2.row_failed(row)
+    assert [row[header.index(c)] for c in (
+        'policy rules', 'policy match', 'policy hit')] == [3, 'as-path', 'last']
+    assert calls.count('policy loaded check') == 1
+    assert next((tmp_path / 'results').glob('*_ta_po3asplast*.events.json'))
 
 
 def test_a_run_without_a_policy_is_not_checked(tmp_path):

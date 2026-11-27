@@ -718,13 +718,27 @@ def bench(runtime, args):
     # fast, and the count guard alone cannot catch a policy that lost rules
     # but still accepts the same routes. A remote target never carries one:
     # it comes only from `-f`, which refuses the policy.
+    #
+    # A refusal is a FAILED row, not an exit (policy phase 1 step 7), so a
+    # batch records that cell and goes on to the next one, and `bench` exits 1
+    # as it does for any failed row. It is recorded through `finish_bench()`
+    # with no sample taken: the row's times and peaks are the unsampled
+    # defaults, its events artifact withholds every interval by this reason,
+    # and the containers are left for inspection as on every failed run.
     if not is_remote and getattr(args, 'policy_rules', None):
         policy_unloaded = target.policy_loaded_failure()
         if policy_unloaded:
-            runtime.sys.exit(
-                'policy-loaded check failed: {0}. No measurement was started; '
-                'the containers are left for inspection'.format(
-                    policy_unloaded))
+            reason = ('policy-loaded check failed: {0}; nothing was '
+                      'measured'.format(policy_unloaded))
+            print('FAILED: {0}'.format(reason))
+            unsampled_output_stats(runtime, output_stats, conf)
+            output_stats['cores'], output_stats['memory'] = runtime.get_hardware_info()
+            output_stats['elapsed'] = runtime.datetime.timedelta(0)
+            output_stats['recved'] = 0
+            output_stats['fail_msg'] = reason
+            output_stats['timing_withheld_reason'] = reason
+            return runtime.finish_bench(args, output_stats, [], bench_start,
+                                        target, m, testers, fail=True)
         print('import policy: {0} rules confirmed loaded on the target'.format(
             args.policy_rules))
     output_stats['cores'], output_stats['memory'] = runtime.get_hardware_info()
@@ -906,23 +920,7 @@ def bench(runtime, args):
     cpu = 0
     mem = 0
 
-    output_stats['max_cpu'] = 0
-    output_stats['max_mem'] = 0
-    output_stats['first_received_time'] = runtime.datetime.timedelta(0)
-    output_stats['min_idle'] = 100
-    output_stats['min_free'] = runtime.UNSAMPLED_MIN_FREE
-    output_stats['max_foreign_cpu'] = 0
-    # None until a sample sets the maximum: a run that never sampled and a run
-    # whose competitors could not be named must not both read as a run that
-    # looked and found nobody.
-    output_stats['max_foreign_cpu_processes'] = None
-    # finish_bench() fills these in once the clock has stopped; a run with no
-    # testers (a remote target) never gets there, and they are printed and
-    # written into the row unconditionally.
-    output_stats['tester_errors'] = 0
-    output_stats['tester_timeouts'] = 0
-
-    output_stats['required'] = conf['monitor']['check-points'][0]
+    unsampled_output_stats(runtime, output_stats, conf)
     bench_stats = []
     neighbors_checked = 0
     neighbors_received_full = 0
@@ -1313,6 +1311,32 @@ def abandon_run(runtime, reason, target, m, testers=()):
     raise runtime.StopRequested(reason)
 
 
+def unsampled_output_stats(runtime, output_stats, conf):
+    '''The row's values before the first sample, set before the loop starts.
+
+    Also what a run that ended before any sampler started publishes: the
+    policy-loaded refusal records its FAILED row from these, and the peaks are
+    the sentinels `summary.py` already reads as unsampled.
+    '''
+    output_stats['max_cpu'] = 0
+    output_stats['max_mem'] = 0
+    output_stats['first_received_time'] = runtime.datetime.timedelta(0)
+    output_stats['min_idle'] = 100
+    output_stats['min_free'] = runtime.UNSAMPLED_MIN_FREE
+    output_stats['max_foreign_cpu'] = 0
+    # None until a sample sets the maximum: a run that never sampled and a run
+    # whose competitors could not be named must not both read as a run that
+    # looked and found nobody.
+    output_stats['max_foreign_cpu_processes'] = None
+    # finish_bench() fills these in once the clock has stopped; a run with no
+    # testers (a remote target) never gets there, and they are printed and
+    # written into the row unconditionally.
+    output_stats['tester_errors'] = 0
+    output_stats['tester_timeouts'] = 0
+
+    output_stats['required'] = conf['monitor']['check-points'][0]
+
+
 def finish_bench(runtime, args, output_stats, bench_stats, bench_start, target, m, testers=(), fail=False,
                  lifecycle_events=(), tester_lifecycles=None,
                  tester_observation_errors=None, tester_read_failures=None,
@@ -1488,6 +1512,12 @@ def finish_bench(runtime, args, output_stats, bench_stats, bench_start, target, 
         import deferred_graphs
         deferred_graphs.save(runtime,bench_stats,bench_prefix,args.results_dir)
         phase('graphs_deferred')
+    elif not bench_stats:
+        # A run that ended before its first sample -- the policy-loaded
+        # refusal -- has no series to draw, and `create_ts_graph()` cannot
+        # index an empty one. Deferred mode above keeps the empty document,
+        # which its renderer already refuses by name.
+        print('no samples were taken; the per-run graphs are not drawn')
     else:
         phase('render_started')
         runtime.create_bench_graphs(bench_stats, prefix=bench_prefix, results_dir=args.results_dir)

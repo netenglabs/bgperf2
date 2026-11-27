@@ -3,8 +3,8 @@
 Status: in progress
 Strand: 6 Test capabilities (IPv6, BGP policy, new workloads)
 Updated: 2026-11-26
-Next: Batch dimensions and graphs (step 7). Steps 1–6 are done: `bench --policy-rules` runs the policy on BIRD and FRR, confirms it is loaded before measuring, and publishes it in the stats row.
-Blocked on: none
+Next: Live qualification (step 8), which needs separate authorization. Steps 1–7 are done: `bench --policy-rules` and `batch`'s `policy_rules`/`policy_match`/`policy_hit` axes run the policy on BIRD and FRR, confirm it is loaded before measuring, and publish it in the stats row and in graphs of cost against rule count.
+Blocked on: authorization for the step-8 live run
 Done when: `bench` and `batch` run a generated import policy of selected size, match type and match position on BIRD and FRR targets at `/24` and `/32`, publish convergence, CPU and memory beside a no-policy baseline, and withhold timing by name whenever the monitor's count differs from the policy's expected count.
 
 Selected 2026-11-21 as the first scoped step of the
@@ -208,11 +208,39 @@ renderer.
      list entry, route-map entry and per-session `route-map … in`, ignoring
      only FRR's ` seq N`. FRR 10.7's real output is the test fixture.
    - Every other adapter fails closed until it has its own check.
-   - It exits with `sys.exit`; step 7 must make it a per-cell failure.
+   - It exited with `sys.exit`; step 7 made it a per-cell failure.
 7. **Batch dimensions and graphs.** `policy_rules`, `policy_match` and
    `policy_hit` become batch matrix keys, as does `prefix_length`,, with `policy_rules: 0` as the
    in-matrix baseline. Graphs plot cost against rule count for each match type
    and hit position.
+
+   *Done 2026-11-26*:
+   - The three keys are list axes on a test, all three or none, and
+     refused on a target. A `0` is one baseline cell per workload, not
+     one per match type and hit position. Every cell of a policy test
+     carries the generator's attributes, the baseline included, since the
+     baseline is the attributes-only run. `tester_attributes: false`
+     beside them is refused.
+   - The policy points run inside the filter axis and outside the
+     targets, so the targets of one point still run side by side. A test
+     without the keys keeps every cell id and ordinal it had.
+   - `check_batch_policy()` puts every target, filter, fleet and point
+     through `bench`'s own policy refusals before the first cell, and
+     the baseline through the attributes' refusals.
+   - The cell id, description, stem and summary identity carry the point.
+     The variance rule compares only cells of one point, and the bar
+     graphs give each point its own group.
+   - New `bgperf_<test>_policy_{elapsed,max_cpu,max_mem}.png`: one line
+     per target, workload, match type and hit position, starting at that
+     workload's baseline. A failed point is a gap, not a zero.
+   - `prefix_length` was already a test key and stays one value per
+     test. The stats row has no prefix-length column, so mixing lengths
+     in one test would merge rows in its graphs. Step 8's `/32` bridge
+     cells are a second test in the same config.
+   - A refused policy-loaded check is now a FAILED row through
+     `finish_bench()`, with nothing sampled and every interval withheld
+     by name. A batch records the cell and goes on; `bench` exits 1, as
+     it does for any failed row.
 8. **Live qualification.** One bounded small matrix, separately authorized:
    BIRD and FRR at `/24`, N ∈ {0, 1000}, each match type, `first` and
    `last`, plus `/32` bridge cells at N ∈ {0, 1000} that tie the new results

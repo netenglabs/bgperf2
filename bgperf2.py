@@ -116,6 +116,7 @@ from mako.template import Template
 from packaging import version
 from docker.types import IPAMConfig, IPAMPool
 import re
+import statistics
 
 # The daemons bgperf2 can build images for, keyed by the name used on the
 # command line (`update <name>`) and in batch yaml. Adding a daemon here is
@@ -4391,9 +4392,15 @@ def create_graph(stats, test_name='total time', stat_index=8, test_file='total_t
         for stat in stats:
             labels[stat[0]] = True
             key = f"{stat[3]}n_{stat[4]}p"
-            
+
             if stat[24]:
                  key =f"{key}_{stat[24]}"
+            # The import policy's point, its own group: a batch iterates it
+            # beside one target, so without it a test's policy cells share a
+            # name and a group, and the bars outnumber the ticks.
+            # `policy rules`, `policy match` and `policy hit`.
+            if len(stat) > 28 and str(stat[26]) not in ('', '0'):
+                key = f"{key}_po{stat[26]}_{stat[27]}_{stat[28]}"
 
             if len(stat) > 23 and stat[22] == 'FAILED':# this means that it failed for some reason
                 data[key].append(0)
@@ -4447,7 +4454,8 @@ BATCH_TEST_KEYS = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
 BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope',
                             'path_diversity', 'receivers', 'churn_prefixes',
                             'churn_bursts', 'policy_reload_blocks', 'pin',
-                            'monitor', 'prefix_length', 'tester_attributes')
+                            'monitor', 'prefix_length', 'tester_attributes',
+                            'policy_rules', 'policy_match', 'policy_hit')
 
 
 # Keys that mean something on a *test* and nothing on a target. There is no
@@ -4465,7 +4473,8 @@ BATCH_TEST_ONLY_KEYS = ('prefix_scope', 'repetitions', 'order', 'seed',
                         'neighbors', 'prefixes', 'filter_test',
                         'path_diversity', 'receivers', 'churn_prefixes',
                         'churn_bursts', 'policy_reload_blocks', 'pin',
-                        'monitor', 'prefix_length', 'tester_attributes')
+                        'monitor', 'prefix_length', 'tester_attributes',
+                        'policy_rules', 'policy_match', 'policy_hit')
 
 # Target keys whose absence means something other than `None`. `batch()`
 # otherwise gives every unset field `None`, and `gen_conf()` routes anything
@@ -4592,18 +4601,136 @@ def check_batch_prefix_length(test, scenarios, scope, diversity):
                     sys.exit("test '{0}': {1}".format(test['name'], e))
 
 
-# The import policy's keys, refused in batch until policy phase 1 step 7 makes
-# them matrix dimensions: a cell needs them in its identity, its stem and its
-# report before one can run.
+# The import policy's matrix keys (policy phase 1 step 7). Each is a list, an
+# axis like `neighbors`, and `policy_rules: 0` is the in-matrix baseline.
 BATCH_POLICY_KEYS = ('policy_rules', 'policy_match', 'policy_hit')
 
+# A test without a policy: one point, the cell every older batch has.
+NO_POLICY_POINT = (DEFAULT_POLICY_RULES, None, None)
 
-def refuse_batch_policy_keys(test, source, where):
-    named = [key for key in BATCH_POLICY_KEYS if key in source]
-    if named:
-        sys.exit("test '{0}': {1} sets {2}, but batch does not run an import "
-                 'policy yet; run it with `bench --policy-rules`'.format(
-                     test.get('name', '<unnamed>'), where, ', '.join(named)))
+
+def batch_policy_points(test):
+    '''The `(rules, match, hit)` points a test's cells run, in written order.
+
+    `[NO_POLICY_POINT]` for a test naming none of the keys. Otherwise all three
+    are required, as on the command line, where neither the match type nor
+    the hit position has a default; `policy_rules` must hold a positive count,
+    since a matrix of baselines measures no policy. A `0` is **one** point,
+    not one per match type and hit position: the baseline has neither, and
+    repeating it would be the same cell under several names.
+
+    Shapes and repeats only; whether a point can run on a target is
+    `check_batch_policy()`'s.
+    '''
+    named = [key for key in BATCH_POLICY_KEYS if key in test]
+    if not named:
+        return [NO_POLICY_POINT]
+    name = test.get('name', '<unnamed>')
+    missing = [key for key in BATCH_POLICY_KEYS if key not in test]
+    if missing:
+        sys.exit("test '{0}': {1} {2} without {3}: an import policy needs "
+                 'all three, and neither the match type nor the hit position '
+                 'has a default'.format(
+                     name, ', '.join(named),
+                     'is set' if len(named) == 1 else 'are set',
+                     ', '.join(missing)))
+    for key in BATCH_POLICY_KEYS:
+        values = test[key]
+        if not isinstance(values, list) or not values:
+            sys.exit("test '{0}': {1} must be a non-empty list, got "
+                     '{2!r}'.format(name, key, values))
+        repeated = sorted({repr(v) for v in values
+                           if sum(1 for w in values if repr(w) == repr(v)) > 1})
+        if repeated:
+            sys.exit("test '{0}': {1} repeats {2}; a matrix axis lists each "
+                     'value once, and `repetitions:` is what measures a cell '
+                     'more than once'.format(name, key, ', '.join(repeated)))
+    rules = test['policy_rules']
+    bad = [v for v in rules if isinstance(v, bool) or not isinstance(v, int)
+           or v < 0]
+    if bad:
+        sys.exit("test '{0}': policy_rules must be whole numbers, 0 for the "
+                 'baseline, got {1}'.format(name,
+                                            ', '.join(repr(v) for v in bad)))
+    if not any(rules):
+        sys.exit("test '{0}': policy_rules holds only the baseline 0, so no "
+                 'cell would run a policy; leave the three policy keys out '
+                 'for a test without one'.format(name))
+    points = []
+    for count in rules:
+        if not count:
+            points.append(NO_POLICY_POINT)
+            continue
+        for match in test['policy_match']:
+            for hit in test['policy_hit']:
+                points.append((count, match, hit))
+    return points
+
+
+def check_batch_policy(test, scenarios, repeated, filters, scope, diversity,
+                       churn_prefixes, reload_blocks):
+    '''`bench()`'s import-policy refusals, reached before the first cell.
+
+    Every target, filter, fleet and policy point on the axes, for the reason
+    the churn check covers the whole grid: a match type one target renders and
+    the next does not is easy to write, and finding that out at cell three is
+    hours lost. The `0` baseline is an attributes-only cell, so its refusals
+    are the attributes' and are checked beside it.
+    '''
+    points = batch_policy_points(test)
+    if points == [NO_POLICY_POINT]:
+        return
+    name = test['name']
+    if test.get('tester_attributes') is False:
+        sys.exit("test '{0}': tester_attributes is false, but a policy test "
+                 'runs every cell with them: the policy matches their '
+                 'attributes, and the 0 baseline is the attributes-only '
+                 'run'.format(name))
+    if scenarios:
+        sys.exit("test '{0}': an import policy has nothing to apply to {1}, "
+                 'which name a scenario file: its checkpoints and count guard '
+                 'come from the matrix, and a file states its own'.format(
+                     name, ', '.join(scenarios)))
+    if repeated:
+        sys.exit("test '{0}': an import policy cannot be used with repeat, "
+                 'which {1} {2} set: repeat reuses the generator containers '
+                 'as they are, so they keep the attributes they were started '
+                 'with'.format(name, ', '.join(repeated),
+                               'has' if len(repeated) == 1 else 'have'))
+    receivers = test.get('receivers')
+    for target, filter_test, neighbors, prefixes, (rules, match, hit) in product(
+            test['targets'], filters, test['neighbors'], test['prefixes'],
+            points):
+        try:
+            per_peer = resolve_prefix_scope(scope, neighbors, prefixes)
+            if rules:
+                _resolve_import_policy(
+                    rules, match, hit, target['name'],
+                    target_policy_matches(target['name']),
+                    batch_target_field(target, 'tester_type'), diversity,
+                    churn_prefixes, filter_test, reload_blocks, receivers,
+                    scenario_filter_flags(target), neighbors, per_peer,
+                    target.get('target_config_file'))
+            else:
+                try:
+                    _resolve_tester_attributes(
+                        True, batch_target_field(target, 'tester_type'),
+                        diversity, churn_prefixes, filter_test, reload_blocks,
+                        neighbors, per_peer, scenario_filter_flags(target))
+                except ValueError as e:
+                    # Named as the baseline: the config sets no
+                    # `tester_attributes`, and the refusal names that flag.
+                    raise ValueError('the policy_rules 0 baseline is an '
+                                     'attributes-only cell, and {0}'.format(
+                                         e)) from e
+        except ValueError as e:
+            sys.exit("test '{0}': target {1!r}: {2}".format(
+                name, target.get('label') or target['name'], e))
+
+
+def batch_test_runs_policy(test):
+    '''Whether a (checked) test names the import policy's matrix keys.'''
+    return any(key in test for key in BATCH_POLICY_KEYS)
 
 
 def check_batch_tester_attributes(test, scenarios, repeated, filters, scope,
@@ -4661,7 +4788,6 @@ def check_batch_test(test):
         sys.exit("test '{0}': missing required {1}: {2}".format(
             test.get('name', '<unnamed>'),
             'key' if len(missing) == 1 else 'keys', ', '.join(missing)))
-    refuse_batch_policy_keys(test, test, 'the test')
     known = set(BATCH_TEST_KEYS) | set(BATCH_TEST_OPTIONAL_KEYS)
     unknown = sorted(key for key in test if key not in known)
     if unknown:
@@ -4819,11 +4945,9 @@ def check_batch_test(test):
                                          target['file'], e)) from e
         except ValueError as e:
             sys.exit(str(e))
-        # Nothing reads a target's keys from a fixed list but `batch()`, so a
-        # policy key here would run the cell with no policy under a config
-        # that names one.
-        refuse_batch_policy_keys(test, target, 'target {0!r}'.format(
-            target.get('label') or target.get('name')))
+        # A policy key is among these: nothing reads a target's keys from a
+        # fixed list but `batch()`, so one here would run the cell with no
+        # policy under a config that names one.
         misplaced = sorted(k for k in target if k in BATCH_TEST_ONLY_KEYS)
         if misplaced:
             sys.exit(
@@ -5011,6 +5135,8 @@ def check_batch_test(test):
                 'has' if len(repeated) == 1 else 'have'))
     check_batch_tester_attributes(test, scenarios, repeated, filters, scope,
                                   diversity, churn_prefixes, reload_blocks)
+    check_batch_policy(test, scenarios, repeated, filters, scope, diversity,
+                       churn_prefixes, reload_blocks)
     check_batch_pin(test, repeated)
     monitor = test.get('monitor')
     if monitor is not None and monitor not in MONITOR_TYPES:
@@ -5112,7 +5238,9 @@ def check_batch_prefix_length_and_repeat(tests):
     # The same trap with the generator's per-block attributes: a test without
     # them reusing generators a `tester_attributes` test started would send
     # the attributes under a stem and manifests that say it did not.
-    attributed = [t['name'] for t in tests if t.get('tester_attributes') is True]
+    # A policy test runs every cell with them, its baseline included.
+    attributed = [t['name'] for t in tests if t.get('tester_attributes') is True
+                  or batch_test_runs_policy(t)]
     if attributed and repeating:
         sys.exit('batch: {0} {1} tester_attributes and {2} {3} a repeat '
                  'target. A repeat reuses whatever tester containers the run '
@@ -5216,13 +5344,20 @@ def expand_batch_cells(test, targets):
     monitor = batch_test_monitor(test)
     # And the prefix length: a /24 table and a /32 table are different cells.
     prefix_length = test.get('prefix_length') or DEFAULT_PREFIX_LENGTH
+    # And the import policy, the one axis here a test iterates rather than
+    # holds: each point is a cell beside every other axis. A policy test runs
+    # every cell with the generator's attributes, its `0` baseline included,
+    # because that baseline is the attributes-only run.
+    policy_points = batch_policy_points(test)
     return construct_batch_cells(
         test, targets, repetitions=repetitions,
         prefix_resolver=resolve_prefix_scope, path_diversity=diversity,
         receivers=receivers, churn_prefixes=churn_prefixes,
         churn_bursts=churn_bursts, policy_reload_blocks=reload_blocks,
         pin=pin, monitor=monitor, prefix_length=prefix_length,
-        tester_attributes=bool(test.get('tester_attributes')))
+        tester_attributes=(bool(test.get('tester_attributes'))
+                           or policy_points != [NO_POLICY_POINT]),
+        policy_points=policy_points)
 
 
 # How a test may sequence its cells. `matrix` is the enumeration order
@@ -5375,6 +5510,15 @@ def batch_summary_groups(test_name, cells, completed):
                              'target': cell['target']},
                 'passes': [],
             }
+            # The one axis a test iterates beside those three, so it is in
+            # the identity the variance rule groups rivals by: two policies
+            # on one target are two workloads, not two rivals. Only for a
+            # policy cell, so every other summary is unchanged.
+            if cell.get('policy_rules'):
+                groups[ordinal]['identity']['policy'] = {
+                    'rules': cell['policy_rules'],
+                    'match': cell['policy_match'],
+                    'hit': cell['policy_hit']}
         groups[ordinal]['passes'].append({
             'repetition': cell['repetition'],
             'row': completed.get(batch_cell_id(test_name, cell))})
@@ -5797,12 +5941,12 @@ def batch_cell_args(args, cell):
     a.receivers = cell.get('receivers') or DEFAULT_RECEIVERS
     a.prefix_length = cell.get('prefix_length') or DEFAULT_PREFIX_LENGTH
     a.tester_attributes = bool(cell.get('tester_attributes'))
-    # No policy: `check_batch_test()` refuses the keys until step 7 makes them
-    # cell dimensions. Set rather than left to `getattr` defaults, so every
-    # `bench` argument exists on a cell's args.
-    a.policy_rules = DEFAULT_POLICY_RULES
-    a.policy_match = None
-    a.policy_hit = None
+    # From the cell, which carries them only for a policy point; set either
+    # way, so every `bench` argument exists on a cell's args. `bench()`
+    # resolves them again through the same guards as the command line.
+    a.policy_rules = cell.get('policy_rules') or DEFAULT_POLICY_RULES
+    a.policy_match = cell.get('policy_match')
+    a.policy_hit = cell.get('policy_hit')
     # From the cell for the same reason the two above are: the cell is
     # what the id, the row and the artifact names were built from.
     a.churn_prefixes = cell.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
@@ -6091,6 +6235,10 @@ def batch_cell_description(cell, repetitions=1):
         described = '{0}, prefix length=/{1}'.format(described, prefix_length)
     if cell.get('tester_attributes'):
         described = '{0}, tester attributes'.format(described)
+    if cell.get('policy_rules'):
+        described = '{0}, policy={1} {2} {3}'.format(
+            described, cell['policy_rules'], cell['policy_match'],
+            cell['policy_hit'])
     churn_prefixes = cell.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
     if churn_prefixes != DEFAULT_CHURN_PREFIXES:
         described = '{0}, churn={1}x{2}'.format(
@@ -6220,9 +6368,87 @@ BATCH_GRAPHS = [
 ]
 
 
+# Cost against rule count (policy phase 1 step 7), drawn only for a test with
+# policy cells. Read by column name, not by position.
+BATCH_POLICY_GRAPHS = [
+        ('convergence against policy rules', 'elapsed (s)', 'policy_elapsed',
+         'seconds'),
+        ('max cpu against policy rules', 'max cpu %', 'policy_max_cpu', '%'),
+        ('max mem against policy rules', 'max mem (GB)', 'policy_max_mem', 'GB'),
+]
+
+
+def batch_policy_graph_series(results, column):
+    '''One line per target, workload, match type and hit position: `{label:
+    [(rules, value), ...]}` sorted by rule count, `{}` without a policy row.
+
+    A workload's `0` baseline is the first point of every line drawn for it,
+    since it is the attributes-only run each of them is read against. The
+    passes of a repeated test are one line, at the median of the passes each
+    point has: `run_name()`'s ` #N` is what tells them apart, and is dropped.
+
+    Nothing absent is drawn as a zero -- a gap says the point was not
+    measured, which a zero would deny. So a failed row is left out, and so
+    is a value `unsampled_row_values()` names as a dead sampler's sentinel,
+    and a row not of the header's width, which this cannot read by name.
+    '''
+    header = [f.strip() for f in stats_header().split(',')]
+    at = {key: header.index(key) for key in (
+        'name', 'peers', 'prefixes per peer', 'filters', 'failed',
+        'policy rules', 'policy match', 'policy hit', column)}
+    unsampled = unsampled_row_values().get(column)
+    baselines, lines = {}, {}
+    for row in results:
+        if len(row) != len(header) or row[at['failed']] == 'FAILED':
+            continue
+        value = float(row[at[column]])
+        if unsampled is not None and value == float(unsampled):
+            continue
+        name = re.sub(r' #\d+$', '', str(row[at['name']]))
+        workload = (name, str(row[at['peers']]),
+                    str(row[at['prefixes per peer']]), row[at['filters']])
+        rules = int(row[at['policy rules']] or 0)
+        if not rules:
+            baselines.setdefault(workload, []).append(value)
+            continue
+        line = lines.setdefault(
+            workload + (row[at['policy match']], row[at['policy hit']]), {})
+        line.setdefault(rules, []).append(value)
+    series = {}
+    for (name, peers, prefixes, filter_test, match, hit), points in lines.items():
+        workload = (name, peers, prefixes, filter_test)
+        if workload in baselines:
+            points = {**points, 0: baselines[workload]}
+        label = '{0} {1} {2}, {3}n_{4}p{5}'.format(
+            name, match, hit, peers, prefixes,
+            '_{0}'.format(filter_test) if filter_test else '')
+        series[label] = sorted((rules, statistics.median(values))
+                               for rules, values in points.items())
+    return series
+
+
+def create_batch_policy_graphs(results, name, results_dir=DEFAULT_RESULTS_DIR):
+    for title, column, suffix, ylabel in BATCH_POLICY_GRAPHS:
+        series = batch_policy_graph_series(results, column)
+        if not series:
+            return
+        plt.figure()
+        for label, points in series.items():
+            plt.plot([x for x, _ in points], [y for _, y in points],
+                     marker='o', label=label)
+        plt.xlabel('policy rules')
+        plt.ylabel(ylabel)
+        plt.title(title)
+        plt.legend()
+        plt.savefig(results_path(results_dir, f"bgperf_{name}_{suffix}.png"))
+        plt.close()
+
+
 def batch_graph_paths(name, results_dir=DEFAULT_RESULTS_DIR):
+    suffixes = ([suffix for _test_name, _stat_index, suffix, _ylabel in BATCH_GRAPHS]
+                + [suffix for _title, _column, suffix, _ylabel in BATCH_POLICY_GRAPHS])
     return [os.path.join(results_dir or DEFAULT_RESULTS_DIR, f"bgperf_{name}_{suffix}.png")
-            for _test_name, _stat_index, suffix, _ylabel in BATCH_GRAPHS]
+            for suffix in suffixes]
 
 
 def create_batch_graphs(results, name, results_dir=DEFAULT_RESULTS_DIR):
@@ -6230,6 +6456,7 @@ def create_batch_graphs(results, name, results_dir=DEFAULT_RESULTS_DIR):
         create_graph(results, test_name=test_name, stat_index=stat_index,
                      test_file=f"bgperf_{name}_{suffix}.png", ylabel=ylabel,
                      results_dir=results_dir)
+    create_batch_policy_graphs(results, name, results_dir=results_dir)
 
 def mem_human(v):
     if v > 1024 * 1024 * 1024:

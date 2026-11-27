@@ -5,6 +5,7 @@ renders, the target configs written from it, the checkpoints and the count
 guard. Whether each daemon applies the policy is the live check's job.
 '''
 import json
+import os
 from argparse import Namespace
 
 import pytest
@@ -583,32 +584,236 @@ def a_test(**overrides):
     return test
 
 
-class TestTheBatch:
-    '''Refused until step 7 makes the policy a matrix dimension.'''
+POLICY_AXES = {'policy_rules': [0, 10], 'policy_match': ['prefix', 'as-path'],
+               'policy_hit': ['first', 'last']}
 
-    @pytest.mark.parametrize('key', bgperf2.BATCH_POLICY_KEYS)
-    def test_a_test_key_is_refused(self, key):
-        with pytest.raises(SystemExit, match='does not run an import policy'):
-            bgperf2.check_batch_test(a_test(**{key: 5}))
+
+def policy_test(**overrides):
+    return a_test(**dict(POLICY_AXES, **overrides))
+
+
+def cells_of(test):
+    bgperf2.check_batch_test(test)
+    return bgperf2.expand_batch_cells(test, test['targets'])
+
+
+class TestTheBatch:
+    '''The policy as matrix axes (step 7).'''
+
+    def test_a_test_without_the_keys_has_no_policy(self):
+        [cell] = cells_of(a_test())
+        args = bgperf2.batch_cell_args(Namespace(), cell)
+        assert (args.policy_rules, args.policy_match,
+                args.policy_hit) == (0, None, None)
+        assert not args.tester_attributes
+        assert 'policy_rules' not in cell
+
+    def test_the_baseline_is_one_cell_and_every_point_is_another(self):
+        cells = cells_of(policy_test())
+        points = [(c.get('policy_rules', 0), c.get('policy_match'),
+                   c.get('policy_hit')) for c in cells]
+        assert points == [(0, None, None),
+                          (10, 'prefix', 'first'), (10, 'prefix', 'last'),
+                          (10, 'as-path', 'first'), (10, 'as-path', 'last')]
+        assert [c['ordinal'] for c in cells] == list(range(5))
+        # The baseline is the attributes-only run, so every cell has them.
+        assert all(c['tester_attributes'] for c in cells)
+
+    def test_a_cell_runs_its_own_point(self):
+        cell = cells_of(policy_test())[4]
+        args = bgperf2.batch_cell_args(Namespace(), cell)
+        assert (args.policy_rules, args.policy_match,
+                args.policy_hit) == (10, 'as-path', 'last')
+        assert args.tester_attributes
+
+    def test_every_point_has_its_own_id_stem_and_description(self):
+        cells = cells_of(policy_test())
+        ids = {bgperf2.batch_cell_id('policy', c) for c in cells}
+        assert len(ids) == len(cells)
+        descriptions = [bgperf2.batch_cell_description(c) for c in cells]
+        assert len(set(descriptions)) == len(cells)
+        assert ', policy=10 as-path last,' in descriptions[4]
+        assert 'policy=' not in descriptions[0]
+        stems = set()
+        for c in cells:
+            args = bgperf2.batch_cell_args(Namespace(tester_type='bird'), c)
+            stems.add(bgperf2.bench_output_prefix(args))
+        assert len(stems) == len(cells)
+
+    def test_a_test_without_a_policy_keeps_its_ids(self):
+        # The ids an in-flight batch resumes on.
+        [cell] = cells_of(a_test())
+        assert json.loads(bgperf2.batch_cell_id('policy', cell)) == {
+            'test': 'policy', 'ordinal': 0, 'neighbors': 4, 'prefixes': 100,
+            'filter': 'None', 'target': {'name': 'bird'}, 'monitor': 'sink'}
+
+    def test_targets_of_one_point_stay_side_by_side(self):
+        test = policy_test(policy_rules=[10], policy_match=['prefix'],
+                           targets=[{'name': 'bird'}, {'name': 'frr_c'}])
+        cells = cells_of(test)
+        assert [(c['policy_hit'], c['target']['name']) for c in cells] == [
+            ('first', 'bird'), ('first', 'frr_c'),
+            ('last', 'bird'), ('last', 'frr_c')]
+
+    def test_the_summary_keeps_points_apart(self):
+        cells = cells_of(policy_test())
+        groups = bgperf2.batch_summary_groups('policy', cells, {})
+        assert 'policy' not in groups[0]['identity']
+        assert groups[4]['identity']['policy'] == {
+            'rules': 10, 'match': 'as-path', 'hit': 'last'}
+        import summary
+        keys = {summary._comparison_key(g) for g in groups}
+        assert len(keys) == len(groups)
+
+    @pytest.mark.parametrize('present', ['policy_rules', 'policy_match',
+                                         'policy_hit'])
+    def test_one_key_alone_is_refused(self, present):
+        with pytest.raises(SystemExit, match='needs all three'):
+            bgperf2.check_batch_test(a_test(**{present: POLICY_AXES[present]}))
+
+    @pytest.mark.parametrize('key, value, message', [
+        ('policy_rules', 10, 'must be a non-empty list'),
+        ('policy_match', [], 'must be a non-empty list'),
+        ('policy_rules', [10, 10], 'repeats 10'),
+        ('policy_hit', ['last', 'last'], "repeats 'last'"),
+        ('policy_rules', [0], 'only the baseline'),
+        ('policy_rules', [-1, 10], 'whole numbers'),
+        ('policy_rules', ['10'], 'whole numbers'),
+        ('policy_rules', [True], 'whole numbers'),
+        ('policy_match', ['regex'], 'policy match must be one of'),
+        ('policy_hit', ['middle'], 'policy hit must be one of'),
+        ('policy_rules', [70000], 'between 1 and 65533'),
+    ])
+    def test_a_bad_axis_is_refused_before_any_cell(self, key, value, message):
+        with pytest.raises(SystemExit, match=message):
+            bgperf2.check_batch_test(policy_test(**{key: value}))
 
     @pytest.mark.parametrize('key', bgperf2.BATCH_POLICY_KEYS)
     def test_a_target_key_is_refused_not_ignored(self, key):
-        with pytest.raises(SystemExit, match="target 'bird' sets " + key):
+        with pytest.raises(SystemExit, match='Move it up one level'):
             bgperf2.check_batch_test(a_test(
-                targets=[{'name': 'bird', key: 5}]))
+                targets=[{'name': 'bird', key: POLICY_AXES[key]}]))
 
-    def test_a_scenario_file_carrying_one_is_refused_up_front(self, tmp_path):
+    def test_a_target_without_a_renderer_is_refused(self):
+        with pytest.raises(SystemExit, match="target 'openbgp'.*no renderer"):
+            bgperf2.check_batch_test(policy_test(
+                targets=[{'name': 'bird'}, {'name': 'openbgp'}]))
+
+    @pytest.mark.parametrize('overrides, message', [
+        ({'filter_test': ['None', 'transit']}, 'filter'),
+        ({'receivers': 2}, '--receivers'),
+        ({'path_diversity': 2}, 'path-diversity'),
+        ({'tester_attributes': False}, 'tester_attributes is false'),
+        ({'targets': [{'name': 'bird', 'repeat': True}]}, 'repeat'),
+        ({'targets': [{'name': 'bird', 'tester_type': 'exa'}]}, 'exa'),
+        ({'targets': [{'name': 'bird', 'target_config_file': '/x.conf'}]},
+         'target_config_file'),
+    ])
+    def test_what_the_command_line_refuses_is_refused_here(self, overrides,
+                                                           message):
+        with pytest.raises(SystemExit, match=message):
+            bgperf2.check_batch_test(policy_test(**overrides))
+
+    def test_the_baseline_is_checked_too(self):
+        # Its refusals are the attributes': an MRT generator has none, even
+        # where no policy point would reach it first.
+        with pytest.raises(SystemExit, match='the policy_rules 0 baseline'):
+            bgperf2.check_batch_policy(
+                policy_test(targets=[{'name': 'bird', 'tester_type': 'exa'}]),
+                [], [], [None], None, 1, 0, 0)
+
+    def test_a_scenario_file_target_is_refused(self, tmp_path):
         scenario = tmp_path / 's.yaml'
         scenario.write_text(bgperf2.gen_conf(policy_args()))
         with pytest.raises(SystemExit, match="carries 'import-policy'"):
             bgperf2.check_batch_test(a_test(
                 targets=[{'name': 'bird', 'file': str(scenario)}]))
+        plain = tmp_path / 'plain.yaml'
+        plain.write_text(bgperf2.gen_conf(bgperf2.create_args_parser().parse_args(
+            ['config', '-n', '2', '-p', '1000'])))
+        with pytest.raises(SystemExit, match='scenario file'):
+            bgperf2.check_batch_test(policy_test(
+                targets=[{'name': 'bird', 'file': str(plain)}]))
 
-    def test_a_cell_has_no_policy(self):
-        [cell] = bgperf2.expand_batch_cells(a_test(), [{'name': 'bird'}])
-        args = bgperf2.batch_cell_args(Namespace(), cell)
-        assert (args.policy_rules, args.policy_match,
-                args.policy_hit) == (0, None, None)
+    def test_a_policy_test_beside_a_repeat_test_is_refused(self):
+        with pytest.raises(SystemExit, match='tester_attributes and'):
+            bgperf2.check_batch_prefix_length_and_repeat([
+                policy_test(), a_test(name='r', targets=[
+                    {'name': 'bird', 'repeat': True}])])
+
+
+def policy_row(name, rules, match, hit, elapsed, failed=''):
+    header = [f.strip() for f in bgperf2.stats_header().split(',')]
+    # Every bar graph's column a number, as a real row's are.
+    row = [0] * len(header)
+    row[header.index('filters')] = ''
+    for column, value in (('name', name), ('peers', '4'),
+                          ('prefixes per peer', '100'), ('failed', failed),
+                          ('policy rules', rules), ('policy match', match),
+                          ('policy hit', hit), ('elapsed (s)', elapsed),
+                          ('max cpu %', 50), ('max mem (GB)', 1.5)):
+        row[header.index(column)] = value
+    return row
+
+
+class TestThePolicyGraphs:
+
+    def test_each_line_starts_at_its_baseline(self):
+        rows = [policy_row('bird', 0, '', '', 10),
+                policy_row('bird', 100, 'prefix', 'last', 14),
+                policy_row('bird', 10, 'prefix', 'last', 11),
+                policy_row('bird', 10, 'prefix', 'first', 10.5)]
+        series = bgperf2.batch_policy_graph_series(rows, 'elapsed (s)')
+        assert series == {
+            'bird prefix last, 4n_100p': [(0, 10.0), (10, 11.0), (100, 14.0)],
+            'bird prefix first, 4n_100p': [(0, 10.0), (10, 10.5)]}
+
+    def test_a_failed_point_is_a_gap_not_a_zero(self):
+        rows = [policy_row('bird', 0, '', '', 10),
+                policy_row('bird', 10, 'prefix', 'last', 11, failed='FAILED'),
+                policy_row('bird', 100, 'prefix', 'last', 14)]
+        series = bgperf2.batch_policy_graph_series(rows, 'elapsed (s)')
+        assert series == {'bird prefix last, 4n_100p': [(0, 10.0), (100, 14.0)]}
+
+    def test_an_unsampled_peak_is_a_gap_not_a_zero(self):
+        dead = policy_row('bird', 10, 'prefix', 'last', 11)
+        header = [f.strip() for f in bgperf2.stats_header().split(',')]
+        dead[header.index('max mem (GB)')] = bgperf2.row_gb(0)
+        rows = [policy_row('bird', 0, '', '', 10), dead,
+                policy_row('bird', 100, 'prefix', 'last', 14)]
+        assert bgperf2.batch_policy_graph_series(rows, 'max mem (GB)') == {
+            'bird prefix last, 4n_100p': [(0, 1.5), (100, 1.5)]}
+        # The other columns of that row are still drawn.
+        assert len(bgperf2.batch_policy_graph_series(
+            rows, 'elapsed (s)')['bird prefix last, 4n_100p']) == 3
+
+    def test_the_passes_of_a_repeated_test_are_one_line_at_their_median(self):
+        rows = [policy_row('bird #1', 0, '', '', 10),
+                policy_row('bird #1', 10, 'prefix', 'last', 11),
+                policy_row('bird #2', 0, '', '', 12),
+                policy_row('bird #2', 10, 'prefix', 'last', 15),
+                policy_row('bird #3', 0, '', '', 11),
+                policy_row('bird #3', 10, 'prefix', 'last', 13)]
+        assert bgperf2.batch_policy_graph_series(rows, 'elapsed (s)') == {
+            'bird prefix last, 4n_100p': [(0, 11.0), (10, 13.0)]}
+
+    def test_a_test_without_a_policy_draws_none(self, tmp_path):
+        rows = [policy_row('bird', 0, '', '', 10)]
+        assert bgperf2.batch_policy_graph_series(rows, 'elapsed (s)') == {}
+        bgperf2.create_batch_policy_graphs(rows, 't', results_dir=str(tmp_path))
+        assert not list(tmp_path.iterdir())
+
+    def test_the_graphs_are_drawn_beside_the_bars(self, tmp_path):
+        rows = [policy_row('bird', 0, '', '', 10),
+                policy_row('frr_c', 0, '', '', 12),
+                policy_row('bird', 10, 'prefix', 'last', 11),
+                policy_row('frr_c', 10, 'prefix', 'last', 15)]
+        bgperf2.create_batch_graphs(rows, 't', results_dir=str(tmp_path))
+        drawn = {p.name for p in tmp_path.iterdir()}
+        assert {'bgperf_t_policy_elapsed.png', 'bgperf_t_policy_max_cpu.png',
+                'bgperf_t_policy_max_mem.png', 'bgperf_t_elapsed.png'} <= drawn
+        assert {os.path.basename(p) for p in bgperf2.batch_graph_paths(
+            't', str(tmp_path))} == drawn
 
 
 FIXTURES = __import__('pathlib').Path(__file__).parent / 'fixtures'

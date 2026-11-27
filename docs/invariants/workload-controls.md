@@ -532,11 +532,25 @@ one).
 - **Where it is refused.** `bench` runs it. `bench -f` refuses the flags, and refuses a scenario
   whose target carries `import-policy` before the teardown (`check_scenario_import_policy()`):
   the checkpoints and the count guard come from the command line, and a file states its own.
-  `config` refuses the flags, since it names no target and writes for `-f`. `batch` refuses
-  `policy_rules`/`policy_match`/`policy_hit` on a test **and on a target**
-  (`refuse_batch_policy_keys()`), because a target key nothing reads would run the cell with no
-  policy under a config naming one; step 7 makes them matrix dimensions. `-r` is refused, as the
-  attributes are. Native controlled cells refuse it.
+  `config` refuses the flags, since it names no target and writes for `-f`. `-r` is refused, as
+  the attributes are. Native controlled cells refuse it.
+- **In `batch` the three are list axes on a test** (step 7), all three or none. They are refused
+  on a target (`BATCH_TEST_ONLY_KEYS`), because a target key nothing reads would run the cell with
+  no policy under a config naming one.
+  - `policy_rules` must hold a positive count, since a matrix of baselines measures nothing.
+  - A `0` is **one** baseline cell per workload (`batch_policy_points()`): the baseline has no
+    match type or hit position, and one per pair would be one cell under several names.
+  - Every cell of a policy test carries the generator's attributes, the baseline included,
+    because the baseline is the attributes-only run. `tester_attributes: false` beside the keys
+    is refused.
+  - `check_batch_policy()` puts every target, filter, fleet and point through
+    `resolve_import_policy()` before the first cell, and the baseline through the attributes'
+    refusals. It also refuses scenario-file targets and `repeat`, the latter across tests too
+    (`check_batch_prefix_length_and_repeat()`).
+  - The points run inside the filter axis and outside the targets. A test without the keys
+    keeps every ordinal and cell id it had; a policy cell's id adds the three keys.
+  - `prefix_length` stays one value per test: the stats row has no prefix-length column, so two
+    lengths in one test would merge rows in its graphs.
 - **The scenario carries the arguments, not the rules**: the target's `import-policy` entry is
   exactly what `build_policy()` takes, including the walk's exclusions, which `gen_conf()` now
   computes once and uses for both the walk and the policy. The target rebuilds the policy
@@ -569,8 +583,11 @@ one).
   guard doing its job rather than a reason to restore the allowance.
 - **The policy-loaded check** (`Target.policy_loaded_failure()`, step 6) runs once, after the
   monitor's and receivers' sessions are up and before the clock, any sampler or any generator
-  starts. A failure exits naming what differs, with no measurement begun and the containers left
-  for inspection. The count guard cannot replace it: a daemon that dropped filler rules accepts the
+  starts. A failure is a **FAILED row**, recorded through `finish_bench()` with nothing sampled:
+  `MSG` names what differs, the events artifact withholds every interval by that reason, no
+  per-run graph is drawn from no samples, and the containers are left for inspection. A batch
+  records the cell and goes on, and `bench` exits 1 as it does for any failed row. The count guard
+  cannot replace it: a daemon that dropped filler rules accepts the
   same routes with less work, and would be published as a fast policy run.
   - **BIRD** (`bird.policy_loaded_failure()` over one `show protocols all`): every BGP protocol's
     ipv4 `Input filter:` must be `bgperf_import_policy`, and a `neighbor range` listener must be
@@ -586,8 +603,6 @@ one).
   - **Every other adapter fails closed**: the base method refuses any run carrying a policy, so an
     adapter that gains a renderer cannot run one until it has its own check, which a test requires
     of every `IMPORT_POLICY_MATCHES` target.
-  - It uses `sys.exit`, like `bench`'s other refusals, because batch cannot run a policy yet; step
-    7 must turn it into a per-cell failure before batch can.
 - A scenario file carrying `offered-check-point` on a neighbour, which only a policy run writes, is
   refused with `import-policy`, at `bench -f` and for a batch `file:` target up front.
 - Stem `po<N><pfx|asp|com><first|last|miss>` after `ta`; both manifests' `run.import_policy`

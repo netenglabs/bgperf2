@@ -100,6 +100,7 @@ images were built before that refuses the run until `./bgperf2.py prepare -t sin
 python3.14 scripts/bootstrap.py --check
 venv/bin/python -m pytest tests/ -q        # no Docker needed
 venv/bin/python -m pytest tests/test_convergence.py -q
+venv/bin/python -I scripts/push.py         # pre-push gate offline, then push (docs/local-delivery-checks.md)
 ```
 
 The test suite deliberately needs **no Docker daemon and no privileges** — it covers the pure layers

@@ -2,7 +2,7 @@
 
 What `bench`/`batch` may be asked to run, and the guards that refuse the rest.
 
-**Read this before editing:** `prefix_length.py` (the synthetic prefix walks and their refusals), `cpu_pinning.py` (pure CPU lists and role-pinning validation), `recipes.py` (portable source validation), `recipe_worker.py` (recipe CPU layout forwarding), `recipe_preflight.py` (online CPU availability), `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `run_lifecycle.py` (run orchestration), `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`), `churn.py`, `policy.py`, `import_policy.py` (the generated import policy and its expected counts), `policy_render.py` (its BIRD and FRR text), `bird.py` (the churn protocol and the reload command), `tester.py` (`check_policy_blocks()`, `write_policy_block_protocols()`, `carries_policy_blocks()`, `BIRDTester.configure_neighbors()`)
+**Read this before editing:** `prefix_length.py` (the synthetic prefix walks and their refusals), `cpu_pinning.py` (pure CPU lists and role-pinning validation), `recipes.py` (portable source validation), `recipe_worker.py` (recipe CPU layout forwarding), `recipe_preflight.py` (online CPU availability), `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `run_lifecycle.py` (run orchestration), `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`, `Target.policy_loaded_failure()`), `churn.py`, `policy.py`, `import_policy.py` (the generated import policy and its expected counts), `policy_render.py` (its BIRD and FRR text), `bird.py` (the churn protocol, the reload command and the policy-loaded check), `frr.py` (the import policy's config and its policy-loaded check), `tester.py` (`check_policy_blocks()`, `write_policy_block_protocols()`, `carries_policy_blocks()`, `BIRDTester.configure_neighbors()`)
 `recipe_minimization.py` governs explicit selected-cell projection and bounded peer/prefix reductions.
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
@@ -567,6 +567,27 @@ one).
   `last`) and FRR 10.7 (prefix, `last`) both ended at exactly 1,500, the expected count. That is
   one small shape; a larger run that loses routes would now be published `FAILED`, which is the
   guard doing its job rather than a reason to restore the allowance.
+- **The policy-loaded check** (`Target.policy_loaded_failure()`, step 6) runs once, after the
+  monitor's and receivers' sessions are up and before the clock, any sampler or any generator
+  starts. A failure exits naming what differs, with no measurement begun and the containers left
+  for inspection. The count guard cannot replace it: a daemon that dropped filler rules accepts the
+  same routes with less work, and would be published as a fast policy run.
+  - **BIRD** (`bird.policy_loaded_failure()` over one `show protocols all`): every BGP protocol's
+    ipv4 `Input filter:` must be `bgperf_import_policy`, and a `neighbor range` listener must be
+    among them, since no generator has connected yet and the listener is what their sessions are
+    spawned from. The name is enough: BIRD refuses to start on a config it cannot parse.
+  - **FRR** (`frr.policy_loaded_failure()` over one `show running-config`): the name is not
+    enough, because bgpd logs and skips a config line it cannot read and starts anyway. Every list
+    entry, every `BGPERF-IMPORT` route-map entry (action and body) and every session's
+    `route-map BGPERF-IMPORT in` must match `frr_policy_lines()`, ignoring only the ` seq N` FRR
+    inserts into list entries. Lists are read wherever they print — FRR 10.7 puts prefix-lists
+    before `router bgp` and as-path and community lists after it. Asked after the monitor's session
+    is up because bgpd reads its whole config before it opens a session.
+  - **Every other adapter fails closed**: the base method refuses any run carrying a policy, so an
+    adapter that gains a renderer cannot run one until it has its own check, which a test requires
+    of every `IMPORT_POLICY_MATCHES` target.
+  - It uses `sys.exit`, like `bench`'s other refusals, because batch cannot run a policy yet; step
+    7 must turn it into a per-cell failure before batch can.
 - A scenario file carrying `offered-check-point` on a neighbour, which only a policy run writes, is
   refused with `import-policy`, at `bench -f` and for a batch `file:` target up front.
 - Stem `po<N><pfx|asp|com><first|last|miss>` after `ta`; both manifests' `run.import_policy`
@@ -580,8 +601,8 @@ one).
   and its attributes-only baseline are the same row. `policy bytes` is counted as the target writes
   its config (`Target.write_import_policy()`), so it is the text the daemon read, never a second
   rendering; it is blank where no size was recorded (a remote target), never 0. A cell result
-  written before these columns is one field short and `summary.py` reports that pass
-  `unreadable`, the supported path for `--resume` across an appended column.
+  written before these columns is four fields short and `summary.py` reports that pass
+  `unreadable`, the supported path for `--resume` across an added column.
 
 ## `-s/--single-table` — refused, because nothing has honoured it since 2021
 

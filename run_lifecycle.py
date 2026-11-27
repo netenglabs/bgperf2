@@ -711,6 +711,22 @@ def bench(runtime, args):
     # `--receivers 20` run look like a slow monitor in every published row.
     for r in receiver_containers:
         r.wait_established(conf['target']['local-address'], role=r.name)
+    # The policy-loaded check (policy phase 1 step 6): once, with the
+    # daemon's config read (its first session is up) and before the clock or
+    # any sampler starts, so a refusal here leaves nothing running and no
+    # measurement begun. A daemon that dropped its policy would otherwise look
+    # fast, and the count guard alone cannot catch a policy that lost rules
+    # but still accepts the same routes. A remote target never carries one:
+    # it comes only from `-f`, which refuses the policy.
+    if not is_remote and getattr(args, 'policy_rules', None):
+        policy_unloaded = target.policy_loaded_failure()
+        if policy_unloaded:
+            runtime.sys.exit(
+                'policy-loaded check failed: {0}. No measurement was started; '
+                'the containers are left for inspection'.format(
+                    policy_unloaded))
+        print('import policy: {0} rules confirmed loaded on the target'.format(
+            args.policy_rules))
     output_stats['cores'], output_stats['memory'] = runtime.get_hardware_info()
     # target_class is only bound in the local branch above; a remote run used to
     # die here with NameError. Pre-existing, but the remote path is now something

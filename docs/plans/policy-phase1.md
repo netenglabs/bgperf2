@@ -3,7 +3,7 @@
 Status: in progress
 Strand: 6 Test capabilities (IPv6, BGP policy, new workloads)
 Updated: 2026-11-26
-Next: The policy-loaded check (step 6). Steps 1–5 are done: `bench --policy-rules` runs the policy on BIRD and FRR and publishes it in the stats row.
+Next: Batch dimensions and graphs (step 7). Steps 1–6 are done: `bench --policy-rules` runs the policy on BIRD and FRR, confirms it is loaded before measuring, and publishes it in the stats row.
 Blocked on: none
 Done when: `bench` and `batch` run a generated import policy of selected size, match type and match position on BIRD and FRR targets at `/24` and `/32`, publish convergence, CPU and memory beside a no-policy baseline, and withhold timing by name whenever the monitor's count differs from the policy's expected count.
 
@@ -195,6 +195,20 @@ renderer.
    that the rendered policy is the one attached (BIRD `show protocols all`
    filter name; FRR `show route-map`). A daemon that silently ignored the
    policy would otherwise look fast.
+
+   *Done 2026-11-26* (`Target.policy_loaded_failure()`):
+   - Runs once, after the monitor's session is up and before the clock,
+     the samplers and the generators. A failure exits naming the
+     difference, with nothing measured.
+   - BIRD: every BGP protocol, the `neighbor range` listener included,
+     imports through `bgperf_import_policy`. The name is enough, because
+     BIRD will not start on a config it cannot parse.
+   - FRR: the name is not enough, because bgpd skips a line it cannot read
+     and starts anyway. Its `show running-config` must hold every rendered
+     list entry, route-map entry and per-session `route-map … in`, ignoring
+     only FRR's ` seq N`. FRR 10.7's real output is the test fixture.
+   - Every other adapter fails closed until it has its own check.
+   - It exits with `sys.exit`; step 7 must make it a per-cell failure.
 7. **Batch dimensions and graphs.** `policy_rules`, `policy_match` and
    `policy_hit` become batch matrix keys, as does `prefix_length`,, with `policy_rules: 0` as the
    in-matrix baseline. Graphs plot cost against rule count for each match type

@@ -13,10 +13,12 @@ import bgperf2
 import run_lifecycle
 
 
-def fake_run(tmp_path, accepted=10, stopped=False):
+def fake_run(tmp_path, accepted=10, stopped=False, extra=(),
+             policy_unloaded=None):
     args = bgperf2.create_args_parser().parse_args([
         '-d', str(tmp_path / 'work'), 'bench', '-n', '1', '-p', '10',
-        '--monitor', 'gobgp', '--results-dir', str(tmp_path / 'results')])
+        '--monitor', 'gobgp', '--results-dir', str(tmp_path / 'results')]
+        + list(extra))
     calls, components = [], []
     runtime = SimpleNamespace(**vars(bgperf2))
     runtime.controller_stop = threading.Event()
@@ -43,6 +45,10 @@ def fake_run(tmp_path, accepted=10, stopped=False):
         def wait_established(self, *args):
             calls.append('establish')
             return 3
+
+        def policy_loaded_failure(self):
+            calls.append('policy loaded check')
+            return policy_unloaded
 
         def stats(self, *args, **kwargs):
             calls.append('sample ' + self.name)
@@ -142,6 +148,36 @@ def test_queued_run_publishes_verdict_and_stops_samplers(tmp_path, accepted, fai
     else:
         assert artifact['events'][-1]['event'] == 'convergence_confirmed'
         assert row[8] == 2  # Existing short assurance-window subtraction.
+
+
+POLICY_RUN = ('--policy-rules', '3', '--policy-match', 'as-path',
+              '--policy-hit', 'last')
+
+
+def test_the_policy_is_confirmed_loaded_before_anything_is_measured(tmp_path):
+    runtime, args, calls, _ = fake_run(tmp_path, accepted=8, extra=POLICY_RUN)
+    run_lifecycle.bench(runtime, args)
+    assert calls.count('policy loaded check') == 1
+    assert calls.index('establish') < calls.index('policy loaded check') \
+        < calls.index('sample target') < calls.index('launch')
+
+
+def test_a_policy_not_loaded_stops_the_run_before_it_starts(tmp_path):
+    runtime, args, calls, _ = fake_run(
+        tmp_path, extra=POLICY_RUN, policy_unloaded='filter not attached')
+    with pytest.raises(SystemExit, match='policy-loaded check failed: '
+                                         'filter not attached'):
+        run_lifecycle.bench(runtime, args)
+    assert 'launch' not in calls
+    assert not any(c.startswith('sample') for c in calls)
+    assert 'controller_idle_percent' not in calls
+    assert not (tmp_path / 'results').exists()
+
+
+def test_a_run_without_a_policy_is_not_checked(tmp_path):
+    runtime, args, calls, _ = fake_run(tmp_path)
+    run_lifecycle.bench(runtime, args)
+    assert 'policy loaded check' not in calls
 
 
 def test_stop_keeps_containers_and_records_no_row(tmp_path):

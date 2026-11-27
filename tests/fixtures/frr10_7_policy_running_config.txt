@@ -1,0 +1,90 @@
+% Can't open configuration file /etc/frr/vtysh.conf due to 'No such file or directory'.
+Configuration file[/etc/frr/frr.conf] processing failure: 11
+Building configuration...
+
+Current configuration:
+!
+frr version 10.7.0-my-manual-build
+frr defaults traditional
+hostname bgpd
+bgp no-rib
+hostname 68943d7615e8
+!
+ip prefix-list BGPERF-IMPORT-G seq 5 permit 1.2.238.0/23 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-G seq 10 permit 1.2.240.0/20 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-G seq 15 permit 1.3.0.0/17 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-G seq 20 permit 1.3.128.0/18 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-G seq 25 permit 1.3.192.0/19 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-G seq 30 permit 1.3.224.0/21 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-G seq 35 permit 1.6.214.0/23 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-G seq 40 permit 1.6.216.0/21 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-G seq 45 permit 1.6.224.0/19 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-G seq 50 permit 1.7.0.0/17 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-G seq 55 permit 1.7.128.0/18 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-G seq 60 permit 1.7.192.0/20 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-R0 seq 5 permit 240.0.0.0/24
+ip prefix-list BGPERF-IMPORT-R1 seq 5 permit 240.0.1.0/24
+ip prefix-list BGPERF-IMPORT-R2 seq 5 permit 1.0.0.0/15 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-R2 seq 10 permit 1.2.0.0/17 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-R2 seq 15 permit 1.2.128.0/18 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-R2 seq 20 permit 1.2.192.0/19 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-R2 seq 25 permit 1.2.224.0/21 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-R2 seq 30 permit 1.2.232.0/22 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-R2 seq 35 permit 1.2.236.0/23 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-R2 seq 40 permit 1.3.232.0/21 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-R2 seq 45 permit 1.3.240.0/20 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-R2 seq 50 permit 1.4.0.0/15 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-R2 seq 55 permit 1.6.0.0/17 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-R2 seq 60 permit 1.6.128.0/18 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-R2 seq 65 permit 1.6.192.0/20 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-R2 seq 70 permit 1.6.208.0/22 ge 24 le 24
+ip prefix-list BGPERF-IMPORT-R2 seq 75 permit 1.6.212.0/23 ge 24 le 24
+!
+route-map BGPERF-IMPORT deny 1
+ match ip address prefix-list BGPERF-IMPORT-G
+exit
+!
+route-map BGPERF-IMPORT deny 2
+ match ip address prefix-list BGPERF-IMPORT-R0
+exit
+!
+route-map BGPERF-IMPORT deny 3
+ match ip address prefix-list BGPERF-IMPORT-R1
+exit
+!
+route-map BGPERF-IMPORT permit 4
+ match ip address prefix-list BGPERF-IMPORT-R2
+exit
+!
+route-map BGPERF-IMPORT permit 5
+exit
+!
+password zebra
+!
+router bgp 1000
+ bgp router-id 10.10.255.254
+ no bgp ebgp-requires-policy
+ neighbor 10.10.0.2 remote-as 1001
+ neighbor 10.10.0.2 disable-connected-check
+ neighbor 10.10.0.2 advertisement-interval 1
+ neighbor 10.10.0.2 timers 30 90
+ neighbor 10.10.0.3 remote-as 1003
+ neighbor 10.10.0.3 disable-connected-check
+ neighbor 10.10.0.3 advertisement-interval 1
+ neighbor 10.10.0.3 timers 30 90
+ neighbor 10.10.0.4 remote-as 1004
+ neighbor 10.10.0.4 disable-connected-check
+ neighbor 10.10.0.4 advertisement-interval 1
+ neighbor 10.10.0.4 timers 30 90
+ !
+ address-family ipv4 unicast
+  neighbor 10.10.0.2 soft-reconfiguration inbound
+  neighbor 10.10.0.2 route-map BGPERF-IMPORT in
+  neighbor 10.10.0.3 soft-reconfiguration inbound
+  neighbor 10.10.0.3 route-map BGPERF-IMPORT in
+  neighbor 10.10.0.4 soft-reconfiguration inbound
+  neighbor 10.10.0.4 route-map BGPERF-IMPORT in
+ exit-address-family
+exit
+!
+end

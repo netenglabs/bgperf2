@@ -1029,6 +1029,21 @@ class Target(Container):
                                              spec.get('match')))
         return _import_policy.policy_from_scenario(spec)
 
+    def policy_loaded_failure(self):
+        '''Why the running daemon is not applying its import policy, or None.
+
+        Asked once, after the monitor's session is up and before the clock
+        starts or any generator launches (policy phase 1 step 6). A daemon
+        that silently ignored its policy would otherwise be published as a
+        fast policy run. None with no policy. Fails closed: an adapter that
+        renders a policy and cannot confirm it is loaded refuses the run, so
+        a new renderer cannot ship without its check.
+        '''
+        if self.import_policy() is None:
+            return None
+        return ('{0} has no way to confirm its import policy is loaded'.format(
+            type(self).__name__))
+
     # What the last `write_config()` wrote of the policy, a
     # `policy_render.RenderedSize`, or None where it wrote none.
     import_policy_size = None

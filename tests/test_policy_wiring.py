@@ -609,3 +609,239 @@ class TestTheBatch:
         args = bgperf2.batch_cell_args(Namespace(), cell)
         assert (args.policy_rules, args.policy_match,
                 args.policy_hit) == (0, None, None)
+
+
+FIXTURES = __import__('pathlib').Path(__file__).parent / 'fixtures'
+
+# The run frr10_7_policy_running_config.txt was captured from:
+# `bench -t frr_c --version 10.7 -n 2 -p 1000 --prefix-length 24
+#  --policy-rules 3 --policy-match prefix --policy-hit last`.
+CAPTURED_FRR_POLICY = {'rules': 3, 'match': 'prefix', 'hit': 'last',
+                       'peers': 2, 'prefixes': 1000, 'prefix-length': 24,
+                       'exclude': ['10.10.0.0/16']}
+CAPTURED_FRR_SESSIONS = ['10.10.0.2', '10.10.0.3', '10.10.0.4']
+
+
+def running_config_from(policy, sessions):
+    '''What FRR prints for the rendered policy: seq numbers inserted, the
+    as-path and community lists after `router bgp`, route-map blocks closed by
+    `exit`.'''
+    before, after, seqs = [], [], {}
+    for line in pr.frr_policy_lines(policy):
+        line = line.rstrip('\n')
+        m = frr._FRR_LIST_LINE.match(line)
+        if m:
+            seqs[m.group(2)] = seqs.get(m.group(2), 0) + 5
+            printed = '{0} {1} seq {2} {3}'.format(
+                m.group(1), m.group(2), seqs[m.group(2)], m.group(3))
+            (before if m.group(1) == 'ip prefix-list' else after).append(
+                printed)
+        elif line.startswith('route-map'):
+            before.extend(['exit', '!', line])
+        else:
+            before.append(line)
+    bgp = ['router bgp 1000', ' address-family ipv4 unicast'] + [
+        '  neighbor {0} route-map {1} in'.format(s, pr.FRR_ROUTE_MAP)
+        for s in sessions] + [' exit-address-family', 'exit', '!']
+    return '\n'.join(['!'] + before + ['exit', '!'] + bgp + after + ['end'])
+
+
+class TestThePolicyLoadedCheck:
+    '''Step 6: a daemon that dropped its policy must not look fast.'''
+
+    def test_the_captured_frr_config_is_the_rendered_policy(self):
+        policy = ip.policy_from_scenario(CAPTURED_FRR_POLICY)
+        text = (FIXTURES / 'frr10_7_policy_running_config.txt').read_text()
+        assert frr.policy_loaded_failure(
+            policy, text, CAPTURED_FRR_SESSIONS) is None
+
+    @pytest.mark.parametrize('match', BOTH)
+    @pytest.mark.parametrize('hit', ip.POLICY_HITS)
+    def test_every_shape_reads_back_as_loaded(self, match, hit):
+        policy = ip.build_policy(4, match, hit, 2, 8, 24, ('10.10.0.0/16',))
+        sessions = ['10.10.0.2', '10.10.0.3']
+        assert frr.policy_loaded_failure(
+            policy, running_config_from(policy, sessions), sessions) is None
+
+    def captured(self):
+        return (ip.policy_from_scenario(CAPTURED_FRR_POLICY),
+                (FIXTURES / 'frr10_7_policy_running_config.txt').read_text())
+
+    def test_a_skipped_list_entry_is_named(self):
+        policy, text = self.captured()
+        text = text.replace(
+            'ip prefix-list BGPERF-IMPORT-R2 seq 40 permit 1.3.232.0/21 '
+            'ge 24 le 24\n', '')
+        failure = frr.policy_loaded_failure(policy, text,
+                                            CAPTURED_FRR_SESSIONS)
+        assert '1 of 29 list entries missing' in failure
+        assert '1.3.232.0/21' in failure
+
+    def test_a_list_entry_the_policy_lacks_is_named(self):
+        policy, text = self.captured()
+        text = text.replace(
+            '!\nroute-map BGPERF-IMPORT deny 1',
+            'ip prefix-list BGPERF-IMPORT-R0 seq 10 permit 0.0.0.0/0 le 32\n'
+            '!\nroute-map BGPERF-IMPORT deny 1')
+        assert '1 list entries not in the policy' in frr.policy_loaded_failure(
+            policy, text, CAPTURED_FRR_SESSIONS)
+
+    @pytest.mark.parametrize('old, new, named', [
+        # A rule's match line skipped: the entry then matches everything.
+        (' match ip address prefix-list BGPERF-IMPORT-R0\n', '',
+         '1 of the 5 rendered entries changed, e.g. sequence 2'),
+        # A rule's action flipped.
+        ('route-map BGPERF-IMPORT deny 3\n',
+         'route-map BGPERF-IMPORT permit 3\n',
+         '1 of the 5 rendered entries changed, e.g. sequence 3'),
+        # A whole entry missing.
+        ('route-map BGPERF-IMPORT deny 2\n match ip address prefix-list '
+         'BGPERF-IMPORT-R0\nexit\n', '',
+         '1 of the 5 rendered entries missing, e.g. sequence 2'),
+        # An entry the policy never had: counted on its own, not out of 5.
+        ('route-map BGPERF-IMPORT permit 5\n',
+         'route-map BGPERF-IMPORT permit 5\nexit\n!\n'
+         'route-map BGPERF-IMPORT deny 9\n',
+         '1 entries not in the policy, e.g. sequence 9'),
+    ])
+    def test_a_route_map_that_differs_is_named(self, old, new, named):
+        policy, text = self.captured()
+        assert old in text
+        failure = frr.policy_loaded_failure(policy, text.replace(old, new),
+                                            CAPTURED_FRR_SESSIONS)
+        assert 'route-map BGPERF-IMPORT: ' + named in failure
+
+    def test_examples_come_in_their_own_order(self):
+        policy = ip.build_policy(12, 'as-path', 'last', 2, 8, 24, ())
+        sessions = ['10.10.0.2', '10.10.0.10', '10.10.0.3', '10.10.0.11']
+        text = running_config_from(policy, [])
+        failure = frr.policy_loaded_failure(
+            policy, '\n'.join(line for line in text.splitlines()
+                              if not line.startswith('route-map')), sessions)
+        # Numeric, not string, order: 1, 2, 3 -- never 1, 10, 11.
+        assert 'missing, e.g. sequence 1, 2, 3 and 11 more' in failure
+        assert "'10.10.0.2', '10.10.0.3', '10.10.0.10' and 1 more" in failure
+
+    @pytest.mark.parametrize('line, entry', [
+        # Printed by FRR 10.7 on 2026-11-26 for lists added by hand to a
+        # running bgpd: the two kinds that print after `router bgp`.
+        ('bgp as-path access-list BGPERF-IMPORT-R0 seq 5 permit _4200000001_',
+         ('bgp as-path access-list', 'BGPERF-IMPORT-R0', 'permit _4200000001_')),
+        ('bgp community-list standard BGPERF-IMPORT-R3 seq 5 permit 64514:3',
+         ('bgp community-list standard', 'BGPERF-IMPORT-R3',
+          'permit 64514:3')),
+    ])
+    def test_real_frr_list_lines_parse(self, line, entry):
+        lists, _, _ = frr._frr_policy_items([line], pr.FRR_ROUTE_MAP)
+        assert lists == {entry: 1}
+
+    def test_a_session_without_the_route_map_is_named(self):
+        policy, text = self.captured()
+        text = text.replace(
+            '  neighbor 10.10.0.3 route-map BGPERF-IMPORT in\n', '')
+        failure = frr.policy_loaded_failure(policy, text,
+                                            CAPTURED_FRR_SESSIONS)
+        assert failure.endswith("sessions without route-map BGPERF-IMPORT "
+                                "in: '10.10.0.3'")
+
+    def test_no_reply_is_a_failure(self):
+        policy, _ = self.captured()
+        assert 'list entries missing' in frr.policy_loaded_failure(
+            policy, '', CAPTURED_FRR_SESSIONS)
+
+    def test_other_lists_and_route_maps_are_not_its_business(self):
+        policy, text = self.captured()
+        text = text.replace('!\nend', 'ip prefix-list OTHER seq 5 permit any\n'
+                            'route-map OTHER permit 10\nexit\n!\nend')
+        assert frr.policy_loaded_failure(policy, text,
+                                         CAPTURED_FRR_SESSIONS) is None
+
+    def bird_text(self, listener='bgperf_import_policy',
+                  sessions='bgperf_import_policy'):
+        '''The BIRD 3 fixture with each BGP protocol's input filter set.'''
+        lines = (FIXTURES / 'bird3_show_protocols_all.txt').read_text() \
+            .splitlines()
+        out, protocol = [], None
+        for line in lines:
+            if line and not line[0].isspace():
+                protocol = line.split()[0]
+            if line.strip().startswith('Input filter:') and protocol and (
+                    protocol == 'everything' or protocol.startswith('dynbgp')):
+                value = listener if protocol == 'everything' else sessions
+                line = line.split(':')[0] + ':   ' + value
+            out.append(line)
+        return '\n'.join(out)
+
+    def test_bird_importing_through_the_filter_is_loaded(self):
+        assert bird.policy_loaded_failure(self.bird_text()) is None
+
+    def test_the_captured_bird_output_is_loaded(self):
+        # BIRD 2.17.1, live, community/miss: the listener while DOWN and
+        # every session print the filter by name.
+        text = (FIXTURES / 'bird2_policy_show_protocols_all.txt').read_text()
+        assert bird.policy_loaded_failure(text) is None
+        assert 'dynbgp2 (ACCEPT)' in bird.policy_loaded_failure(
+            text.replace('Input filter:   bgperf_import_policy\n'
+                         '    Output filter:  ACCEPT\n'
+                         '    Routes:         750', 'Input filter:   ACCEPT\n'
+                         '    Output filter:  ACCEPT\n'
+                         '    Routes:         750', 1))
+
+    def test_the_parser_reads_the_input_filter(self):
+        protocols = bird.parse_protocols(self.bird_text())
+        assert protocols['everything']['channels']['ipv4']['input_filter'] \
+            == 'bgperf_import_policy'
+        assert protocols['kernel1']['channels']['ipv4']['input_filter'] \
+            == 'REJECT'
+
+    @pytest.mark.parametrize('listener, sessions, named', [
+        ('ACCEPT', 'bgperf_import_policy', 'everything (ACCEPT)'),
+        ('bgperf_import_policy', 'ACCEPT', 'dynbgp1 (ACCEPT)'),
+    ])
+    def test_bird_importing_anything_else_is_named(self, listener, sessions,
+                                                    named):
+        failure = bird.policy_loaded_failure(self.bird_text(listener,
+                                                            sessions))
+        assert named in failure
+
+    def test_bird_with_no_listener_is_a_failure(self):
+        assert 'no `neighbor range`' in bird.policy_loaded_failure('')
+
+    @pytest.mark.parametrize('cls', [bird.BIRDTarget, frr.FRRoutingTarget])
+    def test_a_run_without_a_policy_asks_nothing(self, cls):
+        target = cls.__new__(cls)
+        target.conf = {}
+        target.local = lambda *a, **kw: pytest.fail('asked the daemon')
+        assert target.policy_loaded_failure() is None
+
+    def test_an_adapter_without_a_check_fails_closed(self):
+        import base
+
+        class Rendering(base.Target):
+            IMPORT_POLICY_MATCHES = ip.POLICY_MATCHES
+
+        target = Rendering.__new__(Rendering)
+        target.conf = rendered(policy_args())['target']
+        assert 'no way to confirm' in target.policy_loaded_failure()
+
+    def test_every_policy_target_has_its_own_check(self):
+        import base
+        for name, cls in bgperf2.TARGET_CLASSES.items():
+            if cls.IMPORT_POLICY_MATCHES:
+                assert cls.policy_loaded_failure is not \
+                    base.Target.policy_loaded_failure, name
+
+    def test_the_frr_target_asks_its_running_config(self):
+        scenario = rendered(policy_args(match='community'))
+        target = target_session(scenario)
+        asked = []
+
+        def local(cmd, **kw):
+            asked.append(cmd)
+            policy = target.import_policy()
+            return running_config_from(policy, [
+                n['local-address'] for n in
+                target.scenario_neighbors(sort=False)]).encode()
+        target.local = local
+        assert target.policy_loaded_failure() is None
+        assert asked == ["vtysh -c 'show running-config'"]

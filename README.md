@@ -633,7 +633,10 @@ so refuses all of that too, and is also refused beside `--receivers` and
 `--target_config_file`, for any
 target but BIRD and `frr_c`, by `config`, and in batch until it becomes a
 matrix dimension (FRR reads its config in time quadratic in `N`: about 90 s at
-2,000 rules, so expect a long monitor wait on large FRR policies); churn works only with the synthetic BIRD generator (the burst is `birdc`
+2,000 rules, so expect a long monitor wait on large FRR policies). Before the
+clock starts, a policy run checks the daemon really loaded the policy — BIRD's
+sessions import through it, FRR's running config holds every list and
+route-map entry rendered — and stops without measuring anything if not; churn works only with the synthetic BIRD generator (the burst is `birdc`
 switching a static protocol) and is refused under `-r/--repeat` and
 `--filter_test`; the policy reload needs a target with a reload mechanism
 (only BIRD today), and is refused for MRT playback, under `-r`, under

@@ -803,6 +803,13 @@ class TestThePolicyGraphs:
         bgperf2.create_batch_policy_graphs(rows, 't', results_dir=str(tmp_path))
         assert not list(tmp_path.iterdir())
 
+    def test_every_line_has_its_own_colour_and_style(self):
+        styles = bgperf2.batch_policy_line_styles(40)
+        assert len(set(styles)) == 40
+        # Past ten lines the colours repeat, so the style must not.
+        assert styles[10][0] == styles[0][0]
+        assert styles[10][1] != styles[0][1]
+
     def test_the_graphs_are_drawn_beside_the_bars(self, tmp_path):
         rows = [policy_row('bird', 0, '', '', 10),
                 policy_row('frr_c', 0, '', '', 12),

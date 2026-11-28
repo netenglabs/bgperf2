@@ -6427,15 +6427,30 @@ def batch_policy_graph_series(results, column):
     return series
 
 
+POLICY_LINE_STYLES = ('-', '--', ':', '-.')
+
+
+def batch_policy_line_styles(count):
+    '''`(colour, linestyle)` for each of `count` lines, every pair distinct up
+    to 40 lines. Matplotlib's default cycle has ten colours, so an eleventh
+    line reused the first one's colour and the legend could not tell them
+    apart -- step 8's `/24` matrix draws twelve. The line style changes each
+    time the colours run out.'''
+    return [('C{0}'.format(i % 10),
+             POLICY_LINE_STYLES[(i // 10) % len(POLICY_LINE_STYLES)])
+            for i in range(count)]
+
+
 def create_batch_policy_graphs(results, name, results_dir=DEFAULT_RESULTS_DIR):
     for title, column, suffix, ylabel in BATCH_POLICY_GRAPHS:
         series = batch_policy_graph_series(results, column)
         if not series:
             return
         plt.figure()
-        for label, points in series.items():
+        styles = batch_policy_line_styles(len(series))
+        for (label, points), (colour, linestyle) in zip(series.items(), styles):
             plt.plot([x for x, _ in points], [y for _, y in points],
-                     marker='o', label=label)
+                     marker='o', color=colour, linestyle=linestyle, label=label)
         plt.xlabel('policy rules')
         plt.ylabel(ylabel)
         plt.title(title)

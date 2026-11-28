@@ -1,10 +1,10 @@
 # Policy phase 1: import-policy cost on initial table load
 
-Status: in progress
+Status: complete, awaiting distillation
 Strand: 6 Test capabilities (IPv6, BGP policy, new workloads)
-Updated: 2026-11-26
-Next: Live qualification (step 8), which needs separate authorization. Steps 1–7 are done: `bench --policy-rules` and `batch`'s `policy_rules`/`policy_match`/`policy_hit` axes run the policy on BIRD and FRR, confirm it is loaded before measuring, and publish it in the stats row and in graphs of cost against rule count.
-Blocked on: authorization for the step-8 live run
+Updated: 2026-11-27
+Next: Distill the durable contracts into the guides next to the code, then delete this plan. Steps 1–8 are done, including the live qualification on BIRD and FRR (step 8, recorded in [decisions](../decisions.md)).
+Blocked on: nothing
 Done when: `bench` and `batch` run a generated import policy of selected size, match type and match position on BIRD and FRR targets at `/24` and `/32`, publish convergence, CPU and memory beside a no-policy baseline, and withhold timing by name whenever the monitor's count differs from the policy's expected count.
 
 Selected 2026-11-21 as the first scoped step of the
@@ -249,6 +249,27 @@ renderer.
    establishes that the workload runs and the guards fire. Results are
    descriptive only: performance policy stays `disabled` and calibration stays
    deferred ([decisions](../decisions.md)).
+
+   **Done 2026-11-27.** BIRD 2.17.1 (master `fe0c222`) and FRR 10.7.0, 10
+   peers × 10,000 prefixes, sink monitor; 14 `/24` cells and 4 `/32` cells.
+   - Every cell passed. The policy-loaded check confirmed the policy before
+     every policy cell, and every monitor count equalled the expected count
+     (75,000 under 1,000 rules, 100,000 for each baseline), so the count
+     guard withheld nothing. The refusal paths were not exercised live.
+   - `elapsed (s)` is about 4 s at the baselines and in most policy cells.
+     The exception is FRR `as-path`/`last`: 276 s at `/24` and 274 s at
+     `/32`, against BIRD's 7 s for the same policy. FRR `community`/`last`
+     took 11 s; BIRD `prefix`/`last` took 6 s.
+   - The `/24` and `/32` results agree (BIRD 4/4 s baseline, 7/7 s
+     `as-path`/`last`), so this table shape adds no visible cost at 10 ×
+     10,000.
+   - FRR's quadratic config read (step 4) shows in `monitor (s)`, before the
+     clock starts: 13–30 s at 1,000 rules, against 0 s at the baselines.
+   - Another workload on the host (16 workers) overlapped the two
+     `as-path`/`last` cells three times, at about 1,600% foreign CPU; FRR read
+     277–295 s and BIRD 7–9 s. The recorded cells were re-run with that
+     workload paused, at 43% and 115% foreign CPU. The run records stay in the
+     local results directory, outside this repository.
 
 ## Decisions
 

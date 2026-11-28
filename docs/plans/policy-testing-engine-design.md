@@ -1,17 +1,50 @@
 # Policy testing engine design
 
-Status: selected (phase 1 scoped)
+Status: phase 1 delivered; later phases not selected
 Strand: 6 Test capabilities (IPv6, BGP policy, new workloads)
-Updated: 2026-11-21
-Next: Carry out [phase 1](policy-phase1.md); later phases stay unauthorized until scoped.
-Blocked on: phase 1
+Updated: 2026-11-27
+Next: When a later phase is selected, write its scoped design with acceptance criteria.
+Blocked on: operator selection of a later phase
 Done when: Semantic policy rules render equivalently for selected daemons and a route-level oracle verifies them on a controlled corpus.
 
-Status: long-range proposal. Policy work was selected on 2026-11-21 and only
-[phase 1](policy-phase1.md) is scoped for implementation; everything else here
-reopens only through its own scoped design and validation decision; the current priority is the
+Status: long-range proposal. Policy work was selected on 2026-11-21, and only
+phase 1 was scoped for implementation. It was delivered on 2026-11-27 (below).
+Everything else here reopens only through its own scoped design and validation decision; the current priority is the
 delivered A–D workflow summarized in [engine decisions](../decisions.md).
 See [future workloads](future-testing-workloads.md) for the deferred families.
+
+## Phase 1, delivered: import-policy cost on initial table load
+
+Phase 1 measures what a generated import policy costs BIRD and FRR while they
+load a table, through `bench --policy-rules/--policy-match/--policy-hit` and
+the matching `batch` axes. It measures performance, not correctness: an exact
+accepted count is its only guard, against unequal work. The contracts are in
+[workload controls](../invariants/workload-controls.md), and the live
+qualification is in [engine decisions](../decisions.md). The phase plan was
+deleted when it completed, and Git history keeps it.
+
+Phase 1 excluded these, and each needs its own scoped phase:
+
+- policy correctness: no per-route oracle and no attribute verification;
+- attribute-modifying actions (MED, local preference, community edits),
+  continue semantics, export policy, and mixed match types in one policy;
+- a policy change on a populated table (`--policy-reload-blocks` covers BIRD
+  alone);
+- MRT corpora, IPv6, mixed prefix lengths in one run, and lengths other than
+  24 and 32.
+
+Candidate next phases, none authorized:
+
+- attribute-modifying actions, cost only, once a daemon-side witness confirms
+  that the action was applied;
+- policy reload and re-evaluation across BIRD and FRR, unified with
+  `--policy-reload-blocks`;
+- large communities (once both renderers and the generator support them),
+  regex AS-path matches, and mixed match types;
+- further renderers (OpenBGPD, RustyBGP, rustbgpd, Holo, …) within each
+  adapter's scope;
+- why FRR 10.7 takes about 70 times longer with `as-path`/`last` at 1,000
+  rules (276 s against about 4 s), which phase 1 recorded but did not explain.
 
 Adapted from the policy engine proposal at
 `07c6ff1b4001976865057f7ed92ca4b4ccc334a1`, preserved in engine

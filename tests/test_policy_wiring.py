@@ -598,7 +598,7 @@ def cells_of(test):
 
 
 class TestTheBatch:
-    '''The policy as matrix axes (step 7).'''
+    '''The policy as batch matrix axes.'''
 
     def test_a_test_without_the_keys_has_no_policy(self):
         [cell] = cells_of(a_test())
@@ -859,7 +859,7 @@ def running_config_from(policy, sessions):
 
 
 class TestThePolicyLoadedCheck:
-    '''Step 6: a daemon that dropped its policy must not look fast.'''
+    '''The policy-loaded check: a daemon that dropped its policy must not look fast.'''
 
     def test_the_captured_frr_config_is_the_rendered_policy(self):
         policy = ip.policy_from_scenario(CAPTURED_FRR_POLICY)

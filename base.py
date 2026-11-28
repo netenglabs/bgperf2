@@ -1033,7 +1033,7 @@ class Target(Container):
         '''Why the running daemon is not applying its import policy, or None.
 
         Asked once, after the monitor's session is up and before the clock
-        starts or any generator launches (policy phase 1 step 6). A daemon
+        starts or any generator launches (policy phase 1). A daemon
         that silently ignored its policy would otherwise be published as a
         fast policy run. None with no policy. Fails closed: an adapter that
         renders a policy and cannot confirm it is loaded refuses the run, so

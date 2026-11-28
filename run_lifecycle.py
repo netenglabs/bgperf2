@@ -711,7 +711,7 @@ def bench(runtime, args):
     # `--receivers 20` run look like a slow monitor in every published row.
     for r in receiver_containers:
         r.wait_established(conf['target']['local-address'], role=r.name)
-    # The policy-loaded check (policy phase 1 step 6): once, with the
+    # The policy-loaded check (policy phase 1): once, with the
     # daemon's config read (its first session is up) and before the clock or
     # any sampler starts, so a refusal here leaves nothing running and no
     # measurement begun. A daemon that dropped its policy would otherwise look
@@ -719,7 +719,7 @@ def bench(runtime, args):
     # but still accepts the same routes. A remote target never carries one:
     # it comes only from `-f`, which refuses the policy.
     #
-    # A refusal is a FAILED row, not an exit (policy phase 1 step 7), so a
+    # A refusal is a FAILED row, not an exit, so a
     # batch records that cell and goes on to the next one, and `bench` exits 1
     # as it does for any failed row. It is recorded through `finish_bench()`
     # with no sample taken: the row's times and peaks are the unsampled
@@ -1220,7 +1220,7 @@ def bench(runtime, args):
                     # marked failed, so no summary is affected.
                     output_stats['fail_msg'] = churn_evidence[
                         'incomplete_reason'] or 'churn did not complete'
-                # The import policy's count guard (plan Decision 1). A run
+                # The import policy's count guard (workload-controls invariants). A run
                 # whose monitor did not end on exactly the expected count did
                 # not do the work it was asked to do -- an over-acceptance
                 # converges early, a shortfall ends by stability -- so it is

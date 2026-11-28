@@ -4601,7 +4601,7 @@ def check_batch_prefix_length(test, scenarios, scope, diversity):
                     sys.exit("test '{0}': {1}".format(test['name'], e))
 
 
-# The import policy's matrix keys (policy phase 1 step 7). Each is a list, an
+# The import policy's matrix keys (policy phase 1). Each is a list, an
 # axis like `neighbors`, and `policy_rules: 0` is the in-matrix baseline.
 BATCH_POLICY_KEYS = ('policy_rules', 'policy_match', 'policy_hit')
 
@@ -6368,7 +6368,7 @@ BATCH_GRAPHS = [
 ]
 
 
-# Cost against rule count (policy phase 1 step 7), drawn only for a test with
+# Cost against rule count (policy phase 1), drawn only for a test with
 # policy cells. Read by column name, not by position.
 BATCH_POLICY_GRAPHS = [
         ('convergence against policy rules', 'elapsed (s)', 'policy_elapsed',
@@ -6434,7 +6434,7 @@ def batch_policy_line_styles(count):
     '''`(colour, linestyle)` for each of `count` lines, every pair distinct up
     to 40 lines. Matplotlib's default cycle has ten colours, so an eleventh
     line reused the first one's colour and the legend could not tell them
-    apart -- step 8's `/24` matrix draws twelve. The line style changes each
+    apart -- the 2026-11-27 qualification's `/24` matrix draws twelve. The line style changes each
     time the colours run out.'''
     return [('C{0}'.format(i % 10),
              POLICY_LINE_STYLES[(i // 10) % len(POLICY_LINE_STYLES)])
@@ -6689,7 +6689,7 @@ def gen_conf(args):
 
     # The generated import policy (policy phase 1). The scenario carries its
     # arguments, and the target rebuilds the rules from them. Every checkpoint
-    # becomes the policy's expected accepted count (plan Decision 1): the
+    # becomes the policy's expected accepted count (workload-controls invariants): the
     # configured counts would leave every policy run short of its checkpoint.
     # The monitor's is exact, without the 0.99 allowance above, because the
     # run's count guard compares the final count to it exactly. Each

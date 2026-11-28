@@ -401,9 +401,12 @@ Phase 1 supports 24 and 32 (`prefix_length.py`).
 
 ## The generated import policy — model and expected counts (policy phase 1)
 
-`import_policy.py` builds the import policy for policy phase 1
-([plan](../plans/policy-phase1.md)) from the rule count, match type, hit position, peers and
-prefixes per peer, and states the exact accepted count a target must reach. `--tester-attributes`
+`import_policy.py` builds the import policy for policy phase 1 (delivered 2026-11-27; its scope,
+non-goals and candidate next phases are in the
+[policy design](../plans/policy-testing-engine-design.md)) from the rule count, match type, hit
+position, peers and prefixes per peer, and states the exact accepted count a target must reach. It
+measures what a policy costs a daemon loading a table, never whether the daemon evaluates it
+correctly: the exact count is a guard against unequal work, not a correctness check. `--tester-attributes`
 puts the block attributes on the generator (below); `policy_render.py` writes the policy as BIRD
 and FRR text; and `--policy-rules` puts it on a `bench` run's target (both sections after this
 one).
@@ -448,7 +451,21 @@ one).
   attributes), churn (its tail cuts across the blocks), `filter_test` (the private ASNs are bogons),
   `--policy-reload-blocks` and the scenario filter counts `-a`/`-e`/`-c`/`-x` (each a policy on the
   target, a second variable), and a fleet the blocks cannot number. `-f` has nothing to attach and
-  is refused at `bench` and in batch; native controlled cells refuse it. A scenario file that
+  is refused at `bench` and in batch; native controlled cells refuse it.
+- **Attributes cost the target, not the generator, so a policy is read against the
+  attributes-only run, never plain permit-all.** Measured 2026-11-25 on BIRD 2.17.1 target and
+  generators, 10 peers × 500,000 prefixes at `/32` and `/24`, two interleaved repetitions each.
+  - The target set the pace either way. The generators' sockets held over 1 MB unsent for 84–94%
+    of every send window, the target sat flat at about 1.24 cores, and the generators used less CPU
+    with attributes (8.3–8.5 cores against 9.5–9.8).
+  - Target intake fell from about 263k to 222k prefixes/s at `/32`, and from 264k to about 212k
+    at `/24`, and elapsed time rose from 22–24 s to 26–27 s.
+  - Wire bytes rose only 5% at `/32` (6.0 to 6.4 bytes/prefix) and 13% at `/24` (4.8 to 5.5). The
+    extra time is therefore the target's per-route attribute handling, not update size. These byte
+    counts include the testers' ACKs for the table re-advertised to them, so they are upper bounds.
+  - An earlier, quieter set measured a larger penalty, about 270k to 200k prefixes/s. The set
+    reported here ran at load average 8–10.
+- A scenario file that
   carries `policy-blocks` itself is checked before the teardown (`check_scenario_policy_blocks()`):
   the counts must partition each peer's paths, with no churn block, on a BIRD generator, since any
   other drops them silently.
@@ -510,14 +527,21 @@ one).
   - BIRD read every shape up to 8,000 in under a second.
 
   So `MAX_POLICY_RULES` is what FRR can *represent*, not what it can start in a run's time. An FRR
-  cell's startup wait has to scale with `N`, or its large cells must be refused. FRR may also look
-  lists up by name when it evaluates a route; if so, evaluation is quadratic too. That is a
-  hypothesis for the step-5 measurement, not a finding.
+  cell's startup wait has to scale with `N`, or its large cells must be refused (see "FRR's slow
+  config read is waited out" below).
+- **FRR's evaluation is slow for one shape, not for every one.** The 2026-11-27 qualification ran
+  10 peers × 10,000 prefixes with 1,000 rules on BIRD 2.17.1 and FRR 10.7.0, one run per cell. FRR
+  converged in about 4 s for every match type with `first`, and for `prefix` with `last`. It took
+  11 s for `community`/`last` and about 276 s for `as-path`/`last`, at both `/24` and `/32`. BIRD
+  took 7 s for that cell. So walking 1,000 failing AS-path access-lists costs FRR far more per
+  route than walking 1,000 prefix-lists. Whether that cost grows quadratically with `N` was not
+  measured, because only one `N` ran. The cause is unexplained; FRR's AS-path lists use regular
+  expressions, and that is the first place to look.
 
 ### On a run — `--policy-rules N --policy-match M --policy-hit H`
 
 - **It turns `--tester-attributes` on**, whatever the match type: the as-path and community rules
-  match the blocks' attributes, and a policy cell's baseline is the attributes-only run (step 3), so
+  match the blocks' attributes, and a policy cell's baseline is the attributes-only run (measured above), so
   a prefix policy without them would carry a different table from its baseline. Every refusal of
   the attributes is therefore a refusal of the policy, re-raised naming `--policy-rules`
   (`import_policy.resolve_import_policy()`), and so are `--receivers` (a second cost in the run)
@@ -534,7 +558,7 @@ one).
   the checkpoints and the count guard come from the command line, and a file states its own.
   `config` refuses the flags, since it names no target and writes for `-f`. `-r` is refused, as
   the attributes are. Native controlled cells refuse it.
-- **In `batch` the three are list axes on a test** (step 7), all three or none. They are refused
+- **In `batch` the three are list axes on a test**, all three or none. They are refused
   on a target (`BATCH_TEST_ONLY_KEYS`), because a target key nothing reads would run the cell with
   no policy under a config naming one.
   - `policy_rules` must hold a positive count, since a matrix of baselines measures nothing.
@@ -559,7 +583,10 @@ one).
   one `neighbor range` protocol. FRR: lists and route-map **before `router bgp`**, and
   `route-map BGPERF-IMPORT in` on every session. Both apply it to the monitor's and receivers'
   sessions too, which announce nothing.
-- **Every checkpoint is the expected accepted count** (plan Decision 1): each neighbour's
+- **Every checkpoint is the expected accepted count**, never the configured count, which a
+  filtered run never reaches (`convergence.py`'s "a filtered run" case). A shortfall still ends:
+  BIRD's pre-policy `received` reaches the full table and opens the convergence gate, the run ends
+  on stability, and the count guard below withholds its timing. Each neighbour's
   `check-points`, and the monitor's, which is exact — no 0.99 allowance — because the guard below
   compares to it exactly. Each neighbour keeps its offered count as `offered-check-point`, and
   `Target.get_offered_counts()` holds the pre-policy `received` counter to it. Held to the accepted
@@ -581,7 +608,7 @@ one).
   `last`) and FRR 10.7 (prefix, `last`) both ended at exactly 1,500, the expected count. That is
   one small shape; a larger run that loses routes would now be published `FAILED`, which is the
   guard doing its job rather than a reason to restore the allowance.
-- **The policy-loaded check** (`Target.policy_loaded_failure()`, step 6) runs once, after the
+- **The policy-loaded check** (`Target.policy_loaded_failure()`) runs once, after the
   monitor's and receivers' sessions are up and before the clock, any sampler or any generator
   starts. A failure is a **FAILED row**, recorded through `finish_bench()` with nothing sampled:
   `MSG` names what differs, the events artifact withholds every interval by that reason, no
@@ -610,7 +637,8 @@ one).
 - **FRR's slow config read is waited out, not capped.** The monitor's establishment wait has no
   deadline once the sink is writing, so an FRR target parsing a large policy shows as a long
   `monitor (s)`, not a failed run. The clock starts after it, so convergence time excludes the
-  parse. No FRR-specific cap on `N` exists yet.
+  parse. At 1,000 rules on FRR 10.7 (2026-11-27), `monitor (s)` was 13–30 s, against 0 s for the
+  baselines. No FRR-specific cap on `N` exists yet.
 - **The stats row carries `policy rules`, `policy match`, `policy hit` and `policy bytes`**, after
   `max foreign cpu %` and before the provenance columns, which stay last. Without them a policy row
   and its attributes-only baseline are the same row. `policy bytes` is counted as the target writes

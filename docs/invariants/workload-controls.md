@@ -2,7 +2,7 @@
 
 What `bench`/`batch` may be asked to run, and the guards that refuse the rest.
 
-**Read this before editing:** `cpu_pinning.py` (pure CPU lists and role-pinning validation), `recipes.py` (portable source validation), `recipe_worker.py` (recipe CPU layout forwarding), `recipe_preflight.py` (online CPU availability), `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `run_lifecycle.py` (run orchestration), `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`), `churn.py`, `policy.py`, `bird.py` (the churn protocol and the reload command)
+**Read this before editing:** `prefix_length.py` (the synthetic prefix walks and their refusals), `cpu_pinning.py` (pure CPU lists and role-pinning validation), `recipes.py` (portable source validation), `recipe_worker.py` (recipe CPU layout forwarding), `recipe_preflight.py` (online CPU availability), `batch_cells.py` (pure matrix construction, prefix scope and legacy identities), `run_lifecycle.py` (run orchestration), `bgperf2.py` (argument guards, `bench()`, `batch()`, `batch_cell_args()`, `check_batch_test()`, `bench_output_prefix()`), `base.py` (`gen_conf()`, `gen_paths()`, `Target.scenario_neighbors()`, `Target.policy_loaded_failure()`), `churn.py`, `policy.py`, `import_policy.py` (the generated import policy and its expected counts), `policy_render.py` (its BIRD and FRR text), `bird.py` (the churn protocol, the reload command and the policy-loaded check), `frr.py` (the import policy's config and its policy-loaded check), `tester.py` (`check_policy_blocks()`, `write_policy_block_protocols()`, `carries_policy_blocks()`, `BIRDTester.configure_neighbors()`)
 `recipe_minimization.py` governs explicit selected-cell projection and bounded peer/prefix reductions.
 
 These are invariants, not background: every rule here was written because the obvious alternative was tried and published a wrong number quietly. `CLAUDE.md` carries the one-line index; this file carries the argument.
@@ -343,6 +343,309 @@ withdraws the rejected ones from every export session, with the sessions staying
   reason `--path-diversity` is not. The evidence key is `reload_complete`, not `complete`:
   `policy_reload_metrics()` derives a `complete` off the event stream, and
   `_policy_reload_section()` refuses a caller that lands on a derived name.
+
+## `--prefix-length L` — the shape of every synthetic prefix
+
+`--prefix-length L` (batch: `prefix_length: L`, a *test* key) sets the length of every synthetic
+prefix. Every table before it was `/32` host routes, and a prefix-list over `/32`s does not cost
+what one over a real table's `/24`s does, so the policy workload needs the shape to be a dimension.
+Phase 1 supports 24 and 32 (`prefix_length.py`).
+
+- **The `/32` walk is the historical one and is not touched.** It starts at 100.0.0.0 and does not
+  skip reserved space, and it cannot start to: a 50 x 100,000 table already walks through
+  100.64.0.0/10, so a skip at `/32` would change the prefixes of runs that have been published.
+  `gen_mako_macro()` returns its preamble byte for byte at the default, the cell id, stem and
+  description omit the key there, and `prefix_length.walk()` refuses to produce a `/32` walk, so a
+  second definition of every published table cannot appear.
+- **A shorter walk skips special-purpose space and the peering subnet.** It is drawn from 1.0.0.0
+  up to multicast with `RESERVED_NETWORKS` taken out, because a daemon may drop a loopback or
+  link-local prefix without counting it and the run would read as route loss; and the run's own
+  `--local-address-prefix` is taken out, because a route covering it would capture the next hop
+  every route is announced with. So is an explicitly set target or monitor address, which may lie
+  outside that subnet: `prefix_length.walk_exclusions()` is the one list `gen_conf()` and every
+  capacity check use. The scenario preamble imports `prefix_length.walk()`, so what a
+  run announces and what the capacity check counted are one piece of code, and a `config -o`
+  scenario renders the same walk under `bench -f`.
+- **Capacity is checked against distinct prefixes, after the scope and the diversity.** The walk
+  holds 14,461,947 `/24`s, and a table needing more is refused before any container -- for a batch,
+  for every (target, peers, prefixes) combination on the axes, since each target may name its own
+  peering subnet.
+- **Refused, at all four entry points, for**: a value outside `SUPPORTED_PREFIX_LENGTHS` (`True`
+  and quoted values included), an MRT generator (it plays back the file's own prefixes), ExaBGP
+  (unpinned and unversioned images, so a run on one cannot say which generator it measured, and no
+  per-block attribute filters for the policy workload), `-f`/a scenario target (the file states
+  its prefixes), `-r/--repeat` (the reused generators keep announcing what they were started with,
+  and the counts would agree, which is what makes it silent; a batch refuses a shortened test and a
+  `repeat` target anywhere in it, in either order, as `--pin` does), `-e/--prefix-list-num` (its
+  entries are `/32`s from 90.0.0.0, which match no route of another length and sit inside the walk),
+  `--filter_test` (`filters/*` select by length -- `ixp` drops anything longer than `/24`, so it
+  rejects a `/32` table whole and accepts a `/24` one whole; a batch checks every filter on the
+  axis), native controlled cells (`native_mrt.synthetic_spec()`, whose post-run inspection expects the
+  `/32` walk), and recipes (whose prefix-identity
+  layout is contiguous `/32` host routes; their strict key list refuses it). Churn, the policy
+  reload, path diversity and `--prefix-scope total` are length-agnostic -- they work on each peer's
+  path list and on peer ASNs -- and are allowed.
+- **`-r` is also refused the other way round**: a default-length `bench -r` after a separate `/24`
+  run would reuse `/24` generators under a `/32` stem. `-r` rewrites no generator config, so the
+  length a reused generator announces is the first `route` line of the config in the directory
+  *that container* has bind-mounted (`reused_generator_prefix_lengths()`), read beside the
+  reused-cpuset check and before the teardown. Through the container, never `--dir`/`--bench-name`:
+  container names are fixed, so the generators may have been started from another directory. A
+  route that cannot be read refuses rather than passing the check unmade. A batch meets this per
+  cell rather than up front, because an earlier non-`repeat` cell rebuilds the generators and an
+  up-front read would refuse batches that run correctly. A `-p` mismatch under `-r` remains the
+  undetected hazard the policy-reload section measured.
+- Stem gets `pl<L>`, both `run` blocks record `prefix_length` (`recorded_prefix_length()`), and `-f`
+  and MRT playback record `null`, since neither table was synthesised. Not a CSV
+  column, for the reason `--path-diversity` is not.
+
+## The generated import policy — model and expected counts (policy phase 1)
+
+`import_policy.py` builds the import policy for policy phase 1 (delivered 2026-11-27; its scope,
+non-goals and candidate next phases are in the
+[policy design](../plans/policy-testing-engine-design.md)) from the rule count, match type, hit
+position, peers and prefixes per peer, and states the exact accepted count a target must reach. It
+measures what a policy costs a daemon loading a table, never whether the daemon evaluates it
+correctly: the exact count is a guard against unequal work, not a correctness check. `--tester-attributes`
+puts the block attributes on the generator (below); `policy_render.py` writes the policy as BIRD
+and FRR text; and `--policy-rules` puts it on a `bench` run's target (both sections after this
+one).
+
+- **The shape is fixed: guard, then the `N` generated rules, then default accept.** Each peer's list
+  is cut into `BLOCKS_PER_PEER` (4) contiguous blocks and the **last block of every peer** is
+  rejected by a guard evaluated before the generated rules. The guard has to be outside the `N`:
+  under `miss` no generated rule may match, so a policy of generated rules alone decides every
+  route by one default action, and rejects all or nothing. It goes *first* so the rejected routes
+  leave before the generated rules, and every route that reaches them meets them exactly as `hit`
+  says; last, it would make every rejected route evaluate all `N` whatever `hit` was. It uses the
+  run's own match type, since mixed match types are a non-goal.
+- **The tail of every peer, not the tail of the fleet.** Rejecting whole peers would give some
+  neighbour an expected count of 0, which cannot be told from a session that delivered nothing —
+  `--policy-reload-blocks`' empty-table rule, applied per checkpoint. Every peer therefore expects
+  `p - p // 4` and loses `p // 4`, and fewer than 4 prefixes per peer is refused: the rejected
+  block would be empty and the policy invisible.
+- **The expected count depends on the fleet alone**, never on `N`, the match type or the hit, so
+  every policy cell of one fleet shape expects the same count. With no policy it is the whole table.
+- **Block attributes do not depend on the policy.** Each block carries an AS path of its own ASN
+  and its class's ASN (private 32-bit), and communities naming the block and its class (private
+  16-bit ASNs), so changing the policy never changes what the generator sends. The block's own
+  value is there so the value a rule looks for is not the only one on the route. Those ASNs are
+  bogons to `filters/*.conf`' `reject_bogon_asns()`, so a `filter_test` beside a policy would
+  reject every route before the policy saw it — a second reason the two are refused together.
+- **A block's `peer` is its walk slice, never an AS position.** The scenario draws slices in
+  rendered neighbour order, which `yaml.dump` sorts by router-id text, so from ten peers on the
+  AS-1010 peer holds slice 0. `gen_conf()` therefore deals each neighbour its blocks with
+  `scenario_policy_blocks()`, in sorted router-id text order, as a `policy-blocks` list in the
+  scenario; the generator renders that list and derives nothing from its AS or its addresses.
+- **The generator sets the attributes once per route, at load.** `BIRDTester` writes one static
+  protocol per block (`policy_block<k>`) whose own import filter prepends the block's path and adds
+  its communities, never a filter on the BGP session that would run again on every export. It
+  accepts every route, so the static `imported` counts still sum to the peer's whole table and the
+  offering counters are unchanged. A scenario with no `policy-blocks` writes the one unnamed static
+  protocol byte for byte as before.
+- **`--tester-attributes` (batch: `tester_attributes: true` on a test) turns them on with no
+  policy on the target**, so what carrying them costs the generator is measured before any policy
+  cost is read beside it. `import_policy.resolve_tester_attributes()` holds the refusals, applied by
+  `bench`, `config` and `check_batch_tester_attributes()` over every target, filter and fleet on
+  the axes: any generator but BIRD, `--path-diversity` (a shared prefix would carry two blocks'
+  attributes), churn (its tail cuts across the blocks), `filter_test` (the private ASNs are bogons),
+  `--policy-reload-blocks` and the scenario filter counts `-a`/`-e`/`-c`/`-x` (each a policy on the
+  target, a second variable), and a fleet the blocks cannot number. `-f` has nothing to attach and
+  is refused at `bench` and in batch; native controlled cells refuse it.
+- **Attributes cost the target, not the generator, so a policy is read against the
+  attributes-only run, never plain permit-all.** Measured 2026-11-25 on BIRD 2.17.1 target and
+  generators, 10 peers × 500,000 prefixes at `/32` and `/24`, two interleaved repetitions each.
+  - The target set the pace either way. The generators' sockets held over 1 MB unsent for 84–94%
+    of every send window, the target sat flat at about 1.24 cores, and the generators used less CPU
+    with attributes (8.3–8.5 cores against 9.5–9.8).
+  - Target intake fell from about 263k to 222k prefixes/s at `/32`, and from 264k to about 212k
+    at `/24`, and elapsed time rose from 22–24 s to 26–27 s.
+  - Wire bytes rose only 5% at `/32` (6.0 to 6.4 bytes/prefix) and 13% at `/24` (4.8 to 5.5). The
+    extra time is therefore the target's per-route attribute handling, not update size. These byte
+    counts include the testers' ACKs for the table re-advertised to them, so they are upper bounds.
+  - An earlier, quieter set measured a larger penalty, about 270k to 200k prefixes/s. The set
+    reported here ran at load average 8–10.
+- A scenario file that
+  carries `policy-blocks` itself is checked before the teardown (`check_scenario_policy_blocks()`):
+  the counts must partition each peer's paths, with no churn block, on a BIRD generator, since any
+  other drops them silently.
+- **Under `-r` it is refused in both directions**, as `--prefix-length` is: with the flag outright,
+  and without it when a reused generator's config, read through that container's own bind mount,
+  holds a `policy_block` protocol (`reused_generators_with_attributes()`). Across a batch,
+  `check_batch_prefix_length_and_repeat()` refuses a `tester_attributes` test beside a test with a
+  `repeat` target, in either order. It reaches the stem as `ta`, both manifests' `run` blocks as
+  `tester_attributes` (`null` under `-f` and for MRT playback), and the cell identity only when
+  set, so every existing id is unchanged. `gen_conf()` keeps its own refusal of a non-BIRD
+  generator, diversity and churn as a last line. **Not covered: `-f` with `-r`.** Neither reused
+  generator check runs for a scenario file, so `bench -f plain.yaml -r` after a `ta` (or `/24`) run
+  sends what the reused generators were started with while the manifests record `null`.
+- **Filler rules reject values no route carries**: ASNs and communities from their own ranges, and
+  prefixes in class E, which neither walk reaches. Prefix rules name the walk's own addresses
+  through `prefix_length.walk_address_ranges()`, whose `/32` bounds are checked against the
+  scenario preamble rather than being a second definition of the historical walk.
+- `tests/test_import_policy.py` evaluates every route of a rendered `gen_conf()` table through
+  guard, rules and default, for every match type and hit position at both lengths, and checks the
+  deciding rule and the per-peer counts against the model.
+- **`MAX_POLICY_RULES` is 65533, set by the tightest renderer**: FRR numbers route-map entries 1 to
+  65535 and needs one for the guard, one per rule and one for the default. A cap one daemon could
+  not render would make that cell a single-daemon result.
+
+### The renderers — `policy_render.py`
+
+- **One model statement is one test in each language, in the model's order.** BIRD gets one
+  `filter` of one `if <test> then accept|reject;` per statement and a final action; FRR gets one
+  `route-map` whose entries each match one list of their own, and a final entry with no match. A
+  route therefore meets the same number of tests on both daemons and stops at the same one. Folding
+  several rules into one set, or one FRR list shared by several entries, would make the two daemons
+  do different amounts of work for the same `N`.
+- **The tests are the same predicate in both languages.** Prefix: inside a cover *and* exactly the
+  run's length (`P{L,L}`; `P ge L le L`, or plain `P` when the cover is `/L`, because FRR refuses a
+  `ge` equal to the prefix's own length). AS path: containment anywhere on the path (`[= * A * =]`;
+  `_A_`, whose `_` anchors at path boundaries so `4200000001` cannot match inside
+  `14200000001`). Community: membership (`(a, b) ~ bgp_community`; one standard community-list
+  line per value, because a line naming two communities requires both).
+- FRR lists are written before the route-map that names them. The text is yielded line by line.
+- `tests/test_policy_render.py` reads both renderings back with evaluators that accept exactly the
+  forms written and refuse anything else, and runs every route of a rendered `gen_conf()` table
+  through BIRD, FRR and the model: all three must decide at the same statement. Broken renderers
+  (an unanchored FRR regex, a BIRD set without the length, `ge`/`le` dropped, swapped actions, the
+  guard moved last, a denying default) each fail that test on its own. Exact-text fixtures pin
+  small policies.
+- **The daemons themselves were checked once, by hand, not by the suite**: `bird -p` on BIRD
+  2.19.2, 3.3.2 and 2.17.1 (`latest`), and `bgpd --dryrun` on FRR 8.5 and 10.7. Two traps for whoever
+  repeats that: FRR's dry run **exits 0 even when lines fail**, so read its output for `Config
+  Failed`/`Unknown command`; and it **aborts on any `neighbor` line** (`bgp_keepalives_off()`
+  assertion), so dry-run the policy without the session config.
+- **FRR's config read is quadratic in the rule count; BIRD's is not.** Measured 2026-11-25 with
+  `bgpd --dryrun` on FRR 10.7 and `bird -p` on BIRD `latest`, one parse per shape, 300 s cap.
+  - FRR as-path: 22 s at 1,000 rules and 90 s at 2,000, about 4× per doubling.
+  - Community went 16 → 62 → 255 s and prefix 42 → 122 s, about 4× and 2.9× per doubling. Those
+    runs overlapped earlier timed-out parses that `timeout` had left running, so their times and
+    their growth rates are both unreliable. Only the as-path pair is clean.
+  - Every FRR parse at 8,000 rules, and as-path and prefix at 4,000, exceeded the cap.
+  - Extrapolated, 65,533 as-path rules would take about a day.
+  - BIRD read every shape up to 8,000 in under a second.
+
+  So `MAX_POLICY_RULES` is what FRR can *represent*, not what it can start in a run's time. An FRR
+  cell's startup wait has to scale with `N`, or its large cells must be refused (see "FRR's slow
+  config read is waited out" below).
+- **FRR's evaluation is slow for one shape, not for every one.** The 2026-11-27 qualification ran
+  10 peers × 10,000 prefixes with 1,000 rules on BIRD 2.17.1 and FRR 10.7.0, one run per cell. FRR
+  converged in about 4 s for every match type with `first`, and for `prefix` with `last`. It took
+  11 s for `community`/`last` and about 276 s for `as-path`/`last`, at both `/24` and `/32`. BIRD
+  took 7 s for that cell. So walking 1,000 failing AS-path access-lists costs FRR far more per
+  route than walking 1,000 prefix-lists. Whether that cost grows quadratically with `N` was not
+  measured, because only one `N` ran. The cause is unexplained; FRR's AS-path lists use regular
+  expressions, and that is the first place to look.
+
+### On a run — `--policy-rules N --policy-match M --policy-hit H`
+
+- **It turns `--tester-attributes` on**, whatever the match type: the as-path and community rules
+  match the blocks' attributes, and a policy cell's baseline is the attributes-only run (measured above), so
+  a prefix policy without them would carry a different table from its baseline. Every refusal of
+  the attributes is therefore a refusal of the policy, re-raised naming `--policy-rules`
+  (`import_policy.resolve_import_policy()`), and so are `--receivers` (a second cost in the run)
+  and `--target_config_file` (the target runs that file and never writes its own config, so the
+  policy would be recorded in the stem, the row and both manifests without ever being rendered).
+  Neither `--policy-match` nor `--policy-hit` has a default — a default would be a dimension set by
+  omission — and naming either without rules is refused.
+- **Support is declared on the adapter**: `Target.IMPORT_POLICY_MATCHES`, set on `BIRDTarget` and
+  `FRRoutingTarget` (and so `frr_c`), `None` everywhere else. The entry point refuses an undeclared
+  target or match type before anything starts, and `Target.import_policy()` refuses again if a
+  scenario reaches a target that declares none.
+- **Where it is refused.** `bench` runs it. `bench -f` refuses the flags, and refuses a scenario
+  whose target carries `import-policy` before the teardown (`check_scenario_import_policy()`):
+  the checkpoints and the count guard come from the command line, and a file states its own.
+  `config` refuses the flags, since it names no target and writes for `-f`. `-r` is refused, as
+  the attributes are. Native controlled cells refuse it.
+- **In `batch` the three are list axes on a test**, all three or none. They are refused
+  on a target (`BATCH_TEST_ONLY_KEYS`), because a target key nothing reads would run the cell with
+  no policy under a config naming one.
+  - `policy_rules` must hold a positive count, since a matrix of baselines measures nothing.
+  - A `0` is **one** baseline cell per workload (`batch_policy_points()`): the baseline has no
+    match type or hit position, and one per pair would be one cell under several names.
+  - Every cell of a policy test carries the generator's attributes, the baseline included,
+    because the baseline is the attributes-only run. `tester_attributes: false` beside the keys
+    is refused.
+  - `check_batch_policy()` puts every target, filter, fleet and point through
+    `resolve_import_policy()` before the first cell, and the baseline through the attributes'
+    refusals. It also refuses scenario-file targets and `repeat`, the latter across tests too
+    (`check_batch_prefix_length_and_repeat()`).
+  - The points run inside the filter axis and outside the targets. A test without the keys
+    keeps every ordinal and cell id it had; a policy cell's id adds the three keys.
+  - `prefix_length` stays one value per test: the stats row has no prefix-length column, so two
+    lengths in one test would merge rows in its graphs.
+- **The scenario carries the arguments, not the rules**: the target's `import-policy` entry is
+  exactly what `build_policy()` takes, including the walk's exclusions, which `gen_conf()` now
+  computes once and uses for both the walk and the policy. The target rebuilds the policy
+  (`import_policy.policy_from_scenario()`, which refuses a missing or extra field) and writes it
+  line by line. BIRD: the filter beside the others and `import filter bgperf_import_policy` on the
+  one `neighbor range` protocol. FRR: lists and route-map **before `router bgp`**, and
+  `route-map BGPERF-IMPORT in` on every session. Both apply it to the monitor's and receivers'
+  sessions too, which announce nothing.
+- **Every checkpoint is the expected accepted count**, never the configured count, which a
+  filtered run never reaches (`convergence.py`'s "a filtered run" case). A shortfall still ends:
+  BIRD's pre-policy `received` reaches the full table and opens the convergence gate, the run ends
+  on stability, and the count guard below withholds its timing. Each neighbour's
+  `check-points`, and the monitor's, which is exact — no 0.99 allowance — because the guard below
+  compares to it exactly. Each neighbour keeps its offered count as `offered-check-point`, and
+  `Target.get_offered_counts()` holds the pre-policy `received` counter to it. Held to the accepted
+  count, `received` would call a peer complete at three quarters of its table and open the
+  convergence gate early.
+- **The count guard** (`import_policy.count_failure()`): a converged run whose monitor's final
+  count is not exactly the expected count is published `FAILED`, with the received count, the
+  expected count and their difference in `MSG`. The events artifact's monitor intervals are
+  nulled and named in `measurements_withheld_reason`: `MONITOR_REQUIRED_REACHED` is recorded when
+  the count crosses the check-point, so `convergence_s` would otherwise still be derived.
+  `findings.py` reads that reason and publishes a `timing_withheld` confounder in place of the
+  timing findings, so `limiting_component` is `unresolved`: read as absent, the nulled intervals
+  would say the monitor never reached the count, which an over-accepting policy did reach. The CSV
+  row keeps its `elapsed (s)` beside `FAILED`, as every failed row does. It is a guard against
+  unequal work, never evidence of correct evaluation. A run that already failed keeps its own
+  reason.
+- **The exact check-point drops the 0.99 allowance** ("bird seems to reject several handfuls of
+  routes"). Checked live on 2026-11-25 at 2 peers × 1,000 `/24`s, 10 rules: BIRD 2.17.1 (as-path,
+  `last`) and FRR 10.7 (prefix, `last`) both ended at exactly 1,500, the expected count. That is
+  one small shape; a larger run that loses routes would now be published `FAILED`, which is the
+  guard doing its job rather than a reason to restore the allowance.
+- **The policy-loaded check** (`Target.policy_loaded_failure()`) runs once, after the
+  monitor's and receivers' sessions are up and before the clock, any sampler or any generator
+  starts. A failure is a **FAILED row**, recorded through `finish_bench()` with nothing sampled:
+  `MSG` names what differs, the events artifact withholds every interval by that reason, no
+  per-run graph is drawn from no samples, and the containers are left for inspection. A batch
+  records the cell and goes on, and `bench` exits 1 as it does for any failed row. The count guard
+  cannot replace it: a daemon that dropped filler rules accepts the
+  same routes with less work, and would be published as a fast policy run.
+  - **BIRD** (`bird.policy_loaded_failure()` over one `show protocols all`): every BGP protocol's
+    ipv4 `Input filter:` must be `bgperf_import_policy`, and a `neighbor range` listener must be
+    among them, since no generator has connected yet and the listener is what their sessions are
+    spawned from. The name is enough: BIRD refuses to start on a config it cannot parse.
+  - **FRR** (`frr.policy_loaded_failure()` over one `show running-config`): the name is not
+    enough, because bgpd logs and skips a config line it cannot read and starts anyway. Every list
+    entry, every `BGPERF-IMPORT` route-map entry (action and body) and every session's
+    `route-map BGPERF-IMPORT in` must match `frr_policy_lines()`, ignoring only the ` seq N` FRR
+    inserts into list entries. Lists are read wherever they print — FRR 10.7 puts prefix-lists
+    before `router bgp` and as-path and community lists after it. Asked after the monitor's session
+    is up because bgpd reads its whole config before it opens a session.
+  - **Every other adapter fails closed**: the base method refuses any run carrying a policy, so an
+    adapter that gains a renderer cannot run one until it has its own check, which a test requires
+    of every `IMPORT_POLICY_MATCHES` target.
+- A scenario file carrying `offered-check-point` on a neighbour, which only a policy run writes, is
+  refused with `import-policy`, at `bench -f` and for a batch `file:` target up front.
+- Stem `po<N><pfx|asp|com><first|last|miss>` after `ta`; both manifests' `run.import_policy`
+  records the three dimensions and the expected counts, `null` without a policy.
+- **FRR's slow config read is waited out, not capped.** The monitor's establishment wait has no
+  deadline once the sink is writing, so an FRR target parsing a large policy shows as a long
+  `monitor (s)`, not a failed run. The clock starts after it, so convergence time excludes the
+  parse. At 1,000 rules on FRR 10.7 (2026-11-27), `monitor (s)` was 13–30 s, against 0 s for the
+  baselines. No FRR-specific cap on `N` exists yet.
+- **The stats row carries `policy rules`, `policy match`, `policy hit` and `policy bytes`**, after
+  `max foreign cpu %` and before the provenance columns, which stay last. Without them a policy row
+  and its attributes-only baseline are the same row. `policy bytes` is counted as the target writes
+  its config (`Target.write_import_policy()`), so it is the text the daemon read, never a second
+  rendering; it is blank where no size was recorded (a remote target), never 0. A cell result
+  written before these columns is four fields short and `summary.py` reports that pass
+  `unreadable`, the supported path for `--resume` across an added column.
 
 ## `-s/--single-table` — refused, because nothing has honoured it since 2021
 

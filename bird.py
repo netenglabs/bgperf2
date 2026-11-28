@@ -14,6 +14,8 @@
 # limitations under the License.
 
 from base import *
+import import_policy
+import policy_render
 
 
 # --- birdc 'show protocols all' --------------------------------------------
@@ -93,6 +95,7 @@ def parse_protocols(text):
                 'routes': {},
                 'stats': {},
                 'pending_prefixes': None,
+                'input_filter': None,
             }
             columns = None
             continue
@@ -122,6 +125,14 @@ def parse_protocols(text):
             continue
 
         if channel is None:
+            continue
+
+        if line.startswith('Input filter:'):
+            # `ACCEPT`/`REJECT` for `import all`/`none`, else the filter's
+            # name. Shown on a listener's channel while it is still DOWN, so
+            # it can be read before any generator has connected.
+            protocol['channels'][channel]['input_filter'] = \
+                line.split(':', 1)[1].strip()
             continue
 
         if line.startswith('Routes:'):
@@ -293,6 +304,35 @@ def churn_failures(text, sessions, action, protocol=CHURN_PROTOCOL):
         elif not churn_reply_ok(section, action, protocol):
             failures[key] = section.strip() or 'empty reply'
     return failures
+
+
+def policy_loaded_failure(text, filter_name=policy_render.BIRD_FILTER_NAME):
+    '''Why BIRD is not importing through the generated policy, or None.
+
+    Pure over one `birdc show protocols all`. Every BGP protocol's ipv4
+    channel must import through `filter_name`: the `neighbor range` listener,
+    which every generator's session is spawned from, and any session already
+    up (the monitor's, the receivers'). The listener is required, because the
+    generators have not connected yet and it is the only protocol that speaks
+    for them. Checking the name is enough on BIRD: it refuses to start on a
+    config it cannot parse, so a filter attached by name was read whole.
+    '''
+    protocols = parse_protocols(text or '')
+    bgp = {name: p for name, p in protocols.items() if p['proto'] == 'BGP'}
+    if not any(p['neighbor_range'] for p in bgp.values()):
+        return ('birdc shows no `neighbor range` BGP protocol, so nothing '
+                'says what the generators\' sessions will import through')
+    wrong = sorted(
+        '{0} ({1})'.format(
+            name, (p['channels'].get('ipv4') or {}).get('input_filter')
+            or 'no ipv4 input filter shown')
+        for name, p in bgp.items()
+        if (p['channels'].get('ipv4') or {}).get('input_filter')
+        != filter_name)
+    if wrong:
+        return ('BIRD protocols not importing through {0}: {1}'.format(
+            filter_name, ', '.join(wrong)))
+    return None
 
 
 def neighbors_state(text):
@@ -551,6 +591,7 @@ class BIRDTarget(BIRD, Target):
     CONTAINER_NAME = 'bgperf_bird_target'
     CONFIG_FILE_NAME = 'bird.conf'
     SUPPORTS_POLICY_RELOAD = True
+    IMPORT_POLICY_MATCHES = import_policy.POLICY_MATCHES
     POLICY_RELOAD_MECHANISM = 'birdc configure'
     # Verified on bgperf/bird:2.19.2 and bgperf/bird:3.3.2, two peers each: the
     # sessions' `Since` is unchanged across the reconfigure and both stay
@@ -586,6 +627,10 @@ class BIRDTarget(BIRD, Target):
         '''
         if reject_peer_asns:
             return 'filter {0}'.format(POLICY_RELOAD_FILTER)
+        # Refused beside the reload and `--filter_test` at every entry point,
+        # so it never has to compose with either.
+        if import_policy.SCENARIO_KEY in self.conf:
+            return 'filter {0}'.format(policy_render.BIRD_FILTER_NAME)
         if 'filter_test' in self.conf:
             return 'filter {0}'.format(self.conf['filter_test'])
         return 'all'
@@ -669,6 +714,12 @@ return true;
             # exactly the config it always has -- the same rule the churn
             # protocol and the diversity block follow.
             f.write(policy_reload_filter_config(reject_peer_asns))
+            # The generated import policy, written line by line: at 65,533
+            # rules it is megabytes, and is never held as one string.
+            policy = self.import_policy()
+            if policy is not None:
+                self.write_import_policy(
+                    f, policy, policy_render.bird_policy_lines(policy))
 
             if 'policy' in self.scenario_global_conf:
                 for k, v in self.scenario_global_conf['policy'].items():
@@ -735,6 +786,12 @@ return true;
         they would describe two different instants.
         '''
         return self.local("birdc 'show protocols all'").decode('utf-8')
+
+    def policy_loaded_failure(self):
+        '''Why the running BIRD is not applying its import policy, or None.'''
+        if self.import_policy() is None:
+            return None
+        return policy_loaded_failure(self.show_protocols())
 
     def get_neighbors_state(self):
         '''Prefixes each neighbor has sent, from the target's own counters.

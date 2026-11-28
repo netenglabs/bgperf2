@@ -2,8 +2,8 @@
 
 Status: paused
 Strand: 6 Test capabilities (IPv6, BGP policy, new workloads)
-Updated: 2026-11-20
-Next: When Strand 6 is selected, write a scoped design for one family (IPv6 or policy phase 1) with acceptance criteria.
+Updated: 2026-11-27
+Next: When Strand 6 is selected again, write a scoped design for one family (IPv6, or a later policy phase) with acceptance criteria. Policy phase 1 was delivered on 2026-11-27.
 Blocked on: operator selection of a workload family
 Done when: Each retained family is either scoped into its own design plan or explicitly dropped.
 
@@ -21,9 +21,10 @@ without pulling their implementation into that work. See the
 
 ## Policy: a detailed engine design exists
 
-Selected 2026-11-21: [phase 1](policy-phase1.md) scopes the cost of a
-generated import policy on initial load for BIRD and FRR; correctness
-checking is left to separate later tools.
+Selected 2026-11-21 and delivered 2026-11-27: phase 1 measures the cost of a
+generated import policy on initial load for BIRD and FRR (see the
+[design](policy-testing-engine-design.md)). Correctness checking is left to
+separate later tools.
 
 The [policy engine design](policy-testing-engine-design.md) proposes semantic
 ordered rules, equivalent daemon renderers, capability declarations,

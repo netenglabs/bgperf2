@@ -126,6 +126,25 @@ def bench(runtime, args):
         # than the silence about `-n` and `-p` it joins.
         runtime.sys.exit('--path-diversity has nothing to group under -f: a scenario '
                  "file states each neighbour's paths itself")
+    if args.file and getattr(args, 'prefix_length', None) not in (
+            None, runtime.DEFAULT_PREFIX_LENGTH):
+        # A scenario file states each neighbour's prefixes, lengths included,
+        # so the flag would change nothing while the stem and both manifests
+        # recorded it. Above the teardown like the refusals beside it.
+        runtime.sys.exit('--prefix-length has nothing to shorten under -f: a '
+                 "scenario file states each neighbour's prefixes itself")
+    if args.file and getattr(args, 'tester_attributes', False):
+        # A scenario file states what each peer announces, attributes
+        # included, so the flag would change nothing while the stem said `ta`.
+        runtime.sys.exit('--tester-attributes has nothing to attach under -f: '
+                         "a scenario file states each neighbour's routes itself")
+    if args.file:
+        # The policy's checkpoints and count guard are built from the command
+        # line, and a scenario file states its own check-points.
+        runtime.refuse_import_policy_flags(
+            args, 'a policy cannot be put on a scenario file run: its '
+                  'checkpoints and count guard come from the command line, '
+                  'and the file states its own')
     if args.file and getattr(args, 'prefix_scope', None) not in (None, 'per-peer'):
         # `-n`/`-p` are already ignored under `-f`, and this would be too --
         # but the whole point of the flag is that the number means something
@@ -140,6 +159,32 @@ def bench(runtime, args):
                 args.prefix_num, getattr(args, 'tester_type', None))
         except ValueError as e:
             runtime.sys.exit(str(e))
+        # After the scope and the diversity, because the capacity it checks is
+        # the number of distinct prefixes the fleet offers -- blocks times the
+        # resolved per-peer count -- and both decide that.
+        try:
+            args.prefix_length = runtime.resolve_prefix_length(
+                getattr(args, 'prefix_length', None),
+                getattr(args, 'tester_type', None),
+                runtime.path_diversity_groups(
+                    args.neighbor_num,
+                    getattr(args, 'path_diversity', None)
+                    or runtime.DEFAULT_PATH_DIVERSITY) * args.prefix_num,
+                getattr(args, 'local_address_prefix', None),
+                getattr(args, 'prefix_list_num', 0),
+                getattr(args, 'filter_test', None),
+                runtime.run_peering_addresses(args))
+        except ValueError as e:
+            runtime.sys.exit(str(e))
+        if (args.prefix_length != runtime.DEFAULT_PREFIX_LENGTH
+                and getattr(args, 'repeat', False)):
+            # `-r/--repeat` reuses the generator containers and the config they
+            # were started with, so they go on announcing whatever length the
+            # previous run gave them while the stem and both manifests say
+            # this one. The counts would agree, which is what makes it silent.
+            runtime.sys.exit('--prefix-length cannot be used with -r/--repeat: '
+                     'repeat reuses the generator containers as they are, so '
+                     'they keep announcing the prefixes they were started with')
         # After the scope, because the block is taken out of each peer's own
         # list and `--prefix-scope total` is what decides how long that list
         # is: `-n 10 -p 1000 --prefix-scope total` gives every peer 100
@@ -184,6 +229,30 @@ def bench(runtime, args):
                 getattr(args, 'repeat', False))
         except ValueError as e:
             runtime.sys.exit(str(e))
+        # The import policy before the attributes it turns on, so its own
+        # refusals name `--policy-rules`. Same position, for the same reason.
+        try:
+            runtime.resolve_import_policy_args(args)
+        except ValueError as e:
+            runtime.sys.exit(str(e))
+        if args.policy_rules and getattr(args, 'repeat', False):
+            runtime.sys.exit('--policy-rules cannot be used with -r/--repeat: '
+                             'it turns on --tester-attributes, and repeat '
+                             'reuses the generator containers as they are')
+        # Last, because it is refused beside churn, the diversity and the
+        # reload, and checks the resolved per-peer count.
+        try:
+            args.tester_attributes = runtime.resolve_tester_attributes_args(args)
+        except ValueError as e:
+            runtime.sys.exit(str(e))
+        if args.tester_attributes and getattr(args, 'repeat', False):
+            # Repeat reuses the generators with the config they were started
+            # with, so they would go on sending whichever attributes the
+            # previous run gave them while the stem said `ta`.
+            runtime.sys.exit('--tester-attributes cannot be used with '
+                             '-r/--repeat: repeat reuses the generator '
+                             'containers as they are, so they keep the '
+                             'attributes they were started with')
 
     if args.file:
         # A scenario's generators are otherwise only checked in the dispatch
@@ -195,6 +264,8 @@ def bench(runtime, args):
             for tester in early.get('testers') or []:
                 if tester.get('type') == 'mrt':
                     runtime.scenario_mrt_tester_class(tester)
+            runtime.check_scenario_policy_blocks(early)
+            runtime.check_scenario_import_policy(early)
         except ValueError as e:
             runtime.sys.exit(str(e))
 
@@ -275,13 +346,58 @@ def bench(runtime, args):
         # cpuset, and be published as unpinned. A Docker call, so after every
         # guard that reads only the command line; before the teardown, so the
         # refusal costs nothing.
+        names = runtime.get_ctn_names()
+        inspected = {}
+
+        def host_config(name):
+            # Once per container: the cpuset and the binds below read the
+            # same inspection.
+            if name not in inspected:
+                inspected[name] = runtime.dckr.inspect_container(name)['HostConfig']
+            return inspected[name]
         pinned = runtime.pinned_tester_containers(
-            runtime.get_ctn_names(),
-            lambda name: runtime.dckr.inspect_container(name)['HostConfig'].get('CpusetCpus'))
+            names, lambda name: host_config(name).get('CpusetCpus'))
         if pinned:
             runtime.sys.exit('-r/--repeat would reuse tester containers a pinned run '
                      'created ({0}), and they keep its cores. Run once without '
                      '-r to rebuild them'.format(', '.join(pinned)))
+        if not args.file:
+            # The other half of the `--prefix-length` refusal under `--repeat`:
+            # a default-length run reusing generators a `/24` run started
+            # would announce `/24`s under a `/32` stem and manifest, with
+            # counts that agree. `-r` builds no tester objects, so nothing
+            # rewrites a reused generator's config: the one in the directory
+            # each container has mounted is what it announces. Read through
+            # the container, not `config_dir`, because a previous run with
+            # another `-d`/`-b` left the same fixed-name containers. A Docker
+            # call and a file read, so here beside the cpuset read.
+            try:
+                stale = runtime.reused_generator_prefix_lengths(
+                    names,
+                    lambda name: host_config(name).get('Binds'),
+                    args.prefix_length)
+            except ValueError as e:
+                runtime.sys.exit('-r/--repeat cannot tell what the reused '
+                                 'generators announce: {0}. Run once without '
+                                 '-r to rebuild them'.format(e))
+            if stale:
+                runtime.sys.exit(
+                    '-r/--repeat would reuse generators announcing {0} '
+                    'prefixes ({1}) for a /{2} run. Run once without -r to '
+                    'rebuild them'.format(
+                        ', '.join(sorted({'/{0}'.format(n)
+                                          for n in stale.values()})),
+                        ', '.join(sorted(stale)), args.prefix_length))
+            # And the other direction of the `--tester-attributes` refusal,
+            # which `-r` with the flag has already met above.
+            carrying = runtime.reused_generators_with_attributes(
+                names, lambda name: host_config(name).get('Binds'))
+            if carrying:
+                runtime.sys.exit(
+                    '-r/--repeat would reuse generators carrying per-block '
+                    'policy attributes ({0}) for a run without '
+                    '--tester-attributes. Run once without -r to rebuild '
+                    'them'.format(', '.join(carrying)))
     runtime.remove_target_containers()
 
     if not args.repeat:
@@ -595,6 +711,10 @@ def bench(runtime, args):
 
         target.run(conf, dckr_net_name)
 
+    # What the target's config carried of the import policy, as written; None
+    # for a run with none (and for a remote target, which writes no config).
+    output_stats['policy_size'] = getattr(target, 'import_policy_size', None)
+
     runtime.time.sleep(1)
 
     output_stats['monitor_wait_time'] = m.wait_established(conf['target']['local-address'])
@@ -603,6 +723,36 @@ def bench(runtime, args):
     # `--receivers 20` run look like a slow monitor in every published row.
     for r in receiver_containers:
         r.wait_established(conf['target']['local-address'], role=r.name)
+    # The policy-loaded check (policy phase 1): once, with the
+    # daemon's config read (its first session is up) and before the clock or
+    # any sampler starts, so a refusal here leaves nothing running and no
+    # measurement begun. A daemon that dropped its policy would otherwise look
+    # fast, and the count guard alone cannot catch a policy that lost rules
+    # but still accepts the same routes. A remote target never carries one:
+    # it comes only from `-f`, which refuses the policy.
+    #
+    # A refusal is a FAILED row, not an exit, so a
+    # batch records that cell and goes on to the next one, and `bench` exits 1
+    # as it does for any failed row. It is recorded through `finish_bench()`
+    # with no sample taken: the row's times and peaks are the unsampled
+    # defaults, its events artifact withholds every interval by this reason,
+    # and the containers are left for inspection as on every failed run.
+    if not is_remote and getattr(args, 'policy_rules', None):
+        policy_unloaded = target.policy_loaded_failure()
+        if policy_unloaded:
+            reason = ('policy-loaded check failed: {0}; nothing was '
+                      'measured'.format(policy_unloaded))
+            print('FAILED: {0}'.format(reason))
+            unsampled_output_stats(runtime, output_stats, conf)
+            output_stats['cores'], output_stats['memory'] = runtime.get_hardware_info()
+            output_stats['elapsed'] = runtime.datetime.timedelta(0)
+            output_stats['recved'] = 0
+            output_stats['fail_msg'] = reason
+            output_stats['timing_withheld_reason'] = reason
+            return runtime.finish_bench(args, output_stats, [], bench_start,
+                                        target, m, testers, fail=True)
+        print('import policy: {0} rules confirmed loaded on the target'.format(
+            args.policy_rules))
     output_stats['cores'], output_stats['memory'] = runtime.get_hardware_info()
     # target_class is only bound in the local branch above; a remote run used to
     # die here with NameError. Pre-existing, but the remote path is now something
@@ -782,23 +932,7 @@ def bench(runtime, args):
     cpu = 0
     mem = 0
 
-    output_stats['max_cpu'] = 0
-    output_stats['max_mem'] = 0
-    output_stats['first_received_time'] = runtime.datetime.timedelta(0)
-    output_stats['min_idle'] = 100
-    output_stats['min_free'] = runtime.UNSAMPLED_MIN_FREE
-    output_stats['max_foreign_cpu'] = 0
-    # None until a sample sets the maximum: a run that never sampled and a run
-    # whose competitors could not be named must not both read as a run that
-    # looked and found nobody.
-    output_stats['max_foreign_cpu_processes'] = None
-    # finish_bench() fills these in once the clock has stopped; a run with no
-    # testers (a remote target) never gets there, and they are printed and
-    # written into the row unconditionally.
-    output_stats['tester_errors'] = 0
-    output_stats['tester_timeouts'] = 0
-
-    output_stats['required'] = conf['monitor']['check-points'][0]
+    unsampled_output_stats(runtime, output_stats, conf)
     bench_stats = []
     neighbors_checked = 0
     neighbors_received_full = 0
@@ -1098,9 +1232,29 @@ def bench(runtime, args):
                     # marked failed, so no summary is affected.
                     output_stats['fail_msg'] = churn_evidence[
                         'incomplete_reason'] or 'churn did not complete'
+                # The import policy's count guard (workload-controls invariants). A run
+                # whose monitor did not end on exactly the expected count did
+                # not do the work it was asked to do -- an over-acceptance
+                # converges early, a shortfall ends by stability -- so it is
+                # published FAILED with the reason in MSG, and its events
+                # artifact's intervals are withheld. The CSV row keeps its
+                # times beside FAILED, as every failed row does. Refused
+                # beside churn and the reload, so nothing above has set MSG
+                # on a policy run.
+                policy_miss = runtime.policy_count_failure(
+                    getattr(args, 'policy_rules', None), int(recved),
+                    int(conf['monitor']['check-points'][0]))
+                if policy_miss:
+                    output_stats['fail_msg'] = policy_miss
+                    # The events artifact's intervals too, not only the row:
+                    # `MONITOR_REQUIRED_REACHED` was recorded when the count
+                    # crossed the check-point, so `convergence_s` would still
+                    # be derived from it.
+                    output_stats['timing_withheld_reason'] = policy_miss
+                    print('FAILED: {0}'.format(policy_miss))
                 return runtime.finish_bench(
                     args, output_stats, bench_stats, bench_start, target, m,
-                    testers,
+                    testers, fail=bool(policy_miss),
                     lifecycle_events=(list(lifecycle.events)
                                       + list(churn_events)
                                       + list(reload_events)),
@@ -1167,6 +1321,32 @@ def abandon_run(runtime, reason, target, m, testers=()):
     print('no row is recorded for it; its containers are left for the next '
           'run to reclaim')
     raise runtime.StopRequested(reason)
+
+
+def unsampled_output_stats(runtime, output_stats, conf):
+    '''The row's values before the first sample, set before the loop starts.
+
+    Also what a run that ended before any sampler started publishes: the
+    policy-loaded refusal records its FAILED row from these, and the peaks are
+    the sentinels `summary.py` already reads as unsampled.
+    '''
+    output_stats['max_cpu'] = 0
+    output_stats['max_mem'] = 0
+    output_stats['first_received_time'] = runtime.datetime.timedelta(0)
+    output_stats['min_idle'] = 100
+    output_stats['min_free'] = runtime.UNSAMPLED_MIN_FREE
+    output_stats['max_foreign_cpu'] = 0
+    # None until a sample sets the maximum: a run that never sampled and a run
+    # whose competitors could not be named must not both read as a run that
+    # looked and found nobody.
+    output_stats['max_foreign_cpu_processes'] = None
+    # finish_bench() fills these in once the clock has stopped; a run with no
+    # testers (a remote target) never gets there, and they are printed and
+    # written into the row unconditionally.
+    output_stats['tester_errors'] = 0
+    output_stats['tester_timeouts'] = 0
+
+    output_stats['required'] = conf['monitor']['check-points'][0]
 
 
 def finish_bench(runtime, args, output_stats, bench_stats, bench_start, target, m, testers=(), fail=False,
@@ -1263,7 +1443,8 @@ def finish_bench(runtime, args, output_stats, bench_stats, bench_start, target, 
         target_table_witness_rule=target_table_witness_rule,
         convergence_rule=convergence_rule,
         instrument=runtime.sampler_read_failures(target, m),
-        role_cpu=role_cpu_section)
+        role_cpu=role_cpu_section,
+        timing_withheld_reason=output_stats.get('timing_withheld_reason'))
 
     # Scan the tester logs only after the clock has stopped. These used to run
     # in bench() before bench_stop, so walking every tester log line by line --
@@ -1343,6 +1524,12 @@ def finish_bench(runtime, args, output_stats, bench_stats, bench_start, target, 
         import deferred_graphs
         deferred_graphs.save(runtime,bench_stats,bench_prefix,args.results_dir)
         phase('graphs_deferred')
+    elif not bench_stats:
+        # A run that ended before its first sample -- the policy-loaded
+        # refusal -- has no series to draw, and `create_ts_graph()` cannot
+        # index an empty one. Deferred mode above keeps the empty document,
+        # which its renderer already refuses by name.
+        print('no samples were taken; the per-run graphs are not drawn')
     else:
         phase('render_started')
         runtime.create_bench_graphs(bench_stats, prefix=bench_prefix, results_dir=args.results_dir)

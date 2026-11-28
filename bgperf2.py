@@ -68,7 +68,8 @@ from flock import Flock, FlockTarget
 from srlinux import SRLinux, SRLinuxTarget
 from junos import Junos, JunosTarget
 from eos import Eos, EosTarget
-from tester import ExaBGPTester, BIRDTester
+from tester import (ExaBGPTester, BIRDTester, carries_policy_blocks,
+                    check_policy_blocks)
 from mrt_tester import ExaBGPMrtTester
 from bgpdump2 import Bgpdump2, Bgpdump2Tester
 from monitor import Monitor, Receiver, SinkMonitor, SinkReceiver
@@ -77,6 +78,17 @@ from convergence import ConvergenceTracker
 from role_cpu import (ROLE_CPU_INTERVAL_S, RoleCpuRecorder, cgroup_dir_for_pid,
                       read_effective_cpuset, read_members)
 from stop import StopRequested, StopSignal
+from prefix_length import (DEFAULT_PREFIX_LENGTH,
+                           resolve_prefix_length as _resolve_prefix_length,
+                           announced_prefix_length, walk_exclusions)
+from import_policy import (scenario_policy_blocks,
+                           resolve_tester_attributes as _resolve_tester_attributes,
+                           resolve_import_policy as _resolve_import_policy,
+                           DEFAULT_POLICY_RULES, POLICY_MATCHES, POLICY_HITS,
+                           SCENARIO_KEY as IMPORT_POLICY_KEY,
+                           expected_counts as policy_expected_counts,
+                           scenario_import_policy,
+                           count_failure as policy_count_failure)
 from policy import (DEFAULT_POLICY_RELOAD_BLOCKS,
                     PolicyReloadConfigurationError, PolicyReloadTracker,
                     policy_reload_counts, rejected_block_indexes,
@@ -104,6 +116,7 @@ from mako.template import Template
 from packaging import version
 from docker.types import IPAMConfig, IPAMPool
 import re
+import statistics
 
 # The daemons bgperf2 can build images for, keyed by the name used on the
 # command line (`update <name>`) and in batch yaml. Adding a daemon here is
@@ -285,6 +298,32 @@ def bench_output_prefix(args):
     receivers = getattr(args, 'receivers', None) or DEFAULT_RECEIVERS
     if receivers != DEFAULT_RECEIVERS:
         parts.append('rx{0}'.format(receivers))
+    # And the prefix length, on the same rule: a /24 table and a /32 table of
+    # one shape are the same peers and the same per-peer count everywhere else
+    # in this stem. Only away from /32, so every existing name is unchanged.
+    prefix_length = getattr(args, 'prefix_length', None) or DEFAULT_PREFIX_LENGTH
+    if prefix_length != DEFAULT_PREFIX_LENGTH:
+        parts.append('pl{0}'.format(prefix_length))
+    # And the generator's per-block attributes, on the same rule: a run that
+    # carries them and one that does not are the same table everywhere else in
+    # this stem, and the comparison between them is the reason the flag exists.
+    if getattr(args, 'tester_attributes', False):
+        parts.append('ta')
+    # And the import policy, on the same rule: its three dimensions are the
+    # whole difference between a policy cell and its attributes-only baseline.
+    policy_rules = getattr(args, 'policy_rules', None) or DEFAULT_POLICY_RULES
+    if policy_rules:
+        match = getattr(args, 'policy_match', None)
+        hit = getattr(args, 'policy_hit', None)
+        if match not in POLICY_STEM_MATCH or hit not in POLICY_HITS:
+            # Only resolve_import_policy_args() makes these whole; a caller
+            # that skipped it must not get a name for a policy nobody chose.
+            raise ValueError(
+                '--policy-rules {0} needs a resolved --policy-match and '
+                '--policy-hit to name its run, got {1!r} and {2!r}'.format(
+                    policy_rules, match, hit))
+        parts.append('po{0}{1}{2}'.format(
+            policy_rules, POLICY_STEM_MATCH[match], hit))
     # And the churn workload, on the same rule: two tests in one batch config
     # differing only in how much of the table they withdraw, or in how many
     # times, are the same peers and the same per-peer prefix count everywhere
@@ -501,6 +540,88 @@ def pinned_tester_containers(names, cpuset_of):
     return sorted((name for name in names
                    if name.startswith(prefixes) and cpuset_of(name)),
                   key=natural_key)
+
+
+def reused_generator_prefix_lengths(names, binds_of, length):
+    '''Reused generators announcing a length other than `length`.
+
+    `{'<container>:<config>': announced length}`, for the tester containers
+    among `names`. Each is read through the directory *that container* has
+    bind-mounted, from `binds_of(name)` (Docker's `HostConfig.Binds`), never
+    through this run's `--dir`/`--bench-name`: container names are fixed, so
+    the generators `-r` reuses may have been started by a run in another
+    directory. Reading only theirs also leaves alone a config some other
+    generator left in a role directory this run does not reuse.
+
+    Each config is read up to its first route by
+    `prefix_length.announced_prefix_length()`, which raises for a route it
+    cannot read. A synthetic generator (BIRD, ExaBGP) none of whose configs
+    yields a route raises too: its directory was cleaned or never mounted,
+    and the daemon is still announcing what it was started with, so finding
+    nothing is not evidence of nothing stale. An MRT generator's configs hold
+    no synthetic routes and are not required to.
+    '''
+    synthetic = (BIRDTester.CONTAINER_NAME_PREFIX,
+                 ExaBGPTester.CONTAINER_NAME_PREFIX)
+    stale = {}
+    for name, paths in _reused_generator_configs(names, binds_of):
+        read = False
+        for path in paths:
+            try:
+                with open(path, errors='replace') as f:
+                    announced = announced_prefix_length(f)
+            except OSError:
+                continue
+            if announced is None:
+                continue
+            read = True
+            if announced != length:
+                stale['{0}:{1}'.format(name, os.path.basename(path))] = \
+                    announced
+        if not read and name.startswith(synthetic):
+            raise ValueError('{0} has no readable generator config in the '
+                             'directory it mounts'.format(name))
+    return stale
+
+
+def _reused_generator_configs(names, binds_of):
+    '''`(container, [config path, ...])` for each tester container in `names`,
+    read through the directories it bind-mounts, in natural name order.'''
+    prefixes = tuple(cls.CONTAINER_NAME_PREFIX for cls in TESTER_CLASSES.values())
+    for name in sorted((n for n in names if n.startswith(prefixes)),
+                       key=natural_key):
+        paths = []
+        for bind in binds_of(name) or ():
+            host_dir = bind.split(':', 1)[0]
+            if not os.path.isabs(host_dir):
+                # A named volume, not a directory on this host.
+                continue
+            paths.extend(sorted(glob.glob(
+                os.path.join(glob.escape(host_dir), '*.conf'))))
+        yield name, paths
+
+
+def reused_generators_with_attributes(names, binds_of):
+    '''Reused generator configs that carry per-block policy attributes.
+
+    The other direction of the `--tester-attributes` refusal under `-r`: a run
+    without the flag reusing generators a `ta` run started would send the
+    attributes under a stem and manifests that say it did not. Read through
+    each container's own bind mount, as `reused_generator_prefix_lengths()`
+    reads, which has already refused a synthetic generator with nothing
+    readable.
+    '''
+    carrying = []
+    for name, paths in _reused_generator_configs(names, binds_of):
+        for path in paths:
+            try:
+                with open(path, errors='replace') as f:
+                    if carries_policy_blocks(f):
+                        carrying.append('{0}:{1}'.format(
+                            name, os.path.basename(path)))
+            except OSError:
+                continue
+    return carrying
 
 
 def surplus_receiver_names(container_names, wanted):
@@ -948,7 +1069,235 @@ def describe_churn_workload(churn_prefixes, churn_bursts, neighbor_num,
                 counts['distinct_withdrawals']))
 
 
-def gen_mako_macro():
+def resolve_prefix_length(length, tester_type=None, distinct_prefixes=None,
+                          local_address_prefix=None, prefix_list_num=0,
+                          filter_test=None, addresses=()):
+    '''`prefix_length.resolve_prefix_length()` with this tool's MRT generators.'''
+    return _resolve_prefix_length(length, tester_type, distinct_prefixes,
+                                  local_address_prefix, MRT_TESTER_TYPES,
+                                  prefix_list_num, filter_test, addresses)
+
+
+def run_peering_addresses(args):
+    '''The target and monitor addresses a run configured explicitly.
+
+    What `prefix_length.walk_exclusions()` keeps a shorter walk clear of
+    beside the peering subnet. Read from the args, so `gen_conf()`, `config`,
+    `bench()` and the batch check name the same addresses.
+    '''
+    return (getattr(args, 'target_local_address', None),
+            getattr(args, 'monitor_local_address', None))
+
+
+def recorded_prefix_length(args):
+    '''The length a run's manifests record, or None where bgperf2 built none.
+
+    A scenario file states its own prefixes and an MRT generator plays back
+    the file's, so neither run had a synthetic length; recording the default
+    would file an MRT run with the `/32` synthetic ones.
+    '''
+    if (getattr(args, 'file', None)
+            or getattr(args, 'tester_type', None) in MRT_TESTER_TYPES):
+        return None
+    return getattr(args, 'prefix_length', None) or DEFAULT_PREFIX_LENGTH
+
+
+def resolve_tester_attributes_args(args):
+    '''`import_policy.resolve_tester_attributes()` over one run's arguments.
+
+    Called after the prefix scope is resolved, so the fleet it checks is the
+    per-peer count the generator will actually be given.
+    '''
+    return _resolve_tester_attributes(
+        getattr(args, 'tester_attributes', False),
+        getattr(args, 'tester_type', None),
+        getattr(args, 'path_diversity', None),
+        getattr(args, 'churn_prefixes', None),
+        getattr(args, 'filter_test', None),
+        getattr(args, 'policy_reload_blocks', None),
+        getattr(args, 'neighbor_num', None),
+        getattr(args, 'prefix_num', None),
+        scenario_filter_flags(args))
+
+
+# How each match type is spelled in a run's stem: `po1000asplast`. Fixed-width
+# and free of the `-` the stem's other parts are joined with.
+POLICY_STEM_MATCH = {'prefix': 'pfx', 'as-path': 'asp', 'community': 'com'}
+
+
+def target_policy_matches(target):
+    '''The match types a target's adapter renders, or None for no renderer.'''
+    cls = TARGET_CLASSES.get(target)
+    return getattr(cls, 'IMPORT_POLICY_MATCHES', None) if cls else None
+
+
+def resolve_import_policy_args(args):
+    '''`import_policy.resolve_import_policy()` over one run's arguments.
+
+    Called where `resolve_tester_attributes_args()` is, after the scope, so the
+    fleet it checks is the per-peer count the generator will be given. Sets
+    `policy_rules`, `policy_match` and `policy_hit` to their resolved values,
+    and turns `tester_attributes` on for a policy run.
+    '''
+    rules, match, hit = _resolve_import_policy(
+        getattr(args, 'policy_rules', None),
+        getattr(args, 'policy_match', None),
+        getattr(args, 'policy_hit', None),
+        getattr(args, 'target', None),
+        target_policy_matches(getattr(args, 'target', None)),
+        getattr(args, 'tester_type', None),
+        getattr(args, 'path_diversity', None),
+        getattr(args, 'churn_prefixes', None),
+        getattr(args, 'filter_test', None),
+        getattr(args, 'policy_reload_blocks', None),
+        getattr(args, 'receivers', None),
+        scenario_filter_flags(args),
+        getattr(args, 'neighbor_num', None),
+        getattr(args, 'prefix_num', None),
+        getattr(args, 'target_config_file', None))
+    args.policy_rules, args.policy_match, args.policy_hit = rules, match, hit
+    if rules:
+        args.tester_attributes = True
+
+
+def refuse_import_policy_flags(args, reason):
+    '''Exit naming every policy flag a run set where no policy can go.'''
+    named = [flag for flag, field in (('--policy-rules', 'policy_rules'),
+                                      ('--policy-match', 'policy_match'),
+                                      ('--policy-hit', 'policy_hit'))
+             if getattr(args, field, None) not in (None, DEFAULT_POLICY_RULES)]
+    if named:
+        sys.exit('{0}: {1}'.format(', '.join(named), reason))
+
+
+def check_scenario_import_policy(scenario):
+    '''Refuse a scenario file whose target carries a generated policy.
+
+    Before the teardown. The policy's checkpoints and count guard are built
+    from the command line in phase 1, so a file carrying one would run it
+    against whatever check-points the file states.
+    '''
+    if IMPORT_POLICY_KEY in ((scenario or {}).get('target') or {}):
+        raise ValueError(
+            'the scenario target carries {0!r}, which only `bench` without -f '
+            'may write: its checkpoints and count guard come from the '
+            'command line'.format(IMPORT_POLICY_KEY))
+    # Its companion on the neighbours too: left behind by an edited policy
+    # scenario, it would hold `received` to a count the file does not offer.
+    for tester in (scenario or {}).get('testers') or []:
+        for name, neighbor in ((tester or {}).get('neighbors') or {}).items():
+            if 'offered-check-point' in (neighbor or {}):
+                raise ValueError(
+                    "neighbour {0} carries 'offered-check-point', which only "
+                    'an import policy run writes'.format(name))
+
+
+def policy_row_values(args, size=None):
+    '''The stats row's `policy rules`, `policy match`, `policy hit` and
+    `policy bytes`. `size` is the target's `import_policy_size`; a policy run
+    whose target recorded none (a remote target) leaves `policy bytes` blank
+    rather than publishing a size nobody measured.'''
+    rules = getattr(args, 'policy_rules', None) or DEFAULT_POLICY_RULES
+    if not rules:
+        return [DEFAULT_POLICY_RULES, '', '', '']
+    return [rules, args.policy_match, args.policy_hit,
+            size.bytes if size is not None else '']
+
+
+def recorded_import_policy(args):
+    '''The policy a run's manifests record: its arguments and expected count.
+
+    `None` where the run had none, including `-f` and MRT playback, which
+    refuse it. The expected count is the one the run was checked against.
+    '''
+    rules = getattr(args, 'policy_rules', None) or DEFAULT_POLICY_RULES
+    if not rules or getattr(args, 'file', None):
+        return None
+    expected = policy_expected_counts(rules, args.neighbor_num,
+                                      args.prefix_num)
+    return {'rules': rules, 'match': args.policy_match,
+            'hit': args.policy_hit, 'expected_accepted': expected.accepted,
+            'expected_accepted_per_peer': expected.accepted_per_peer[0]}
+
+
+# The scenario `filter` matrix: each nonzero count puts a policy on the target.
+SCENARIO_FILTER_FLAGS = (('as_path_list_num', '-a/--as-path-list-num'),
+                         ('prefix_list_num', '-e/--prefix-list-num'),
+                         ('community_list_num', '-c/--community-list-num'),
+                         ('ext_community_list_num',
+                          '-x/--ext-community-list-num'))
+
+
+def scenario_filter_flags(source):
+    '''The scenario-filter flags a run (args) or batch target (dict) sets.'''
+    if isinstance(source, dict):
+        def read(field):
+            return batch_target_field(source, field)
+    else:
+        def read(field):
+            return getattr(source, field, 0)
+    return tuple(flag for field, flag in SCENARIO_FILTER_FLAGS
+                 if read(field))
+
+
+def check_scenario_policy_blocks(scenario):
+    '''Refuse `policy-blocks` a scenario file's generators cannot send as given.
+
+    Before the teardown, unlike the generator's own check: a hand-edited
+    count, a churn block beside them, or a generator other than BIRD (which
+    would drop them without a word) is otherwise found only after the previous
+    run's containers are gone.
+    '''
+    for tester in scenario.get('testers') or []:
+        for neighbor in (tester.get('neighbors') or {}).values():
+            blocks = neighbor.get('policy-blocks')
+            if not blocks:
+                continue
+            name = neighbor.get('router-id', '?')
+            if tester.get('type') != 'bird':
+                raise ValueError(
+                    'neighbour {0} carries policy-blocks but its {1!r} '
+                    'generator cannot send them; only the BIRD generator '
+                    'can'.format(name, tester.get('type')))
+            try:
+                check_policy_blocks(blocks, neighbor.get('paths') or [],
+                                    neighbor.get('churn-prefixes'))
+            except (ValueError, KeyError, TypeError) as e:
+                raise ValueError('neighbour {0}: {1}'.format(name, e)) from e
+
+
+def recorded_tester_attributes(args):
+    '''Whether a run's generator carried per-block attributes, or None where
+    bgperf2 built no table (`-f`, or an MRT generator playing back a file).'''
+    if (getattr(args, 'file', None)
+            or getattr(args, 'tester_type', None) in MRT_TESTER_TYPES):
+        return None
+    return bool(getattr(args, 'tester_attributes', False))
+
+
+def gen_mako_macro(prefix_length=DEFAULT_PREFIX_LENGTH, exclude=()):
+    # A prefix length other than the historical /32 draws its walk from
+    # `prefix_length.walk()`, the same code the capacity check counted, so
+    # what a run announces and what it was checked against cannot drift. The
+    # /32 preamble below is returned unchanged, byte for byte: it is the walk
+    # every published synthetic run used, and it is not the same walk -- it
+    # starts at 100.0.0.0 and does not skip reserved space.
+    if prefix_length != DEFAULT_PREFIX_LENGTH:
+        return '''<%
+    import prefix_length as _bgperf_prefix_length
+    from itertools import islice
+
+    it = _bgperf_prefix_length.walk({0}, {1!r})
+    blocks = {{}}
+
+    def gen_paths(num, block=None):
+        if block is None:
+            return list(islice(it, num))
+        if block not in blocks:
+            blocks[block] = list(islice(it, num))
+        return blocks[block]
+%>
+'''.format(int(prefix_length), tuple(str(e) for e in exclude))
     # `block` is what makes several peers announce competing paths for the same
     # prefixes: called without one, every call takes the next `num` addresses
     # off the shared iterator and the peers are disjoint, which is what bgperf
@@ -2668,6 +3017,16 @@ def write_provenance(args, provenance, prefix):
                            or DEFAULT_PATH_DIVERSITY),
         'receivers': (None if getattr(args, 'file', None) else
                       getattr(args, 'receivers', None) or DEFAULT_RECEIVERS),
+        # The length of every synthetic prefix, and only where bgperf2 built
+        # the table: a scenario file states its own prefixes. Both blocks,
+        # for the reason `path_diversity` is in both.
+        'prefix_length': recorded_prefix_length(args),
+        # Whether the generator carried per-block policy attributes. `None`
+        # under `-f`, where the scenario file states what is announced.
+        'tester_attributes': recorded_tester_attributes(args),
+        # The generated import policy and the count it was checked against,
+        # or `None` for a run with none.
+        'import_policy': recorded_import_policy(args),
         # The cores each role was confined to, or None for every core. Known
         # under `-f` too, unlike the workload keys around it: bgperf2 starts
         # the containers whatever wrote the scenario.
@@ -2827,7 +3186,7 @@ def write_event_artifact(args, events, prefix, status, testers=None,
                          target_table_unmeasured_reason=None,
                          target_table_witness_rule=None,
                          convergence_rule=None, instrument=None,
-                         role_cpu=None):
+                         role_cpu=None, timing_withheld_reason=None):
     '''Atomically preserve lifecycle evidence before post-run collection.
 
     Returns the document it wrote, so the caller can print the findings it
@@ -2866,7 +3225,8 @@ def write_event_artifact(args, events, prefix, status, testers=None,
         instrument=instrument,
         # No fallback: a run built before this sampler, or one that never
         # reached the clock, has no section rather than an empty one.
-        role_cpu=role_cpu)
+        role_cpu=role_cpu,
+        timing_withheld_reason=timing_withheld_reason)
     # Derived from the finished document rather than from the events, so the
     # policy can only ever reason about intervals this artifact published.
     #
@@ -2896,6 +3256,16 @@ def write_event_artifact(args, events, prefix, status, testers=None,
                            or DEFAULT_PATH_DIVERSITY),
         'receivers': (None if getattr(args, 'file', None) else
                       getattr(args, 'receivers', None) or DEFAULT_RECEIVERS),
+        # The length of every synthetic prefix, and only where bgperf2 built
+        # the table: a scenario file states its own prefixes. Both blocks,
+        # for the reason `path_diversity` is in both.
+        'prefix_length': recorded_prefix_length(args),
+        # Whether the generator carried per-block policy attributes. `None`
+        # under `-f`, where the scenario file states what is announced.
+        'tester_attributes': recorded_tester_attributes(args),
+        # The generated import policy and the count it was checked against,
+        # or `None` for a run with none.
+        'import_policy': recorded_import_policy(args),
         # Both blocks, for the reason `receivers` is in both.
         'pin': pin_cpusets(getattr(args, 'pin', None)) or None,
         # Both blocks, for the same reason: `findings.py` and
@@ -3880,7 +4250,7 @@ def stats_header():
     # The provenance columns are appended at the END on purpose:
     # create_batch_graphs() indexes this row positionally, so inserting a column
     # anywhere earlier silently shifts every graph and every existing CSV.
-    return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date, cores, Mem (GB), tester errors, tester timeouts, failed, MSG, filters, max foreign cpu %, target image, tester version, monitor version")
+    return("name, target, version, peers, prefixes per peer, required, received, monitor (s), elapsed (s), prefix received (s), testers (s), total time, max cpu %, max mem (GB), min idle%, min free mem (GB), flags, date, cores, Mem (GB), tester errors, tester timeouts, failed, MSG, filters, max foreign cpu %, policy rules, policy match, policy hit, policy bytes, target image, tester version, monitor version")
 
 
 def row_message(value):
@@ -3970,6 +4340,13 @@ def create_output_stats(args, target_version, stats, fail=False, provenance=None
     # because bgperf's own load moves it too. Placed before the provenance
     # columns so those stay last, which test_provenance.py requires.
     out.extend([round(stats.get('max_foreign_cpu', 0))])
+    # The generated import policy (policy phase 1): its three dimensions, so a
+    # policy row and its attributes-only baseline are told apart in the CSV,
+    # and the bytes of the daemon's own rendering, which differ between daemons
+    # for one policy -- what each had to parse, not how much evaluating it
+    # costs. A run with no policy reads 0 and blanks. Before the provenance
+    # columns, which stay last.
+    out.extend(policy_row_values(args, stats.get('policy_size')))
     # Which builds produced this row. The target's own version already sits in
     # the 'version' column; these say which image it came from and which builds
     # generated and measured the load.
@@ -4034,9 +4411,15 @@ def create_graph(stats, test_name='total time', stat_index=8, test_file='total_t
         for stat in stats:
             labels[stat[0]] = True
             key = f"{stat[3]}n_{stat[4]}p"
-            
+
             if stat[24]:
                  key =f"{key}_{stat[24]}"
+            # The import policy's point, its own group: a batch iterates it
+            # beside one target, so without it a test's policy cells share a
+            # name and a group, and the bars outnumber the ticks.
+            # `policy rules`, `policy match` and `policy hit`.
+            if len(stat) > 28 and str(stat[26]) not in ('', '0'):
+                key = f"{key}_po{stat[26]}_{stat[27]}_{stat[28]}"
 
             if len(stat) > 23 and stat[22] == 'FAILED':# this means that it failed for some reason
                 data[key].append(0)
@@ -4090,7 +4473,8 @@ BATCH_TEST_KEYS = ('name', 'neighbors', 'prefixes', 'filter_test', 'targets')
 BATCH_TEST_OPTIONAL_KEYS = ('repetitions', 'order', 'seed', 'prefix_scope',
                             'path_diversity', 'receivers', 'churn_prefixes',
                             'churn_bursts', 'policy_reload_blocks', 'pin',
-                            'monitor')
+                            'monitor', 'prefix_length', 'tester_attributes',
+                            'policy_rules', 'policy_match', 'policy_hit')
 
 
 # Keys that mean something on a *test* and nothing on a target. There is no
@@ -4108,7 +4492,8 @@ BATCH_TEST_ONLY_KEYS = ('prefix_scope', 'repetitions', 'order', 'seed',
                         'neighbors', 'prefixes', 'filter_test',
                         'path_diversity', 'receivers', 'churn_prefixes',
                         'churn_bursts', 'policy_reload_blocks', 'pin',
-                        'monitor')
+                        'monitor', 'prefix_length', 'tester_attributes',
+                        'policy_rules', 'policy_match', 'policy_hit')
 
 # Target keys whose absence means something other than `None`. `batch()`
 # otherwise gives every unset field `None`, and `gen_conf()` routes anything
@@ -4171,6 +4556,240 @@ def batch_target_field(target, field):
     """
     value = target.get(field)
     return batch_target_defaults(target).get(field) if value is None else value
+
+
+def batch_local_address_prefix(target):
+    '''The peering subnet a batch target's cells run on.
+
+    One reading for `batch_cell_args()` and the capacity check before it, so
+    the subnet the walk was checked against is the one the run excludes.
+    '''
+    return (target['local_address_prefix'] if 'local_address_prefix' in target
+            else '10.10.0.0/16')
+
+
+def check_batch_prefix_length(test, scenarios, scope, diversity):
+    '''`bench()`'s prefix-length refusals, reached before the first cell.
+
+    `batch()` synthesizes the args, so a refusal left to `bench()` would end
+    the matrix at whichever cell first reached it. Every target's generator
+    and peering subnet and every (peers, prefixes) combination on the axes is
+    checked, for the reason the scope is: a capacity that holds for the first
+    entry and not the last is hours lost.
+    '''
+    length = test.get('prefix_length')
+    if length in (None, DEFAULT_PREFIX_LENGTH):
+        try:
+            resolve_prefix_length(length)
+        except ValueError as e:
+            sys.exit("test '{0}': {1}".format(test['name'], e))
+        return
+    if scenarios:
+        sys.exit(
+            "test '{0}': prefix_length has nothing to shorten for {1}, which "
+            "name a scenario file: the file states each neighbour's prefixes "
+            'itself'.format(test['name'], ', '.join(scenarios)))
+    repeats = [t.get('label') or t['name'] for t in test['targets']
+               if t.get('repeat')]
+    if repeats:
+        sys.exit(
+            "test '{0}': prefix_length cannot be used with repeat on {1}: "
+            'repeat reuses the generator containers as they are, so they keep '
+            'announcing the prefixes they were started with'.format(
+                test['name'], ', '.join(repeats)))
+    # `'None'` is how a filter axis spells no filter.
+    filters = sorted({None if f in (None, 'None') else f
+                      for f in test['filter_test']}, key=str)
+    for t, filter_test in product(test['targets'], filters):
+        for neighbors in test['neighbors']:
+            for prefixes in test['prefixes']:
+                try:
+                    per_peer = resolve_prefix_scope(
+                        scope, neighbors, prefixes,
+                        batch_target_field(t, 'tester_type'))
+                    resolve_prefix_length(
+                        length, batch_target_field(t, 'tester_type'),
+                        path_diversity_groups(
+                            neighbors, diversity or DEFAULT_PATH_DIVERSITY)
+                        * per_peer,
+                        batch_local_address_prefix(t),
+                        t.get('prefix_list_num', 0), filter_test,
+                        (batch_target_field(t, 'target_local_address'),
+                         batch_target_field(t, 'monitor_local_address')))
+                except ValueError as e:
+                    sys.exit("test '{0}': {1}".format(test['name'], e))
+
+
+# The import policy's matrix keys (policy phase 1). Each is a list, an
+# axis like `neighbors`, and `policy_rules: 0` is the in-matrix baseline.
+BATCH_POLICY_KEYS = ('policy_rules', 'policy_match', 'policy_hit')
+
+# A test without a policy: one point, the cell every older batch has.
+NO_POLICY_POINT = (DEFAULT_POLICY_RULES, None, None)
+
+
+def batch_policy_points(test):
+    '''The `(rules, match, hit)` points a test's cells run, in written order.
+
+    `[NO_POLICY_POINT]` for a test naming none of the keys. Otherwise all three
+    are required, as on the command line, where neither the match type nor
+    the hit position has a default; `policy_rules` must hold a positive count,
+    since a matrix of baselines measures no policy. A `0` is **one** point,
+    not one per match type and hit position: the baseline has neither, and
+    repeating it would be the same cell under several names.
+
+    Shapes and repeats only; whether a point can run on a target is
+    `check_batch_policy()`'s.
+    '''
+    named = [key for key in BATCH_POLICY_KEYS if key in test]
+    if not named:
+        return [NO_POLICY_POINT]
+    name = test.get('name', '<unnamed>')
+    missing = [key for key in BATCH_POLICY_KEYS if key not in test]
+    if missing:
+        sys.exit("test '{0}': {1} {2} without {3}: an import policy needs "
+                 'all three, and neither the match type nor the hit position '
+                 'has a default'.format(
+                     name, ', '.join(named),
+                     'is set' if len(named) == 1 else 'are set',
+                     ', '.join(missing)))
+    for key in BATCH_POLICY_KEYS:
+        values = test[key]
+        if not isinstance(values, list) or not values:
+            sys.exit("test '{0}': {1} must be a non-empty list, got "
+                     '{2!r}'.format(name, key, values))
+        repeated = sorted({repr(v) for v in values
+                           if sum(1 for w in values if repr(w) == repr(v)) > 1})
+        if repeated:
+            sys.exit("test '{0}': {1} repeats {2}; a matrix axis lists each "
+                     'value once, and `repetitions:` is what measures a cell '
+                     'more than once'.format(name, key, ', '.join(repeated)))
+    rules = test['policy_rules']
+    bad = [v for v in rules if isinstance(v, bool) or not isinstance(v, int)
+           or v < 0]
+    if bad:
+        sys.exit("test '{0}': policy_rules must be whole numbers, 0 for the "
+                 'baseline, got {1}'.format(name,
+                                            ', '.join(repr(v) for v in bad)))
+    if not any(rules):
+        sys.exit("test '{0}': policy_rules holds only the baseline 0, so no "
+                 'cell would run a policy; leave the three policy keys out '
+                 'for a test without one'.format(name))
+    points = []
+    for count in rules:
+        if not count:
+            points.append(NO_POLICY_POINT)
+            continue
+        for match in test['policy_match']:
+            for hit in test['policy_hit']:
+                points.append((count, match, hit))
+    return points
+
+
+def check_batch_policy(test, scenarios, repeated, filters, scope, diversity,
+                       churn_prefixes, reload_blocks):
+    '''`bench()`'s import-policy refusals, reached before the first cell.
+
+    Every target, filter, fleet and policy point on the axes, for the reason
+    the churn check covers the whole grid: a match type one target renders and
+    the next does not is easy to write, and finding that out at cell three is
+    hours lost. The `0` baseline is an attributes-only cell, so its refusals
+    are the attributes' and are checked beside it.
+    '''
+    points = batch_policy_points(test)
+    if points == [NO_POLICY_POINT]:
+        return
+    name = test['name']
+    if test.get('tester_attributes') is False:
+        sys.exit("test '{0}': tester_attributes is false, but a policy test "
+                 'runs every cell with them: the policy matches their '
+                 'attributes, and the 0 baseline is the attributes-only '
+                 'run'.format(name))
+    if scenarios:
+        sys.exit("test '{0}': an import policy has nothing to apply to {1}, "
+                 'which name a scenario file: its checkpoints and count guard '
+                 'come from the matrix, and a file states its own'.format(
+                     name, ', '.join(scenarios)))
+    if repeated:
+        sys.exit("test '{0}': an import policy cannot be used with repeat, "
+                 'which {1} {2} set: repeat reuses the generator containers '
+                 'as they are, so they keep the attributes they were started '
+                 'with'.format(name, ', '.join(repeated),
+                               'has' if len(repeated) == 1 else 'have'))
+    receivers = test.get('receivers')
+    for target, filter_test, neighbors, prefixes, (rules, match, hit) in product(
+            test['targets'], filters, test['neighbors'], test['prefixes'],
+            points):
+        try:
+            per_peer = resolve_prefix_scope(scope, neighbors, prefixes)
+            if rules:
+                _resolve_import_policy(
+                    rules, match, hit, target['name'],
+                    target_policy_matches(target['name']),
+                    batch_target_field(target, 'tester_type'), diversity,
+                    churn_prefixes, filter_test, reload_blocks, receivers,
+                    scenario_filter_flags(target), neighbors, per_peer,
+                    target.get('target_config_file'))
+            else:
+                try:
+                    _resolve_tester_attributes(
+                        True, batch_target_field(target, 'tester_type'),
+                        diversity, churn_prefixes, filter_test, reload_blocks,
+                        neighbors, per_peer, scenario_filter_flags(target))
+                except ValueError as e:
+                    # Named as the baseline: the config sets no
+                    # `tester_attributes`, and the refusal names that flag.
+                    raise ValueError('the policy_rules 0 baseline is an '
+                                     'attributes-only cell, and {0}'.format(
+                                         e)) from e
+        except ValueError as e:
+            sys.exit("test '{0}': target {1!r}: {2}".format(
+                name, target.get('label') or target['name'], e))
+
+
+def batch_test_runs_policy(test):
+    '''Whether a (checked) test names the import policy's matrix keys.'''
+    return any(key in test for key in BATCH_POLICY_KEYS)
+
+
+def check_batch_tester_attributes(test, scenarios, repeated, filters, scope,
+                                  diversity, churn_prefixes, reload_blocks):
+    '''`bench()`'s `--tester-attributes` refusals, reached before the first cell.
+
+    Every target, filter and fleet on the axes, for the reason the churn check
+    covers the whole grid; `-f` and `repeat` are refused here rather than at
+    the cell, where the refusal would come after a teardown.
+    '''
+    enabled = test.get('tester_attributes')
+    # The value first, so a bad one is named as bad rather than as whichever
+    # rule below it would trip.
+    try:
+        enabled = _resolve_tester_attributes(enabled)
+    except ValueError as e:
+        sys.exit("test '{0}': {1}".format(test['name'], e))
+    if not enabled:
+        return
+    if scenarios:
+        sys.exit("test '{0}': tester_attributes has nothing to attach for "
+                 "{1}, which name a scenario file: the file states each "
+                 "neighbour's routes itself".format(
+                     test['name'], ', '.join(scenarios)))
+    if repeated:
+        sys.exit("test '{0}': tester_attributes cannot be used with repeat, "
+                 'which {1} {2} set: repeat reuses the generator containers '
+                 'as they are, so they keep the attributes they were started '
+                 'with'.format(test['name'], ', '.join(repeated),
+                               'has' if len(repeated) == 1 else 'have'))
+    for target, filter_test, neighbors, prefixes in product(
+            test['targets'], filters, test['neighbors'], test['prefixes']):
+        try:
+            _resolve_tester_attributes(
+                enabled, batch_target_field(target, 'tester_type'),
+                diversity, churn_prefixes, filter_test, reload_blocks,
+                neighbors, resolve_prefix_scope(scope, neighbors, prefixes),
+                scenario_filter_flags(target))
+        except ValueError as e:
+            sys.exit("test '{0}': {1}".format(test['name'], e))
 
 
 def check_batch_test(test):
@@ -4333,8 +4952,21 @@ def check_batch_test(test):
                     'sets single-table, which'.format(
                         test['name'], target.get('label') or target.get('name'),
                         target['file']))
+                # `bench -f`'s import-policy refusal, here for the same reason.
+                try:
+                    check_scenario_import_policy(scenario)
+                except ValueError as e:
+                    raise ValueError("test '{0}': target {1!r}'s scenario file "
+                                     '{2!r}: {3}'.format(
+                                         test['name'],
+                                         target.get('label')
+                                         or target.get('name'),
+                                         target['file'], e)) from e
         except ValueError as e:
             sys.exit(str(e))
+        # A policy key is among these: nothing reads a target's keys from a
+        # fixed list but `batch()`, so one here would run the cell with no
+        # policy under a config that names one.
         misplaced = sorted(k for k in target if k in BATCH_TEST_ONLY_KEYS)
         if misplaced:
             sys.exit(
@@ -4423,6 +5055,7 @@ def check_batch_test(test):
                                      mrt[0] if mrt else None)
             except ValueError as e:
                 sys.exit("test '{0}': {1}".format(test['name'], e))
+    check_batch_prefix_length(test, scenarios, scope, diversity)
     churn_prefixes = test.get('churn_prefixes')
     churn_bursts = test.get('churn_bursts')
     churn_flags = churn_flags_set(churn_prefixes, churn_bursts)
@@ -4519,6 +5152,10 @@ def check_batch_test(test):
                              for f in churn_flags),
                 ', '.join(repeated),
                 'has' if len(repeated) == 1 else 'have'))
+    check_batch_tester_attributes(test, scenarios, repeated, filters, scope,
+                                  diversity, churn_prefixes, reload_blocks)
+    check_batch_policy(test, scenarios, repeated, filters, scope, diversity,
+                       churn_prefixes, reload_blocks)
     check_batch_pin(test, repeated)
     monitor = test.get('monitor')
     if monitor is not None and monitor not in MONITOR_TYPES:
@@ -4593,6 +5230,45 @@ def check_batch_pin_and_repeat(tests):
                      'created ({1}), and they keep its cores. Run one bench '
                      'without -r to rebuild them'.format(
                          ', '.join(repeating), ', '.join(left)))
+
+
+def check_batch_prefix_length_and_repeat(tests):
+    '''A shortened table against `repeat` across a whole batch.
+
+    `check_batch_prefix_length()` sees one test at a time, so a `/24` test
+    followed by a test with a `repeat` target passed it, and the second test
+    then reused generators still announcing `/24`s while its stem and both
+    manifests said `/32`. Refused in either order, as `--pin` is:
+    `order: shuffle` and `--resume` both decide what runs first.
+    '''
+    shortened = [t['name'] for t in tests
+                 if t.get('prefix_length') not in (None, DEFAULT_PREFIX_LENGTH)]
+    repeating = [t['name'] for t in tests
+                 if any(target.get('repeat') for target in t['targets'])]
+    if shortened and repeating:
+        sys.exit('batch: {0} {1} prefix_length and {2} {3} a repeat target. A '
+                 'repeat reuses whatever tester containers the run before it '
+                 'left, and they keep announcing the prefixes they were '
+                 'started with. Split them into separate batches'.format(
+                     ', '.join(shortened),
+                     'sets' if len(shortened) == 1 else 'set',
+                     ', '.join(repeating),
+                     'has' if len(repeating) == 1 else 'have'))
+    # The same trap with the generator's per-block attributes: a test without
+    # them reusing generators a `tester_attributes` test started would send
+    # the attributes under a stem and manifests that say it did not.
+    # A policy test runs every cell with them, its baseline included.
+    attributed = [t['name'] for t in tests if t.get('tester_attributes') is True
+                  or batch_test_runs_policy(t)]
+    if attributed and repeating:
+        sys.exit('batch: {0} {1} tester_attributes and {2} {3} a repeat '
+                 'target. A repeat reuses whatever tester containers the run '
+                 'before it left, and they keep the attributes they were '
+                 'started with. Split them into separate batches'.format(
+                     ', '.join(attributed),
+                     'sets' if len(attributed) == 1 else 'set',
+                     ', '.join(repeating),
+                     'has' if len(repeating) == 1 else 'have'))
 
 
 def target_run_name(target):
@@ -4685,12 +5361,22 @@ def expand_batch_cells(test, targets):
     # re-checked under GoBGP are different cells, and an edited monitor is a
     # different run.
     monitor = batch_test_monitor(test)
+    # And the prefix length: a /24 table and a /32 table are different cells.
+    prefix_length = test.get('prefix_length') or DEFAULT_PREFIX_LENGTH
+    # And the import policy, the one axis here a test iterates rather than
+    # holds: each point is a cell beside every other axis. A policy test runs
+    # every cell with the generator's attributes, its `0` baseline included,
+    # because that baseline is the attributes-only run.
+    policy_points = batch_policy_points(test)
     return construct_batch_cells(
         test, targets, repetitions=repetitions,
         prefix_resolver=resolve_prefix_scope, path_diversity=diversity,
         receivers=receivers, churn_prefixes=churn_prefixes,
         churn_bursts=churn_bursts, policy_reload_blocks=reload_blocks,
-        pin=pin, monitor=monitor)
+        pin=pin, monitor=monitor, prefix_length=prefix_length,
+        tester_attributes=(bool(test.get('tester_attributes'))
+                           or policy_points != [NO_POLICY_POINT]),
+        policy_points=policy_points)
 
 
 # How a test may sequence its cells. `matrix` is the enumeration order
@@ -4843,6 +5529,15 @@ def batch_summary_groups(test_name, cells, completed):
                              'target': cell['target']},
                 'passes': [],
             }
+            # The one axis a test iterates beside those three, so it is in
+            # the identity the variance rule groups rivals by: two policies
+            # on one target are two workloads, not two rivals. Only for a
+            # policy cell, so every other summary is unchanged.
+            if cell.get('policy_rules'):
+                groups[ordinal]['identity']['policy'] = {
+                    'rules': cell['policy_rules'],
+                    'match': cell['policy_match'],
+                    'hit': cell['policy_hit']}
         groups[ordinal]['passes'].append({
             'repetition': cell['repetition'],
             'row': completed.get(batch_cell_id(test_name, cell))})
@@ -5101,6 +5796,7 @@ def batch(args):
     check_batch_images([t for _, targets, _, _, _ in expanded for t in targets])
     check_batch_monitor_images([test for test, _, _, _, _ in expanded])
     check_batch_pin_and_repeat([test for test, _, _, _, _ in expanded])
+    check_batch_prefix_length_and_repeat([test for test, _, _, _, _ in expanded])
 
     for test, _targets, cells, order, seed in expanded:
         repetitions = batch_repetitions(test)
@@ -5262,6 +5958,14 @@ def batch_cell_args(args, cell):
     # diversity its own id does not record.
     a.path_diversity = cell.get('path_diversity') or DEFAULT_PATH_DIVERSITY
     a.receivers = cell.get('receivers') or DEFAULT_RECEIVERS
+    a.prefix_length = cell.get('prefix_length') or DEFAULT_PREFIX_LENGTH
+    a.tester_attributes = bool(cell.get('tester_attributes'))
+    # From the cell, which carries them only for a policy point; set either
+    # way, so every `bench` argument exists on a cell's args. `bench()`
+    # resolves them again through the same guards as the command line.
+    a.policy_rules = cell.get('policy_rules') or DEFAULT_POLICY_RULES
+    a.policy_match = cell.get('policy_match')
+    a.policy_hit = cell.get('policy_hit')
     # From the cell for the same reason the two above are: the cell is
     # what the id, the row and the artifact names were built from.
     a.churn_prefixes = cell.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
@@ -5283,7 +5987,7 @@ def batch_cell_args(args, cell):
     a.repetition = cell['repetition']
     a.defer_graphs = bool(cell.get('defer_graphs'))
     # read any config attribute that was specified in the yaml batch file
-    a.local_address_prefix = t['local_address_prefix'] if 'local_address_prefix' in t else '10.10.0.0/16'
+    a.local_address_prefix = batch_local_address_prefix(t)
     # Refused by `check_batch_test()` when true, so it is never copied.
     a.single_table = False
     for field in ['docker_network_name', 'repeat', 'file', 'target_local_address',
@@ -5395,6 +6099,7 @@ def run_selected_batch_cells(args, expanded):
     check_batch_images([cell['target'] for _test, cell in selected])
     check_batch_monitor_images(tests)
     check_batch_pin_and_repeat(tests)
+    check_batch_prefix_length_and_repeat(tests)
     for test, cell in selected:
         repetitions = batch_repetitions(test)
         if stop_signal.is_set():
@@ -5545,6 +6250,15 @@ def batch_cell_description(cell, repetitions=1):
     receivers = cell.get('receivers') or DEFAULT_RECEIVERS
     if receivers != DEFAULT_RECEIVERS:
         described = '{0}, receivers={1}'.format(described, receivers)
+    prefix_length = cell.get('prefix_length') or DEFAULT_PREFIX_LENGTH
+    if prefix_length != DEFAULT_PREFIX_LENGTH:
+        described = '{0}, prefix length=/{1}'.format(described, prefix_length)
+    if cell.get('tester_attributes'):
+        described = '{0}, tester attributes'.format(described)
+    if cell.get('policy_rules'):
+        described = '{0}, policy={1} {2} {3}'.format(
+            described, cell['policy_rules'], cell['policy_match'],
+            cell['policy_hit'])
     churn_prefixes = cell.get('churn_prefixes') or DEFAULT_CHURN_PREFIXES
     if churn_prefixes != DEFAULT_CHURN_PREFIXES:
         described = '{0}, churn={1}x{2}'.format(
@@ -5674,9 +6388,102 @@ BATCH_GRAPHS = [
 ]
 
 
+# Cost against rule count (policy phase 1), drawn only for a test with
+# policy cells. Read by column name, not by position.
+BATCH_POLICY_GRAPHS = [
+        ('convergence against policy rules', 'elapsed (s)', 'policy_elapsed',
+         'seconds'),
+        ('max cpu against policy rules', 'max cpu %', 'policy_max_cpu', '%'),
+        ('max mem against policy rules', 'max mem (GB)', 'policy_max_mem', 'GB'),
+]
+
+
+def batch_policy_graph_series(results, column):
+    '''One line per target, workload, match type and hit position: `{label:
+    [(rules, value), ...]}` sorted by rule count, `{}` without a policy row.
+
+    A workload's `0` baseline is the first point of every line drawn for it,
+    since it is the attributes-only run each of them is read against. The
+    passes of a repeated test are one line, at the median of the passes each
+    point has: `run_name()`'s ` #N` is what tells them apart, and is dropped.
+
+    Nothing absent is drawn as a zero -- a gap says the point was not
+    measured, which a zero would deny. So a failed row is left out, and so
+    is a value `unsampled_row_values()` names as a dead sampler's sentinel,
+    and a row not of the header's width, which this cannot read by name.
+    '''
+    header = [f.strip() for f in stats_header().split(',')]
+    at = {key: header.index(key) for key in (
+        'name', 'peers', 'prefixes per peer', 'filters', 'failed',
+        'policy rules', 'policy match', 'policy hit', column)}
+    unsampled = unsampled_row_values().get(column)
+    baselines, lines = {}, {}
+    for row in results:
+        if len(row) != len(header) or row[at['failed']] == 'FAILED':
+            continue
+        value = float(row[at[column]])
+        if unsampled is not None and value == float(unsampled):
+            continue
+        name = re.sub(r' #\d+$', '', str(row[at['name']]))
+        workload = (name, str(row[at['peers']]),
+                    str(row[at['prefixes per peer']]), row[at['filters']])
+        rules = int(row[at['policy rules']] or 0)
+        if not rules:
+            baselines.setdefault(workload, []).append(value)
+            continue
+        line = lines.setdefault(
+            workload + (row[at['policy match']], row[at['policy hit']]), {})
+        line.setdefault(rules, []).append(value)
+    series = {}
+    for (name, peers, prefixes, filter_test, match, hit), points in lines.items():
+        workload = (name, peers, prefixes, filter_test)
+        if workload in baselines:
+            points = {**points, 0: baselines[workload]}
+        label = '{0} {1} {2}, {3}n_{4}p{5}'.format(
+            name, match, hit, peers, prefixes,
+            '_{0}'.format(filter_test) if filter_test else '')
+        series[label] = sorted((rules, statistics.median(values))
+                               for rules, values in points.items())
+    return series
+
+
+POLICY_LINE_STYLES = ('-', '--', ':', '-.')
+
+
+def batch_policy_line_styles(count):
+    '''`(colour, linestyle)` for each of `count` lines, every pair distinct up
+    to 40 lines. Matplotlib's default cycle has ten colours, so an eleventh
+    line reused the first one's colour and the legend could not tell them
+    apart -- the 2026-11-27 qualification's `/24` matrix draws twelve. The line style changes each
+    time the colours run out.'''
+    return [('C{0}'.format(i % 10),
+             POLICY_LINE_STYLES[(i // 10) % len(POLICY_LINE_STYLES)])
+            for i in range(count)]
+
+
+def create_batch_policy_graphs(results, name, results_dir=DEFAULT_RESULTS_DIR):
+    for title, column, suffix, ylabel in BATCH_POLICY_GRAPHS:
+        series = batch_policy_graph_series(results, column)
+        if not series:
+            return
+        plt.figure()
+        styles = batch_policy_line_styles(len(series))
+        for (label, points), (colour, linestyle) in zip(series.items(), styles):
+            plt.plot([x for x, _ in points], [y for _, y in points],
+                     marker='o', color=colour, linestyle=linestyle, label=label)
+        plt.xlabel('policy rules')
+        plt.ylabel(ylabel)
+        plt.title(title)
+        plt.legend()
+        plt.savefig(results_path(results_dir, f"bgperf_{name}_{suffix}.png"))
+        plt.close()
+
+
 def batch_graph_paths(name, results_dir=DEFAULT_RESULTS_DIR):
+    suffixes = ([suffix for _test_name, _stat_index, suffix, _ylabel in BATCH_GRAPHS]
+                + [suffix for _title, _column, suffix, _ylabel in BATCH_POLICY_GRAPHS])
     return [os.path.join(results_dir or DEFAULT_RESULTS_DIR, f"bgperf_{name}_{suffix}.png")
-            for _test_name, _stat_index, suffix, _ylabel in BATCH_GRAPHS]
+            for suffix in suffixes]
 
 
 def create_batch_graphs(results, name, results_dir=DEFAULT_RESULTS_DIR):
@@ -5684,6 +6491,7 @@ def create_batch_graphs(results, name, results_dir=DEFAULT_RESULTS_DIR):
         create_graph(results, test_name=test_name, stat_index=stat_index,
                      test_file=f"bgperf_{name}_{suffix}.png", ylabel=ylabel,
                      results_dir=results_dir)
+    create_batch_policy_graphs(results, name, results_dir=results_dir)
 
 def mem_human(v):
     if v > 1024 * 1024 * 1024:
@@ -5883,6 +6691,57 @@ def gen_conf(args):
             neighbors[router_id]['churn-prefixes'] = churn_prefixes
         configured_neighbors_cnt += 1
 
+    # Per-block attributes for policy phase 1, written only when asked for so
+    # every other scenario stays byte-identical. Only a BIRD generator can
+    # carry them, and only on disjoint slices with one static protocol per
+    # block: shared groups would give one prefix two blocks' attributes, and a
+    # churn block would cut across the policy's blocks.
+    if getattr(args, 'tester_attributes', False):
+        if tester_type != 'bird':
+            raise ValueError('policy attributes need the BIRD generator, got '
+                             '{0!r}'.format(tester_type))
+        if diversity != DEFAULT_PATH_DIVERSITY or churn_prefixes:
+            raise ValueError('policy attributes cannot be combined with '
+                             '--path-diversity or churn')
+        for router_id, blocks in scenario_policy_blocks(
+                neighbors, prefix).items():
+            neighbors[router_id]['policy-blocks'] = blocks
+
+    # The generated import policy (policy phase 1). The scenario carries its
+    # arguments, and the target rebuilds the rules from them. Every checkpoint
+    # becomes the policy's expected accepted count (workload-controls invariants): the
+    # configured counts would leave every policy run short of its checkpoint.
+    # The monitor's is exact, without the 0.99 allowance above, because the
+    # run's count guard compares the final count to it exactly. Each
+    # neighbour keeps its offered count as `offered-check-point`, for the
+    # pre-policy `received` counter, which a policy does not shorten.
+    #
+    # The walk's exclusions are computed here, once, and rendered below: a
+    # prefix rule names the walk's own addresses, so the two must skip exactly
+    # the same space. Only a shorter walk is told what to skip: the /32
+    # preamble takes no exclusions, and parsing addresses for it would add a
+    # failure every historical run never had. The peering subnet, and any
+    # target or monitor address set explicitly outside it, are excluded so
+    # that no route covers the next hop of a session the run depends on.
+    prefix_length = (getattr(args, 'prefix_length', None)
+                     or DEFAULT_PREFIX_LENGTH)
+    exclude = (() if prefix_length == DEFAULT_PREFIX_LENGTH
+               else walk_exclusions(local_address_prefix,
+                                    run_peering_addresses(args)))
+    policy_rules = getattr(args, 'policy_rules', None) or DEFAULT_POLICY_RULES
+    if policy_rules:
+        if not getattr(args, 'tester_attributes', False):
+            raise ValueError('an import policy needs the generator attributes; '
+                             'resolve it with resolve_import_policy_args()')
+        conf['target'][IMPORT_POLICY_KEY] = scenario_import_policy(
+            policy_rules, args.policy_match, args.policy_hit, neighbor_num,
+            prefix, prefix_length, exclude)
+        expected = policy_expected_counts(policy_rules, neighbor_num, prefix)
+        for neighbor in neighbors.values():
+            neighbor['offered-check-point'] = neighbor['check-points']
+            neighbor['check-points'] = expected.accepted_per_peer[0]
+        conf['monitor']['check-points'] = [expected.accepted]
+
     # Export fan-out: sessions the target advertises its table to and which
     # announce nothing back. They are a top-level key rather than entries in
     # `conf['testers']`, which is what keeps them from being route sources --
@@ -5947,7 +6806,11 @@ def gen_conf(args):
             }
 
     yaml.Dumper.ignore_aliases = lambda *args : True
-    return gen_mako_macro() + yaml.dump(conf, default_flow_style=False)
+    # `prefix_length` and `exclude` were resolved above, beside the policy.
+    # The length is validated at every entry point, as the diversity is; this
+    # reads what was asked for.
+    return (gen_mako_macro(prefix_length, exclude)
+            + yaml.dump(conf, default_flow_style=False))
 
 
 def check_generator_matches_workload(args):
@@ -6002,6 +6865,11 @@ def config(args):
                             '-s/--single-table')
     except ValueError as e:
         sys.exit(str(e))
+    # A policy is rendered per target and `config` names none; and the file it
+    # writes is for `bench -f`, which refuses a scenario carrying a policy.
+    # Refused rather than dropped, so the file never looks like a policy run's.
+    refuse_import_policy_flags(args, 'config writes a scenario for bench -f, '
+                                     'which cannot carry a policy in phase 1')
     # The same guard `bench()` applies, and this is the path that most needs
     # it: `bench -f` deliberately skips the check on the reasoning that a
     # scenario file states its own neighbours, so a scenario stating *none* --
@@ -6031,6 +6899,20 @@ def config(args):
             args.prefix_num, getattr(args, 'tester_type', None))
     except ValueError as e:
         sys.exit(str(e))
+    # After the scope and the diversity, as in `bench()`: the capacity it
+    # checks is blocks times the resolved per-peer count.
+    try:
+        args.prefix_length = resolve_prefix_length(
+            getattr(args, 'prefix_length', None),
+            getattr(args, 'tester_type', None),
+            path_diversity_groups(args.neighbor_num, args.path_diversity)
+            * args.prefix_num,
+            getattr(args, 'local_address_prefix', None),
+            getattr(args, 'prefix_list_num', 0),
+            getattr(args, 'filter_test', None),
+            run_peering_addresses(args))
+    except ValueError as e:
+        sys.exit(str(e))
     # After the scope for the reason `bench()` puts it there: the block is
     # taken out of each peer's own list, and the scope decides how long that
     # list is.
@@ -6041,6 +6923,10 @@ def config(args):
             args.neighbor_num, args.prefix_num,
             getattr(args, 'tester_type', None),
             getattr(args, 'filter_test', None))
+    except ValueError as e:
+        sys.exit(str(e))
+    try:
+        args.tester_attributes = resolve_tester_attributes_args(args)
     except ValueError as e:
         sys.exit(str(e))
     conf = gen_conf(args)
@@ -6110,6 +6996,41 @@ def create_args_parser(main=True):
         # met by argparse's bare `unrecognized arguments`.
         parser.add_argument('-s', '--single-table', action='store_true',
                             help='refused: no target implements it (bgperf2-0ma)')
+        parser.add_argument('--prefix-length', type=int,
+                            default=DEFAULT_PREFIX_LENGTH,
+                            help='length of every synthetic prefix. 32 (the '
+                                 'default, and what bgperf has always '
+                                 'generated) walks host routes up from '
+                                 '100.0.0.0 exactly as before. 24 walks '
+                                 'public unicast space from 1.0.0.0, skipping '
+                                 'special-purpose ranges and the peering '
+                                 'subnet. BIRD generator only')
+        parser.add_argument('--tester-attributes', action='store_true',
+                            help='have the BIRD generator send each quarter '
+                                 'of every peer\'s prefixes with its own '
+                                 'AS path and communities, the attributes '
+                                 'the generated import policy matches on. '
+                                 'No policy is put on the target, so this '
+                                 'measures what carrying them costs. Refused '
+                                 'with churn, --path-diversity, filter_test, '
+                                 '--policy-reload-blocks, -a/-e/-c/-x, -f and -r')
+        parser.add_argument('--policy-rules', type=int,
+                            default=DEFAULT_POLICY_RULES,
+                            help='put a generated import policy of this many '
+                                 'rules on the target (0, the default, puts '
+                                 'none). Turns on --tester-attributes, and '
+                                 'needs --policy-match and --policy-hit. A '
+                                 'quarter of every peer\'s prefixes is '
+                                 'rejected, and the run is marked FAILED '
+                                 'unless the monitor receives exactly the '
+                                 'rest. BIRD and '
+                                 'frr_c targets only; `bench` only')
+        parser.add_argument('--policy-match', choices=POLICY_MATCHES,
+                            help='what every policy rule matches on')
+        parser.add_argument('--policy-hit', choices=POLICY_HITS,
+                            help='which rule the accepted routes meet: first, '
+                                 'last, or miss (no rule matches and the '
+                                 'default action decides)')
         parser.add_argument('--prefix-scope', choices=PREFIX_SCOPES,
                             default='per-peer',
                             help='how to read --prefix-num. per-peer (the '

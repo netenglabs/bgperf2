@@ -81,6 +81,16 @@ with recorded background activity; none is a performance or hardware result.
   native minimization to one peer/two prefixes, external-trial bisection, five
   combined `step --execute` trials (three build invocations, two cache hits)
   and one alternating `compare` command with four originals.
+- Generated import policy (`batch` `policy_rules`/`policy_match`/`policy_hit`,
+  2026-11-27) on BIRD 2.17.1 and FRR 10.7.0: 10 peers × 10,000 prefixes,
+  baseline and 1,000 rules, `prefix`, `as-path` and `community` matches, `first`
+  and `last` hits at `/24`, and `as-path`/`last` at `/32`. All 18 cells
+  delivered exactly the expected count, and the policy-loaded check passed
+  before every policy cell. Descriptively, FRR `as-path`/`last` converged in
+  about 276 s at both lengths, against about 4 s for every other FRR cell
+  except `community`/`last` (11 s) and 7 s for BIRD's matching cell. That is
+  one run per cell, not a performance result. The policy-loaded refusal and the
+  count guard's withholding were not exercised live.
 
 ## Not qualified
 

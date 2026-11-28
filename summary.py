@@ -74,8 +74,8 @@ FAILED = 'failed'
 NOT_RUN = 'not run'
 # A row that cannot be read against this header at all. It is kept apart from
 # `failed` because it is not a result about the daemon: `--resume` onto a
-# cell result written before a column was appended is a supported path, and
-# such a row is one field short. One of them must cost that pass and not the
+# cell result written before a column was added is a supported path, and
+# such a row is short by the columns added since. One of them must cost that pass and not the
 # whole document.
 UNREADABLE = 'unreadable'
 
@@ -325,14 +325,18 @@ def _unobserved_because(cell, metric):
 def _comparison_key(cell):
     """The cells one graph draws side by side, which is what gets compared.
 
-    Peers, prefixes and filter -- every axis of the matrix except the target
+    Peers, prefixes, filter and import policy -- every axis of the matrix except the target
     itself, which is the thing being told apart. `create_graph()` groups its
     bars exactly this way, so the rule answers a question somebody is actually
     going to ask of the picture.
     """
     identity = cell.get('identity') or {}
+    # The import policy is an axis too, and the graphs keep its points in
+    # separate groups; absent for every cell without one.
+    policy = identity.get('policy') or {}
     return (identity.get('peers'), identity.get('prefixes'),
-            identity.get('filter'))
+            identity.get('filter'),
+            tuple(policy.get(k) for k in ('rules', 'match', 'hit')))
 
 
 def _decision_statistics(cell, metric):

@@ -228,6 +228,7 @@ A batch also writes, per test:
 | `<test>.summary.json` | Median, min, max, spread and pass states across repetitions, and whether cells are separated |
 | `<test>.cells/<key>.json` | Each cell's row, the record the CSV and summary are built from |
 | `bgperf_<test>_<metric>.png` | Bars comparing the targets: elapsed, total time, route reception, CPU, memory and more |
+| `bgperf_<test>_policy_<metric>.png` | For a test with import-policy axes only: elapsed, max CPU and max memory against rule count |
 
 `bench` exits 1 when its run is marked failed (as for a setup error), 143 when
 stopped by SIGTERM, and 0 when the run converged. A batch records a failed cell as a result and carries on.
@@ -574,7 +575,7 @@ Either way, check the result without paying for a build:
 
 `-n` and `-p` scale one axis: each peer gets its own disjoint prefix block, so
 session count and table size move together and the target holds `n * p`
-routes, each learned over exactly one path. Five flags separate the things
+routes, each learned over exactly one path, all of them `/32` host routes. Seven flags separate the things
 that hides. Each is also a batch key -- a *test* key, beside `neighbors` and
 `prefixes`, not a target key -- and each is refused rather than approximated
 where it cannot be honoured.
@@ -582,6 +583,9 @@ where it cannot be honoured.
 | flag | batch key | what it adds |
 |---|---|---|
 | `--prefix-scope total` | `prefix_scope: total` | reads `-p` as the whole table and splits it across the peers, so peer count can rise without the table rising with it |
+| `--prefix-length 24` | `prefix_length: 24` | announces `/24`s drawn from public unicast space instead of the historical `/32` host routes, so prefix-list and table costs reflect a realistic table shape |
+| `--tester-attributes` | `tester_attributes: true` | sends each quarter of every peer's prefixes with its own AS path and communities, the attributes the generated import policy matches on, with no policy on the target, so carrying them can be measured on its own |
+| `--policy-rules N --policy-match M --policy-hit H` | `policy_rules` / `policy_match` / `policy_hit`, each a list | puts a generated import policy of `N` rules matching on `prefix`, `as-path` or `community` on the target, with the accepted routes meeting the `first` rule, the `last`, or none (`miss`); rejects a quarter of every peer's prefixes, and marks the run FAILED unless the monitor receives exactly the rest. BIRD and `frr_c` only |
 | `--path-diversity D` | `path_diversity: D` | deals the peers into groups of `D` sharing one prefix block, so the target has competing paths to choose between |
 | `--receivers N` | `receivers: N` | `N` extra sessions the target exports its whole table to and which announce nothing back |
 | `--churn-prefixes C --churn-bursts B` | `churn_prefixes` / `churn_bursts` | after convergence, withdraws and re-announces the last `C` prefixes of every peer, `B` times |
@@ -590,6 +594,9 @@ where it cannot be honoured.
 ```bash
 # 50 sessions holding the same 100,000 routes, not 5,000,000
 ./bgperf2.py bench -t bird -n 50 -p 100000 --prefix-scope total
+
+# the same table as /24s instead of /32 host routes
+./bgperf2.py bench -t bird -n 10 -p 100000 --prefix-length 24
 
 # 10 peers in pairs, so 500,000 paths compete for 250,000 prefixes
 ./bgperf2.py bench -t bird -n 10 -p 50000 --path-diversity 2
@@ -602,6 +609,36 @@ where it cannot be honoured.
 
 # change the policy over a converged table
 ./bgperf2.py bench -t bird -n 10 -p 100000 --policy-reload-blocks 2
+
+# load the table through a 1,000-rule AS-path policy, deciding at the last rule,
+# and its baseline: the same attributes with no policy
+./bgperf2.py bench -t bird -n 10 -p 100000 --prefix-length 24 \
+    --policy-rules 1000 --policy-match as-path --policy-hit last
+./bgperf2.py bench -t bird -n 10 -p 100000 --prefix-length 24 --tester-attributes
+```
+
+In a batch the three policy keys are lists, and `policy_rules: 0` is the
+baseline: one attributes-only cell per workload, beside a cell for every rule
+count, match type and hit position. A policy test also draws
+`bgperf_<test>_policy_{elapsed,max_cpu,max_mem}.png` with its other batch
+graphs (so not under deferred graphs), each plotting cost against rule count,
+one line per target, match type and hit position, at the median of a repeated
+test's passes:
+
+```yaml
+tests:
+  - name: policy-24
+    neighbors: [10]
+    prefixes: [100000]
+    filter_test: [None]
+    prefix_length: 24
+    policy_rules: [0, 1000]
+    policy_match: [prefix, as-path, community]
+    policy_hit: [first, last]
+    targets:
+      - name: bird
+      - name: frr_c
+        version: '10.7'
 ```
 
 What each refuses, and why, is worth knowing before a batch fails at cell
@@ -609,7 +646,22 @@ three: `--prefix-scope total` needs the peer count to divide the table exactly
 and is refused for the MRT generators (whose check-point is already the whole
 table); `--path-diversity` needs the diversity to divide the peer count
 exactly and is refused for MRT playback and beside `--prefix-scope total`;
-churn works only with the synthetic BIRD generator (the burst is `birdc`
+`--prefix-length 24` works only with the synthetic BIRD generator, is refused
+under `-r/--repeat`, beside `-e/--prefix-list-num` and in native controlled
+batches, and refuses a table larger than the 14,461,947 `/24`s
+left once special-purpose ranges and the peering subnet are skipped;
+`--tester-attributes` works only with the synthetic BIRD generator, needs at
+least 4 prefixes per peer, and is refused under `-r/--repeat`, beside churn,
+`--path-diversity`, `--filter_test`, `--policy-reload-blocks` and `-a`/`-e`/`-c`/`-x`, and in
+native controlled batches; `--policy-rules` turns `--tester-attributes` on and
+so refuses all of that too, and is also refused beside `--receivers` and
+`--target_config_file`, for any
+target but BIRD and `frr_c`, and by `config` (FRR reads its config in time
+quadratic in `N`: about 90 s at 2,000 rules, so expect a long monitor wait on
+large FRR policies). Before the clock starts, a policy run checks the daemon
+really loaded the policy — BIRD's sessions import through it, FRR's running
+config holds every list and route-map entry rendered — and is marked FAILED
+without measuring anything if not, so a batch goes on to its next cell; churn works only with the synthetic BIRD generator (the burst is `birdc`
 switching a static protocol) and is refused under `-r/--repeat` and
 `--filter_test`; the policy reload needs a target with a reload mechanism
 (only BIRD today), and is refused for MRT playback, under `-r`, under
@@ -619,7 +671,7 @@ on its axes before the first container starts, not just the first.
 
 **None of these appear in the CSV.** `elapsed (s)` keeps meaning the monitor's
 convergence in every row. What a workload was is in the artifact filename
-(`pd2`, `rx11`, `ch1000x3`, `pr2`) and in the `run` block of both
+(`pl24`, `ta`, `pd2`, `rx11`, `ch1000x3`, `pr2`) and in the `run` block of both
 `<prefix>.events.json` and `<prefix>.versions.json`; what it cost is in that
 artifact's own section — `export`, `churn`, `policy_reload`. The
 [measurement dictionary](docs/measurement-dictionary.md) lists the fields.

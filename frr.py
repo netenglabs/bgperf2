@@ -17,6 +17,136 @@ from base import *
 import json
 import os
 import re
+import import_policy
+import policy_render
+import ipaddress
+from collections import Counter
+
+# FRR's three list kinds as `show running-config` prints them: the rendered
+# line with ` seq N` inserted after the name. Lists print anywhere in the
+# config -- prefix-lists before `router bgp`, as-path and community lists after
+# it -- so they are matched wherever they sit.
+_FRR_LIST_LINE = re.compile(
+    r'^(ip prefix-list|bgp as-path access-list|bgp community-list standard)'
+    r' (\S+)(?: seq \d+)? (.*)$')
+_FRR_ROUTE_MAP_ENTRY = re.compile(r'^route-map (\S+) (permit|deny) (\d+)$')
+_FRR_NEIGHBOR_IN = re.compile(r'^neighbor (\S+) route-map (\S+) in$')
+
+
+def _frr_policy_items(lines, route_map):
+    '''The lists' entries, route-map entries and inbound attachments in `lines`.
+
+    Lists are counted by `(kind, name, entry)` and only for this policy's own
+    names; route-map entries are `{seq: (action, body lines)}`; attachments
+    are the addresses whose inbound route-map is `route_map`.
+    '''
+    prefix = route_map + '-'
+    lists = Counter()
+    entries = {}
+    attached = set()
+    entry = None
+    for raw in lines:
+        line = raw.strip()
+        if raw[:1].isspace() and entry is not None and line not in ('', '!'):
+            if line == 'exit':
+                entry = None
+            else:
+                entries[entry][1].append(line)
+            continue
+        entry = None
+        m = _FRR_LIST_LINE.match(line)
+        if m and m.group(2).startswith(prefix):
+            lists[m.group(1), m.group(2), m.group(3)] += 1
+            continue
+        m = _FRR_ROUTE_MAP_ENTRY.match(line)
+        if m and m.group(1) == route_map:
+            entry = int(m.group(3))
+            entries[entry] = (m.group(2), [])
+            continue
+        m = _FRR_NEIGHBOR_IN.match(line)
+        if m and m.group(2) == route_map:
+            attached.add(m.group(1))
+    return lists, {seq: (action, tuple(body))
+                   for seq, (action, body) in entries.items()}, attached
+
+
+def _some(items, limit=3, key=None):
+    '''The first few `items` in their own order, for a failure message.
+
+    Sorted before they become text, so sequence 2 comes before 10 and
+    10.10.0.2 before 10.10.0.10; `key` orders items that are text already.
+    '''
+    # Text is quoted, so a config line's own spacing is visible; a sequence
+    # number is not text.
+    items = [str(item) if isinstance(item, int)
+             else repr(' '.join(str(p) for p in item))
+             if isinstance(item, tuple) else repr(item)
+             for item in sorted(items, key=key)]
+    shown = ', '.join(items[:limit])
+    return shown + (' and {0:,} more'.format(len(items) - limit)
+                    if len(items) > limit else '')
+
+
+def _address_key(text):
+    try:
+        return (0, ipaddress.ip_address(text))
+    except ValueError:
+        return (1, text)
+
+
+def policy_loaded_failure(policy, running_config, neighbors,
+                          route_map=policy_render.FRR_ROUTE_MAP):
+    '''Why FRR's running config is not the rendered policy, or None.
+
+    Pure over one `show running-config`. FRR reads its config file leniently:
+    a line it cannot parse is logged and skipped, and bgpd starts anyway, so a
+    route-map attached by name could still be missing a list, an entry or a
+    match -- a policy doing less work than the run records. So every list
+    entry, every route-map entry and every session's `route-map ... in` is
+    compared with what `frr_policy_lines()` rendered, ignoring only the
+    sequence numbers FRR adds to list entries. `neighbors` is every session
+    the scenario configured.
+    '''
+    want_lists, want_entries, _ = _frr_policy_items(
+        policy_render.frr_policy_lines(policy), route_map)
+    got_lists, got_entries, attached = _frr_policy_items(
+        (running_config or '').splitlines(), route_map)
+    problems = []
+    missing = want_lists - got_lists
+    extra = got_lists - want_lists
+    if missing:
+        problems.append('{0:,} of {1:,} list entries missing, e.g. {2}'.format(
+            sum(missing.values()), sum(want_lists.values()),
+            _some(missing.elements())))
+    if extra:
+        problems.append('{0:,} list entries not in the policy, e.g. {1}'.format(
+            sum(extra.values()), _some(extra.elements())))
+    absent = set(want_entries) - set(got_entries)
+    stray = set(got_entries) - set(want_entries)
+    changed = {seq for seq in set(want_entries) & set(got_entries)
+               if want_entries[seq] != got_entries[seq]}
+    # Kept apart so every count is out of the total it belongs to: a stray
+    # entry is not one of the rendered ones.
+    for found, what in ((absent, 'missing'), (changed, 'changed')):
+        if found:
+            problems.append(
+                'route-map {0}: {1:,} of the {2:,} rendered entries {3}, '
+                'e.g. sequence {4}'.format(route_map, len(found),
+                                           len(want_entries), what,
+                                           _some(found)))
+    if stray:
+        problems.append('route-map {0}: {1:,} entries not in the policy, '
+                        'e.g. sequence {2}'.format(route_map, len(stray),
+                                                   _some(stray)))
+    unattached = set(neighbors) - attached
+    if unattached:
+        problems.append('sessions without route-map {0} in: {1}'.format(
+            route_map, _some(unattached, key=_address_key)))
+    if problems:
+        return 'FRR\'s running config is not the rendered policy: {0}'.format(
+            '; '.join(problems))
+    return None
+
 
 def neighbors_state(summary):
     '''The two per-neighbour dicts, from one parsed `sh ip bgp summary json`.
@@ -137,6 +267,7 @@ class FRRoutingTarget(FRRouting, Target):
 
     CONTAINER_NAME = 'bgperf_frrouting_target'
     CONFIG_FILE_NAME = 'bgpd.conf'
+    IMPORT_POLICY_MATCHES = import_policy.POLICY_MATCHES
 
     def write_config(self):
 
@@ -165,12 +296,30 @@ no bgp ebgp-requires-policy
             c +="    neighbor {0} soft-reconfiguration inbound\n".format(local_addr)
             if 'filter_test' in self.conf:
                 c +="    neighbor {0} route-map {1} in\n".format(local_addr, self.conf['filter_test'])
+            # On every session, as BIRD's one `neighbor range` protocol has it;
+            # the monitor and the receivers announce nothing for it to decide.
+            # Refused beside `filter_test` at every entry point, so at most one
+            # inbound route-map is ever written.
+            if policy is not None:
+                c += "    neighbor {0} route-map {1} in\n".format(
+                    local_addr, policy_render.FRR_ROUTE_MAP)
             return c
 
         neighbors = self.scenario_neighbors(sort=False)
-        
+        policy = self.import_policy()
+
         with open('{0}/{1}'.format(self.host_dir, self.CONFIG_FILE_NAME), 'w') as f:
-            f.write(config)
+            # The generated import policy goes before `router bgp`, so every
+            # list and the route-map exist before a session names them. Line
+            # by line: at 65,533 rules it is megabytes.
+            if policy is not None:
+                head, _, rest = config.partition('router bgp')
+                f.write(head)
+                self.write_import_policy(
+                    f, policy, policy_render.frr_policy_lines(policy))
+                f.write('router bgp' + rest)
+            else:
+                f.write(config)
 
             for n in neighbors:
                 f.write(gen_neighbor_config(n))
@@ -285,6 +434,21 @@ no bgp ebgp-requires-policy
             return json.loads(output.decode('utf-8'))
         except json.JSONDecodeError:
             return None
+
+    def policy_loaded_failure(self):
+        '''Why the running bgpd is not applying its import policy, or None.
+
+        Asked after the monitor's session is up. bgpd reads its whole config
+        file before it opens a session, and the policy is written ahead of
+        `router bgp`, so by then everything it was going to load is loaded.
+        '''
+        policy = self.import_policy()
+        if policy is None:
+            return None
+        output = self.local("vtysh -c 'show running-config'")
+        return policy_loaded_failure(
+            policy, (output or b'').decode('utf-8', 'replace'),
+            [n['local-address'] for n in self.scenario_neighbors(sort=False)])
 
     def get_neighbors_state(self):
         return neighbors_state(self.summary_json())

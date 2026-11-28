@@ -95,6 +95,11 @@ documents.
   share a name: it is the stem of every file they write and part of every cell id and key.
 - A withheld graph set leaves earlier PNGs in place, and the report says they were drawn from
   other rows.
+- **The import policy is the one axis a test iterates beside peers, prefixes and filter**, so it
+  is in every place those are: the cell id, the summary identity (and so the variance rule's
+  rivals) and the bar graphs' groups. Without the group, a test's policy cells share a name and a
+  group, and the bars outnumber the ticks. The policy graphs (`batch_policy_graph_series()`) read
+  the row by column name and leave a failed point out rather than drawing it as a zero.
 
 ## Campaign analysis
 
@@ -206,7 +211,7 @@ would be arithmetic nobody could check. `docs/measurement-dictionary.md` has the
   because no CV means the same thing twice: 2% is nothing between targets 40% apart and fatal
   between ones 0.12% apart, which is what FRR 8.5, 9.1 and 10.0 were over a 95s MRT run. Three
   details are load-bearing. It is decided against **every** rival sharing the cell's (peers,
-  prefixes, filter) axes and reported against the *binding* one — the smallest margin — since
+  prefixes, filter, import-policy point) axes and reported against the *binding* one — the smallest margin — since
   separating a cell from its nearest neighbour separates it from the rest only if every rival has
   the same dispersion, and `create_graph()` draws the whole group side by side. Rivals that have a
   dispersion are preferred, so one mostly-failed cell cannot sit between two unseparated ones and

@@ -96,7 +96,10 @@ def list_plan(engine, args, expanded):
 def failed_row(engine, selected, error):
     """No invented timing: a failed row retains absent statistics as None."""
     header = [h.strip() for h in engine.stats_header().split(',')]
-    values = {name:'' for name in ('flags','date','target image','tester version','monitor version')}
+    values = {name:'' for name in ('flags','date','target image','tester version','monitor version',
+                                   'policy match','policy hit','policy bytes')}
+    # A native cell refuses an import policy, so its row is a baseline's: 0 rules.
+    values['policy rules'] = 0
     values.update(name=engine.run_name(selected), target=selected.target,
                   version=getattr(selected, 'version', None) or '', peers=selected.neighbor_num,
                   failed='FAILED', MSG=engine.row_message(error), filters=getattr(selected, 'filter_test', None) or '')

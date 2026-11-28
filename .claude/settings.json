@@ -35,7 +35,19 @@
       "Bash(venv/bin/python bgperf2.py doctor *)",
       "Bash(venv/bin/python bgperf2.py images)",
       "Bash(venv/bin/python bgperf2.py images *)",
-      "Bash(venv/bin/python bgperf2.py dockerfile *)"
+      "Bash(venv/bin/python bgperf2.py dockerfile *)",
+      "Bash(docker stats --no-stream)",
+      "Bash(docker stats --no-stream *)",
+      "Bash(docker network ls)",
+      "Bash(docker network ls *)",
+      "Bash(docker network inspect *)",
+      "Bash(lscpu)",
+      "Bash(lscpu *)",
+      "Bash(vmstat)",
+      "Bash(vmstat *)",
+      "Bash(iostat)",
+      "Bash(iostat *)",
+      "Bash(mpstat *)"
     ]
   }
 }

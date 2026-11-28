@@ -86,6 +86,37 @@ retries do reuse their own receipt. `dev_checks.py` gives each command a
 referents run without reuse; a source alias the checker cannot read is not
 worked around.
 
+### Pushing without an idle connection
+
+`git push` connects to the remote *before* it runs the pre-push hook, so the
+connection sits idle while the suite runs. GitHub closed it after about five
+and a half minutes on 2026-11-26, after the checks had passed, so the push
+failed, and the retry needed only the receipt that run had left. To run the
+checks before anything connects:
+
+```sh
+venv/bin/python -I scripts/push.py               # check, then push
+venv/bin/python -I scripts/push.py --check-only  # check only
+```
+
+It runs the pre-push hook through `git hook run`, which hands it the same
+environment, working directory, arguments and stdin as a real push (verified
+with Git 2.53, and by `tests/test_push_helper.py` on every run) without opening
+a connection. Then it runs `git push <remote> refs/heads/<branch>:<upstream>`,
+whose own hook reuses the receipt and repeats only the quick guards. It pushes
+only the checked-out branch to its configured upstream, the one shape pre-push
+accepts, to the remote `git push` would pick (`branch.<name>.pushRemote`, then
+`remote.pushDefault`, then `branch.<name>.remote`). It refuses a detached HEAD,
+a branch with no upstream, and a checkout with no pre-push hook installed —
+the last said as such, since no gate would run. The remote's tip is asked of
+the remote (`ls-remote`, exact ref only), as a push would, rather than read
+from a possibly stale tracking ref. Committing or editing between the two
+steps changes the receipt identity, and the push then reruns the suite itself.
+
+GitHub's idle close can also be prevented at the SSH layer: with
+`ServerAliveInterval 30` for `github.com` in `~/.ssh/config`, an idle push
+session stayed open for 7 minutes where one without it was closed.
+
 Git-aware tests are conservatively kept in the suite: a commit changes HEAD,
 index or status and can require a fresh run. This intentionally saves repeated
 runs at the same state without claiming arbitrary pre-/post-commit equivalence.

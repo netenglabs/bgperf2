@@ -1,6 +1,6 @@
 # bgperf2 roadmap
 
-Updated 2026-11-21 UTC. This is the public index of open engine plans and
+Updated 2026-11-27 UTC. This is the public index of open engine plans and
 delivered capabilities. Everything needed to understand, use and contribute to
 bgperf2 belongs in this repository. Other projects can build campaigns and
 services on its documented CLI and versioned artifacts; none is required to use
@@ -27,9 +27,8 @@ decisions in force are in [engine decisions](decisions.md).
 | [Maghemite receive readiness](plans/maghemite-receive-readiness.md) | paused | Decide whether to design receive-side loading beyond the 4,096-prefix synthetic ceiling, or close the plan into the recipe guide. | Operator selection of a larger receive-side workload |
 | [Exact-prefix maintainer workflow](plans/prefix-maintainer-workflow.md) | paused | Decide whether the completed FRR correctness-localization case satisfies the remaining localization step, then close or rescope. | Operator decision; the upstream BIRD investigation it excludes is paused |
 | [Upstream BIRD correctness screening](plans/upstream-bird-correctness-screening.md) | paused | If resumed, resolve the issue 436 evidence limit or select another documented BIRD fix with a supported trigger and witness. | Operator decision to resume |
-| [Future testing workloads](plans/future-testing-workloads.md) | paused | When selected, write a scoped design for one family (IPv6 or policy phase 1). | Operator selection of a workload family |
-| [Policy phase 1](plans/policy-phase1.md) | accepted | Implement `--prefix-length`, then the generated policy model. | none |
-| [Policy testing engine design](plans/policy-testing-engine-design.md) | selected (phase 1 scoped) | Carry out phase 1; later phases stay unauthorized until scoped. | Phase 1 |
+| [Future testing workloads](plans/future-testing-workloads.md) | paused | When selected, write a scoped design for one family (IPv6, or a later policy phase). | Operator selection of a workload family |
+| [Policy testing engine design](plans/policy-testing-engine-design.md) | phase 1 delivered; later phases not selected | When a later phase is selected, write its scoped design. | Operator selection of a later phase |
 | [Engine architecture design](plans/architecture-design.md) | reference | Consult when the next engine seam (typed records, staging or runtime interfaces) is selected. | none |
 
 A plan describes proposed or in-progress work. It never documents a supported
@@ -39,6 +38,7 @@ command, result field or capability; the guides below do.
 
 - [How bgperf works](how_bgperf_works.md): roles, lifecycle and the `bench`/`batch` model.
 - [Measurement dictionary](measurement-dictionary.md): legacy CSV column meanings.
+- [Workload controls](invariants/workload-controls.md): peers, table shape, prefix length, churn, export fan-out and the generated import policy (policy phase 1, 2026-11-27).
 - [Native batches](native-batches.md): one durable native batch with interruption recovery.
 - [Native throughput](native-throughput.md): native throughput controls.
 - [Native MRT performance](native-mrt-performance.md): fixed-input MRT `bench` and `batch`.
